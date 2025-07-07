@@ -10429,14 +10429,18 @@ function updateModalDetails(wellResult) {
         }
     }
     
-    // POS requires good S-curve + amplitude > 500 + no anomalies
+    // POS/NEG/REDO strict criteria (match table):
     const isGoodSCurve = wellResult.is_good_scurve || false;
-    if (isGoodSCurve && amplitude > 500 && !hasAnomalies) {
-        resultClass = 'modal-result-pos';
-        resultText = 'POS';
-    } else if (amplitude < 400) {
+    const cqValue = wellResult.cq_value;
+    if (amplitude < 400 || !isGoodSCurve || isNaN(Number(cqValue))) {
         resultClass = 'modal-result-neg';
         resultText = 'NEG';
+    } else if (isGoodSCurve && amplitude > 500 && !hasAnomalies) {
+        resultClass = 'modal-result-pos';
+        resultText = 'POS';
+    } else {
+        resultClass = 'modal-result-redo';
+        resultText = 'REDO';
     }
     
     modalDetails.innerHTML = `
