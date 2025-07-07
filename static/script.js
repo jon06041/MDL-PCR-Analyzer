@@ -3402,15 +3402,16 @@ function populateResultsTable(individualResults) {
             }
             
             // Apply enhanced criteria: POS requires good S-curve + amplitude > 500 + no anomalies
-            const isGoodSCurve = result.is_good_scurve || false;
-            if (isGoodSCurve && amplitude > 500 && !hasAnomalies) {
-                strictBadgeClass = 'strict-pos';
-                strictBadgeText = 'POS';
-            } else if (amplitude < 400) {
+            const cqValue = result.cq_value;
+            // NEG if amplitude < 400 OR poor fit OR Cq is not a number
+            if (amplitude < 400 || !result.is_good_scurve || isNaN(Number(cqValue))) {
                 strictBadgeClass = 'strict-neg';
                 strictBadgeText = 'NEG';
+            } else if (result.is_good_scurve && amplitude > 500 && !hasAnomalies) {
+                strictBadgeClass = 'strict-pos';
+                strictBadgeText = 'POS';
             } else {
-                // REDO: poor curves, amplitude 400-500, OR amplitude > 500 with anomalies
+                // REDO: amplitude 400-500, or amplitude > 500 with anomalies, but not NEG
                 strictBadgeClass = 'strict-redo';
                 strictBadgeText = 'REDO';
             }
@@ -3617,9 +3618,9 @@ function generateFilteredSamplesHtml(effectiveFilterMode = null) {
     Object.entries(currentAnalysisResults.individual_results).forEach(([wellKey, result]) => {
         const resultFluorophore = result.fluorophore || 'Unknown';
         if (resultFluorophore !== currentFluorophore) return;
-        
+
         const amplitude = result.amplitude || 0;
-        
+
         // Check for anomalies
         let hasAnomalies = false;
         if (result.anomalies) {
@@ -3632,18 +3633,18 @@ function generateFilteredSamplesHtml(effectiveFilterMode = null) {
                 hasAnomalies = true;
             }
         }
-        
+
         // Apply filter criteria
         let matchesFilter = false;
-        const isGoodSCurve = result.is_good_scurve || false;
         if (filterMode === 'pos') {
-            matchesFilter = isGoodSCurve && amplitude > 500 && !hasAnomalies;
+            matchesFilter = result.is_good_scurve && amplitude > 500 && !hasAnomalies;
         } else if (filterMode === 'neg') {
-            matchesFilter = amplitude < 400;
+            const cqValue = result.cq_value;
+            matchesFilter = amplitude < 400 || !result.is_good_scurve || isNaN(Number(cqValue));
         } else if (filterMode === 'redo') {
-            matchesFilter = !isGoodSCurve || (amplitude >= 400 && amplitude <= 500) || (amplitude > 500 && hasAnomalies);
+            matchesFilter = (!result.is_good_scurve || (amplitude >= 400 && amplitude <= 500) || (amplitude > 500 && hasAnomalies)) && !(amplitude < 400 || !result.is_good_scurve || isNaN(Number(result.cq_value)));
         }
-        
+
         if (matchesFilter) {
             filteredSamples.push({
                 wellId: result.well_id || wellKey,
@@ -5715,8 +5716,7 @@ function createCombinedSession(experimentPattern, sessions) {
                     }
                 }
                 
-                const isGoodSCurve = session.is_good_scurve || false;
-                return isGoodSCurve && amplitude > 500 && !hasAnomalies;
+                return session.is_good_scurve && amplitude > 500 && !hasAnomalies;
             }).length;
             
             totalPositive += sessionPositive;
@@ -5848,8 +5848,7 @@ function calculatePathogenBreakdownFromSessions(sessions) {
         if (session.well_results) {
             session.well_results.forEach(well => {
                 const amplitude = well.amplitude || 0;
-                const isGoodSCurve = well.is_good_scurve || false;
-                if (isGoodSCurve && amplitude > 500) {
+                if (well.is_good_scurve && amplitude > 500) {
                     positive++;
                 }
             });
@@ -7276,7 +7275,7 @@ async function saveExperimentStatistics(experimentPattern, allResults, fluoropho
                 // Apply enhanced criteria
                 if (amplitude > 500 && !hasAnomalies) {
                     fluorophoreGroups[fluorophore].positive++;
-                } else if (amplitude < 400) {
+                } else if (amplitude < 400 || !well.is_good_scurve || isNaN(Number(well.cq_value))) {
                     fluorophoreGroups[fluorophore].negative++;
                 } else {
                     fluorophoreGroups[fluorophore].redo++;
@@ -7639,10 +7638,9 @@ async function saveExperimentStatisticsFromCombined(experimentPattern, combinedR
                 }
                 
                 // Apply enhanced criteria: POS requires good S-curve + amplitude > 500 + no anomalies
-                const isGoodSCurve = well.is_good_scurve || false;
-                if (isGoodSCurve && amplitude > 500 && !hasAnomalies) {
+                if (well.is_good_scurve && amplitude > 500 && !hasAnomalies) {
                     positive++;
-                } else if (amplitude < 400) {
+                } else if (amplitude < 400 || !well.is_good_scurve || isNaN(Number(well.cq_value))) {
                     negative++;
                 } else {
                     redo++;
@@ -7728,10 +7726,9 @@ function getResultClassification(wellData) {
     }
     
     // Apply same criteria as main analysis: POS requires good S-curve + amplitude > 500 + no anomalies
-    const isGoodSCurve = wellData.is_good_scurve || false;
-    if (isGoodSCurve && amplitude > 500 && !hasAnomalies) {
+    if (wellData.is_good_scurve && amplitude > 500 && !hasAnomalies) {
         return 'POS';
-    } else if (amplitude < 400) {
+    } else if (amplitude < 400 || !wellData.is_good_scurve || isNaN(Number(wellData.cq_value))) {
         return 'NEG';
     } else {
         return 'REDO';
@@ -8756,9 +8753,9 @@ function validateControlAmplitude(controlType, amplitude, wellData) {
     console.log(`🔍 VALIDATION - Control ${controlType} amplitude: ${amplitude}`, wellData ? `S-curve: ${wellData.is_good_scurve}` : 'No well data');
     
     if (controlType === 'NTC') {
-        // NTC should be negative (low amplitude)
-        const isValid = amplitude < 400;
-        console.log(`🔍 VALIDATION - NTC result: ${isValid ? 'VALID' : 'INVALID'} (amplitude: ${amplitude})`);
+        // NTC should be negative (low amplitude, poor fit, or Cq not a number)
+        const isValid = amplitude < 400 || !wellData.is_good_scurve || isNaN(Number(wellData?.cq_value));
+        console.log(`🔍 VALIDATION - NTC result: ${isValid ? 'VALID' : 'INVALID'} (amplitude: ${amplitude}, isGoodSCurve: ${wellData.is_good_scurve}, cq: ${wellData?.cq_value})`);
         return isValid;
     } else {
         // H, M, L should be positive - use comprehensive criteria when available
@@ -9843,7 +9840,7 @@ function showResultsFiltered(selectedFluorophore, resultType) {
                 shouldInclude = isGoodSCurve && amplitude > 500;
                 break;
             case 'neg':
-                shouldInclude = amplitude < 400;
+                shouldInclude = amplitude < 400 || !isGoodSCurve || isNaN(Number(wellData.cq_value));
                 break;
             case 'redo':
                 shouldInclude = amplitude >= 400 && amplitude <= 500;
