@@ -529,12 +529,23 @@ def detect_curve_anomalies(cycles, rfu):
         if plateau_std < max(20, rfu_range * 0.05):
             anomalies.append('early_plateau')
 
-    # Check for irregular baseline - use first 20% of data or minimum 3 points
+    # Check for irregular baseline - EXCLUDE first 5 cycles from baseline calculation
+    # Original version (preserved):
+    # baseline_points = max(3, len(rfu) // 5)
+    # baseline_rfu = rfu[:baseline_points]
+    # baseline_std = np.std(baseline_rfu)
+    # if baseline_std > max(50, rfu_range * 0.15):
+    #     anomalies.append('unstable_baseline')
+
+    # New version: exclude first 5 cycles from baseline calculation
     baseline_points = max(3, len(rfu) // 5)
-    baseline_rfu = rfu[:baseline_points]
-    baseline_std = np.std(baseline_rfu)
-    if baseline_std > max(50, rfu_range * 0.15):
-        anomalies.append('unstable_baseline')
+    baseline_start = 5 if len(rfu) > 5 else 0
+    baseline_end = baseline_start + baseline_points
+    baseline_rfu = rfu[baseline_start:baseline_end]
+    if len(baseline_rfu) > 0:
+        baseline_std = np.std(baseline_rfu)
+        if baseline_std > max(50, rfu_range * 0.15):
+            anomalies.append('unstable_baseline')
 
     # Check for negative amplification in potential exponential phase
     exp_start = max(baseline_points, len(rfu) // 4)
