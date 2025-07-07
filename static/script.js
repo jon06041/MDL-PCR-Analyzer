@@ -1,3 +1,30 @@
+// --- Shared strict result classification for NEG/POS/REDO ---
+function classifyResult(wellData) {
+    const amplitude = wellData.amplitude || 0;
+    const isGoodSCurve = wellData.is_good_scurve || false;
+    let hasAnomalies = false;
+    if (wellData.anomalies) {
+        try {
+            const anomalies = typeof wellData.anomalies === 'string' ? 
+                JSON.parse(wellData.anomalies) : wellData.anomalies;
+            hasAnomalies = Array.isArray(anomalies) && anomalies.length > 0 && 
+                          !(anomalies.length === 1 && anomalies[0] === 'None');
+        } catch (e) {
+            hasAnomalies = true;
+        }
+    }
+    const cqValue = wellData.cq_value;
+    if (amplitude < 400 || !isGoodSCurve || isNaN(Number(cqValue))) {
+        return 'NEG';
+    } else if (isGoodSCurve && amplitude > 500 && !hasAnomalies) {
+        return 'POS';
+    } else {
+        return 'REDO';
+    }
+}
+
+// Expose globally for use in other scripts
+window.classifyResult = classifyResult;
 // --- Chart.js Annotation Plugin Registration (robust, before chart creation) ---
 function ensureAnnotationPluginRegistered() {
     if (window.Chart && window['chartjs-plugin-annotation']) {

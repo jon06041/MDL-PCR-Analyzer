@@ -414,29 +414,11 @@ function getExpectedResult(controlType) {
 }
 
 function getActualResult(wellData) {
-    // Use the same comprehensive validation logic as the main analysis
-    const amplitude = wellData.amplitude || 0;
-    const isGoodCurve = wellData.is_good_scurve || false;
-    
-    // Check for anomalies using the same logic as main analysis
-    let hasAnomalies = false;
-    if (wellData.anomalies) {
-        try {
-            const anomalies = typeof wellData.anomalies === 'string' ? 
-                JSON.parse(wellData.anomalies) : wellData.anomalies;
-            hasAnomalies = Array.isArray(anomalies) && anomalies.length > 0 && 
-                          !(anomalies.length === 1 && anomalies[0] === 'None');
-        } catch (e) {
-            hasAnomalies = true;
-        }
-    }
-    
-    // Apply same criteria as main analysis: POS requires good S-curve + amplitude > 500 + no anomalies
-    if (isGoodCurve && amplitude > 500 && !hasAnomalies) {
-        return 'POS';
-    } else if (amplitude < 400) {
-        return 'NEG';
+    // Use the shared strict result classification logic from script.js
+    if (window.classifyResult) {
+        return window.classifyResult(wellData);
     } else {
+        console.error('classifyResult is not defined on window!');
         return 'REDO';
     }
 }
