@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Chart.js Draggable Annotation Test</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="static/chartjs-plugin-annotation.mincopy.js"></script>
+  <script>
+const DraggableThresholdPlugin = {
+  id: 'draggableThreshold',
+  afterInit(chart) {
+    chart.$threshold = { y: 500, dragging: false };
+    const canvas = chart.canvas;
+
+    function getY(event) {
+      const rect = canvas.getBoundingClientRect();
+      return event.touches ? event.touches[0].clientY - rect.top : event.clientY - rect.top;
+    }
+
+    canvas.addEventListener('mousedown', (e) => {
+      const y = chart.$threshold.y;
+      const mouseY = getY(e);
+      if (Math.abs(chart.scales.y.getPixelForValue(y) - mouseY) < 8) {
+        chart.$threshold.dragging = true;
+      }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (chart.$threshold.dragging) {
+        const mouseY = getY(e);
+        const value = chart.scales.y.getValueForPixel(mouseY);
+        chart.$threshold.y = value;
+        chart.update('none');
+      }
+    });
+
+    canvas.addEventListener('mouseup', (e) => {
+      if (chart.$threshold.dragging) {
+        chart.$threshold.dragging = false;
+        alert('New threshold: ' + chart.$threshold.y.toFixed(2));
+      }
+    });
+
+    // For touch devices
+    canvas.addEventListener('touchstart', (e) => {
+      const y = chart.$threshold.y;
+      const mouseY = getY(e);
+      if (Math.abs(chart.scales.y.getPixelForValue(y) - mouseY) < 8) {
+        chart.$threshold.dragging = true;
+      }
+    });
+
+    canvas.addEventListener('touchmove', (e) => {
+      if (chart.$threshold.dragging) {
+        const mouseY = getY(e);
+        const value = chart.scales.y.getValueForPixel(mouseY);
+        chart.$threshold.y = value;
+        chart.update('none');
+      }
+    });
+
+    canvas.addEventListener('touchend', (e) => {
+      if (chart.$threshold.dragging) {
+        chart.$threshold.dragging = false;
+        alert('New threshold: ' + chart.$threshold.y.toFixed(2));
+      }
+    });
+  },
+  afterDraw(chart) {
+    const y = chart.$threshold.y;
+    const yPixel = chart.scales.y.getPixelForValue(y);
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.strokeStyle = 'red';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(chart.scales.x.left, yPixel);
+    ctx.lineTo(chart.scales.x.right, yPixel);
+    ctx.stroke();
+    // Draw label
+    ctx.fillStyle = 'red';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillText('Threshold', chart.scales.x.left + 8, yPixel - 8);
+    ctx.restore();
+  }
+};
+</script>
+  <style>
+    body { font-family: sans-serif; }
+    #chart { max-width: 600px; margin: 40px auto; }
+  </style>
+</head>
+<body>
+  <h2>Chart.js Draggable Threshold Line (Custom Plugin)</h2>
+  <div id="chart">
+    <canvas id="myChart" width="600" height="400"></canvas>
+  </div>
+  <script>
+    const ctx = document.getElementById('myChart').getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: Array.from({length: 40}, (_, i) => i + 1),
+        datasets: [{
+          label: 'Sample Data',
+          data: Array.from({length: 40}, () => Math.random() * 1000),
+          borderColor: '#2ecc71',
+          borderWidth: 2,
+          fill: false,
+          pointRadius: 0
+        }]
+      },
+      options: {
+        responsive: false,
+        plugins: {
+          draggableThreshold: true // enable our custom plugin
+        },
+        scales: {
+          x: { title: { display: true, text: 'Cycle' } },
+          y: { title: { display: true, text: 'RFU' }, min: 0, max: 1000 }
+        }
+      },
+      plugins: [DraggableThresholdPlugin]
+    });
+  </script>
+</body>
+</html>

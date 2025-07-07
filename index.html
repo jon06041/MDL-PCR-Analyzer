@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MDL PCR Analyzer - Enhanced</title>
+    <!-- Chart.js v4.x (stable) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@2.2.1/dist/chartjs-plugin-annotation.min.js"></script>
+    
+    <!-- Chart.js Annotation Plugin v3.1.2 (compatible with Chart.js v4) -->
+   <!-- <script src="/static/chartjs-plugin-annotation.min.js"></script>-->
+    <!-- Diagnostics: Check Chart.js and Annotation plugin presence before main script -->
+    <script>
+      console.log('[DIAG] Before static/script.js:', {
+        Chart: typeof window.Chart,
+        ChartAnnotation: typeof window.ChartAnnotation,
+        ChartPluginAnnotation: typeof window['chartjs-plugin-annotation'],
+        ChartPlugins: window.Chart && window.Chart.registry ? Object.keys(window.Chart.registry.plugins) : 'N/A'
+      });
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" defer></script>
+    <script src="/static/pathogen_library.js?v=1751381539" defer></script>
+    <link rel="stylesheet" href="/static/style.css?v=1751381539">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧬 MDL PCR Analyzer - Enhanced</h1>
+            <p>Upload your CFX Manager CSV file to analyze amplification curves with flexible cycle counts</p>
+            <div class="features">
+                <span class="feature">✓ Variable Cycle Lengths</span>
+                <span class="feature">✓ Dynamic Curve Fitting</span>
+                <span class="feature">✓ Real-time Analysis</span>
+                <button class="emergency-reset-btn" onclick="emergencyReset()" style="background: #e74c3c; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 20px; font-weight: bold;">🔄 RESET EVERYTHING</button>
+            </div>
+        </div>
+
+        <div class="upload-section">
+            <div class="instructions-box">
+                <h3>📋 Upload Instructions</h3>
+                <p><strong>CFX Manager Export:</strong> Open .pcrd → Quantification tab → Export All Data Sheets → CSV Format</p>
+                <p><strong>Multi-Channel Support:</strong> Upload multiple "Quantification Amplification Results" CSV files - one for each fluorophore (Cy5, FAM, HEX, Texas Red) with pattern: testName_1234567_CFX123456.csv</p>
+                <p><strong>Cycle Threshold Comparison:</strong> Upload the "Quantification Summary" CSV file for cycle threshold comparison (Required) - system automatically matches wells and fluorophores to display correct sample names and Cq values</p>
+                <p><strong>Smart Analysis:</strong> System analyzes all uploaded fluorophores simultaneously for comprehensive multi-channel results</p>
+            </div>
+            
+            <div class="file-upload-multi" id="fileUpload">
+                <div class="upload-icon">📁</div>
+                <h3>Upload qPCR Data Files</h3>
+                <p>Upload amplification data and optionally integrate Cq values and sample names</p>
+                
+                <div class="file-upload-grid">
+                    <div class="upload-item primary">
+                        <h4>1. Amplification Data (Required)</h4>
+                        <p>Upload one or more fluorophore-specific CSV files (Cy5, FAM, HEX, Texas Red)</p>
+                        <input type="file" id="fileInput" class="file-input" accept=".csv" multiple>
+                        <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+                            Choose matching Amplification CSV Files
+                        </button>
+                        <button class="clear-btn" onclick="clearAmplificationFiles()">Clear Files</button>
+                        <div class="file-status" id="amplificationStatus"></div>
+                        <div class="uploaded-files" id="uploadedFiles"></div>
+                    </div>
+                    
+                    <div class="upload-item required">
+                        <h4>2. Quantification Summary (Required)</h4>
+                        <p>Upload the Summary CSV file - provides sample names and Cq values for analysis</p>
+                        <input type="file" id="samplesInput" class="file-input" accept=".csv">
+                        <button class="upload-btn" onclick="document.getElementById('samplesInput').click()">
+                            Choose a matching Quantification Summary
+                        </button>
+                        <button class="clear-btn" onclick="clearSummaryFile()">Clear File</button>
+                        <div class="file-status" id="samplesStatus"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="file-info" id="fileInfo" style="display: none;">
+                <div class="file-details">
+                    <strong>File:</strong> <span id="fileName"></span><br>
+                    <strong>Size:</strong> <span id="fileSize"></span><br>
+                    <strong>Cycles Detected:</strong> <span id="cycleRange"></span><br>
+                    <strong>Wells Found:</strong> <span id="wellCount"></span>
+                </div>
+                <button class="analyze-btn" id="analyzeBtn">Analyze Curves</button>
+            </div>
+        </div>
+
+        <div class="analysis-section" id="analysisSection" style="display: none;">
+            <div class="controls">
+                <div class="fluorophore-selector">
+                    <label for="fluorophoreSelect">Select Fluorophore:</label>
+                    <select id="fluorophoreSelect">
+                        <option value="all">All Fluorophores</option>
+                    </select>
+                </div>
+                <div class="well-selector">
+                    <label for="wellSelect">Select Well:</label>
+                    <select id="wellSelect"></select>
+                </div>
+                <div class="view-controls">
+                    <button class="control-btn" id="showSelectedBtn">Show Selected Curve</button>
+                    <button class="control-btn" id="showAllBtn">Show All Wells</button>
+                    <button class="control-btn pos-btn" id="showPosBtn">POS</button>
+                    <button class="control-btn neg-btn" id="showNegBtn">NEG</button>
+                    <button class="control-btn redo-btn" id="showRedoBtn">REDO</button>
+                    <button class="control-btn" id="exportBtn">Export Results</button>
+                </div>
+            </div>
+
+            <div class="chart-container">
+                <canvas id="amplificationChart"></canvas>
+            </div>
+
+            <div class="chart-post-controls">
+            <div class="chart-controls-content">
+                <!-- All controls in single row below chart -->
+                <div class="controls-row-1">
+                    <div class="scale-mode">
+                        <label for="scaleToggle">Y-Axis:</label>
+                        <button class="toggle-btn" id="scaleToggle" data-scale="linear">
+                            <span class="toggle-option active">Linear</span>
+                            <span class="toggle-option">Log</span>
+                        </button>
+                    </div>
+                    <div class="threshold-manual" id="thresholdManualContainer" style="display: flex; align-items: center; gap: 6px; margin-right: 10px;">
+                        <label for="thresholdInput" style="margin-bottom:0;">Threshold:</label>
+                        <input type="number" id="thresholdInput" min="0" step="0.1" style="width: 70px;" title="Set threshold value directly">
+                        <button id="autoThresholdBtn" title="Auto-calculate threshold" style="padding: 2px 8px; font-size: 13px;">Auto</button>
+                    </div>
+                    <div class="scale-presets" id="scalePresetsContainer">
+                        <label>Presets:</label>
+                        <div class="preset-buttons">
+                            <button class="preset-btn" data-value="0.5" data-desc="Conservative">0.5x</button>
+                            <button class="preset-btn" data-value="1.0" data-desc="Standard" class="active">1.0x</button>
+                            <button class="preset-btn" data-value="2.0" data-desc="Strict">2.0x</button>
+                            <button class="preset-btn" data-value="5.0" data-desc="Very Strict">5.0x</button>
+                        </div>
+                    </div>
+                    <div class="scale-range" id="scaleRangeContainer">
+                        <label for="scaleRangeSlider"><span id="scaleRangeLabel">Linear range:</span></label>
+                        <div class="slider-container">
+                            <input type="range" id="scaleRangeSlider" min="0.1" max="100" value="10" step="0.1" class="scale-slider">
+                            <span class="slider-value" id="scaleMultiplier">1.0x</span>
+                        </div>
+                    </div>
+                    <div class="baseline-flattening" id="baselineFlatteningContainer">
+                        <label for="baselineToggle">Baseline:</label>
+                        <button class="toggle-btn" id="baselineToggle" data-enabled="false" title="CFX Manager 3.1 style: Flatten non-S-curves only, preserve positive amplification">
+                            <span class="toggle-option active">Off</span>
+                            <span class="toggle-option">ON</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            </div>
+
+            <div class="results-sections-container">
+                <div class="analysis-summary-section">
+                    <div class="results-summary">
+                        <h3>Analysis Summary</h3>
+                        <div class="summary-stats">
+                            <div class="stat-item">
+                                <span class="stat-label">Experiment Name:</span>
+                                <span class="stat-value" id="experimentPattern">-</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Cycle Range:</span>
+                                <span class="stat-value" id="cycleRangeResult">-</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Total Positive:</span>
+                                <span class="stat-value" id="totalPositive">-</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Positive Percentage:</span>
+                                <span class="stat-value" id="positivePercentage">-</span>
+                            </div>
+                            <div class="control-validation-grid" id="controlValidationGrid" style="display: none;">
+                                <div class="control-grid-header">
+                                    <span class="control-grid-label">Control Validation:</span>
+                                </div>
+                                <div class="control-grid">
+                                    <div class="control-grid-axis">
+                                        <div class="control-grid-corner"></div>
+                                        <div class="control-set-header">1</div>
+                                        <div class="control-set-header">2</div>
+                                        <div class="control-set-header">3</div>
+                                        <div class="control-set-header">4</div>
+                                    </div>
+                                    <div class="control-type-row">
+                                        <div class="control-type-label">H</div>
+                                        <div class="control-cell" id="controlH1">-</div>
+                                        <div class="control-cell" id="controlH2">-</div>
+                                        <div class="control-cell" id="controlH3">-</div>
+                                        <div class="control-cell" id="controlH4">-</div>
+                                    </div>
+                                    <div class="control-type-row">
+                                        <div class="control-type-label">M</div>
+                                        <div class="control-cell" id="controlM1">-</div>
+                                        <div class="control-cell" id="controlM2">-</div>
+                                        <div class="control-cell" id="controlM3">-</div>
+                                        <div class="control-cell" id="controlM4">-</div>
+                                    </div>
+                                    <div class="control-type-row">
+                                        <div class="control-type-label">L</div>
+                                        <div class="control-cell" id="controlL1">-</div>
+                                        <div class="control-cell" id="controlL2">-</div>
+                                        <div class="control-cell" id="controlL3">-</div>
+                                        <div class="control-cell" id="controlL4">-</div>
+                                    </div>
+                                    <div class="control-type-row">
+                                        <div class="control-type-label">NTC</div>
+                                        <div class="control-cell" id="controlNTC1">-</div>
+                                        <div class="control-cell" id="controlNTC2">-</div>
+                                        <div class="control-cell" id="controlNTC3">-</div>
+                                        <div class="control-cell" id="controlNTC4">-</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="fluorophore-breakdown" id="fluorophoreBreakdown">
+                            <!-- Fluorophore-specific statistics will be populated here -->
+                        </div>
+                        
+                        <!-- Individual pathogen control grids -->
+                        <div class="pathogen-control-grids" id="pathogenControlGrids">
+                            <!-- Individual 4x4 control grids for each pathogen will be added here -->
+                        </div>
+                        
+                        <!-- Pathogen grids section for new system -->
+                        <div id="pathogen-grids-section">
+                            <!-- Pathogen-specific control validation grids will be added here -->
+                        </div>
+                        
+                        <div class="channel-completion-status" id="channelCompletionStatus" style="display: none;">
+                            <!-- Channel completion status will be populated here -->
+                        </div>
+                    </div>
+                </div>
+
+
+
+                <div class="curve-details-section">
+                    <div class="curve-details">
+                        <h3>Selected Curve Details</h3>
+                        <div class="details-content" id="curveDetails">
+                            <p>Select a well to view detailed analysis results</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="wells-table-container">
+                <h3 id="wellsAnalysisTitle">All Wells Analysis</h3>
+                <div class="table-controls">
+                    <input type="text" id="searchWells" placeholder="Search wells..." class="search-input">
+                    <select id="filterStatus" class="filter-select">
+                        <option value="all">All Wells</option>
+                        <option value="pos">POS Results</option>
+                        <option value="neg">NEG Results</option>
+                        <option value="redo">REDO Results</option>
+                        <option value="controls">Controls</option>
+                    </select>
+                    <button class="control-btn" id="toggleSortModeBtn" style="margin-left:10px;">Sort: A1, A2...</button>
+                </div>
+                <div class="table-wrapper">
+                    <table id="resultsTable">
+                        <thead>
+                            <tr>
+                                <th>Well</th>
+                                <th>Sample Name</th>
+                                <th>Fluorophore</th>
+                                <th>Results</th>
+                                <th>Status</th>
+                                <th>R² Score</th>
+                                <th>RMSE</th>
+                                <th>Amplitude</th>
+                                <th>Steepness</th>
+                                <th>Midpoint</th>
+                                <th>Baseline</th>
+                                <th>Cq Value</th>
+                                <th>Anomalies</th>
+                            </tr>
+                        </thead>
+                        <tbody id="resultsTableBody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="history-section" id="historySection">
+            <div class="history-header">
+                <h2>Analysis History</h2>
+                <div class="history-controls" style="margin-top: 15px; display: flex; gap: 10px;">
+                    <button class="control-btn trend-btn" id="trendAnalysisBtn" onclick="viewTrendAnalysis()">View Trends</button>
+                </div>
+            </div>
+            
+            <div class="history-content" id="historyContent">
+                <p>Loading analysis history...</p>
+            </div>
+        </div>
+
+
+
+        <div class="loading" id="loadingIndicator" style="display: none;">
+            <div class="spinner"></div>
+            <p>Analyzing curves...</p>
+        </div>
+
+        <!-- Chart Modal -->
+        <div class="modal" id="chartModal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div class="modal-navigation">
+                        <button class="modal-nav-btn" id="modalPrevBtn" disabled>← Previous</button>
+                        <h3 id="modalTitle">qPCR Amplification Curve</h3>
+                        <button class="modal-nav-btn" id="modalNextBtn" disabled>Next →</button>
+                    </div>
+                    <span class="modal-close" id="modalClose">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="modal-chart-container">
+                        <canvas id="modalChart"></canvas>
+                    </div>
+                    <div class="modal-details" id="modalDetails">
+                        <!-- Sample details will be populated here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    
+    <!-- <script src="/static/pathogen_grids_data.js?v=1751381539"></script>-->
+    <script>
+    // Force CSS reload to bypass cache
+    document.addEventListener('DOMContentLoaded', function() {
+        const link = document.querySelector('link[rel="stylesheet"]');
+        if (link) {
+            const newLink = link.cloneNode();
+            newLink.href = link.href.split('?')[0] + '?v=' + Date.now();
+            link.parentNode.insertBefore(newLink, link.nextSibling);
+            link.remove();
+        }
+    });
+    </script>
+    <script src="/static/script.js?v=1751382261"></script>
+</body>
+</html>
