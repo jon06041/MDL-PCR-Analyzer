@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score
 import pandas as pd
 import warnings
+from curve_classification import classify_curve
 
 warnings.filterwarnings('ignore')
 
@@ -476,7 +477,23 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
         # Add anomaly detection
         anomalies = detect_curve_anomalies(cycles, rfu)
         analysis['anomalies'] = anomalies
-
+        # Add curve classification
+        if 'error' in analysis:
+            analysis['curve_classification'] = {
+                'classification': 'No Data',
+                'reason': analysis.get('error', 'Invalid or missing data'),
+                'confidence_penalty': 1.0,
+                'review_flag': True
+            }
+        else:
+            analysis['curve_classification'] = classify_curve(
+            analysis.get('r2_score'),
+            analysis.get('steepness'),
+            analysis.get('quality_filters', {}).get('snr_check', {}).get('snr'),
+            analysis.get('midpoint'),
+            analysis.get('baseline'),
+            analysis.get('amplitude')
+)
         results[well_id] = analysis
 
         if analysis.get('is_good_scurve', False):

@@ -1,4 +1,39 @@
 // --- Shared strict result classification for NEG/POS/REDO ---
+
+/**
+ * Safely set item in localStorage or sessionStorage, handling quota errors.
+ * @param {Storage} storage - localStorage or sessionStorage
+ * @param {string} key
+ * @param {string} value
+ * @param {object} [options] - { historyTrimFn: function to trim history if needed, maxRetries: number }
+ */
+function safeSetItem(storage, key, value, options = {}) {
+    const { historyTrimFn, maxRetries = 1 } = options;
+    let attempts = 0;
+    while (attempts <= maxRetries) {
+        try {
+            storage.setItem(key, value);
+            return true;
+        } catch (e) {
+            if (e.name === 'QuotaExceededError' || e.code === 22) {
+                console.warn('Storage quota exceeded for', key, 'Attempt:', attempts + 1);
+                // Try to trim history if function provided
+                if (historyTrimFn && typeof historyTrimFn === 'function') {
+                    historyTrimFn();
+                } else {
+                    // Otherwise, clear all storage
+                    storage.clear();
+                }
+                attempts++;
+            } else {
+                throw e;
+            }
+        }
+    }
+    alert('Unable to save data: browser storage is full. Some features may not work.');
+    return false;
+}
+
 function classifyResult(wellData) {
     const amplitude = wellData.amplitude || 0;
     const isGoodSCurve = wellData.is_good_scurve || false;
@@ -385,7 +420,7 @@ function toggleBaselineFlattening() {
     }
     
     // Save preference
-    sessionStorage.setItem('baselineFlatteningEnabled', baselineFlatteningEnabled.toString());
+    safeSetItem(sessionStorage, 'baselineFlatteningEnabled', baselineFlatteningEnabled.toString());
     
     // Update chart with new baseline settings
     if (window.amplificationChart) {
@@ -1306,8 +1341,8 @@ function setChannelThreshold(channel, scale, value) {
     channelThresholds[channel][scale] = value;
     
     // Persist both systems in sessionStorage
-    sessionStorage.setItem('stableChannelThresholds', JSON.stringify(window.stableChannelThresholds));
-    sessionStorage.setItem('channelThresholds', JSON.stringify(channelThresholds));
+    safeSetItem(sessionStorage, 'stableChannelThresholds', JSON.stringify(window.stableChannelThresholds));
+    safeSetItem(sessionStorage, 'channelThresholds', JSON.stringify(channelThresholds));
 }
 
 function getChannelThreshold(channel, scale) {
@@ -1358,7 +1393,7 @@ function onSliderChange(e) {
     currentScaleMultiplier = parseFloat(e.target.value);
     
     // Save to session storage
-    sessionStorage.setItem('qpcr_scale_multiplier', currentScaleMultiplier);
+    safeSetItem(sessionStorage, 'qpcr_scale_multiplier', currentScaleMultiplier.toString());
     
     updateSliderUI();
     
@@ -1381,7 +1416,7 @@ function onPresetClick(e) {
     if (scaleRangeSlider) scaleRangeSlider.value = val;
     
     // Save to session storage
-    sessionStorage.setItem('qpcr_scale_multiplier', currentScaleMultiplier);
+    safeSetItem(sessionStorage, 'qpcr_scale_multiplier', currentScaleMultiplier.toString());
     
     updateSliderUI();
     
@@ -1402,7 +1437,7 @@ function onScaleToggle() {
     currentScaleMode = (currentScaleMode === 'linear') ? 'log' : 'linear';
     
     // Save preference to session storage
-    sessionStorage.setItem('qpcr_chart_scale', currentScaleMode);
+    safeSetItem(sessionStorage, 'qpcr_chart_scale', currentScaleMode);
     
     // Update chart with new scale
     if (window.amplificationChart) {
@@ -3481,11 +3516,30 @@ function populateResultsTable(individualResults) {
             `<span class="strict-badge ${strictBadgeClass}">${strictBadgeText}</span>` : 
             '-';
 
+        
+        // --- Curve Class badge (from new script/classifier) ---
+        let curveClassBadgeHTML = '-';
+        if (typeof result.curve_classification === 'object' && result.curve_classification.classification) {
+            const classMap = {
+                'STRONG_POSITIVE': 'curve-strong-pos',
+                'POSITIVE': 'curve-pos',
+                'WEAK_POSITIVE': 'curve-weak-pos',
+                'NEGATIVE': 'curve-neg',
+                'INDETERMINATE': 'curve-indet',
+                'SUSPICIOUS': 'curve-suspicious'
+            };
+            const badgeClass = classMap[result.curve_classification.classification] || 'curve-other';
+            curveClassBadgeHTML = `<span class="curve-badge ${badgeClass}" title="${result.curve_classification.reason || ''}">${result.curve_classification.classification.replace('_', ' ')}</span>`;
+        } else if (typeof result.curve_classification === 'string') {
+            curveClassBadgeHTML = `<span class="curve-badge curve-other">${result.curve_classification}</span>`;
+        }
+
         row.innerHTML = `
             <td><strong>${wellId}</strong></td>
             <td>${sampleName}</td>
             <td><span class="fluorophore-tag fluorophore-${fluorophore.toLowerCase()}">${fluorophore}</span></td>
             <td>${strictBadgeHTML}</td>
+            <td>${curveClassBadgeHTML}</td>
             <td><span class="status ${statusClass}">${statusText}</span></td>
             <td>${result.r2_score ? result.r2_score.toFixed(4) : 'N/A'}</td>
             <td>${result.rmse ? result.rmse.toFixed(2) : 'N/A'}</td>
@@ -6469,13 +6523,13 @@ async function loadSessionDetails(sessionId) {
         if (!pendingSessionLoad) {
             // First time - store session ID and refresh
             console.log('Storing session ID and refreshing browser');
-            localStorage.setItem('pendingSessionLoad', sessionId);
+            safeSetItem(localStorage, 'pendingSessionLoad', sessionId);
             window.location.reload();
             return;
         } else if (pendingSessionLoad !== sessionId) {
             // Different session ID - store new one and refresh
             console.log('Different session - storing new ID and refreshing');
-            localStorage.setItem('pendingSessionLoad', sessionId);
+            safeSetItem(localStorage, 'pendingSessionLoad', sessionId);
             window.location.reload();
             return;
         }
@@ -6844,7 +6898,12 @@ function deleteLocalSession(index) {
     
     const history = getLocalAnalysisHistory();
     history.splice(index, 1);
-    localStorage.setItem('qpcr_analysis_history', JSON.stringify(history));
+    safeSetItem(localStorage, 'qpcr_analysis_history', JSON.stringify(history), {
+        historyTrimFn: () => {
+            // Remove oldest entry and try again
+            history.shift();
+        }
+    });
     
     // Reload history to refresh the display
     loadAnalysisHistory();

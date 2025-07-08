@@ -65,6 +65,7 @@ class WellResult(db.Model):
     cq_value = db.Column(db.Float)  # Integrated Cq value
     sample_name = db.Column(db.String(255))  # Integrated sample name
     threshold_value = db.Column(db.Float)  # Threshold value for annotation
+    curve_classification = db.Column(db.Text)  # JSON string for curve classification result
     
     def to_dict(self):
         # Get fluorophore from dedicated column first
@@ -121,7 +122,8 @@ class WellResult(db.Model):
             'raw_rfu': parse_json_array(self.raw_rfu),
             'cq_value': self.cq_value,
             'sample_name': self.sample_name,
-            'threshold_value': self.threshold_value
+            'threshold_value': self.threshold_value,
+            'curve_classification': parse_json_object(self.curve_classification)  # Parse as object
         }
     
     @classmethod
@@ -146,7 +148,8 @@ class WellResult(db.Model):
             raw_cycles=json.dumps(raw_data.get('cycles', [])),
             raw_rfu=json.dumps(raw_data.get('rfu', [])),
             cq_value=raw_data.get('cq'),
-            sample_name=raw_data.get('sampleName')
+            sample_name=raw_data.get('sampleName'),
+            curve_classification=json.dumps(analysis_result.get('curve_classification', {}))  # New field
         )
 
 
