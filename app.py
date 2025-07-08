@@ -1033,7 +1033,7 @@ def save_combined_session():
                 well_result.baseline = float(well_data.get('baseline', 0)) if well_data.get('baseline') is not None else None
                 well_result.data_points = int(well_data.get('data_points', 0)) if well_data.get('data_points') is not None else None
                 well_result.cycle_range = float(well_data.get('cycle_range', 0)) if well_data.get('cycle_range') is not None else None
-                
+
                 # JSON/text fields - ensure they are converted to JSON strings for database storage
                 well_result.fit_parameters = safe_json_dumps(well_data.get('fit_parameters'), [])
                 well_result.parameter_errors = safe_json_dumps(well_data.get('parameter_errors'), [])
@@ -1041,11 +1041,11 @@ def save_combined_session():
                 well_result.anomalies = safe_json_dumps(well_data.get('anomalies'), [])
                 well_result.raw_cycles = safe_json_dumps(well_data.get('raw_cycles'), [])
                 well_result.raw_rfu = safe_json_dumps(well_data.get('raw_rfu'), [])
-                
+
                 well_result.sample_name = str(well_data.get('sample_name', '')) if well_data.get('sample_name') else None
                 well_result.cq_value = float(well_data.get('cq_value', 0)) if well_data.get('cq_value') is not None else None
                 well_result.fluorophore = str(well_data.get('fluorophore', '')) if well_data.get('fluorophore') else None
-                
+
                 # Set threshold_value if present
                 threshold_value = well_data.get('threshold_value')
                 if threshold_value is not None:
@@ -1055,7 +1055,7 @@ def save_combined_session():
                         well_result.threshold_value = None
                 else:
                     well_result.threshold_value = None
-                
+
                 # Set curve_classification if present, else default to {'class': 'N/A'}
                 curve_classification = well_data.get('curve_classification')
                 if curve_classification is None:
@@ -1063,7 +1063,11 @@ def save_combined_session():
                     curve_classification = {'class': 'N/A'}
                 # Ensure it's a JSON string for DB
                 well_result.curve_classification = safe_json_dumps(curve_classification, {'class': 'N/A'})
-                
+
+                # --- Save CQ-J and Calc-J fields if present ---
+                well_result.cqj = safe_json_dumps(well_data.get('cqj'), {})
+                well_result.calcj = safe_json_dumps(well_data.get('calcj'), {})
+
                 db.session.add(well_result)
                 well_count += 1
                 if well_count % 50 == 0:

@@ -268,22 +268,24 @@
                 <div class="table-wrapper">
                     <table id="resultsTable">
                         <thead>
-                            <tr>
-                                <th>Well</th>
-                                <th>Sample Name</th>
-                                <th>Fluorophore</th>
-                                <th>Results</th>
-                                <th>Curve Class</th>
-                                <th>Status</th>
-                                <th>R² Score</th>
-                                <th>RMSE</th>
-                                <th>Amplitude</th>
-                                <th>Steepness</th>
-                                <th>Midpoint</th>
-                                <th>Baseline</th>
-                                <th>Cq Value</th>
-                                <th>Anomalies</th>
-                            </tr>
+            <tr>
+                <th>Well</th>
+                <th class="sample-col">Sample Name</th>
+                <th>Fluorophore</th>
+                <th>Results</th>
+                <th>Curve Class</th>
+                <th>Status</th>
+                <th>R²</th>
+                <th>RMSE</th>
+                <th>Amp</th>
+                <th>Steep</th>
+                <th>Mid</th>
+                <th>Base</th>
+                <th>Cq</th>
+                <th>CQ-J</th>
+                <th>Calc-J</th>
+                <th>Anom</th>
+            </tr>
                         </thead>
                         <tbody id="resultsTableBody">
                         </tbody>
@@ -349,6 +351,7 @@
         }
     });
     </script>
+    <script src="/static/cqj_calcj.js?v=1751382261"></script>
     <script src="/static/script.js?v=1751382261"></script>
 </body>
 </html>

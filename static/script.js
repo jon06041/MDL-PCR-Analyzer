@@ -2316,10 +2316,14 @@ function getPathogenTarget(testCode, fluorophore) {
     if (typeof PATHOGEN_LIBRARY !== 'undefined' && testCode && fluorophore) {
         const testData = PATHOGEN_LIBRARY[testCode];
         if (testData && testData[fluorophore]) {
+            // If object with .target, return .target, else string
+            if (typeof testData[fluorophore] === 'object' && testData[fluorophore].target) {
+                return testData[fluorophore].target;
+            }
             return testData[fluorophore];
         }
     }
-    return "Unknown";
+    return fluorophore;
 }
 
 function extractTestCode(experimentPattern) {
@@ -3545,6 +3549,16 @@ function populateResultsTable(individualResults) {
             }
         }
 
+        // Format CQ-J and Calc-J as channel:value pairs if present
+        let cqjDisplay = '-';
+        if (result.cqj && typeof result.cqj === 'object' && Object.keys(result.cqj).length > 0) {
+            cqjDisplay = Object.entries(result.cqj).map(([ch, val]) => `${ch}:${val !== null && val !== undefined ? Number(val).toFixed(2) : 'N/A'}`).join('<br>');
+        }
+        let calcjDisplay = '-';
+        if (result.calcj && typeof result.calcj === 'object' && Object.keys(result.calcj).length > 0) {
+            calcjDisplay = Object.entries(result.calcj).map(([ch, val]) => `${ch}:${val !== null && val !== undefined ? Number(val).toExponential(2) : 'N/A'}`).join('<br>');
+        }
+
         row.innerHTML = `
             <td><strong>${wellId}</strong></td>
             <td>${sampleName}</td>
@@ -3560,6 +3574,8 @@ function populateResultsTable(individualResults) {
             <td>${result.midpoint ? result.midpoint.toFixed(1) : 'N/A'}</td>
             <td>${result.baseline ? result.baseline.toFixed(1) : 'N/A'}</td>
             <td>${cqValue}</td>
+            <td>${cqjDisplay}</td>
+            <td>${calcjDisplay}</td>
             <td>${anomaliesText}</td>
         `;
         
@@ -6999,7 +7015,13 @@ function addFluorophoreFilter(individualResults) {
         fluorophores.forEach(fluorophore => {
             const option = document.createElement('option');
             option.value = fluorophore;
-            const pathogenTarget = getPathogenTarget(testCode, fluorophore);
+            let pathogenTarget = getPathogenTarget(testCode, fluorophore);
+            // Handle both object and string style entries in PATHOGEN_LIBRARY
+            if (pathogenTarget && typeof pathogenTarget === 'object' && pathogenTarget.target) {
+                pathogenTarget = pathogenTarget.target;
+            } else if (typeof pathogenTarget !== 'string') {
+                pathogenTarget = 'Unknown';
+            }
             option.textContent = pathogenTarget !== 'Unknown' ? `${fluorophore} (${pathogenTarget})` : fluorophore;
             filterSelect.appendChild(option);
         });

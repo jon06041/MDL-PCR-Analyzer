@@ -487,13 +487,33 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
             }
         else:
             analysis['curve_classification'] = classify_curve(
-            analysis.get('r2_score'),
-            analysis.get('steepness'),
-            analysis.get('quality_filters', {}).get('snr_check', {}).get('snr'),
-            analysis.get('midpoint'),
-            analysis.get('baseline'),
-            analysis.get('amplitude')
-)
+                analysis.get('r2_score'),
+                analysis.get('steepness'),
+                analysis.get('quality_filters', {}).get('snr_check', {}).get('snr'),
+                analysis.get('midpoint'),
+                analysis.get('baseline'),
+                analysis.get('amplitude')
+            )
+
+        # --- CQ-J and Calc-J integration ---
+        # For now, assume single channel per well (extend as needed for multiplex)
+        # Use threshold_value from analysis for CQ-J
+        threshold = analysis.get('threshold_value')
+        cqj = calculate_cqj({'cycles': cycles, 'rfu': rfu}, threshold) if threshold is not None else None
+        # Placeholder: H/M/L Cq and values should come from controls per run/channel
+        # For now, use dummy values (replace with real control extraction logic)
+        h_cq, m_cq, l_cq = 20, 25, 30
+        h_val, m_val, l_val = 1e7, 1e5, 1e3
+        calcj = calculate_calcj(cqj, h_cq, m_cq, l_cq, h_val, m_val, l_val) if cqj is not None else None
+        # Use the actual fluorophore/channel name as the key
+        channel_name = data.get('fluorophore', 'default')
+        analysis['cqj'] = {channel_name: cqj} if cqj is not None else {}
+        analysis['calcj'] = {channel_name: calcj} if calcj is not None else {}
+        # Add pathogen target as a string for frontend display
+        from app import get_pathogen_target
+        test_code = data.get('test_code', None)
+        analysis['pathogen_target'] = get_pathogen_target(test_code, channel_name) if test_code else channel_name
+
         results[well_id] = analysis
 
         if analysis.get('is_good_scurve', False):
@@ -763,6 +783,38 @@ def main():
         print(f'SNR: {quality_filters["snr_check"]["snr"]:.1f}')
         print(f'Growth Rate: {quality_filters["growth_check"]["max_growth_rate"]:.1f}')
         print('-' * 50)
+
+def calculate_cqj(well_data, threshold):
+    """Calculate Cq-J for a well: first cycle where RFU >= threshold."""
+    cycles = well_data.get('cycles', [])
+    rfu = well_data.get('rfu', [])
+    for i, val in enumerate(rfu):
+        if val >= threshold:
+            return cycles[i]
+    return None
+
+def calculate_calcj(cqj, h_cq, m_cq, l_cq, h_val, m_val, l_val):
+    """Calculate Calc-J using log-linear interpolation between H, M, L controls."""
+    # Requires all Cq and value controls to be present
+    if None in (cqj, h_cq, m_cq, l_cq, h_val, m_val, l_val):
+        return None
+    # Log-linear interpolation (standard curve):
+    # log10(conc) = slope * (Cq - intercept)
+    # For now, use two-point slope between H and L
+    try:
+        import math
+        slope = (math.log10(h_val) - math.log10(l_val)) / (l_cq - h_cq)
+        intercept = math.log10(h_val) - slope * h_cq
+        log_conc = slope * cqj + intercept
+        return 10 ** log_conc
+    except Exception:
+        return None
+
+# In batch_analyze_wells or after per-well analysis:
+# For each well, after analysis, add:
+#   well_result['cqj'] = {channel: cqj_value, ...}
+#   well_result['calcj'] = {channel: calcj_value, ...}
+# (You will need to pass thresholds and control Cq/values per channel from your pipeline.)
 
 if __name__ == "__main__":
     main()
