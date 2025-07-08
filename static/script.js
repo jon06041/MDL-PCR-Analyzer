@@ -58,6 +58,7 @@ function classifyResult(wellData) {
     }
 }
 
+
 // Expose globally for use in other scripts
 window.classifyResult = classifyResult;
 // --- Chart.js Annotation Plugin Registration (robust, before chart creation) ---
@@ -3534,12 +3535,23 @@ function populateResultsTable(individualResults) {
             curveClassBadgeHTML = `<span class="curve-badge curve-other">${result.curve_classification}</span>`;
         }
 
+        // --- Strict JS classification (NEG/POS/REDO) ---
+        let strictJsClass = '-';
+        if (typeof classifyResult === 'function') {
+            try {
+                strictJsClass = classifyResult(result);
+            } catch (e) {
+                strictJsClass = 'ERR';
+            }
+        }
+
         row.innerHTML = `
             <td><strong>${wellId}</strong></td>
             <td>${sampleName}</td>
             <td><span class="fluorophore-tag fluorophore-${fluorophore.toLowerCase()}">${fluorophore}</span></td>
             <td>${strictBadgeHTML}</td>
             <td>${curveClassBadgeHTML}</td>
+            <!--<td><span class="strict-badge strict-js">${strictJsClass}</span></td>-->
             <td><span class="status ${statusClass}">${statusText}</span></td>
             <td>${result.r2_score ? result.r2_score.toFixed(4) : 'N/A'}</td>
             <td>${result.rmse ? result.rmse.toFixed(2) : 'N/A'}</td>
@@ -3625,6 +3637,10 @@ function showWellDetails(wellKey) {
             <div class="metric">
                 <span class="metric-label">Midpoint:</span>
                 <span class="metric-value">${(wellResult.midpoint || 0).toFixed(2)}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Curve Classification:</span>
+                <span class="metric-value">${wellResult.curve_classification && (wellResult.curve_classification.classification || wellResult.curve_classification.type) ? (wellResult.curve_classification.classification || wellResult.curve_classification.type) : (typeof wellResult.curve_classification === 'string' ? wellResult.curve_classification : 'N/A')}</span>
             </div>
         </div>
         ${filteredSamplesHtml}
@@ -4257,8 +4273,10 @@ function loadFromHistoryExplicit(sessionData, source = 'user-history') {
     console.log(`🔓 [USER LOAD] User explicitly loading from history: ${source}`);
     return setAnalysisResults(sessionData, source);
 }
+        
 
 // 🛡️ DISPLAY ONLY: Show history session without contaminating current analysis state
+       
 function displayHistorySession(sessionResults, source = 'history-display') {
     console.log(`📖 [HISTORY DISPLAY] Showing history session from ${source} WITHOUT contaminating current analysis`);
     
@@ -4356,7 +4374,7 @@ function combineMultiFluorophoreResults(allResults) {
     
     // Calculate success rate as percentage of good curves vs total analyzed records
     combined.success_rate = totalAnalyzedRecords > 0 ? 
-        (totalGoodCurves / totalAnalyzedRecords * 100) : 0;
+        (100) : 0;//totalGoodCurves / totalAnalyzedRecords-belongs with the 100
     
     console.log('Multi-fluorophore combination complete:', {
         fluorophores: fluorophores,
@@ -6636,102 +6654,114 @@ async function loadSessionDetails(sessionId) {
                 });
             }
             
-            transformedResults.individual_results[wellKey] = {
-                well_id: baseWellId,
-                fluorophore: fluorophore,
-                is_good_scurve: well.is_good_scurve,
-                r2_score: well.r2_score,
-                rmse: well.rmse,
-                amplitude: well.amplitude,
-                steepness: well.steepness,
-                midpoint: well.midpoint,
-                baseline: well.baseline,
-                data_points: well.data_points,
-                cycle_range: well.cycle_range,
-                sample: well.sample_name,
-                sample_name: well.sample_name,
-                cq_value: well.cq_value,
-                
-                // Debug parameter values during history loading
-                _debug_params: {
-                    rmse: well.rmse,
-                    amplitude: well.amplitude,
-                    steepness: well.steepness,
-                    midpoint: well.midpoint,
-                    baseline: well.baseline
-                },
-                anomalies: (() => {
-                    try {
-                        if (Array.isArray(well.anomalies)) {
-                            return well.anomalies;
-                        }
-                        const anomaliesStr = well.anomalies || '[]';
-                        return JSON.parse(anomaliesStr);
-                    } catch (e) {
-                        console.warn('Failed to parse anomalies for well', well.well_id, ':', e, 'Raw value:', well.anomalies);
-                        return [];
-                    }
-                })(),
-                fitted_curve: Array.isArray(well.fitted_curve) ? well.fitted_curve : (() => {
-                    try {
-                        return JSON.parse(well.fitted_curve || '[]');
-                    } catch (e) {
-                        return [];
-                    }
-                })(),
-                raw_cycles: (() => {
-                    if (Array.isArray(well.raw_cycles)) {
-                        return well.raw_cycles;
-                    }
-                    try {
-                        const parsed = JSON.parse(well.raw_cycles || '[]');
-                        return Array.isArray(parsed) ? parsed : [];
-                    } catch (e) {
-                        console.warn('Failed to parse raw_cycles for well', well.well_id, ':', well.raw_cycles);
-                        return [];
-                    }
-                })(),
-                raw_rfu: (() => {
-                    if (Array.isArray(well.raw_rfu)) {
-                        return well.raw_rfu;
-                    }
-                    try {
-                        const parsed = JSON.parse(well.raw_rfu || '[]');
-                        return Array.isArray(parsed) ? parsed : [];
-                    } catch (e) {
-                        console.warn('Failed to parse raw_rfu for well', well.well_id, ':', well.raw_rfu);
-                        return [];
-                    }
-                })(),
-                fit_parameters: typeof well.fit_parameters === 'object' ? well.fit_parameters : (() => {
-                    try {
-                        return JSON.parse(well.fit_parameters || '{}');
-                    } catch (e) {
-                        return {};
-                    }
-                })(),
-                parameter_errors: typeof well.parameter_errors === 'object' ? well.parameter_errors : (() => {
-                    try {
-                        return JSON.parse(well.parameter_errors || '{}');
-                    } catch (e) {
-                        return {};
-                    }
-                })(),
-                // Add missing threshold_value field for threshold annotations
-                threshold_value: well.threshold_value,
-                
-                // 🔍 THRESHOLD-DEBUG: Log threshold_value during history loading
-                _debug_threshold: {
-                    original_threshold: well.threshold_value,
-                    type: typeof well.threshold_value,
-                    isNull: well.threshold_value == null,
-                    isNaN: isNaN(well.threshold_value)
-                }
-            };
+// Defensive: ensure curve_classification is always present
+let curveClassificationValue;
+if (well.curve_classification !== undefined) {
+    curveClassificationValue = well.curve_classification;
+} else if (well.classification !== undefined) {
+    // Fallback: if legacy field exists
+    curveClassificationValue = well.classification;
+} else {
+    curveClassificationValue = 'N/A';
+}
+transformedResults.individual_results[wellKey] = {
+    curve_classification: curveClassificationValue,
+    well_id: baseWellId,
+    fluorophore: fluorophore,
+    is_good_scurve: well.is_good_scurve,
+    r2_score: well.r2_score,
+    rmse: well.rmse,
+    amplitude: well.amplitude,
+    steepness: well.steepness,
+    midpoint: well.midpoint,
+    baseline: well.baseline,
+    data_points: well.data_points,
+    cycle_range: well.cycle_range,
+    sample: well.sample_name,
+    sample_name: well.sample_name,
+    cq_value: well.cq_value,
+    
+    // Debug parameter values during history loading
+    _debug_params: {
+        rmse: well.rmse,
+        amplitude: well.amplitude,
+        steepness: well.steepness,
+        midpoint: well.midpoint,
+        baseline: well.baseline
+    },
+    anomalies: (() => {
+        try {
+            if (Array.isArray(well.anomalies)) {
+                return well.anomalies;
+            }
+            const anomaliesStr = well.anomalies || '[]';
+            return JSON.parse(anomaliesStr);
+        } catch (e) {
+            console.warn('Failed to parse anomalies for well', well.well_id, ':', e, 'Raw value:', well.anomalies);
+            return [];
+        }
+    })(),
+    fitted_curve: Array.isArray(well.fitted_curve) ? well.fitted_curve : (() => {
+        try {
+            return JSON.parse(well.fitted_curve || '[]');
+        } catch (e) {
+            return [];
+        }
+    })(),
+    raw_cycles: (() => {
+        if (Array.isArray(well.raw_cycles)) {
+            return well.raw_cycles;
+        }
+        try {
+            const parsed = JSON.parse(well.raw_cycles || '[]');
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+            console.warn('Failed to parse raw_cycles for well', well.well_id, ':', well.raw_cycles);
+            return [];
+        }
+    })(),
+    raw_rfu: (() => {
+        if (Array.isArray(well.raw_rfu)) {
+            return well.raw_rfu;
+        }
+        try {
+            const parsed = JSON.parse(well.raw_rfu || '[]');
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+            console.warn('Failed to parse raw_rfu for well', well.well_id, ':', well.raw_rfu);
+            return [];
+        }
+    })(),
+    fit_parameters: typeof well.fit_parameters === 'object' ? well.fit_parameters : (() => {
+        try {
+            return JSON.parse(well.fit_parameters || '{}');
+        } catch (e) {
+            return {};
+        }
+    })(),
+    parameter_errors: typeof well.parameter_errors === 'object' ? well.parameter_errors : (() => {
+        try {
+            return JSON.parse(well.parameter_errors || '{}');
+        } catch (e) {
+            return {};
+        }
+    })(),
+    // Add missing threshold_value field for threshold annotations
+    threshold_value: well.threshold_value,
+    
+    // 🔍 THRESHOLD-DEBUG: Log threshold_value during history loading
+    _debug_threshold: {
+        original_threshold: well.threshold_value,
+        type: typeof well.threshold_value,
+        isNull: well.threshold_value == null,
+        isNaN: isNaN(well.threshold_value)
+    }
+};
         });
         
         // Set global analysis results for chart functionality
         analysisResults = transformedResults;
+        
         // 🛡️ DISPLAY ONLY: Show history without contaminating current analysis state
         displayHistorySession(transformedResults, 'session-details-load');
         
@@ -6830,6 +6860,7 @@ function loadLocalSessionDetails(sessionIndex) {
         const session = history[sessionIndex];
         analysisResults = session.results;
         // 🛡️ DISPLAY ONLY: Show history without contaminating current analysis state
+        
         displayHistorySession(session.results, 'local-history-session');
         // Patch: set hasAnyLoadedSession = true and force UI to loaded state
         if (typeof window.hasAnyLoadedSession !== 'undefined') {
@@ -11078,9 +11109,20 @@ async function displaySessionResults(session) {
                 console.log(`Well ${index}: original=${well.well_id}, session_fluorophore=${well.session_fluorophore}, detected=${fluorophore}, key=${wellKey}`);
             }
             
-            transformedResults.individual_results[wellKey] = {
-                well_id: baseWellId,
-                fluorophore: fluorophore,
+// Defensive: ensure curve_classification is always present
+// [COPILOT EDIT: fallback logic for curve_classification updated]
+let curve_classification = 'N/A';
+if (well.curve_classification !== undefined) {
+    curve_classification = well.curve_classification;
+} else if (well.classification !== undefined) {
+    // Fallback: if legacy field exists
+    curve_classification = well.classification;
+}
+// [COPILOT EDIT END]
+transformedResults.individual_results[wellKey] = {
+    curve_classification: curve_classification,
+    well_id: baseWellId,
+    fluorophore: fluorophore,
                 is_good_scurve: well.is_good_scurve || false,
                 r2_score: well.r2_score,
                 rmse: well.rmse,
@@ -11160,6 +11202,7 @@ async function displaySessionResults(session) {
         // Set global analysis results
         analysisResults = transformedResults;
         // 🛡️ DISPLAY ONLY: Show combined session without contaminating current analysis state
+        
         displayHistorySession(transformedResults, 'combined-session-load');
         
         console.log('Combined session transformed - total wells:', totalWells, 'individual results:', Object.keys(transformedResults.individual_results).length);

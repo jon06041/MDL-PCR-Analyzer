@@ -400,7 +400,15 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                         well_result.threshold_value = None
                 else:
                     well_result.threshold_value = None
-                    
+                
+                # Set curve_classification if present, else default to {'class': 'N/A'}
+                curve_classification = well_data.get('curve_classification')
+                if curve_classification is None:
+                    # Default to N/A if not present
+                    curve_classification = {'class': 'N/A'}
+                # Ensure it's a JSON string for DB
+                well_result.curve_classification = safe_json_dumps(curve_classification, {'class': 'N/A'})
+                
                 db.session.add(well_result)
                 db.session.flush()  # Force write to DB after each well
                 well_count += 1
@@ -1047,6 +1055,15 @@ def save_combined_session():
                         well_result.threshold_value = None
                 else:
                     well_result.threshold_value = None
+                
+                # Set curve_classification if present, else default to {'class': 'N/A'}
+                curve_classification = well_data.get('curve_classification')
+                if curve_classification is None:
+                    # Default to N/A if not present
+                    curve_classification = {'class': 'N/A'}
+                # Ensure it's a JSON string for DB
+                well_result.curve_classification = safe_json_dumps(curve_classification, {'class': 'N/A'})
+                
                 db.session.add(well_result)
                 well_count += 1
                 if well_count % 50 == 0:
