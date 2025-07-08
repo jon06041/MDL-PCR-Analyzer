@@ -79,3 +79,15 @@ instance/
 
 # Logs
 *.log
+# Ignore backup and intermediate JS files
+static/script_backup_*.js
+static/script_main_backup.js
+static/script_production.js
+static/clean_hybrid_script.js
+static/script_backup_before_*.js
+static/merged_hybrid_script.js
+static/xscript.js
+static/xxxscript.js
+static/xxxxscript.js
+static/xmerged_hybrid_script.js
+static/this_works_but_isnt_perfect_script.js
