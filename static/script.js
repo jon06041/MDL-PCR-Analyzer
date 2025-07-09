@@ -1,7 +1,7 @@
 // --- Shared strict result classification for NEG/POS/REDO ---
 
-// Load CQ-J/Calc-J calculation utilities
-import('./cqj_calcj_utils.js');
+// Remove any import/export statements for browser compatibility
+// All dependencies should be accessed via window, e.g., window.calculateThreshold
 
 /**
  * Safely set item in localStorage or sessionStorage, handling quota errors.
@@ -559,6 +559,183 @@ function updateBaselineFlatteningVisibility() {
 }
 
 // ...existing code...
+
+// --- Threshold Strategy Dropdown Logic ---
+// Remove any import/export statements for browser compatibility
+// All dependencies should be accessed via window, e.g., window.LINEAR_THRESHOLD_STRATEGIES, window.LOG_THRESHOLD_STRATEGIES
+
+function populateThresholdStrategyDropdown() {
+    const select = document.getElementById('thresholdStrategySelect');
+    if (!select) return;
+    select.innerHTML = '';
+    // Always use the global window objects for strategies
+    const scale = (typeof currentScaleMode === 'string' ? currentScaleMode : 'linear');
+    // Always use window-scoped strategies to ensure up-to-date reference
+    const strategies = scale === 'log' ? window.LOG_THRESHOLD_STRATEGIES : window.LINEAR_THRESHOLD_STRATEGIES;
+    let firstKey = null;
+    // Defensive: ensure strategies is an object and not undefined
+    if (strategies && typeof strategies === 'object') {
+        Object.keys(strategies).forEach((key, idx) => {
+            const strat = strategies[key];
+            const option = document.createElement('option');
+            option.value = key;
+            option.textContent = strat && strat.name ? strat.name : key;
+            option.title = strat && strat.description ? strat.description : '';
+            select.appendChild(option);
+            if (idx === 0) firstKey = key;
+        });
+    }
+    // Restore previous selection if possible, else default to first
+    if (window.selectedThresholdStrategy && strategies && strategies[window.selectedThresholdStrategy]) {
+        select.value = window.selectedThresholdStrategy;
+    } else {
+        select.value = firstKey;
+        window.selectedThresholdStrategy = firstKey;
+    }
+    // Trigger chart/threshold update after repopulating
+    handleThresholdStrategyChange();
+}
+
+function getSelectedThresholdStrategy() {
+    const select = document.getElementById('thresholdStrategySelect');
+    if (select && select.value) {
+        window.selectedThresholdStrategy = select.value;
+        return select.value;
+    }
+    return null;
+}
+
+function handleThresholdStrategyChange() {
+    // When the strategy changes, recalculate thresholds for all channels and both scales, then update the chart and CQ-J/Calc-J values
+    const strategy = getSelectedThresholdStrategy();
+    if (!window.stableChannelThresholds) window.stableChannelThresholds = {};
+    // For each channel, recalculate threshold for BOTH log and linear
+    if (window.channelControlWells) {
+        Object.keys(window.channelControlWells).forEach(channel => {
+            const controls = window.channelControlWells[channel];
+            let baseline = 0, baseline_std = 1;
+            let allRfus = [];
+            if (controls && controls.NTC && controls.NTC.length > 0) {
+                controls.NTC.forEach(well => {
+                    let rfu = well.raw_rfu;
+                    if (typeof rfu === 'string') try { rfu = JSON.parse(rfu); } catch(e){}
+                    if (Array.isArray(rfu)) allRfus.push(...rfu.slice(0,5));
+                });
+            }
+            if (allRfus.length > 0) {
+                baseline = allRfus.reduce((a,b)=>a+b,0)/allRfus.length;
+                const mean = baseline;
+                const variance = allRfus.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / allRfus.length;
+                baseline_std = Math.sqrt(variance);
+            }
+            const params = { baseline, baseline_std, N: 10 };
+            // Calculate for both log and linear
+            ['log','linear'].forEach(scale => {
+                let stratObj = (scale === 'log' ? window.LOG_THRESHOLD_STRATEGIES : window.LINEAR_THRESHOLD_STRATEGIES)[strategy];
+                let threshold = stratObj && typeof stratObj.calculate === 'function' ? stratObj.calculate(params) : baseline + 10*baseline_std;
+                if (!window.stableChannelThresholds[channel]) window.stableChannelThresholds[channel] = {};
+                window.stableChannelThresholds[channel][scale] = threshold;
+            });
+        });
+    }
+    updateAllChannelThresholds();
+    // Recalculate CQ-J and Calc-J for all wells in all channels after threshold strategy change, for BOTH log and linear
+    if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+        let experimentPattern = (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null;
+        let testCode = (typeof extractTestCode === 'function' && experimentPattern) ? extractTestCode(experimentPattern) : null;
+        Object.keys(window.currentAnalysisResults.individual_results).forEach(wellKey => {
+            const well = window.currentAnalysisResults.individual_results[wellKey];
+            const channel = well.fluorophore;
+            // Use the threshold for the current scale mode, but if log strategy is selected, always use log threshold
+            let scale = (typeof currentScaleMode === 'string' ? currentScaleMode : 'linear');
+            const selectedStrategy = getSelectedThresholdStrategy();
+            if (selectedStrategy && scale === 'log') {
+                scale = 'log';
+            }
+            let threshold = null;
+            if (window.stableChannelThresholds && window.stableChannelThresholds[channel] && window.stableChannelThresholds[channel][scale] != null) {
+                threshold = window.stableChannelThresholds[channel][scale];
+            }
+            if (testCode) {
+                well.test_code = testCode;
+            }
+            if (typeof window.calculateCqForWell === 'function' && well.cycles && well.rfu && threshold != null) {
+                well.cqj_value = window.calculateCqForWell({ cycles: well.cycles, rfu: well.rfu }, threshold);
+            } else {
+                well.cqj_value = null;
+            }
+            if (typeof window.calculateConcentration === 'function' && well.cqj_value != null && well.test_code) {
+                well.calcj_value = window.calculateConcentration(well.cqj_value, well.test_code);
+            } else {
+                well.calcj_value = null;
+            }
+        });
+        // Update the UI to reflect new CQ-J/Calc-J values
+        if (typeof populateResultsTable === 'function') {
+            populateResultsTable(window.currentAnalysisResults.individual_results);
+        } else {
+            console.log('[CQJ/CalcJ] Values recalculated for all wells after threshold strategy change.');
+        }
+        // Always force "Show All Curves" view and activate button after threshold change
+        setTimeout(() => {
+            if (typeof showAllCurves === 'function') showAllCurves('all');
+            const showAllBtn = document.getElementById('showAllBtn');
+            if (showAllBtn) showAllBtn.classList.add('active');
+        }, 400);
+    } else {
+        console.warn('[CQJ/CalcJ] No valid analysis results found when recalculating after threshold strategy change.');
+    }
+}
+
+
+document.addEventListener('DOMContentLoaded', function() {
+    populateThresholdStrategyDropdown();
+    // Default to show all wells on load if analysis section is visible
+    setTimeout(function() {
+        if (typeof showAllCurves === 'function') {
+            showAllCurves('all');
+        }
+        // Also set chart mode to 'all' and update display if needed
+        if (typeof updateChartDisplayMode === 'function') {
+            window.currentChartMode = 'all';
+            updateChartDisplayMode();
+        }
+    }, 500);
+    const select = document.getElementById('thresholdStrategySelect');
+    if (select) {
+        select.addEventListener('change', handleThresholdStrategyChange);
+    }
+    // Update dropdown when scale changes
+    const scaleToggle = document.getElementById('scaleToggle');
+    if (scaleToggle) {
+        scaleToggle.addEventListener('click', function() {
+            setTimeout(populateThresholdStrategyDropdown, 100); // Delay to allow scale change
+        });
+    }
+    // Also trigger on input change for thresholdInput
+    const thresholdInput = document.getElementById('thresholdInput');
+    if (thresholdInput) {
+        thresholdInput.addEventListener('change', function() {
+            // When user changes threshold input, update threshold for current channel/scale
+            let channel = window.currentFluorophore;
+            if (!channel || channel === 'all') {
+                // Try to extract from chart datasets
+                const datasets = window.amplificationChart?.data?.datasets;
+                if (datasets && datasets.length > 0) {
+                    const match = datasets[0].label?.match(/\(([^)]+)\)/);
+                    if (match && match[1] !== 'Unknown') channel = match[1];
+                }
+            }
+            if (!channel) return;
+            const scale = currentScaleMode || 'linear';
+            const value = Number(thresholdInput.value);
+            if (!window.stableChannelThresholds[channel]) window.stableChannelThresholds[channel] = {};
+            window.stableChannelThresholds[channel][scale] = value;
+            updateAllChannelThresholds();
+            // Optionally recalculate CQ-J/Calc-J here
+        });
+    }
+});
 
 // --- ENHANCED PER-CHANNEL THRESHOLD SYSTEM ---
 // This replaces the existing threshold calculation logic with a stable, 
@@ -1280,23 +1457,21 @@ function calculateLogThreshold(channelWells, channel) {
 function calculateLinearThreshold(channelWells, channel) {
     console.log(`🔍 LINEAR-THRESHOLD - Calculating linear threshold for ${channelWells.length} wells in channel: ${channel}`);
     
-    // Use NTC wells if available, otherwise use all control wells, otherwise use all wells
-    let controlWells = channelWells.filter(well => 
-        well.sample_name && well.sample_name.toLowerCase().includes('ntc')
+    // Use NTC/NEG/CONTROL wells if available, otherwise use all wells
+    let controlWells = channelWells.filter(well =>
+        well.sample_name && (
+            well.sample_name.toLowerCase().includes('ntc') ||
+            well.sample_name.toLowerCase().includes('neg') ||
+            well.sample_name.toLowerCase().includes('control') ||
+            /\b(ctrl|positive|h[0-9]|m[0-9]|l[0-9])\b/i.test(well.sample_name)
+        )
     );
-    
+
     if (controlWells.length === 0) {
-        // Fallback to other control types
-        controlWells = channelWells.filter(well => 
-            well.sample_name && /\b(control|ctrl|neg|positive|h[0-9]|m[0-9]|l[0-9])\b/i.test(well.sample_name)
-        );
-    }
-    
-    if (controlWells.length === 0) {
-        console.warn(`🔍 LINEAR-THRESHOLD - No control wells found for channel: ${channel}, using all wells`);
+        console.warn(`⚠️ No NTC/NEG/CONTROL wells found for channel ${channel}. Using ALL wells as controls for threshold calculation.`);
         controlWells = channelWells;
     }
-    
+
     console.log(`🔍 LINEAR-THRESHOLD - Using ${controlWells.length} control wells for channel: ${channel}`);
     
     // Calculate inflection point thresholds: RFU = L/2 + B
@@ -2834,8 +3009,8 @@ async function performAnalysis() {
 
 // Display functions
 async function displayAnalysisResults(results) {
-    console.log('Displaying analysis results:', results);
-    
+    // Ensure global is set before any UI/chart calls
+    window.currentAnalysisResults = results;
     // Clear previous experiment data RIGHT BEFORE displaying new results
     clearPreviousExperimentData();
     
@@ -2954,23 +3129,48 @@ async function displayAnalysisResults(results) {
     
     populateWellSelector(individualResults);
     populateResultsTable(individualResults);
-    
+
+    // --- Force "Show All Curves" view and activate button after analysis loads ---
+    setTimeout(() => {
+        const wellSelector = document.getElementById('wellSelect');
+        if (wellSelector) {
+            const allOption = Array.from(wellSelector.options).find(opt => opt.value === 'ALL_WELLS');
+            if (allOption) {
+                wellSelector.value = 'ALL_WELLS';
+                if (typeof showAllCurves === 'function') showAllCurves('all');
+            } else {
+                if (typeof initializeChartDisplay === 'function') initializeChartDisplay();
+            }
+        } else {
+            if (typeof initializeChartDisplay === 'function') initializeChartDisplay();
+        }
+        // Reset filters to default state after loading results
+        if (typeof initializeFilters === 'function') initializeFilters();
+        // Update export button validation after loading session
+        if (typeof updateExportButton === 'function') updateExportButton(false, []);
+        // Activate the Show All button
+        const showAllBtn = document.getElementById('showAllBtn');
+        if (showAllBtn) showAllBtn.classList.add('active');
+    }, 400);
+
     // Show first well by default
     const firstWell = Object.keys(individualResults)[0];
     if (firstWell) {
         showWellDetails(firstWell);
     }
-    
+
     // Mark this as fresh analysis to ensure validation display shows
     currentAnalysisResults.freshAnalysis = true;
-    
+
     // Update pathogen channel validation status for fresh analysis
     await updatePathogenChannelStatusInBreakdown();
-    
+
     document.getElementById('analysisSection').scrollIntoView({ behavior: 'smooth' });
 }
 
 async function displayMultiFluorophoreResults(results) {
+    // Ensure global is set before any UI/chart calls
+    window.currentAnalysisResults = results;
     // Clear previous experiment data RIGHT BEFORE displaying new results
     clearPreviousExperimentData();
     
@@ -3402,6 +3602,10 @@ function populateWellSelector(individualResults) {
             wellSelector.value = 'ALL_WELLS';
         }
     }
+    // Always force "Show All Curves" view and activate button after analysis loads
+    if (typeof showAllCurves === 'function') showAllCurves('all');
+    const showAllBtn = document.getElementById('showAllBtn');
+    if (showAllBtn) showAllBtn.classList.add('active');
 }
 
 function populateResultsTable(individualResults) {
@@ -3564,52 +3768,15 @@ function populateResultsTable(individualResults) {
             }
         }
 
-        // Calculate CQ-J and Calc-J live using the current channel threshold
-        /* --- CQ-J/Calc-J LIVE CALCULATION BLOCK ---
-         * To remove all CQ-J/Calc-J logic, delete this block.
-         */
+        // Display stored CQ-J and Calc-J values (calculated after threshold changes)
         let cqjDisplay = '-';
         let calcjDisplay = '-';
-        if (window.calculateCqForWell && window.calculateConcentration) {
-            const channel = result.fluorophore || 'FAM';
-            let threshold = 0;
-            if (typeof getCurrentChannelThreshold === 'function') {
-                threshold = getCurrentChannelThreshold(channel, 'log');
-            } else if (window.userSetThresholds && window.userSetThresholds[channel] && window.userSetThresholds[channel]['log']) {
-                threshold = window.userSetThresholds[channel]['log'];
-            }
-            let cycles = result.cycles || [];
-            let rfu = result.rfu || [];
-            if (typeof cycles === 'string') {
-                try { cycles = JSON.parse(cycles); } catch (e) { cycles = []; }
-            }
-            if (typeof rfu === 'string') {
-                try { rfu = JSON.parse(rfu); } catch (e) { rfu = []; }
-            }
-            if (Array.isArray(cycles) && Array.isArray(rfu) && cycles.length && rfu.length && cycles.length === rfu.length) {
-                const cqj = window.calculateCqForWell(cycles, rfu, threshold);
-                if (cqj !== null && cqj !== undefined && !isNaN(cqj)) {
-                    cqjDisplay = Number(cqj).toFixed(2);
-                }
-                let testCode = null;
-                if (typeof extractTestCode === 'function') {
-                    const experimentPattern = getCurrentFullPattern && getCurrentFullPattern();
-                    testCode = experimentPattern ? extractTestCode(experimentPattern) : null;
-                }
-                let controlValues = null;
-                if (window.currentAnalysisResults && window.currentAnalysisResults.controls) {
-                    controlValues = window.currentAnalysisResults.controls[channel] || null;
-                }
-                if (!controlValues && result.controls) {
-                    controlValues = result.controls;
-                }
-                const calcj = window.calculateConcentration(cqj, testCode, controlValues);
-                if (calcj !== null && calcj !== undefined && !isNaN(calcj)) {
-                    calcjDisplay = Number(calcj).toExponential(2);
-                }
-            }
+        if (result.cqj_value !== null && result.cqj_value !== undefined && !isNaN(result.cqj_value)) {
+            cqjDisplay = Number(result.cqj_value).toFixed(2);
         }
-        /* --- END CQ-J/Calc-J LIVE CALCULATION BLOCK --- */
+        if (result.calcj_value !== null && result.calcj_value !== undefined && !isNaN(result.calcj_value)) {
+            calcjDisplay = Number(result.calcj_value).toExponential(2);
+        }
 
         row.innerHTML = `
             <td><strong>${wellId}</strong></td>

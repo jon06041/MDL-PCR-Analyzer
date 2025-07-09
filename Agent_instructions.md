@@ -1,5 +1,38 @@
 # Chart.js Annotation Plugin Integration Debug Log (2025-07-06)
+## MDL-PCR-Analyzer Agent Change Log & Troubleshooting Notes (2025-07-09)
 
+### Major Refactor: Per-Channel, Per-Pathogen Controls
+- Refactored `static/pathogen_library.js` so all multi-channel test definitions (e.g., LactoNY, MegasphaeraNY, HPV1NY, BVPanelPCR1NY, etc.) are now split into per-channel, per-pathogen objects (e.g., `LactoNY_Cy5`, `HPV1NY_FAM`, etc.), each with its own `target` and `concentrationControls`.
+- Patched the export logic in `pathogen_library.js` to always expose both `window.PATHOGEN_LIBRARY` and `window.pathogenLibrary` as flattened, per-channel objects for compatibility.
+
+### Thresholding, CQ-J/Calc-J, and UI Logic
+- Patched all code in `static/script.js` that looks up pathogen info, CQ-J/Calc-J, or results table entries to use the new per-channel keys (e.g., `LactoNY_Cy5` instead of `LactoNY` + channel).
+- Ensured threshold update logic works for both log and linear strategies and triggers a full update of results and UI.
+- Restored and verified that the default view is "Show All Curves" after analysis loads (using a robust setTimeout-based snippet).
+- Ensured CQ-J/Calc-J results appear in the result table and that thresholding logic works for all channels.
+- Patched any UI or backend logic that assumed a multi-channel object structure.
+
+### Threshold Calculation Robustness
+- Improved `calculateLinearThreshold` to:
+  - Use NTC/NEG/CONTROL wells if available, otherwise use all wells as controls (with a warning).
+  - Log which wells are used for thresholding and fallback cases.
+- Added more robust sample name matching for control wells.
+- Added debug logging for threshold calculation and CQ-J/Calc-J assignment.
+
+### Known Issues & What Has Been Tried
+- If no NTC/NEG/CONTROL wells are found, all wells are used for threshold calculation (with a warning in the console).
+- If CQ-J/Calc-J values are missing, check that thresholds are not fallback values and that the calculation functions are not returning null due to missing or invalid data.
+- The default view logic is now robust and should always show "All Curves" after analysis or reload.
+- If only some channels get correct thresholds, check the sample names in your data and the debug logs for control well detection.
+- The Calc-J function is a placeholder and will only return real values if H/M/L Cq values and concentrations are provided for the current run.
+
+### Next Steps / To-Do
+- If CQ-J/Calc-J values are still missing, add more debug logging to the calculation loop and check the threshold and input data for each well.
+- If thresholding is still inconsistent, further improve control well detection and consider allowing manual override or review of detected controls.
+- If you need to reset the app state, use the `emergencyReset` function in `static/script.js`.
+
+---
+**This file should be updated with every major agent intervention or troubleshooting step to avoid repeating work or losing context.**
 ## 📝 qPCR Analyzer: Threshold/UI/Editor Troubleshooting & Workflow (Added: July 6, 2025)
 
 ### Instructions for Next Work Session
@@ -506,3 +539,66 @@ window.currentAnalysisResults = data // FORBIDDEN
 **All code and workflow changes are complete and pushed. The only remaining step is to confirm that Railway deployment is triggered from GitHub and production matches the latest code.**
 
 ---
+
+# Agent Instructions: CQ-J and Calc-J Calculation Setup (2025-07-09)
+
+## 1. Threshold Calculation
+- For each channel, a threshold is calculated for both linear and log scales using the selected strategy from `window.LINEAR_THRESHOLD_STRATEGIES` or `window.LOG_THRESHOLD_STRATEGIES`.
+- The **log threshold** should be used for CQ-J and Calc-J calculations.
+
+## 2. CQ-J Calculation
+- For each well, calculate CQ-J using:
+  ```js
+  window.calculateCqForWell({ cycles: well.cycles, rfu: well.rfu }, logThreshold)
+  ```
+  - `well.cycles` and `well.rfu` must be arrays for the well.
+  - `logThreshold` is the threshold value for the well's channel in log mode:  
+    `window.stableChannelThresholds[well.fluorophore]['log']`
+- Store the result in `well.cqj_value`.
+
+## 3. Calc-J Calculation
+- For each well, calculate Calc-J using:
+  ```js
+  window.calculateConcentration(well.cqj_value, well.test_code)
+  ```
+  - `well.cqj_value` must be a number (from the previous step).
+  - `well.test_code` must match a key in `window.pathogenLibrary` and have `concentrationControls` defined.
+- Store the result in `well.calcj_value`.
+
+## 4. When to Recalculate
+- Recalculate CQ-J and Calc-J for all wells whenever:
+  - The threshold strategy is changed.
+  - The log threshold for a channel is changed (manually or programmatically).
+  - New data is loaded or analysis is run.
+
+## 5. UI Update
+- After recalculating, update the results table so the new CQ-J and Calc-J values appear in their columns.
+
+## 6. Implementation Example
+```js
+Object.keys(window.currentAnalysisResults.individual_results).forEach(wellKey => {
+    const well = window.currentAnalysisResults.individual_results[wellKey];
+    const channel = well.fluorophore;
+    const logThreshold = window.stableChannelThresholds[channel] && window.stableChannelThresholds[channel]['log'];
+    if (logThreshold != null && Array.isArray(well.cycles) && Array.isArray(well.rfu)) {
+        well.cqj_value = window.calculateCqForWell({ cycles: well.cycles, rfu: well.rfu }, logThreshold);
+    }
+    if (well.cqj_value != null && well.test_code) {
+        well.calcj_value = window.calculateConcentration(well.cqj_value, well.test_code);
+    }
+});
+if (typeof updateResultsTable === 'function') updateResultsTable();
+```
+
+## 7. Notes
+- The current `calculateConcentration` function is a placeholder and must be implemented to return a real value based on H, M, L controls.
+- Make sure `window.pathogenLibrary` and `well.test_code` are set up correctly for Calc-J to work.
+
+---
+
+### [2025-07-09] updateAllChannelThresholds Robustness Patch
+- Refactored `updateAllChannelThresholds` in `static/script.js` to be fully robust and silent:
+  - Now only updates chart thresholds if both analysis results and chart are ready.
+  - All logging and warnings removed; function is now silent and safe to call at any time.
+  - Prevents spurious logs and ensures UI only updates when possible.
+- This resolves noisy logs and unnecessary calls when switching threshold strategies or before analysis results are loaded.
