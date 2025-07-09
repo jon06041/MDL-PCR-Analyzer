@@ -2,7 +2,6 @@
     margin: 0;
     padding: 0;
     box-sizing: border-box;
-}
 
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -1554,19 +1553,27 @@ body {
 }
 
 .table-wrapper {
+   
+    
     overflow-x: auto;
     border-radius: 10px;
     border: 1px solid #ecf0f1;
+   
 }
-
+/*#resultsTable {
+    width: auto;
+    margin-left: 0 !important;
+    float: left;
+}*/
 table {
     width: 100%;
     border-collapse: collapse;
     font-size: 0.85rem;
-    table-layout: fixed;
+    
 }
 
 th, td {
+    
     padding: 4px 6px;
     text-align: left;
     border-bottom: 1px solid #ecf0f1;
@@ -1577,12 +1584,27 @@ th, td {
 }
 
 th.sample-col, td.sample-col {
-    min-width: 120px;
+    min-width: 100px;
     max-width: 180px;
-    width: 180px;
+    width: 150px;
 }
-
+th.results-col-curve-class, td.results-col-curve-class {
+    min-width: 90px;
+    max-width: 180px;
+    width: 90px;
+}
+th.results-col-status, td.results-col-status {
+    min-width: 90px;
+    max-width: 180px;
+    width: 90px;
+}
+th.results-col-anom, td.results-col-anom {
+    min-width: 90px;
+    max-width: 180px;
+    width: 90px;
+}
 th {
+    
     background: #f8f9fa;
     font-weight: 600;
     color: #2c3e50;
@@ -1600,6 +1622,7 @@ tr {
 }
 
 tr::before {
+   
     content: "👁️ Click to view";
     position: absolute;
     right: 10px;
@@ -1838,8 +1861,20 @@ tr:hover::before {
     padding: 12px;
     text-align: left;
     border-bottom: 1px solid #ecf0f1;
+    white-space: normal;
 }
+/*th.positive-rate-col, td.positive-rate-col {
+    min-width: 100px;
+    max-width: 300px;
+    width: 200px;
+}*/
 
+ td.wrap {
+    width: 200px; /* Set a specific width for the cell */
+    word-wrap: break-word; /* Ensures long words break to fit */
+    word-break: break-word; /* Alternative for better compatibility */
+    white-space: normal; /* Allows text to wrap */
+  }
 .history-table th {
     background: #f8f9fa;
     font-weight: 600;

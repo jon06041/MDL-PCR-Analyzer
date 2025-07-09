@@ -3121,7 +3121,19 @@ async function displayMultiFluorophoreResults(results) {
     
     // Initialize chart display after DOM updates complete
     setTimeout(() => {
-        initializeChartDisplay();
+        // Show "All Wells" overlay by default if possible
+        const wellSelector = document.getElementById('wellSelect');
+        if (wellSelector) {
+            const allOption = Array.from(wellSelector.options).find(opt => opt.value === 'ALL_WELLS');
+            if (allOption) {
+                wellSelector.value = 'ALL_WELLS';
+                if (typeof showAllCurves === 'function') showAllCurves('all');
+            } else {
+                initializeChartDisplay();
+            }
+        } else {
+            initializeChartDisplay();
+        }
         // Reset filters to default state after loading results
         initializeFilters();
         // Update export button validation after loading session
@@ -3607,15 +3619,15 @@ function populateResultsTable(individualResults) {
             <td>${curveClassBadgeHTML}</td>
             <!--<td><span class="strict-badge strict-js">${strictJsClass}</span></td>-->
             <td><span class="status ${statusClass}">${statusText}</span></td>
-            <td>${result.r2_score ? result.r2_score.toFixed(4) : 'N/A'}</td>
-            <td>${result.rmse ? result.rmse.toFixed(2) : 'N/A'}</td>
-            <td>${result.amplitude ? result.amplitude.toFixed(1) : 'N/A'}</td>
-            <td>${result.steepness ? result.steepness.toFixed(3) : 'N/A'}</td>
-            <td>${result.midpoint ? result.midpoint.toFixed(1) : 'N/A'}</td>
-            <td>${result.baseline ? result.baseline.toFixed(1) : 'N/A'}</td>
-            <td>${cqValue}</td>
-            <td>${cqjDisplay}</td>
-            <td>${calcjDisplay}</td>
+            <td>${formatNumber(result.r2_score ? result.r2_score.toFixed(4) : 'N/A')}</td>
+            <td>${formatNumber(result.rmse ? result.rmse.toFixed(2) : 'N/A')}</td>
+            <td>${formatNumber(result.amplitude ? result.amplitude.toFixed(1) : 'N/A')}</td>
+            <td>${formatNumber(result.steepness ? result.steepness.toFixed(3) : 'N/A')}</td>
+            <td>${formatNumber(result.midpoint ? result.midpoint.toFixed(1) : 'N/A')}</td>
+            <td>${formatNumber(result.baseline ? result.baseline.toFixed(1) : 'N/A')}</td>
+            <td>${formatNumber(cqValue)}</td>
+            <td>${formatNumber(cqjDisplay)}</td>
+            <td>${formatNumber(calcjDisplay)}</td>
             <td>${anomaliesText}</td>
         `;
         
@@ -6518,6 +6530,7 @@ function displayAnalysisHistory(sessions) {
                     <th>Wells</th>
                     <th>Positive Rate</th>
                     <th>Cycles</th>
+
                     <th>Actions</th>
                 </tr>
             </thead>

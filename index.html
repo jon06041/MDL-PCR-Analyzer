@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MDL PCR Analyzer - Enhanced</title>
+    <script src="static/formatNumber.js"></script>
     <!-- Chart.js v4.x (stable) -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@2.2.1/dist/chartjs-plugin-annotation.min.js"></script>
@@ -22,6 +23,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" defer></script>
     <script src="/static/pathogen_library.js?v=1751381539" defer></script>
     <link rel="stylesheet" href="/static/style.css?v=1751381539">
+    <link rel="stylesheet" href="/static/results-table-custom.css?v=1751381539">
 </head>
 <body>
     <div class="container">
@@ -141,7 +143,7 @@
                     <div class="scale-range" id="scaleRangeContainer">
                         <label for="scaleRangeSlider"><span id="scaleRangeLabel">Linear range:</span></label>
                         <div class="slider-container">
-                            <input type="range" id="scaleRangeSlider" min="-0.1" max="100" value="30" step="0.1" class="scale-slider">
+                            <input type="range" id="scaleRangeSlider" min="-0.1" max="100" value="20" step="0.1" class="scale-slider">
                             <span class="slider-value" id="scaleMultiplier">1.0x</span>
                         </div>
                     </div>
@@ -273,8 +275,8 @@
                 <th class="sample-col">Sample Name</th>
                 <th>Fluorophore</th>
                 <th>Results</th>
-                <th>Curve Class</th>
-                <th>Status</th>
+                <th class="results-col-curve-class">Curve Class</th>
+                <th class="results-col-status">Status</th>
                 <th>R²</th>
                 <th>RMSE</th>
                 <th>Amp</th>
@@ -284,7 +286,7 @@
                 <th>Cq</th>
                 <th>CQ-J</th>
                 <th>Calc-J</th>
-                <th>Anom</th>
+                <th class="results-col-anom">Anom</th>
             </tr>
                         </thead>
                         <tbody id="resultsTableBody">
