@@ -463,6 +463,13 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
         cycles = data['cycles']
         rfu = data['rfu']
 
+        # Ensure fluorophore/channel is present for each well
+        channel_name = data.get('fluorophore')
+        if not channel_name:
+            # Try to infer from a global or default, or set a sensible default
+            channel_name = 'FAM'  # Change this to your actual default channel if needed
+            data['fluorophore'] = channel_name
+
         # Store cycle info from first well - convert to Python types
         if cycle_info is None and len(cycles) > 0:
             cycle_info = {
@@ -495,21 +502,15 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                 analysis.get('amplitude')
             )
 
-        # --- CQ-J and Calc-J integration ---
-        # For now, assume single channel per well (extend as needed for multiplex)
-        # Use threshold_value from analysis for CQ-J
+       # --- CQ-J and Calc-J integration (single value, not dict) ---
         threshold = analysis.get('threshold_value')
         cqj = calculate_cqj({'cycles': cycles, 'rfu': rfu}, threshold) if threshold is not None else None
-        # Placeholder: H/M/L Cq and values should come from controls per run/channel
-        # For now, use dummy values (replace with real control extraction logic)
         h_cq, m_cq, l_cq = 20, 25, 30
         h_val, m_val, l_val = 1e7, 1e5, 1e3
         calcj = calculate_calcj(cqj, h_cq, m_cq, l_cq, h_val, m_val, l_val) if cqj is not None else None
-        # Use the actual fluorophore/channel name as the key
-        channel_name = data.get('fluorophore', 'default')
-        analysis['cqj'] = {channel_name: cqj} if cqj is not None else {}
-        analysis['calcj'] = {channel_name: calcj} if calcj is not None else {}
-        # Add pathogen target as a string for frontend display
+
+        analysis['cqj'] = cqj
+        analysis['calcj'] = calcj
         from app import get_pathogen_target
         test_code = data.get('test_code', None)
         analysis['pathogen_target'] = get_pathogen_target(test_code, channel_name) if test_code else channel_name
@@ -519,6 +520,7 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
         if analysis.get('is_good_scurve', False):
             good_curves.append(well_id)
 
+    # <-- The return statement should be here, outside the for-loop!
     return {
         'individual_results': results,
         'good_curves': good_curves,
@@ -530,8 +532,6 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
             'quality_filter_params': quality_filter_params
         }
     }
-
-
 def detect_curve_anomalies(cycles, rfu):
     """Detect common qPCR curve problems - adapted for variable cycle counts"""
     anomalies = []

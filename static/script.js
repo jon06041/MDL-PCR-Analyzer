@@ -1,5 +1,8 @@
 // --- Shared strict result classification for NEG/POS/REDO ---
 
+// Load CQ-J/Calc-J calculation utilities
+import('./cqj_calcj_utils.js');
+
 /**
  * Safely set item in localStorage or sessionStorage, handling quota errors.
  * @param {Storage} storage - localStorage or sessionStorage
@@ -3549,15 +3552,52 @@ function populateResultsTable(individualResults) {
             }
         }
 
-        // Format CQ-J and Calc-J as channel:value pairs if present
+        // Calculate CQ-J and Calc-J live using the current channel threshold
+        /* --- CQ-J/Calc-J LIVE CALCULATION BLOCK ---
+         * To remove all CQ-J/Calc-J logic, delete this block.
+         */
         let cqjDisplay = '-';
-        if (result.cqj && typeof result.cqj === 'object' && Object.keys(result.cqj).length > 0) {
-            cqjDisplay = Object.entries(result.cqj).map(([ch, val]) => `${ch}:${val !== null && val !== undefined ? Number(val).toFixed(2) : 'N/A'}`).join('<br>');
-        }
         let calcjDisplay = '-';
-        if (result.calcj && typeof result.calcj === 'object' && Object.keys(result.calcj).length > 0) {
-            calcjDisplay = Object.entries(result.calcj).map(([ch, val]) => `${ch}:${val !== null && val !== undefined ? Number(val).toExponential(2) : 'N/A'}`).join('<br>');
+        if (window.calculateCqForWell && window.calculateConcentration) {
+            const channel = result.fluorophore || 'FAM';
+            let threshold = 0;
+            if (typeof getCurrentChannelThreshold === 'function') {
+                threshold = getCurrentChannelThreshold(channel, 'log');
+            } else if (window.userSetThresholds && window.userSetThresholds[channel] && window.userSetThresholds[channel]['log']) {
+                threshold = window.userSetThresholds[channel]['log'];
+            }
+            let cycles = result.cycles || [];
+            let rfu = result.rfu || [];
+            if (typeof cycles === 'string') {
+                try { cycles = JSON.parse(cycles); } catch (e) { cycles = []; }
+            }
+            if (typeof rfu === 'string') {
+                try { rfu = JSON.parse(rfu); } catch (e) { rfu = []; }
+            }
+            if (Array.isArray(cycles) && Array.isArray(rfu) && cycles.length && rfu.length && cycles.length === rfu.length) {
+                const cqj = window.calculateCqForWell(cycles, rfu, threshold);
+                if (cqj !== null && cqj !== undefined && !isNaN(cqj)) {
+                    cqjDisplay = Number(cqj).toFixed(2);
+                }
+                let testCode = null;
+                if (typeof extractTestCode === 'function') {
+                    const experimentPattern = getCurrentFullPattern && getCurrentFullPattern();
+                    testCode = experimentPattern ? extractTestCode(experimentPattern) : null;
+                }
+                let controlValues = null;
+                if (window.currentAnalysisResults && window.currentAnalysisResults.controls) {
+                    controlValues = window.currentAnalysisResults.controls[channel] || null;
+                }
+                if (!controlValues && result.controls) {
+                    controlValues = result.controls;
+                }
+                const calcj = window.calculateConcentration(cqj, testCode, controlValues);
+                if (calcj !== null && calcj !== undefined && !isNaN(calcj)) {
+                    calcjDisplay = Number(calcj).toExponential(2);
+                }
+            }
         }
+        /* --- END CQ-J/Calc-J LIVE CALCULATION BLOCK --- */
 
         row.innerHTML = `
             <td><strong>${wellId}</strong></td>
