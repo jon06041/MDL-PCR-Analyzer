@@ -2494,14 +2494,19 @@ function getPathogenTarget(testCode, fluorophore) {
     if (typeof PATHOGEN_LIBRARY !== 'undefined' && testCode && fluorophore) {
         const testData = PATHOGEN_LIBRARY[testCode];
         if (testData && testData[fluorophore]) {
-            // If object with .target, return .target, else string
-            if (typeof testData[fluorophore] === 'object' && testData[fluorophore].target) {
-                return testData[fluorophore].target;
+            // If object with .target, return .target, else convert to string
+            if (typeof testData[fluorophore] === 'object' && testData[fluorophore] !== null) {
+                if (testData[fluorophore].target) {
+                    return String(testData[fluorophore].target);
+                }
+                // If it's an object without .target, convert the whole object to string
+                return String(testData[fluorophore]);
             }
-            return testData[fluorophore];
+            // Always ensure we return a string
+            return String(testData[fluorophore]);
         }
     }
-    return fluorophore;
+    return String(fluorophore);
 }
 
 function extractTestCode(experimentPattern) {
