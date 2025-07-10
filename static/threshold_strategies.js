@@ -40,46 +40,46 @@ const LINEAR_THRESHOLD_STRATEGIES = {
 // --- Log strategies ---
 const LOG_THRESHOLD_STRATEGIES = {
   "default": {
-    name: "Exponential Phase (L/2 + B, clamped)",
+    name: "Exponential Phase (L/2 + B, clamped, RFU units)",
     calculate: ({L, B}) => {
       const min_thresh = B + 0.10 * L;
       const max_thresh = B + 0.90 * L;
       const exp_phase = L / 2 + B;
       return Math.min(Math.max(exp_phase, min_thresh), max_thresh);
     },
-    description: "Standard exponential phase threshold, clamped to 10–90% of amplitude.",
+    description: "Standard exponential phase threshold, clamped to 10–90% of amplitude. Returns RFU for both linear and log charts.",
     reference: "See qPCR_Curve_Classification_Reference.md"
   },
   "log_max_derivative": {
     name: "Log: Max First Derivative",
-    calculate: ({log_curve, cycles}) => {
-      if (!log_curve || log_curve.length < 3) return null;
+    calculate: ({rfu, cycles}) => {
+      if (!rfu || rfu.length < 3) return null;
       let maxSlope = -Infinity, maxIdx = 1;
-      for (let i = 1; i < log_curve.length - 1; i++) {
-        const slope = log_curve[i + 1] - log_curve[i - 1];
+      for (let i = 1; i < rfu.length - 1; i++) {
+        const slope = rfu[i + 1] - rfu[i - 1];
         if (slope > maxSlope) {
           maxSlope = slope;
           maxIdx = i;
         }
       }
-      return log_curve[maxIdx];
+      return rfu[maxIdx];
     },
     description: "Threshold at the point of maximum slope (first derivative) on the log-transformed curve.",
     reference: "See qPCR_Curve_Classification_Reference.md"
   },
   "log_second_derivative_max": {
     name: "Log: Max Second Derivative",
-    calculate: ({log_curve, cycles}) => {
-      if (!log_curve || log_curve.length < 5) return null;
+    calculate: ({rfu, cycles}) => {
+      if (!rfu || rfu.length < 5) return null;
       let maxSecond = -Infinity, maxIdx = 2;
-      for (let i = 2; i < log_curve.length - 2; i++) {
-        const second = (log_curve[i + 1] - 2 * log_curve[i] + log_curve[i - 1]);
+      for (let i = 2; i < rfu.length - 2; i++) {
+        const second = (rfu[i + 1] - 2 * rfu[i] + rfu[i - 1]);
         if (second > maxSecond) {
           maxSecond = second;
           maxIdx = i;
         }
       }
-      return log_curve[maxIdx];
+      return rfu[maxIdx];
     },
     description: "Threshold at the point of maximum second derivative (inflection) on the log-transformed curve.",
     reference: "See qPCR_Curve_Classification_Reference.md"
@@ -94,37 +94,37 @@ const LOG_THRESHOLD_STRATEGIES = {
 
 // Pathogen-specific fixed threshold values (per channel/fluorophore)
 window.PATHOGEN_FIXED_THRESHOLDS = {
-  "BVAB": { "default": { linear: 250, log: 2.5 } },
+  "BVAB": { "default": { linear: 250, log: 250 } },
   "BVPanelPCR1": {
-    "FAM": { linear: 200, log: 2.0 },
-    "HEX": { linear: 250, log: 2.2 },
-    "Texas Red": { linear: 150, log: 1.8 },
-    "CY5": { linear: 200, log: 2.0 }
+    "FAM": { linear: 200, log: 200 },
+    "HEX": { linear: 250, log: 250 },
+    "Texas Red": { linear: 150, log: 150 },
+    "CY5": { linear: 200, log: 200 }
   },
   "BVPanelPCR2": {
-    "FAM": { linear: 350, log: 3.0 },
-    "HEX": { linear: 350, log: 3.0 },
-    "Texas Red": { linear: 200, log: 2.0 },
-    "CY5": { linear: 350, log: 3.0 }
+    "FAM": { linear: 350, log: 350 },
+    "HEX": { linear: 350, log: 350 },
+    "Texas Red": { linear: 200, log: 200 },
+    "CY5": { linear: 350, log: 350 }
   },
-  "BVPanelPCR3": { "default": { linear: 100, log: 1.0 } },
-  "Calb": { "default": { linear: 150, log: 1.5 } },
-  "Cglab": { "default": { linear: 150, log: 1.5 } },
-  "CHVIC": { "default": { linear: 250, log: 2.5 } },
-  "Ckru": { "default": { linear: 280, log: 2.8 } },
-  "Cpara": { "default": { linear: 200, log: 2.0 } },
-  "Ctrach": { "default": { linear: 150, log: 1.5 } },
-  "Ctrop": { "default": { linear: 200, log: 2.0 } },
-  "Efaecalis": { "default": { linear: 200, log: 2.0 } },
-  "FLUA": { "FAM": { linear: 265, log: 2.65 } },
-  "FLUB": { "CY5": { linear: 225, log: 2.25 } },
-  "GBS": { "default": { linear: 300, log: 3.0 } },
-  "Lacto": { "default": { linear: 150, log: 1.5 } },
-  "Mgen": { "default": { linear: 500, log: 5.0 } },
-  "Ngon": { "default": { linear: 200, log: 2.0 } },
-  "NOV": { "default": { linear: 500, log: 5.0 } },
-  "Saureus": { "default": { linear: 250, log: 2.5 } },
-  "Tvag": { "default": { linear: 250, log: 2.5 } }
+  "BVPanelPCR3": { "default": { linear: 100, log: 100 } },
+  "Calb": { "default": { linear: 150, log: 150 } },
+  "Cglab": { "default": { linear: 150, log: 150 } },
+  "CHVIC": { "default": { linear: 250, log: 250 } },
+  "Ckru": { "default": { linear: 280, log: 280 } },
+  "Cpara": { "default": { linear: 200, log: 200 } },
+  "Ctrach": { "default": { linear: 150, log: 150 } },
+  "Ctrop": { "default": { linear: 200, log: 200 } },
+  "Efaecalis": { "default": { linear: 200, log: 200 } },
+  "FLUA": { "FAM": { linear: 265, log: 265 } },
+  "FLUB": { "CY5": { linear: 225, log: 225 } },
+  "GBS": { "default": { linear: 300, log: 300 } },
+  "Lacto": { "default": { linear: 150, log: 150 } },
+  "Mgen": { "default": { linear: 500, log: 500 } },
+  "Ngon": { "default": { linear: 200, log: 200 } },
+  "NOV": { "default": { linear: 500, log: 500 } },
+  "Saureus": { "default": { linear: 250, log: 250 } },
+  "Tvag": { "default": { linear: 250, log: 250 } }
 };
 
 
@@ -138,8 +138,18 @@ function calculateThreshold(strategy, params, scale = 'log') {
   let strat;
   if (scale === 'linear') {
     strat = LINEAR_THRESHOLD_STRATEGIES[strategy] || LINEAR_THRESHOLD_STRATEGIES[Object.keys(LINEAR_THRESHOLD_STRATEGIES)[0]];
+    // For linear, if using the log default strategy, force returnLog: false
+    if (strategy === 'default' && strat.calculate && typeof strat.calculate === 'function') {
+      if (!params) params = {};
+      params.returnLog = false;
+    }
   } else {
     strat = LOG_THRESHOLD_STRATEGIES[strategy] || LOG_THRESHOLD_STRATEGIES[Object.keys(LOG_THRESHOLD_STRATEGIES)[0]];
+    // For log, if using the default strategy, force returnLog: true
+    if (strategy === 'default' && strat.calculate && typeof strat.calculate === 'function') {
+      if (!params) params = {};
+      params.returnLog = true;
+    }
   }
 
   // Patch: If using a fixed strategy, auto-lookup the correct fixed_value for pathogen/channel/scale

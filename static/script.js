@@ -598,7 +598,8 @@ function populateThresholdStrategyDropdown() {
     if (!select) return;
     select.innerHTML = '';
     // Always use the global window objects for strategies
-    const scale = (typeof currentScaleMode === 'string' ? currentScaleMode : 'linear');
+    // Always get the latest scale mode from UI or global
+    const scale = (typeof currentScaleMode === 'string' ? currentScaleMode : (window.currentScaleMode || 'linear'));
     const strategies = scale === 'log' ? window.LOG_THRESHOLD_STRATEGIES : window.LINEAR_THRESHOLD_STRATEGIES;
     let firstKey = null;
     let found = false;
@@ -624,6 +625,29 @@ function populateThresholdStrategyDropdown() {
     window.selectedThresholdStrategy = select.value;
     // Trigger chart/threshold update after repopulating
     handleThresholdStrategyChange();
+    // Also update threshold input box to match new value
+    setTimeout(() => {
+        const thresholdInput = document.getElementById('thresholdInput');
+        let channel = window.currentFluorophore;
+        if (!channel || channel === 'all') {
+            // Try to extract from chart datasets
+            const datasets = window.amplificationChart?.data?.datasets;
+            if (datasets && datasets.length > 0) {
+                const match = datasets[0].label?.match(/\(([^)]+)\)/);
+                if (match && match[1] !== 'Unknown') channel = match[1];
+            }
+        }
+        if (thresholdInput && channel && window.stableChannelThresholds && window.stableChannelThresholds[channel]) {
+            const scale = window.currentScaleMode || 'linear';
+            const val = window.stableChannelThresholds[channel][scale];
+            if (val !== undefined && val !== null && !isNaN(val)) {
+                thresholdInput.value = val;
+            }
+        }
+        // Always update chart threshold lines and recalc CQJ/CalcJ after dropdown change
+        updateAllChannelThresholds();
+        handleThresholdStrategyChange();
+    }, 150);
 }
 
 function getSelectedThresholdStrategy() {
@@ -677,16 +701,63 @@ function handleThresholdStrategyChange() {
                 const variance = allRfus.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / allRfus.length;
                 baseline_std = Math.sqrt(variance);
             }
-            const params = { baseline, baseline_std, N: 10 };
+            // --- Patch: Always use calculateThreshold for fixed strategies ---
+            // Get pathogen/test_code for this channel (from first well in channel)
+            let pathogen = null;
+            let fluor = channel;
+            // Try to get pathogen from any well in this channel
+            if (controls && controls.NTC && controls.NTC.length > 0 && controls.NTC[0].test_code) {
+                pathogen = controls.NTC[0].test_code;
+            } else if (controls && controls.H && controls.H.length > 0 && controls.H[0].test_code) {
+                pathogen = controls.H[0].test_code;
+            }
             // Calculate for both log and linear
             ['log','linear'].forEach(scale => {
-                let stratObj = (scale === 'log' ? window.LOG_THRESHOLD_STRATEGIES : window.LINEAR_THRESHOLD_STRATEGIES)[strategy];
-                let threshold = stratObj && typeof stratObj.calculate === 'function' ? stratObj.calculate(params) : baseline + 10*baseline_std;
+                let params = { baseline, baseline_std, N: 10 };
+                // For fixed strategies, add pathogen/channel for lookup
+                if (strategy === 'log_fixed' || strategy === 'linear_fixed') {
+                    params.pathogen = pathogen;
+                    params.fluorophore = fluor;
+                }
+                // For log strategies, pass log_curve if available
+                if (scale === 'log' && controls.NTC && controls.NTC.length > 0 && controls.NTC[0].log_rfu) {
+                    let log_curve = controls.NTC[0].log_rfu;
+                    if (typeof log_curve === 'string') try { log_curve = JSON.parse(log_curve); } catch(e){}
+                    if (Array.isArray(log_curve)) params.log_curve = log_curve;
+                }
+                let threshold = window.calculateThreshold(strategy, params, scale);
+                if (typeof threshold !== 'number' || isNaN(threshold) || threshold <= 0) {
+                    console.warn(`[THRESHOLD][${channel}][${scale}] Invalid threshold (${threshold}), using fallback.`);
+                    threshold = (scale === 'log') ? 1.0 : 100.0;
+                }
                 if (!window.stableChannelThresholds[channel]) window.stableChannelThresholds[channel] = {};
                 window.stableChannelThresholds[channel][scale] = threshold;
+                console.log(`[THRESHOLD][${channel}][${scale}] Set threshold:`, threshold);
             });
         });
     }
+    // After recalculation, update threshold input box to match new value for current channel/scale
+    setTimeout(() => {
+        const thresholdInput = document.getElementById('thresholdInput');
+        let channel = window.currentFluorophore;
+        if (!channel || channel === 'all') {
+            // Try to extract from chart datasets
+            const datasets = window.amplificationChart?.data?.datasets;
+            if (datasets && datasets.length > 0) {
+                const match = datasets[0].label?.match(/\(([^)]+)\)/);
+                if (match && match[1] !== 'Unknown') channel = match[1];
+            }
+        }
+        if (thresholdInput && channel && window.stableChannelThresholds && window.stableChannelThresholds[channel]) {
+            const scale = window.currentScaleMode || 'linear';
+            const val = window.stableChannelThresholds[channel][scale];
+            if (val !== undefined && val !== null && !isNaN(val)) {
+                thresholdInput.value = val;
+            }
+        }
+        // Always update chart threshold lines after strategy change
+        updateAllChannelThresholds();
+    }, 150);
     updateAllChannelThresholds();
     // Recalculate CQ-J and Calc-J for all wells in all channels after threshold strategy change, for BOTH log and linear
     // --- Compatibility fix: support both { individual_results: {...} } and flat { well_id: {...} } structures ---
@@ -715,7 +786,6 @@ function handleThresholdStrategyChange() {
             // Always use the threshold for the selected strategy and scale
             let scale = (typeof currentScaleMode === 'string' ? currentScaleMode : 'linear');
             const selectedStrategy = getSelectedThresholdStrategy();
-            // If the selected strategy is log, always use log threshold
             if (selectedStrategy && selectedStrategy.toLowerCase().includes('log')) {
                 scale = 'log';
             }
@@ -723,12 +793,18 @@ function handleThresholdStrategyChange() {
             if (window.stableChannelThresholds && window.stableChannelThresholds[channel] && window.stableChannelThresholds[channel][scale] != null) {
                 threshold = window.stableChannelThresholds[channel][scale];
             }
+            if (typeof threshold !== 'number' || isNaN(threshold) || threshold <= 0) {
+                console.warn(`[CQJ/CalcJ][${wellKey}] Invalid threshold (${threshold}), skipping CQJ/CalcJ.`);
+                well.cqj_value = null;
+                well.calcj_value = null;
+                return;
+            }
             // Always set test_code for CalcJ
             if (testCode) {
                 well.test_code = testCode;
             }
             // Calculate CQJ using the correct threshold
-            if (typeof window.calculateCqForWell === 'function' && well.cycles && well.rfu && threshold != null) {
+            if (typeof window.calculateCqForWell === 'function' && well.cycles && well.rfu) {
                 well.cqj_value = window.calculateCqForWell({ cycles: well.cycles, rfu: well.rfu }, threshold);
             } else {
                 well.cqj_value = null;
@@ -739,6 +815,7 @@ function handleThresholdStrategyChange() {
             } else {
                 well.calcj_value = null;
             }
+            console.log(`[CQJ/CalcJ][${wellKey}] CQJ:`, well.cqj_value, 'CalcJ:', well.calcj_value, 'Threshold:', threshold);
         });
         // Update the UI to reflect new CQ-J/Calc-J values
         if (typeof populateResultsTable === 'function') {
@@ -773,13 +850,57 @@ document.addEventListener('DOMContentLoaded', function() {
     }, 500);
     const select = document.getElementById('thresholdStrategySelect');
     if (select) {
-        select.addEventListener('change', handleThresholdStrategyChange);
+        select.addEventListener('change', function() {
+            // When dropdown changes, update threshold, input, chart, and recalc CQJ/CalcJ
+            handleThresholdStrategyChange();
+            // Also update input box and chart lines
+            setTimeout(() => {
+                const thresholdInput = document.getElementById('thresholdInput');
+                let channel = window.currentFluorophore;
+                if (!channel || channel === 'all') {
+                    const datasets = window.amplificationChart?.data?.datasets;
+                    if (datasets && datasets.length > 0) {
+                        const match = datasets[0].label?.match(/\(([^)]+)\)/);
+                        if (match && match[1] !== 'Unknown') channel = match[1];
+                    }
+                }
+                if (thresholdInput && channel && window.stableChannelThresholds && window.stableChannelThresholds[channel]) {
+                    const scale = window.currentScaleMode || 'linear';
+                    const val = window.stableChannelThresholds[channel][scale];
+                    if (val !== undefined && val !== null && !isNaN(val)) {
+                        thresholdInput.value = val;
+                    }
+                }
+                updateAllChannelThresholds();
+            }, 150);
+        });
     }
     // Update dropdown when scale changes
     const scaleToggle = document.getElementById('scaleToggle');
     if (scaleToggle) {
         scaleToggle.addEventListener('click', function() {
-            setTimeout(populateThresholdStrategyDropdown, 100); // Delay to allow scale change
+            setTimeout(() => {
+                populateThresholdStrategyDropdown();
+                // After scale toggle, ensure threshold and input are updated for log/linear
+                const thresholdInput = document.getElementById('thresholdInput');
+                let channel = window.currentFluorophore;
+                if (!channel || channel === 'all') {
+                    const datasets = window.amplificationChart?.data?.datasets;
+                    if (datasets && datasets.length > 0) {
+                        const match = datasets[0].label?.match(/\(([^)]+)\)/);
+                        if (match && match[1] !== 'Unknown') channel = match[1];
+                    }
+                }
+                if (thresholdInput && channel && window.stableChannelThresholds && window.stableChannelThresholds[channel]) {
+                    const scale = window.currentScaleMode || 'linear';
+                    const val = window.stableChannelThresholds[channel][scale];
+                    if (val !== undefined && val !== null && !isNaN(val)) {
+                        thresholdInput.value = val;
+                    }
+                }
+                updateAllChannelThresholds();
+                handleThresholdStrategyChange();
+            }, 120);
         });
     }
     // Also trigger on input change for thresholdInput
@@ -797,12 +918,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
             if (!channel) return;
-            const scale = currentScaleMode || 'linear';
+            const scale = window.currentScaleMode || 'linear';
             const value = Number(thresholdInput.value);
             if (!window.stableChannelThresholds[channel]) window.stableChannelThresholds[channel] = {};
             window.stableChannelThresholds[channel][scale] = value;
             updateAllChannelThresholds();
-            // Optionally recalculate CQ-J/Calc-J here
+            // Recalculate CQ-J/Calc-J for all wells after manual threshold change
+            handleThresholdStrategyChange();
         });
     }
 });
@@ -3878,7 +4000,7 @@ if (result.calcj && typeof result.calcj === 'object' && result.fluorophore && re
             <td>${formatNumber(result.baseline ? result.baseline.toFixed(1) : 'N/A')}</td>
             <td>${formatNumber(cqValue)}</td>
             <td>${formatNumber((cqjDisplay !== null && cqjDisplay !== undefined && !isNaN(Number(cqjDisplay))) ? Number(cqjDisplay).toFixed(2) : 'N/A')}</td>
-            <td>${formatNumber((calcjDisplay !== null && calcjDisplay !== undefined && !isNaN(Number(calcjDisplay))) ? Number(calcjDisplay).toExponential(2) : 'N/A')}</td>
+            <td>${(calcjDisplay !== null && calcjDisplay !== undefined && !isNaN(Number(calcjDisplay))) ? ('10' + '<sup>' + formatNumber(Number(calcjDisplay).toFixed(2)) + '</sup>') : 'N/A'}</td>
             <td>${anomaliesText}</td>
         `;
         
