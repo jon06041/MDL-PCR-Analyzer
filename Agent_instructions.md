@@ -1,3 +1,19 @@
+# [2025-07-10] CQJ/CalcJ Backend Integration Progress
+
+## Backend CQJ/CalcJ Calculation
+- The CQJ and CalcJ calculation logic has been ported from JS (`static/cqj_calcj_utils.js`) to Python (`cqj_calcj_utils.py`).
+- The backend analysis pipeline (`qpcr_analyzer.py`) now calls these Python functions for each well/channel.
+- The API now returns per-channel CQJ and CalcJ values for each well, as dicts keyed by channel name.
+- The frontend (`static/script.js`) is set up to display these values if present in the backend response.
+- This ensures CQJ/CalcJ are always backend-driven, robust, and persisted.
+
+## Next Steps
+- Confirm that the frontend displays the new backend-driven CQJ/CalcJ values for all channels.
+- Remove or deprecate the old frontend-only CQJ/CalcJ calculation logic if no longer needed.
+- Add or update backend tests to verify correct CQJ/CalcJ calculation and API output.
+
+---
+
 # [2025-07-10] Agent Progress Note: Threshold Dropdown/Scale Sync Handoff
 
 ## Context & Handoff (July 10, 2025)
