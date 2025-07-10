@@ -1,5 +1,54 @@
+# [2025-07-10] Agent Progress Note: Threshold Dropdown/Scale Sync Handoff
+
+## Context & Handoff (July 10, 2025)
+- The main technical issue: the threshold strategy dropdown does not always match the current scale (log/linear) on load/toggle, even though the correct logic is present in `static/script.js` (see `populateThresholdStrategyDropdown`).
+- The robust implementation ensures:
+  - The dropdown is repopulated with the correct strategies for the current scale.
+  - If the previous selection is not valid for the new scale, it defaults to the first available strategy.
+  - The internal state (`window.selectedThresholdStrategy`) is always synchronized with the dropdown value.
+- Manual confirmation: the correct code is present in `static/script.js` (lines 590–612 show the robust logic).
+- If the issue persists after switching computers, check for caching, browser/site issues, or code not being loaded.
+- Next steps: After switching computers, verify the robust dropdown logic is present and working, and continue debugging if the issue persists.
+- See below for previous instructions, troubleshooting, and workflow notes.
+
+---
+
+# [2025-07-09] Threshold Strategy Dropdown, CQ-J/Calc-J Calculation, and Channel Logic
+
+## New Feature: Threshold Strategy Dropdown and Channel Separation
+- Added a dropdown in the chart UI to select between log and linear threshold strategies.
+- The toggle button now switches between log and linear modes:
+  - **Linear mode:** 2 or 3 separate thresholds per channel (depending on the test).
+  - **Log mode:** Only 1 threshold per channel (currently, this value does not change with the dropdown, indicating a possible bug or unimplemented feature).
+- Each channel (e.g., FAM, Cy5, etc.) now has its own set of thresholds, and the UI reflects this separation.
+
+## CQ-J and Calc-J Calculation Requirements
+- Regardless of the number of strategies, **every well in every channel** must have a CQ-J (CqJ) value calculated using the currently selected log threshold for that channel.
+- For each well:
+  - Use the log threshold for the well's channel to calculate CQ-J:
+    ```js
+    well.cqj_value = window.calculateCqForWell({ cycles: well.cycles, rfu: well.rfu }, logThreshold);
+    ```
+    where `logThreshold = window.stableChannelThresholds[channel]['log']`.
+  - Then, calculate Calc-J (concentration) using the average of the H, M, L controls for that channel, as defined in `pathogen_library.js`:
+    ```js
+    well.calcj_value = window.calculateConcentration(well.cqj_value, well.test_code);
+    ```
+    - This requires that `window.pathogenLibrary[well.test_code]` has valid `concentrationControls` (H, M, L Cq and concentration values).
+
+## Current Observations & Issues
+- The log threshold value does not change when switching strategies in the dropdown (possible bug or missing implementation).
+- Even if there is only one log strategy, it should still be used to calculate CQ-J for every well, per channel.
+- Calc-J calculation depends on the correct setup of H, M, L controls in `pathogen_library.js`.
+
+## Next Steps / To-Do
+- [ ] Fix or implement log threshold switching so the value updates when the dropdown changes.
+- [ ] Ensure CQ-J is recalculated for every well, per channel, whenever the threshold or strategy changes.
+- [ ] Ensure Calc-J is recalculated for every well, per channel, using the correct H, M, L controls from `pathogen_library.js`.
+- [ ] Document any changes, issues, or findings in this file before proceeding further.
+
 # Chart.js Annotation Plugin Integration Debug Log (2025-07-06)
-## MDL-PCR-Analyzer Agent Change Log & Troubleshooting Notes (2025-07-09)
+# MDL-PCR-Analyzer Agent Change Log & Troubleshooting Notes (2025-07-09)
 
 ### Major Refactor: Per-Channel, Per-Pathogen Controls
 - Refactored `static/pathogen_library.js` so all multi-channel test definitions (e.g., LactoNY, MegasphaeraNY, HPV1NY, BVPanelPCR1NY, etc.) are now split into per-channel, per-pathogen objects (e.g., `LactoNY_Cy5`, `HPV1NY_FAM`, etc.), each with its own `target` and `concentrationControls`.
@@ -596,9 +645,55 @@ if (typeof updateResultsTable === 'function') updateResultsTable();
 
 ---
 
-### [2025-07-09] updateAllChannelThresholds Robustness Patch
-- Refactored `updateAllChannelThresholds` in `static/script.js` to be fully robust and silent:
-  - Now only updates chart thresholds if both analysis results and chart are ready.
-  - All logging and warnings removed; function is now silent and safe to call at any time.
-  - Prevents spurious logs and ensures UI only updates when possible.
-- This resolves noisy logs and unnecessary calls when switching threshold strategies or before analysis results are loaded.
+# [2025-01-14] FAILED ATTEMPTS TO FIX [object Object] AND CQ-J/CALC-J BUGS
+
+## CRITICAL WARNING: These changes caused the [object Object] bug and were NOT successful
+
+## IMPORTANT CONTEXT: ORIGINAL STATE WAS WORKING
+- **The original system was NOT calculating CQ-J/Calc-J values at all** - this was a NEW FEATURE REQUEST, not a bug fix
+- **The `[object Object]` bug DID NOT EXIST** in the original working system - it was INTRODUCED by our changes
+- **The pathogen target display was working correctly** before our modifications
+- **We attempted to implement new functionality but broke existing working features**
+
+### Changes Made That CAUSED Problems:
+1. **Added `stringifyPathogenTarget` function** - Attempted to fix pathogen display but actually introduced the `[object Object]` bug
+2. **Modified `displayAnalysisResults`** - Added pathogen target stringification that broke display
+3. **Modified `populateResultsTable`** - Changed how pathogen targets are displayed, causing display issues
+4. **Added `recalculateAndRefreshCqValues` function** - Attempted to centralize CQ-J/Calc-J logic but introduced instability
+5. **Modified threshold strategy handling** - Changed how thresholds are managed, causing calculation inconsistencies
+
+### Symptoms of These Failed Changes:
+- Pathogen target names display as `[object Object]` instead of actual names
+- CQ-J and Calc-J values appear and then disappear or revert
+- Results table shows incorrect or missing pathogen information
+- Threshold dropdown behavior becomes unstable
+
+### Root Cause Analysis:
+The original system was working correctly WITHOUT CQ-J/Calc-J calculation. Our attempts to ADD this new functionality:
+- Broke the existing pathogen display system by introducing the `stringifyPathogenTarget` function
+- Created the `[object Object]` display bug that didn't exist before
+- Introduced instability in the results table and threshold calculations
+- Attempted to solve problems that didn't originally exist
+
+### KEY LESSON:
+- The app was working fine for its intended purpose
+- CQ-J/Calc-J calculation was a NEW FEATURE REQUEST, not a bug fix
+- We should have implemented the new functionality WITHOUT modifying the existing working pathogen display logic
+- The `[object Object]` bug is entirely our fault and didn't exist in the original system
+
+### RECOMMENDATION FOR FUTURE AGENTS:
+1. **DO NOT** attempt to add `stringifyPathogenTarget` function again
+2. **DO NOT** modify the core pathogen display logic in `displayAnalysisResults`
+3. **DO NOT** change how `populateResultsTable` handles pathogen targets
+4. Instead, investigate the ORIGINAL working code before these changes
+5. Consider reverting to a known good state before attempting new fixes
+6. Focus on understanding why the original logic worked before modifying it
+
+### Files That Need Attention:
+- `/workspaces/MDL-PCR-Analyzer/static/script.js` - Contains the problematic changes that introduced bugs
+- `/workspaces/MDL-PCR-Analyzer/index.html` - Cache-busting was added but may not be necessary
+
+### Current State:
+- The application likely needs to be reverted to a previous working state
+- CQ-J/Calc-J functionality should be implemented as a NEW FEATURE without touching existing code
+- The `[object Object]` bug needs to be fixed by removing our problematic additions, not by adding more code
