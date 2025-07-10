@@ -459,6 +459,10 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
     good_curves = []
     cycle_info = None
 
+
+    # --- Import new CQJ/CalcJ utils ---
+    from cqj_calcj_utils import calculate_cqj as py_cqj, calculate_calcj as py_calcj
+
     for well_id, data in data_dict.items():
         cycles = data['cycles']
         rfu = data['rfu']
@@ -466,8 +470,7 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
         # Ensure fluorophore/channel is present for each well
         channel_name = data.get('fluorophore')
         if not channel_name:
-            # Try to infer from a global or default, or set a sensible default
-            channel_name = 'FAM'  # Change this to your actual default channel if needed
+            channel_name = 'FAM'
             data['fluorophore'] = channel_name
 
         # Store cycle info from first well - convert to Python types
@@ -502,15 +505,21 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                 analysis.get('amplitude')
             )
 
-       # --- CQ-J and Calc-J integration (single value, not dict) ---
+        # --- Per-channel CQJ/CalcJ integration (dict, robust) ---
+        # Prepare well dict for CQJ/CalcJ utils
+        well_for_cqj = {
+            'raw_cycles': analysis.get('raw_cycles'),
+            'raw_rfu': analysis.get('raw_rfu'),
+            'amplitude': analysis.get('amplitude')
+        }
         threshold = analysis.get('threshold_value')
-        cqj = calculate_cqj({'cycles': cycles, 'rfu': rfu}, threshold) if threshold is not None else None
-        h_cq, m_cq, l_cq = 20, 25, 30
-        h_val, m_val, l_val = 1e7, 1e5, 1e3
-        calcj = calculate_calcj(cqj, h_cq, m_cq, l_cq, h_val, m_val, l_val) if cqj is not None else None
+        cqj_val = py_cqj(well_for_cqj, threshold) if threshold is not None else None
+        calcj_val = py_calcj(well_for_cqj, threshold) if threshold is not None else None
 
-        analysis['cqj'] = cqj
-        analysis['calcj'] = calcj
+        # Store as dict for per-channel support (even if only one channel)
+        analysis['cqj'] = {channel_name: cqj_val}
+        analysis['calcj'] = {channel_name: calcj_val}
+
         from app import get_pathogen_target
         test_code = data.get('test_code', None)
         analysis['pathogen_target'] = get_pathogen_target(test_code, channel_name) if test_code else channel_name

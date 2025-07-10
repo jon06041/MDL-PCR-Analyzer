@@ -8,16 +8,19 @@
     <!-- Chart.js v4.x (stable) -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@2.2.1/dist/chartjs-plugin-annotation.min.js"></script>
-    
+    <!-- Ensure threshold_strategies.js is loaded BEFORE script.js -->
+    <script src="/static/threshold_strategies.js?v=1751382261"></script>
     <!-- Chart.js Annotation Plugin v3.1.2 (compatible with Chart.js v4) -->
-   <!-- <script src="/static/chartjs-plugin-annotation.min.js"></script>-->
+    <!-- <script src="/static/chartjs-plugin-annotation.min.js"></script>-->
     <!-- Diagnostics: Check Chart.js and Annotation plugin presence before main script -->
     <script>
       console.log('[DIAG] Before static/script.js:', {
         Chart: typeof window.Chart,
         ChartAnnotation: typeof window.ChartAnnotation,
         ChartPluginAnnotation: typeof window['chartjs-plugin-annotation'],
-        ChartPlugins: window.Chart && window.Chart.registry ? Object.keys(window.Chart.registry.plugins) : 'N/A'
+        ChartPlugins: window.Chart && window.Chart.registry ? Object.keys(window.Chart.registry.plugins) : 'N/A',
+        LinearStrategies: typeof window.LINEAR_THRESHOLD_STRATEGIES,
+        LogStrategies: typeof window.LOG_THRESHOLD_STRATEGIES
       });
     </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" defer></script>
@@ -111,7 +114,10 @@
                 </div>
             </div>
 
-            <div class="chart-container">
+            <div class="chart-container" style="position: relative;">
+                <select id="thresholdStrategySelect" style="position: absolute; top: 10px; right: 10px; z-index: 10; min-width: 220px; padding: 4px 8px; font-size: 14px; border-radius: 4px; border: 1px solid #bbb; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.04);">
+                  <!-- Options will be populated by JS -->
+                </select>
                 <canvas id="amplificationChart"></canvas>
             </div>
 
@@ -354,6 +360,6 @@
     });
     </script>
     <script src="/static/cqj_calcj.js?v=1751382261"></script>
-    <script src="/static/script.js?v=1751382261"></script>
+    <script src="/static/script.js?v=20250710"></script>
 </body>
 </html>

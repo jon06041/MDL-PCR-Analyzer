@@ -9,298 +9,200 @@
 // ======================================
 const PATHOGEN_LIBRARY = {
     "Lacto": {
-        "Cy5": {
-            target: "Lactobacillus jenseni",
-            concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
-        },
-        "FAM": {
-            target: "Lactobacillus gasseri",
-            concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
-        },
-        "HEX": {
-            target: "Lactobacillus iners",
-            concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
-        },
-        "Texas Red": {
-            target: "Lactobacillus crispatus",
-            concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
-        }
+        "Cy5": "Lactobacillus jenseni",
+        "FAM": "Lactobacillus gasseri",
+        "HEX": "Lactobacillus iners",
+        "Texas Red": "Lactobacillus crispatus"
     },
     "Calb": {
-        "HEX": {
-            target: "Candida albicans",
-            concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
-        }
+        "HEX": "Candida albicans"
     },
     "Ctrach": {
-        "FAM": {
-            target: "Chlamydia trachomatis",
-            concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
-        }
+        "FAM": "Chlamydia trachomatis"
     },
     "Ngon": {
-        "HEX": {
-            target: "Neisseria gonhorrea",
-            concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
-        }
+        "HEX": "Neisseria gonhorrea"
     },
     "Tvag": {
-        "FAM": {
-            target: "Trichomonas vaginalis",
-            concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
-        }
+        "FAM": "Trichomonas vaginalis"
     },
     "Cglab": {
-        "FAM": {
-            target: "Candida glabrata",
-            concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
-        }
+        "FAM": "Candida glabrata"
     },
     "Cpara": {
-        "FAM": {
-            target: "Candida parapsilosis",
-            concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
-        }
+        "FAM": "Candida parapsilosis"
     },
     "Ctrop": {
-        "FAM": {
-            target: "Candida tropicalis",
-            concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
-        }
+        "FAM": "Candida tropicalis"
     },
     "Gvag": {
-        "FAM": {
-            target: "Gardnerella vaginalis",
-            concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
-        }
+        "FAM": "Gardnerella vaginalis"
     },
     "BVAB2": {
-        "FAM": {
-            target: "BVAB2",
-            concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
-        }
+        "FAM": "BVAB2"
     },
     "CHVIC": {
-        "FAM": {
-            target: "CHVIC",
-            concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
-        }
+        "FAM": "CHVIC"
     },
     "AtopVag": {
-        "FAM": {
-            target: "Atopobium vaginae",
-            concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
-        }
+        "FAM": "Atopobium vaginae"
     },
     "Megasphaera": {
-        "FAM": {
-            target: "Megasphaera1",
-            concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
-        },
-        "HEX": {
-            target: "Megasphaera2",
-            concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
-        }
+        "FAM": "Megasphaera1",
+        "HEX": "Megasphaera2"
     },
     "Efaecalis": {
-        "FAM": {
-            target: "Enterococcus faecaelis",
-            concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
-        }
+        "FAM": "Enterococcus faecaelis"
     },
     "Saureus": {
-        "FAM": {
-            target: "Staphylococcus aureus",
-            concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
-        }
+        "FAM": "Staphylococcus aureus"
     },
     "Ecoli": {
-        "FAM": {
-            target: "Escherichia coli",
-            concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
-        }
+        "FAM": "Escherichia coli"
     },
     "AtopVagNY": {
-        "FAM": "Atopobium vaginae",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "FAM": "Atopobium vaginae"
     },
     "BVAB2NY": {
-        "FAM": "BVAB2",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "FAM": "BVAB2"
     },
     "GvagNY": {
-        "FAM": "Gardnerella vaginalis",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "FAM": "Gardnerella vaginalis"
     },
     "MegasphaeraNY": {
         "FAM": "MegasphaeraNY1",
-        "HEX": "MegasphaeraNY2",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "HEX": "MegasphaeraNY2"
     },
     "LactoNY": {
         "Cy5": "Lactobacillus jenseni",
         "FAM": "Lactobacillus gasseri",
         "HEX": "Lactobacillus iners", 
-        "Texas Red": "Lactobacillus crispatus",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "Texas Red": "Lactobacillus crispatus"
     },
     "RNaseP": {
-        "HEX": "Ribonuclease P",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "HEX": "Ribonuclease P"
     },
     "HPVNGS1": {
-        "Unknown": "HPVNGS1",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "Unknown": "HPVNGS1"
     },
     "HPVNGS2": {
         "FAM": "HPVNGS2",
-        "HEX": "HPVNGS2",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "HEX": "HPVNGS2"
     },
     "HPVNGS3": {
-        "Unknown": "HPVNGS3",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "Unknown": "HPVNGS3"
     },
     "GBS": {
-        "FAM": "Group B Strep",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "FAM": "Group B Strep"
     },
     "GBSEnrich": {
-        "FAM": "GBS Enrich",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "FAM": "GBS Enrich"
     },
     "GBSNY": {
-        "FAM": "GBS NY",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "FAM": "GBS NY"
     },
     "GBSEnrichNY": {
-        "FAM": "GBS Enrich NY",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "FAM": "GBS Enrich NY"
     },
     "COVIDN1NY": {
-        "FAM": "Unknown",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "FAM": "Unknown"
     },
     "COVIDN2NY": {
-        "FAM": "Unknown",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "FAM": "Unknown"
     },
     "COVIDHRPP30NY": {
-        "FAM": "Unknown",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "FAM": "Unknown"
     },
     "COVID19NY": {
-        "FAM": "Unknown",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "FAM": "Unknown"
     },
     "FLUAB": {
         "Cy5": "Influenza A",
-        "FAM": "Influenza B",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "FAM": "Influenza B"
     },
     "InfluenzaA": {
-        "Cy5": "Influenza A",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "Cy5": "Influenza A"
     },
     "InfluenzaB": {
-        "FAM": "Influenza B",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "FAM": "Influenza B"
     },
     "HPV1": {
         "FAM": "HPV16",
         "HEX": "HPV58",
         "Texas Red": "HPV18",
-        "Cy5": "HPV45",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "Cy5": "HPV45"
     },
     "HPV2": {
         "FAM": "HPV51",
         "HEX": "HPV52",
-        "Cy5": "HPV35",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "Cy5": "HPV35"
     },
     "HPV3": {
         "FAM": "HPV31",
         "HEX": "HPV39",
         "Texas Red": "HPV56",
-        "Cy5": "HPVBG",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "Cy5": "HPVBG"
     },
     "HPV4": {
         "FAM": "HPV59",
         "HEX": "HPV33",
-        "Texas Red": "HPV68",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "Texas Red": "HPV68"
     },
     "Mgen": {
-        "FAM": "Mgen",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "FAM": "Mgen"
     },
     "NOVNOV": {
-        "FAM": "NOVNOV",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "FAM": "NOVNOV"
     },
     "NOVRP": {
-        "FAM": "NOVRP",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "FAM": "NOVRP"
     },
     "NOV": {
-        "FAM": "NOV",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "FAM": "NOV"
     },
     "Ckrus": {
-        "FAM": "Ckrus",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "FAM": "Ckrus"
     },
     "BVPanelPCR1": {
         "FAM": "Bacteroides fragilis",
         "HEX": "Mobiluncus curtisii",
         "Texas Red": "Streptococcus anginosus",
-        "Cy5": "Sneathia sanguinegens",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "Cy5": "Sneathia sanguinegens"
     },
     "BVPanelPCR2": {
         "FAM": "Atopobium vaginae",
         "HEX": "Mobiluncus mulieris",
         "Texas Red": "Megasphaera type 2",
-        "Cy5": "Megasphaera type 1",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "Cy5": "Megasphaera type 1"
     },
     "BVPanelPCR3": {
         "FAM": "Gardnerella vaginalis",
         "HEX": "Lactobacillus acidophilus",
         "Texas Red": "Prevotella bivia",
-        "Cy5": "Bifidobacterium breve",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "Cy5": "Bifidobacterium breve"
     },
     "BVPanelPCR4": {
         "FAM": "Gardnerella vaginalis",
         "HEX": "Lactobacillus acidophilus",
         "Texas Red": "Prevotella bivia",
-        "Cy5": "Bifidobacterium breve",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "Cy5": "Bifidobacterium breve"
     },
     "BVAB": {
         "FAM": "BVAB2",
-        "HEX": "BVAB1", 
-        "Cy5": "BVAB3",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "HEX": "BVAB1",
+        "Cy5": "BVAB3"
     },
     "BifidoBreve": {
-        "Cy5": "BifidoBreve",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "Cy5": "BifidoBreve"
     },
     "LactoAcido": {
-        "HEX": "LactoAcido",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "HEX": "LactoAcido"
     },
     "MobiCurti": {
-        "HEX": "MobiCurti",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "HEX": "MobiCurti"
     },
     "SneSangu": {
-        "Cy5": "SneSangu",
-        concentrationControls: { H: 1e7, M: 1e5, L: 1e3 }
+        "Cy5": "SneSangu"
     },
     "PrevoBivia": {
         "Texas Red": "PrevoBivia"

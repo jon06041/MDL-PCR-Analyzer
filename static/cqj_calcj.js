@@ -34,18 +34,32 @@ function calculateConcentration(cq, testCode) {
     // cq: Cq value for the sample
     // testCode: string (e.g., 'BVAB', 'AcBVAB', etc.)
     // Returns: calculated concentration (copies/mL or similar)
-    // Description: Uses H, M, L control Cq values and concentrations from pathogen_library.js
-    // For now, H = 1e7, M = 1e5, L = 1e3 for all tests (can be changed per test in pathogen_library.js)
+    // Uses H, M, L control Cq values and concentrations from pathogen_library.js
     if (typeof cq !== 'number' || !window.pathogenLibrary) return null;
     const assay = window.pathogenLibrary[testCode];
     if (!assay || !assay.concentrationControls) return null;
-    const { H, M, L } = assay.concentrationControls;
-    // For demonstration, use a simple linear interpolation between H, M, L (real implementation may use standard curve)
-    // TODO: Replace with log-linear regression if needed
-    // Example: If cq is closer to H_Cq, return H; if closer to L_Cq, return L, etc.
-    // This is a placeholder for demonstration.
-    // You must provide H_Cq, M_Cq, L_Cq for the current run to use this function meaningfully.
-    return null; // Placeholder
+    const { H, M, L, H_Cq, M_Cq, L_Cq } = assay.concentrationControls;
+    // If H_Cq, M_Cq, L_Cq are not present, cannot calculate
+    if ([H_Cq, M_Cq, L_Cq].some(v => typeof v !== 'number')) return null;
+    // Prepare arrays for regression
+    const cqVals = [H_Cq, M_Cq, L_Cq];
+    const concVals = [H, M, L];
+    // Log-transform concentrations
+    const logConc = concVals.map(x => Math.log10(x));
+    // Linear regression: logConc = slope * Cq + intercept
+    // Fit slope and intercept using two-point formula (since only 3 points)
+    // Use least squares for 3 points
+    const n = 3;
+    const sumX = cqVals.reduce((a, b) => a + b, 0);
+    const sumY = logConc.reduce((a, b) => a + b, 0);
+    const sumXY = cqVals.reduce((a, b, i) => a + b * logConc[i], 0);
+    const sumX2 = cqVals.reduce((a, b) => a + b * b, 0);
+    const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+    const intercept = (sumY - slope * sumX) / n;
+    // Predict log concentration for sample Cq
+    const logConcSample = slope * cq + intercept;
+    const concSample = Math.pow(10, logConcSample);
+    return concSample;
 }
 
 // --- Export functions for use in main script ---

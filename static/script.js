@@ -558,6 +558,35 @@ function updateBaselineFlatteningVisibility() {
     }
 }
 
+// --- Force CQJ calculation and table update after analysis results load ---
+document.addEventListener('DOMContentLoaded', function() {
+    // If analysis results are present, calculate CQJ for all wells and update table
+    if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+        Object.keys(window.currentAnalysisResults.individual_results).forEach(wellKey => {
+            const well = window.currentAnalysisResults.individual_results[wellKey];
+            const channel = well.fluorophore;
+            let scale = (typeof currentScaleMode === 'string' ? currentScaleMode : 'linear');
+            let threshold = null;
+            if (window.stableChannelThresholds && window.stableChannelThresholds[channel] && window.stableChannelThresholds[channel][scale] != null) {
+                threshold = window.stableChannelThresholds[channel][scale];
+            }
+            if (typeof window.calculateCqForWell === 'function' && well.cycles && well.rfu && threshold != null) {
+                well.cqj_value = window.calculateCqForWell({ cycles: well.cycles, rfu: well.rfu }, threshold);
+            } else {
+                console.warn('[CQJ/CalcJ][DEBUG] CQJ not calculated for well', wellKey, {
+                    hasCycles: !!well.cycles,
+                    hasRfu: !!well.rfu,
+                    threshold,
+                    calculateCqForWellType: typeof window.calculateCqForWell
+                });
+                well.cqj_value = null;
+            }
+        });
+        if (typeof populateResultsTable === 'function') {
+            populateResultsTable(window.currentAnalysisResults.individual_results);
+        }
+    }
+});
 // ...existing code...
 
 // --- Threshold Strategy Dropdown Logic ---
@@ -570,9 +599,9 @@ function populateThresholdStrategyDropdown() {
     select.innerHTML = '';
     // Always use the global window objects for strategies
     const scale = (typeof currentScaleMode === 'string' ? currentScaleMode : 'linear');
-    // Always use window-scoped strategies to ensure up-to-date reference
     const strategies = scale === 'log' ? window.LOG_THRESHOLD_STRATEGIES : window.LINEAR_THRESHOLD_STRATEGIES;
     let firstKey = null;
+    let found = false;
     // Defensive: ensure strategies is an object and not undefined
     if (strategies && typeof strategies === 'object') {
         Object.keys(strategies).forEach((key, idx) => {
@@ -583,15 +612,16 @@ function populateThresholdStrategyDropdown() {
             option.title = strat && strat.description ? strat.description : '';
             select.appendChild(option);
             if (idx === 0) firstKey = key;
+            if (window.selectedThresholdStrategy === key) found = true;
         });
     }
-    // Restore previous selection if possible, else default to first
-    if (window.selectedThresholdStrategy && strategies && strategies[window.selectedThresholdStrategy]) {
-        select.value = window.selectedThresholdStrategy;
-    } else {
-        select.value = firstKey;
+    // If the current selected strategy is not available in this scale, default to first
+    if (!found) {
         window.selectedThresholdStrategy = firstKey;
     }
+    select.value = window.selectedThresholdStrategy;
+    // Always update window.selectedThresholdStrategy to match dropdown
+    window.selectedThresholdStrategy = select.value;
     // Trigger chart/threshold update after repopulating
     handleThresholdStrategyChange();
 }
@@ -607,6 +637,25 @@ function getSelectedThresholdStrategy() {
 
 function handleThresholdStrategyChange() {
     // When the strategy changes, recalculate thresholds for all channels and both scales, then update the chart and CQ-J/Calc-J values
+    console.log('[CQJ/CalcJ][DEBUG] handleThresholdStrategyChange: currentAnalysisResults =', window.currentAnalysisResults);
+    if (window.currentAnalysisResults) {
+        if (window.currentAnalysisResults.individual_results && typeof window.currentAnalysisResults.individual_results === 'object') {
+            console.log('[CQJ/CalcJ][DEBUG] handleThresholdStrategyChange: Detected structure: { individual_results: {...} }');
+            console.log('[CQJ/CalcJ][DEBUG] handleThresholdStrategyChange: individual_results keys =', Object.keys(window.currentAnalysisResults.individual_results));
+        } else if (
+            typeof window.currentAnalysisResults === 'object' &&
+            !Array.isArray(window.currentAnalysisResults) &&
+            Object.keys(window.currentAnalysisResults).length > 0 &&
+            Object.values(window.currentAnalysisResults).every(
+                v => v && typeof v === 'object' && 'well_id' in v
+            )
+        ) {
+            console.log('[CQJ/CalcJ][DEBUG] handleThresholdStrategyChange: Detected structure: flat well-keyed object');
+            console.log('[CQJ/CalcJ][DEBUG] handleThresholdStrategyChange: well keys =', Object.keys(window.currentAnalysisResults));
+        } else {
+            console.log('[CQJ/CalcJ][DEBUG] handleThresholdStrategyChange: Unknown or empty structure for currentAnalysisResults');
+        }
+    }
     const strategy = getSelectedThresholdStrategy();
     if (!window.stableChannelThresholds) window.stableChannelThresholds = {};
     // For each channel, recalculate threshold for BOTH log and linear
@@ -640,30 +689,51 @@ function handleThresholdStrategyChange() {
     }
     updateAllChannelThresholds();
     // Recalculate CQ-J and Calc-J for all wells in all channels after threshold strategy change, for BOTH log and linear
-    if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+    // --- Compatibility fix: support both { individual_results: {...} } and flat { well_id: {...} } structures ---
+    let resultsObj = null;
+    if (window.currentAnalysisResults) {
+        if (window.currentAnalysisResults.individual_results && typeof window.currentAnalysisResults.individual_results === 'object') {
+            resultsObj = window.currentAnalysisResults.individual_results;
+        } else if (
+            typeof window.currentAnalysisResults === 'object' &&
+            !Array.isArray(window.currentAnalysisResults) &&
+            Object.keys(window.currentAnalysisResults).length > 0 &&
+            Object.values(window.currentAnalysisResults).every(
+                v => v && typeof v === 'object' && 'well_id' in v
+            )
+        ) {
+            // Looks like a flat well-keyed object
+            resultsObj = window.currentAnalysisResults;
+        }
+    }
+    if (resultsObj) {
         let experimentPattern = (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null;
         let testCode = (typeof extractTestCode === 'function' && experimentPattern) ? extractTestCode(experimentPattern) : null;
-        Object.keys(window.currentAnalysisResults.individual_results).forEach(wellKey => {
-            const well = window.currentAnalysisResults.individual_results[wellKey];
+        Object.keys(resultsObj).forEach(wellKey => {
+            const well = resultsObj[wellKey];
             const channel = well.fluorophore;
-            // Use the threshold for the current scale mode, but if log strategy is selected, always use log threshold
+            // Always use the threshold for the selected strategy and scale
             let scale = (typeof currentScaleMode === 'string' ? currentScaleMode : 'linear');
             const selectedStrategy = getSelectedThresholdStrategy();
-            if (selectedStrategy && scale === 'log') {
+            // If the selected strategy is log, always use log threshold
+            if (selectedStrategy && selectedStrategy.toLowerCase().includes('log')) {
                 scale = 'log';
             }
             let threshold = null;
             if (window.stableChannelThresholds && window.stableChannelThresholds[channel] && window.stableChannelThresholds[channel][scale] != null) {
                 threshold = window.stableChannelThresholds[channel][scale];
             }
+            // Always set test_code for CalcJ
             if (testCode) {
                 well.test_code = testCode;
             }
+            // Calculate CQJ using the correct threshold
             if (typeof window.calculateCqForWell === 'function' && well.cycles && well.rfu && threshold != null) {
                 well.cqj_value = window.calculateCqForWell({ cycles: well.cycles, rfu: well.rfu }, threshold);
             } else {
                 well.cqj_value = null;
             }
+            // Calculate CalcJ using the correct test code and CQJ
             if (typeof window.calculateConcentration === 'function' && well.cqj_value != null && well.test_code) {
                 well.calcj_value = window.calculateConcentration(well.cqj_value, well.test_code);
             } else {
@@ -672,7 +742,7 @@ function handleThresholdStrategyChange() {
         });
         // Update the UI to reflect new CQ-J/Calc-J values
         if (typeof populateResultsTable === 'function') {
-            populateResultsTable(window.currentAnalysisResults.individual_results);
+            populateResultsTable(resultsObj);
         } else {
             console.log('[CQJ/CalcJ] Values recalculated for all wells after threshold strategy change.');
         }
@@ -3774,14 +3844,23 @@ function populateResultsTable(individualResults) {
         }
 
         // Display stored CQ-J and Calc-J values (calculated after threshold changes)
-        let cqjDisplay = '-';
-        let calcjDisplay = '-';
-        if (result.cqj_value !== null && result.cqj_value !== undefined && !isNaN(result.cqj_value)) {
-            cqjDisplay = Number(result.cqj_value).toFixed(2);
-        }
-        if (result.calcj_value !== null && result.calcj_value !== undefined && !isNaN(result.calcj_value)) {
-            calcjDisplay = Number(result.calcj_value).toExponential(2);
-        }
+        // --- Display per-channel CQJ and CalcJ if available (backend-calculated) ---
+       
+let cqjDisplay = '-';
+let calcjDisplay = '-';
+
+// Prefer per-channel backend values if available
+if (result.cqj && typeof result.cqj === 'object' && result.fluorophore && result.cqj[result.fluorophore] !== undefined && result.cqj[result.fluorophore] !== null && !isNaN(result.cqj[result.fluorophore])) {
+    cqjDisplay = Number(result.cqj[result.fluorophore]).toFixed(2);
+} else if (result.cqj_value !== null && result.cqj_value !== undefined && !isNaN(result.cqj_value)) {
+    cqjDisplay = Number(result.cqj_value).toFixed(2);
+}
+
+if (result.calcj && typeof result.calcj === 'object' && result.fluorophore && result.calcj[result.fluorophore] !== undefined && result.calcj[result.fluorophore] !== null && !isNaN(result.calcj[result.fluorophore])) {
+    calcjDisplay = Number(result.calcj[result.fluorophore]).toExponential(2);
+} else if (result.calcj_value !== null && result.calcj_value !== undefined && !isNaN(result.calcj_value)) {
+    calcjDisplay = Number(result.calcj_value).toExponential(2);
+}
 
         row.innerHTML = `
             <td><strong>${wellId}</strong></td>

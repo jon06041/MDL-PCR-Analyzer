@@ -64,7 +64,9 @@ class WellResult(db.Model):
     raw_rfu = db.Column(db.Text)  # JSON string
     cq_value = db.Column(db.Float)  # Integrated Cq value
     sample_name = db.Column(db.String(255))  # Integrated sample name
-    threshold_value = db.Column(db.Float)  # Threshold value for annotation
+    # Per-channel threshold values (JSON string: {"FAM": 1500, "HEX": 1200, ...})
+    thresholds = db.Column(db.Text)  # JSON string for per-channel thresholds
+    threshold_value = db.Column(db.Float)  # (Legacy, for single-channel backward compatibility)
     curve_classification = db.Column(db.Text)  # JSON string for curve classification result
     # Add CQ-J and Calc-J as JSON fields for per-channel results
     cqj = db.Column(db.Text)  # JSON string: {"FAM": 23.1, "HEX": 27.5, ...}
@@ -125,7 +127,8 @@ class WellResult(db.Model):
             'raw_rfu': parse_json_array(self.raw_rfu),
             'cq_value': self.cq_value,
             'sample_name': self.sample_name,
-            'threshold_value': self.threshold_value,
+            'threshold_value': self.threshold_value,  # Legacy single-channel
+            'thresholds': parse_json_object(self.thresholds),  # Per-channel thresholds
             'curve_classification': parse_json_object(self.curve_classification),  # Parse as object
             'cqj': parse_json_object(self.cqj),
             'calcj': parse_json_object(self.calcj),
@@ -155,6 +158,8 @@ class WellResult(db.Model):
             cq_value=raw_data.get('cq'),
             sample_name=raw_data.get('sampleName'),
             curve_classification=json.dumps(analysis_result.get('curve_classification', {})),  # New field
+            thresholds=json.dumps(analysis_result.get('thresholds', {})),  # Per-channel thresholds
+            threshold_value=analysis_result.get('threshold_value'),  # Legacy single-channel
             cqj=json.dumps(analysis_result.get('cqj', {})),
             calcj=json.dumps(analysis_result.get('calcj', {})),
         )

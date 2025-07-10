@@ -392,6 +392,7 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                     print(f"[CONTROL FLUOR] {well_key}: sample='{well_result.sample_name}', final_fluorophore='{final_fluorophore}' (param={fluorophore}, data={well_fluorophore})")
                 
                 # Set threshold_value if present
+
                 threshold_value = well_data.get('threshold_value')
                 if threshold_value is not None:
                     try:
@@ -400,6 +401,9 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                         well_result.threshold_value = None
                 else:
                     well_result.threshold_value = None
+
+                # Set per-channel thresholds if present
+                well_result.thresholds = safe_json_dumps(well_data.get('thresholds'), {})
                 
                 # Set curve_classification if present, else default to {'class': 'N/A'}
                 curve_classification = well_data.get('curve_classification')
@@ -1056,6 +1060,9 @@ def save_combined_session():
                 else:
                     well_result.threshold_value = None
 
+                # Set per-channel thresholds if present
+                well_result.thresholds = safe_json_dumps(well_data.get('thresholds'), {})
+                
                 # Set curve_classification if present, else default to {'class': 'N/A'}
                 curve_classification = well_data.get('curve_classification')
                 if curve_classification is None:
@@ -1065,6 +1072,7 @@ def save_combined_session():
                 well_result.curve_classification = safe_json_dumps(curve_classification, {'class': 'N/A'})
 
                 # --- Save CQ-J and Calc-J fields if present ---
+
                 well_result.cqj = safe_json_dumps(well_data.get('cqj'), {})
                 well_result.calcj = safe_json_dumps(well_data.get('calcj'), {})
 

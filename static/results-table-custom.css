@@ -1,0 +1,4 @@
+/* Custom widths for results table columns */
+.results-col-curve-class { min-width: 130px; }
+.results-col-status { min-width: 110px; }
+.results-col-anom { min-width: 110px; }
