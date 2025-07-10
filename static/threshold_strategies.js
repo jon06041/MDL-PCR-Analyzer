@@ -11,12 +11,7 @@ const LINEAR_THRESHOLD_STRATEGIES = {
     description: "Linear threshold, often used for manual review or fallback.",
     reference: "See qPCR_Curve_Classification_Reference.md"
   },
-  "linear_baseline_plus_nsd": {
-    name: "Linear: Baseline + N × SD",
-    calculate: ({baseline, baseline_std, N = 10}) => baseline + N * baseline_std,
-    description: "Linear threshold at baseline plus N times the standard deviation.",
-    reference: "See qPCR_Curve_Classification_Reference.md"
-  },
+  // Removed duplicate linear_baseline_plus_nsd
   "linear_max_slope": {
     name: "Linear: Max Slope",
     calculate: ({curve, cycles}) => {
@@ -33,6 +28,12 @@ const LINEAR_THRESHOLD_STRATEGIES = {
     },
     description: "Threshold at the point of maximum slope (first derivative) on the linear curve.",
     reference: "See qPCR_Curve_Classification_Reference.md"
+  },
+  "linear_fixed": {
+    name: "Linear: Fixed Value (per-pathogen)",
+    calculate: ({fixed_value}) => fixed_value,
+    description: "User- or pathogen-specific fixed threshold value (loaded from JS or CSV).",
+    reference: "Manual or pathogen-specific. See documentation."
   }
 };
 
@@ -82,8 +83,50 @@ const LOG_THRESHOLD_STRATEGIES = {
     },
     description: "Threshold at the point of maximum second derivative (inflection) on the log-transformed curve.",
     reference: "See qPCR_Curve_Classification_Reference.md"
+  },
+  "log_fixed": {
+    name: "Log: Fixed Value (per-pathogen)",
+    calculate: ({fixed_value}) => fixed_value,
+    description: "User- or pathogen-specific fixed threshold value (loaded from JS or CSV).",
+    reference: "Manual or pathogen-specific. See documentation."
   }
 };
+
+// Pathogen-specific fixed threshold values (per channel/fluorophore)
+window.PATHOGEN_FIXED_THRESHOLDS = {
+  "BVAB": { "default": { linear: 250, log: 2.5 } },
+  "BVPanelPCR1": {
+    "FAM": { linear: 200, log: 2.0 },
+    "HEX": { linear: 250, log: 2.2 },
+    "Texas Red": { linear: 150, log: 1.8 },
+    "CY5": { linear: 200, log: 2.0 }
+  },
+  "BVPanelPCR2": {
+    "FAM": { linear: 350, log: 3.0 },
+    "HEX": { linear: 350, log: 3.0 },
+    "Texas Red": { linear: 200, log: 2.0 },
+    "CY5": { linear: 350, log: 3.0 }
+  },
+  "BVPanelPCR3": { "default": { linear: 100, log: 1.0 } },
+  "Calb": { "default": { linear: 150, log: 1.5 } },
+  "Cglab": { "default": { linear: 150, log: 1.5 } },
+  "CHVIC": { "default": { linear: 250, log: 2.5 } },
+  "Ckru": { "default": { linear: 280, log: 2.8 } },
+  "Cpara": { "default": { linear: 200, log: 2.0 } },
+  "Ctrach": { "default": { linear: 150, log: 1.5 } },
+  "Ctrop": { "default": { linear: 200, log: 2.0 } },
+  "Efaecalis": { "default": { linear: 200, log: 2.0 } },
+  "FLUA": { "FAM": { linear: 265, log: 2.65 } },
+  "FLUB": { "CY5": { linear: 225, log: 2.25 } },
+  "GBS": { "default": { linear: 300, log: 3.0 } },
+  "Lacto": { "default": { linear: 150, log: 1.5 } },
+  "Mgen": { "default": { linear: 500, log: 5.0 } },
+  "Ngon": { "default": { linear: 200, log: 2.0 } },
+  "NOV": { "default": { linear: 500, log: 5.0 } },
+  "Saureus": { "default": { linear: 250, log: 2.5 } },
+  "Tvag": { "default": { linear: 250, log: 2.5 } }
+};
+
 
 /**
  * Get a threshold value using the selected strategy and scale.
@@ -98,6 +141,23 @@ function calculateThreshold(strategy, params, scale = 'log') {
   } else {
     strat = LOG_THRESHOLD_STRATEGIES[strategy] || LOG_THRESHOLD_STRATEGIES[Object.keys(LOG_THRESHOLD_STRATEGIES)[0]];
   }
+
+  // Patch: If using a fixed strategy, auto-lookup the correct fixed_value for pathogen/channel/scale
+  if ((strategy === 'linear_fixed' || strategy === 'log_fixed') && params && !('fixed_value' in params)) {
+    // Try to auto-populate fixed_value from PATHOGEN_FIXED_THRESHOLDS
+    const pathogen = params.pathogen || params.test_code || params.target || params.pathogen_code;
+    const fluor = params.fluorophore || params.channel;
+    if (window.PATHOGEN_FIXED_THRESHOLDS && pathogen) {
+      const pathogenEntry = window.PATHOGEN_FIXED_THRESHOLDS[pathogen];
+      if (pathogenEntry) {
+        const channelEntry = (fluor && pathogenEntry[fluor]) ? pathogenEntry[fluor] : pathogenEntry['default'];
+        if (channelEntry && typeof channelEntry === 'object' && scale in channelEntry) {
+          params.fixed_value = channelEntry[scale];
+        }
+      }
+    }
+  }
+
   try {
     return strat.calculate(params);
   } catch (e) {

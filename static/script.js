@@ -3877,8 +3877,8 @@ if (result.calcj && typeof result.calcj === 'object' && result.fluorophore && re
             <td>${formatNumber(result.midpoint ? result.midpoint.toFixed(1) : 'N/A')}</td>
             <td>${formatNumber(result.baseline ? result.baseline.toFixed(1) : 'N/A')}</td>
             <td>${formatNumber(cqValue)}</td>
-            <td>${formatNumber(cqjDisplay)}</td>
-            <td>${formatNumber(calcjDisplay)}</td>
+            <td>${formatNumber((cqjDisplay !== null && cqjDisplay !== undefined && !isNaN(Number(cqjDisplay))) ? Number(cqjDisplay).toFixed(2) : 'N/A')}</td>
+            <td>${formatNumber((calcjDisplay !== null && calcjDisplay !== undefined && !isNaN(Number(calcjDisplay))) ? Number(calcjDisplay).toExponential(2) : 'N/A')}</td>
             <td>${anomaliesText}</td>
         `;
         

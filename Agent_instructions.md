@@ -1,3 +1,35 @@
+
+# [2025-07-10] Threshold Strategy System: Per-Pathogen, Per-Channel, Per-Scale Fixed Values
+
+## New Feature: Pathogen/Channel/Scale-Specific Fixed Thresholds
+- The threshold strategy system now supports fixed values that are specific to each pathogen, channel (fluorophore), and scale (linear/log).
+- The object `window.PATHOGEN_FIXED_THRESHOLDS` in `static/threshold_strategies.js` is structured as:
+  ```js
+  window.PATHOGEN_FIXED_THRESHOLDS = {
+    "FLUA": { "FAM": { linear: 265, log: 2.65 } },
+    "FLUB": { "CY5": { linear: 225, log: 2.25 } },
+    // ...
+    "Ngon": { "default": { linear: 200, log: 2.0 } }
+  };
+  ```
+- When the `linear_fixed` or `log_fixed` strategy is selected, the correct value is auto-looked-up based on the current pathogen, channel, and scale.
+- The lookup logic is implemented in `calculateThreshold` in `static/threshold_strategies.js`.
+- You can override by passing `fixed_value` directly, but if you provide `pathogen` (or `test_code`/`target`) and `fluorophore` (or `channel`), it will auto-fill.
+
+## Usage Example
+```js
+const threshold = calculateThreshold('linear_fixed', {
+  pathogen: 'FLUA',
+  fluorophore: 'FAM'
+}, 'linear');
+// threshold will be 265
+```
+
+## Notes
+- You can update the JS object as you learn the best values for each scale.
+- This system is robust to missing values: if a value is not found for a channel, it falls back to 'default' for the pathogen.
+- This enables future expansion for more complex thresholding needs.
+
 # [2025-07-10] CQJ/CalcJ Backend Integration Progress
 
 ## Backend CQJ/CalcJ Calculation
