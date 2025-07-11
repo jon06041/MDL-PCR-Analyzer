@@ -3,6 +3,8 @@ import json
 import os
 import re
 import traceback
+import logging
+from logging.handlers import RotatingFileHandler
 import numpy as np
 from datetime import datetime
 from qpcr_analyzer import process_csv_data, validate_csv_structure
@@ -508,6 +510,20 @@ def analyze_data():
         print(f"[ANALYZE] Request headers - Filename: {filename}, Fluorophore: {fluorophore}")
         print(f"[ANALYZE] Request data type: {type(request_data)}, Length: {len(request_data) if request_data else 0}")
         
+        # Debug request structure
+        if request_data:
+            print(f"[ANALYZE-DEBUG] Request keys: {list(request_data.keys()) if isinstance(request_data, dict) else 'Not a dict'}")
+            if isinstance(request_data, dict):
+                if 'analysis_data' in request_data:
+                    print(f"[ANALYZE-DEBUG] analysis_data type: {type(request_data['analysis_data'])}, length: {len(request_data['analysis_data']) if request_data['analysis_data'] else 0}")
+                if 'samples_data' in request_data:
+                    samples_data_info = request_data.get('samples_data')
+                    if samples_data_info:
+                        print(f"[ANALYZE-DEBUG] samples_data length: {len(samples_data_info)}")
+                        print(f"[ANALYZE-DEBUG] samples_data preview: {samples_data_info[:200]}...")
+                    else:
+                        print(f"[ANALYZE-DEBUG] samples_data is None or empty")
+        
         if not request_data:
             print(f"[ANALYZE ERROR] No data provided")
             return jsonify({'error': 'No data provided', 'success': False}), 400
@@ -541,12 +557,27 @@ def analyze_data():
         # Process the data with SQL integration if samples data available
         try:
             if samples_data:
+                print(f"[ANALYZE-SQL] Starting SQL integration with samples_data length: {len(samples_data)}")
+                print(f"[ANALYZE-SQL] Samples data preview: {samples_data[:200]}...")
                 from sql_integration import process_with_sql_integration
                 results = process_with_sql_integration(data, samples_data, fluorophore)
-                print(f"SQL-based analysis completed for {len(data)} wells with {fluorophore}")
+                print(f"[ANALYZE-SQL] SQL-based analysis completed for {len(data)} wells with {fluorophore}")
+                print(f"[ANALYZE-SQL] Results success: {results.get('success', 'Unknown')}")
+                print(f"[ANALYZE-SQL] Results keys: {list(results.keys()) if isinstance(results, dict) else 'Not a dict'}")
+                if results.get('individual_results'):
+                    print(f"[ANALYZE-SQL] Individual results count: {len(results['individual_results'])}")
+                else:
+                    print(f"[ANALYZE-SQL] No individual_results in SQL response")
             else:
+                print(f"[ANALYZE-STANDARD] No samples data, using standard analysis")
                 results = process_csv_data(data)
-                print(f"Standard analysis completed for {len(data)} wells")
+                print(f"[ANALYZE-STANDARD] Standard analysis completed for {len(data)} wells")
+                print(f"[ANALYZE-STANDARD] Results success: {results.get('success', 'Unknown')}")
+                print(f"[ANALYZE-STANDARD] Results keys: {list(results.keys()) if isinstance(results, dict) else 'Not a dict'}")
+                if results.get('individual_results'):
+                    print(f"[ANALYZE-STANDARD] Individual results count: {len(results['individual_results'])}")
+                else:
+                    print(f"[ANALYZE-STANDARD] No individual_results in standard response")
             
             # Inject fluorophore information and ensure proper well_id structure for fresh load
             if 'individual_results' in results and fluorophore != 'Unknown':
@@ -1416,7 +1447,14 @@ def simple_delete_session(session_id):
         return jsonify({'error': f'Simple delete failed: {str(e)}'}), 500
 
 if __name__ == '__main__':
-    # Production and development server configuration
-    port = int(os.environ.get('PORT', 5000))  # Use Railway's PORT or default to 5000 for dev
-    debug = os.environ.get('FLASK_ENV') != 'production'  # Disable debug in production
-    app.run(host='0.0.0.0', port=port, debug=debug)
+    handler = RotatingFileHandler('flask.log', maxBytes=5_000_000, backupCount=5)
+    handler.setLevel(logging.DEBUG)
+    formatter = logging.Formatter(
+        '%(asctime)s %(levelname)-8s %(name)s %(message)s'
+    )
+    handler.setFormatter(formatter)
+    app.logger.addHandler(handler)
+    # Also capture the werkzeug (request) log
+    logging.getLogger('werkzeug').addHandler(handler)
+
+    app.run(debug=True)

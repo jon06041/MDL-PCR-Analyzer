@@ -42,6 +42,15 @@ def process_with_sql_integration(amplification_data, samples_csv_data, fluoropho
     
     # Process amplification data to get curve analysis results
     analysis_results = process_csv_data(amplification_data)
+    # Preserve frontend-parsed sample_name and cq_value so they are not lost
+    if 'individual_results' in analysis_results:
+        for well_id, well_result in analysis_results['individual_results'].items():
+            original = amplification_data.get(well_id)
+            if original:
+                if 'sample_name' in original and original['sample_name'] is not None:
+                    well_result['sample_name'] = original['sample_name']
+                if 'cq_value' in original and original['cq_value'] is not None:
+                    well_result['cq_value'] = original['cq_value']
     if not analysis_results.get('success', False):
         return analysis_results
     
@@ -50,10 +59,12 @@ def process_with_sql_integration(amplification_data, samples_csv_data, fluoropho
         # Convert CSV string to DataFrame
         from io import StringIO
         samples_df = pd.read_csv(StringIO(samples_csv_data))
-        print(f"Parsed samples CSV: {len(samples_df)} rows, columns: {list(samples_df.columns)}")
+        print(f"[SQL-DEBUG] Parsed samples CSV: {len(samples_df)} rows, columns: {list(samples_df.columns)}")
+        print(f"[SQL-DEBUG] First few rows: {samples_df.head(3).to_dict('records')}")
         
     except Exception as e:
-        print(f"Error parsing samples CSV: {e}")
+        print(f"[SQL-ERROR] Error parsing samples CSV: {e}")
+        print(f"[SQL-ERROR] CSV data preview: {samples_csv_data[:500]}...")
         # Return analysis results without sample integration if CSV parsing fails
         return analysis_results
     
@@ -80,25 +91,75 @@ def process_with_sql_integration(amplification_data, samples_csv_data, fluoropho
             # Insert sample data filtered by fluorophore
             sample_records = []
             
-            # Detect column indices (CFX Manager format)
-            well_col = 1 if len(samples_df.columns) > 1 else 0  # Well column
-            fluor_col = 2 if len(samples_df.columns) > 2 else 1  # Fluor column
-            sample_col = 5 if len(samples_df.columns) > 5 else -1  # Sample column
-            cq_col = 6 if len(samples_df.columns) > 6 else -1  # Cq column
+            # Flexible column detection by name (case-insensitive)
+            def find_column_index(column_names, target_patterns):
+                """Find column index by matching patterns in column names"""
+                for i, col_name in enumerate(column_names):
+                    col_lower = str(col_name).lower().strip()
+                    for pattern in target_patterns:
+                        if pattern.lower() in col_lower:
+                            return i
+                return -1
             
-            for _, row in samples_df.iterrows():
+            columns = [str(col).strip() for col in samples_df.columns]
+            print(f"[SQL-DEBUG] Column names: {columns}")
+            
+            # Auto-detect column indices
+            well_col = find_column_index(columns, ['well', 'pos', 'position'])
+            fluor_col = find_column_index(columns, ['fluor', 'dye', 'channel', 'reporter'])  
+            sample_col = find_column_index(columns, ['sample', 'name', 'target'])
+            cq_col = find_column_index(columns, ['cq', 'ct', 'cycle'])
+            
+            print(f"[SQL-DEBUG] Detected columns - Well: {well_col}, Fluor: {fluor_col}, Sample: {sample_col}, Cq: {cq_col}")
+            
+            # Fallback to positional detection if name-based detection fails
+            if well_col == -1:
+                well_col = 0 if len(columns) > 0 else -1
+                print(f"[SQL-DEBUG] Using fallback well column: {well_col}")
+            if fluor_col == -1:
+                fluor_col = 1 if len(columns) > 1 else -1
+                print(f"[SQL-DEBUG] Using fallback fluor column: {fluor_col}")
+            if sample_col == -1:
+                # Look for any column that might contain sample names
+                for i, col in enumerate(columns):
+                    if i > 2 and 'sample' not in col.lower() and 'cq' not in col.lower() and 'ct' not in col.lower():
+                        sample_col = i
+                        break
+                print(f"[SQL-DEBUG] Using fallback sample column: {sample_col}")
+            if cq_col == -1:
+                # Look for numeric columns that might be Cq values
+                for i, col in enumerate(columns):
+                    if i > 2:  # Skip well, fluor columns
+                        cq_col = i
+                        break
+                print(f"[SQL-DEBUG] Using fallback Cq column: {cq_col}")
+            
+            if well_col == -1 or fluor_col == -1:
+                print(f"[SQL-ERROR] Could not detect required columns. Well: {well_col}, Fluor: {fluor_col}")
+                return analysis_results
+            
+            for row_idx, row in samples_df.iterrows():
                 try:
-                    well_raw = str(row.iloc[well_col]) if well_col < len(row) else None
-                    fluor_raw = str(row.iloc[fluor_col]) if fluor_col < len(row) else None
+                    # Extract values using detected column indices
+                    well_raw = str(row.iloc[well_col]) if well_col >= 0 and well_col < len(row) else None
+                    fluor_raw = str(row.iloc[fluor_col]) if fluor_col >= 0 and fluor_col < len(row) else None
                     sample_raw = str(row.iloc[sample_col]) if sample_col >= 0 and sample_col < len(row) else None
                     cq_raw = row.iloc[cq_col] if cq_col >= 0 and cq_col < len(row) else None
                     
+                    # Debug first few rows
+                    if row_idx < 5:
+                        print(f"[SQL-DEBUG] Row {row_idx}: Well='{well_raw}', Fluor='{fluor_raw}', Sample='{sample_raw}', Cq='{cq_raw}'")
+                    
                     # Skip header row and invalid data
-                    if not well_raw or well_raw.lower() in ['well', 'nan', ''] or not fluor_raw:
+                    if not well_raw or well_raw.lower() in ['well', 'nan', '', 'pos', 'position']:
                         continue
                     
-                    # Filter by current fluorophore
-                    if fluor_raw != fluorophore:
+                    # Skip if no fluorophore data
+                    if not fluor_raw or fluor_raw.lower() in ['fluor', 'dye', 'nan', '', 'channel']:
+                        continue
+                    
+                    # Filter by current fluorophore (flexible matching)
+                    if fluorophore.lower() not in fluor_raw.lower():
                         continue
                     
                     # Convert well format A01 -> A1
@@ -107,25 +168,38 @@ def process_with_sql_integration(amplification_data, samples_csv_data, fluoropho
                     
                     # Parse Cq value
                     cq_value = None
-                    if cq_raw and str(cq_raw).lower() not in ['nan', '', 'cq']:
+                    if cq_raw and str(cq_raw).lower() not in ['nan', '', 'cq', 'ct']:
                         try:
                             cq_value = float(cq_raw)
                         except (ValueError, TypeError):
                             pass
                     
+                    # Clean sample name
+                    clean_sample_name = None
+                    if sample_raw and sample_raw.lower() not in ['nan', '', 'sample', 'target', 'name']:
+                        clean_sample_name = sample_raw.strip()
+                    
                     sample_records.append({
                         'session_id': session_id,
                         'well_id': well_normalized,
                         'fluorophore': fluorophore,
-                        'sample_name': sample_raw if sample_raw and sample_raw.lower() not in ['nan', '', 'sample'] else None,
+                        'sample_name': clean_sample_name,
                         'cq_value': cq_value
                     })
                     
                 except Exception as row_error:
-                    print(f"Error processing row {row.name}: {row_error}")
+                    print(f"[SQL-ERROR] Error processing row {row_idx}: {row_error}")
                     continue
             
-            print(f"Prepared {len(sample_records)} sample records for {fluorophore}")
+            print(f"[SQL-DEBUG] Prepared {len(sample_records)} sample records for {fluorophore}")
+            
+            if len(sample_records) > 0:
+                print(f"[SQL-DEBUG] Sample records preview: {sample_records[:3]}")
+            else:
+                print(f"[SQL-WARNING] No sample records found for {fluorophore}. Check fluorophore matching and data format.")
+                # Show what we found vs what we were looking for
+                print(f"[SQL-DEBUG] Looking for fluorophore: '{fluorophore}'")
+                print(f"[SQL-DEBUG] Available fluorophores in data: {set(str(row.iloc[fluor_col]) for _, row in samples_df.iterrows() if fluor_col >= 0)}")
             
             # Insert sample records into temporary table
             if sample_records:
@@ -160,27 +234,66 @@ def process_with_sql_integration(amplification_data, samples_csv_data, fluoropho
                     if row.cq_value is not None:
                         cq_mapping[well_id] = row.cq_value
                 
-                print(f"SQL integration complete: {len(sample_mapping)} samples, {len(cq_mapping)} Cq values for {fluorophore}")
+                print(f"[SQL-SUCCESS] SQL integration complete: {len(sample_mapping)} samples, {len(cq_mapping)} Cq values for {fluorophore}")
                 
                 # Apply SQL results to analysis results
                 if 'individual_results' in analysis_results:
+                    applied_count = 0
                     for well_id, well_result in analysis_results['individual_results'].items():
-                        # Add fluorophore-specific sample data
-                        well_result['sample_name'] = sample_mapping.get(well_id, 'Unknown')
-                        well_result['cq_value'] = cq_mapping.get(well_id, None)
+                        # Determine base well ID (strip any fluor suffix) for mapping lookup
+                        base_id = well_id.split('_')[0]
+                        # Apply sample name if available
+                        if base_id in sample_mapping:
+                            well_result['sample_name'] = sample_mapping[base_id]
+                            well_result['sample'] = sample_mapping[base_id]
+                        # Apply Cq value if available
+                        if base_id in cq_mapping:
+                            well_result['cq_value'] = cq_mapping[base_id]
+                        # Always set fluorophore
                         well_result['fluorophore'] = fluorophore
+                        
+                        if well_id in sample_mapping or well_id in cq_mapping:
+                            applied_count += 1
+                            if applied_count < 5:  # Log first few applications
+                                print(f"[SQL-DEBUG] Applied to {well_id}: sample='{well_result.get('sample_name', 'Unknown')}', cq={well_result.get('cq_value', None)}")
+                    
+                    print(f"[SQL-SUCCESS] Applied sample data to {applied_count} wells out of {len(analysis_results['individual_results'])} total wells")
+                else:
+                    print(f"[SQL-WARNING] No individual_results found in analysis_results to apply sample data to")
                 
                 # Clean up temporary table (SQLite will auto-drop on connection close)
                 conn.commit()
                 
             else:
-                print(f"No valid sample records found for {fluorophore}")
+                print(f"[SQL-WARNING] No valid sample records found for {fluorophore}")
+                print(f"[SQL-DEBUG] This could be due to:")
+                print(f"[SQL-DEBUG] 1. Fluorophore name mismatch (looking for '{fluorophore}')")
+                print(f"[SQL-DEBUG] 2. Column detection failure")
+                print(f"[SQL-DEBUG] 3. Data format issues")
+                
+                # Still add fluorophore info to analysis results even without sample integration
+                if 'individual_results' in analysis_results:
+                    for well_id, well_result in analysis_results['individual_results'].items():
+                        # Preserve existing sample_name and cq_value when no SQL records; only set fluorophore
+                        well_result['fluorophore'] = fluorophore
+                    print(f"[SQL-DEBUG] Added fluorophore info to {len(analysis_results['individual_results'])} wells without sample integration")
         
     except Exception as sql_error:
-        print(f"SQL integration error: {sql_error}")
-        # Continue with analysis results even if SQL integration fails
+        print(f"[SQL-ERROR] SQL integration error: {sql_error}")
+        import traceback
+        print(f"[SQL-ERROR] Full traceback: {traceback.format_exc()}")
+        
+        # Continue with analysis results even if SQL integration fails, but add fluorophore info
+        if 'individual_results' in analysis_results:
+            for well_id, well_result in analysis_results['individual_results'].items():
+                # Preserve existing sample_name and cq_value on error; only set fluorophore
+                well_result['fluorophore'] = fluorophore
+            print(f"[SQL-FALLBACK] Added basic fluorophore info to {len(analysis_results['individual_results'])} wells after SQL error")
+        
+        # Don't fail the entire analysis due to SQL integration issues
         pass
     
+    # Finalize SQL integration
     print(f"SQL-based integration completed for {fluorophore}")
     return analysis_results
 

@@ -1,3 +1,5 @@
+// --- Problematic version from commit 902fbea ---// Source: script_problematic_20250711_011704.js// This file was restored by Copilot on 2025-07-11 for debugging purposes.// --- BEGIN SCRIPT CONTENT ---// (Full contents below)// --- Shared strict result classification for NEG/POS/REDO ---// Remove any import/export statements for browser compatibility// All dependencies should be accessed via window, e.g., window.calculateThreshold/** * Safely set item in localStorage or sessionStorage, handling quota errors. * @param {Storage} storage - localStorage or sessionStorage * @param {string} key * @param {string} value * @param {object} [options] - { historyTrimFn: function to trim history if needed, maxRetries: number } */function safeSetItem(storage, key, value, options = {}) {    const { historyTrimFn, maxRetries = 1 } = options;    let attempts = 0;    while (attempts <= maxRetries) {        try {            storage.setItem(key, value);            return true;        } catch (e) {            if (e.name === 'QuotaExceededError' || e.code === 22) {                console.warn('Storage quota exceeded for', key, 'Attempt:', attempts + 1);                // Try to trim history if function provided                if (historyTrimFn && typeof historyTrimFn === 'function') {                    historyTrimFn();                } else {                    // Otherwise, clear all storage                    storage.clear();                }                attempts++;            } else {                throw e;            }        }    }    alert('Unable to save data: browser storage is full. Some features may not work.');    return false;}// ...existing code...// (Full file contents from script_problematic_20250711_011704.js)// ...existing code...
+
 // --- Shared strict result classification for NEG/POS/REDO ---
 
 // Remove any import/export statements for browser compatibility
@@ -570,15 +572,10 @@ document.addEventListener('DOMContentLoaded', function() {
             if (window.stableChannelThresholds && window.stableChannelThresholds[channel] && window.stableChannelThresholds[channel][scale] != null) {
                 threshold = window.stableChannelThresholds[channel][scale];
             }
-            if (typeof window.calculateCqForWell === 'function' && well.cycles && well.rfu && threshold != null) {
-                well.cqj_value = window.calculateCqForWell({ cycles: well.cycles, rfu: well.rfu }, threshold);
+            // Use backend-provided CQJ value
+            if (well.cqj && channel in well.cqj) {
+                well.cqj_value = well.cqj[channel];
             } else {
-                console.warn('[CQJ/CalcJ][DEBUG] CQJ not calculated for well', wellKey, {
-                    hasCycles: !!well.cycles,
-                    hasRfu: !!well.rfu,
-                    threshold,
-                    calculateCqForWellType: typeof window.calculateCqForWell
-                });
                 well.cqj_value = null;
             }
         });
@@ -810,8 +807,9 @@ function handleThresholdStrategyChange() {
                 well.cqj_value = null;
             }
             // Calculate CalcJ using the correct test code and CQJ
-            if (typeof window.calculateConcentration === 'function' && well.cqj_value != null && well.test_code) {
-                well.calcj_value = window.calculateConcentration(well.cqj_value, well.test_code);
+            // Use backend-provided CalcJ value
+            if (well.calcj && channel in well.calcj) {
+                well.calcj_value = well.calcj[channel];
             } else {
                 well.calcj_value = null;
             }
@@ -1983,6 +1981,7 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
         let result;
         
         // Try to perform the actual analysis via backend
+        // Send to backend and handle HTTP errors gracefully
         try {
             const response = await fetch('/analyze', {
                 method: 'POST',
@@ -1993,47 +1992,27 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
                 },
                 body: JSON.stringify(payload)
             });
-            
             if (!response.ok) {
-                let errorMessage = `HTTP ${response.status}`;
+                // Log and return empty results so combine can continue
+                let msg = `HTTP ${response.status}`;
                 try {
-                    // Clone the response to read it multiple times if needed
-                    const responseClone = response.clone();
-                    const errorData = await responseClone.json();
-                    errorMessage = errorData.error || errorData.message || errorMessage;
-                } catch (jsonError) {
-                    // If we can't parse JSON, try to get the text from the original response
-                    try {
-                        const errorText = await response.text();
-                        if (errorText) {
-                            errorMessage = `${errorMessage}: ${errorText}`;
-                        }
-                    } catch (textError) {
-                        console.error(`❌ SINGLE-CHANNEL - Could not read error response for ${fluorophore}:`, textError);
-                    }
-                }
-                throw new Error(`Backend analysis failed for ${fluorophore}: ${errorMessage}`);
+                    const err = await response.json();
+                    msg = err.error || err.message || msg;
+                } catch(_) {}
+                console.error(`❌ SINGLE-CHANNEL - Backend error for ${fluorophore}: ${msg}`);
+                return { individual_results: {} };
             }
-            
-            try {
-                result = await response.json();
-                console.log(`🔍 SINGLE-CHANNEL - Backend response received for ${fluorophore}`);
-            } catch (jsonError) {
-                console.error(`❌ SINGLE-CHANNEL - Failed to parse JSON response for ${fluorophore}:`, jsonError);
-                throw new Error(`Invalid JSON response from backend for ${fluorophore}: ${jsonError.message}`);
-            }
-            
-        } catch (networkError) {
-            // If backend is not available, throw error instead of using mock data
-            console.error(`❌ SINGLE-CHANNEL - Backend not available for ${fluorophore}:`, networkError.message);
-            throw new Error(`Backend connection failed for ${fluorophore}: ${networkError.message}`);
-            
-            // COMMENTED OUT: Mock data was interfering with real channel analysis
-            // console.warn(`⚠️ SINGLE-CHANNEL - Backend not available for ${fluorophore}, using mock data:`, networkError.message);
-            // console.log(`🔧 MOCK-MODE - Generating mock analysis results for ${fluorophore}`);
-            // result = createMockAnalysisResponse(fluorophore);
+            result = await response.json();
+        } catch (fetchError) {
+            // Network or other failure - log and return empty
+            console.error(`❌ SINGLE-CHANNEL - Network error for ${fluorophore}:`, fetchError.message);
+            return { individual_results: {} };
         }
-        
+        // COMMENTED OUT: Mock data was interfering with real channel analysis
+        // console.warn(`⚠️ SINGLE-CHANNEL - Backend not available for ${fluorophore}, using mock data:`, networkError.message);
+        // console.log(`🔧 MOCK-MODE - Generating mock analysis results for ${fluorophore}`);
+        // result = createMockAnalysisResponse(fluorophore);
+
         // 🔍 ROBUST-NULL-CHECK: Enhanced result validation
         console.log(`🔍 SINGLE-CHANNEL - Raw backend response for ${fluorophore}:`, {
             resultExists: !!result,
@@ -3965,24 +3944,32 @@ function populateResultsTable(individualResults) {
             }
         }
 
-        // Display stored CQ-J and Calc-J values (calculated after threshold changes)
-        // --- Display per-channel CQJ and CalcJ if available (backend-calculated) ---
-       
-let cqjDisplay = '-';
-let calcjDisplay = '-';
+        // Display CQJ and CalcJ values ONLY from backend (comment out JS fallbacks)
+        let cqjDisplay = '-';
+        let calcjDisplay = '-';
 
-// Prefer per-channel backend values if available
-if (result.cqj && typeof result.cqj === 'object' && result.fluorophore && result.cqj[result.fluorophore] !== undefined && result.cqj[result.fluorophore] !== null && !isNaN(result.cqj[result.fluorophore])) {
-    cqjDisplay = Number(result.cqj[result.fluorophore]).toFixed(2);
-} else if (result.cqj_value !== null && result.cqj_value !== undefined && !isNaN(result.cqj_value)) {
-    cqjDisplay = Number(result.cqj_value).toFixed(2);
-}
+        // Use only backend-provided values, comment out any JS fallback logic
+        if (result.cqj && typeof result.cqj === 'object' && result.fluorophore && result.cqj[result.fluorophore] !== undefined && result.cqj[result.fluorophore] !== null && !isNaN(result.cqj[result.fluorophore])) {
+            cqjDisplay = Number(result.cqj[result.fluorophore]).toFixed(2);
+        } 
+        // else if (result.cqj_value !== null && result.cqj_value !== undefined && !isNaN(result.cqj_value)) {
+        //     cqjDisplay = Number(result.cqj_value).toFixed(2);
+        // }
 
-if (result.calcj && typeof result.calcj === 'object' && result.fluorophore && result.calcj[result.fluorophore] !== undefined && result.calcj[result.fluorophore] !== null && !isNaN(result.calcj[result.fluorophore])) {
-    calcjDisplay = Number(result.calcj[result.fluorophore]).toExponential(2);
-} else if (result.calcj_value !== null && result.calcj_value !== undefined && !isNaN(result.calcj_value)) {
-    calcjDisplay = Number(result.calcj_value).toExponential(2);
-}
+        if (result.calcj && typeof result.calcj === 'object' && result.fluorophore && result.calcj[result.fluorophore] !== undefined && result.calcj[result.fluorophore] !== null && !isNaN(result.calcj[result.fluorophore])) {
+            calcjDisplay = Number(result.calcj[result.fluorophore]).toExponential(2);
+        } 
+        // else if (result.calcj_value !== null && result.calcj_value !== undefined && !isNaN(result.calcj_value)) {
+        //     calcjDisplay = Number(result.calcj_value).toExponential(2);
+        // }
+
+        // If backend value is missing, show placeholder
+        if (cqjDisplay === '-' || cqjDisplay === undefined || cqjDisplay === null || isNaN(Number(cqjDisplay))) {
+            cqjDisplay = '<span class="missing-backend">N/A</span>';
+        }
+        if (calcjDisplay === '-' || calcjDisplay === undefined || calcjDisplay === null || isNaN(Number(calcjDisplay))) {
+            calcjDisplay = '<span class="missing-backend">N/A</span>';
+        }
 
         row.innerHTML = `
             <td><strong>${wellId}</strong></td>
@@ -4439,11 +4426,10 @@ function prepareAnalysisData(data = null) {
     
     // Add sample names and Cq values to well data
     Object.keys(wellData).forEach(wellKey => {
-        // Extract base well ID from fluorophore-tagged key (A1_Cy5 -> A1)
-        const baseWellId = wellKey.split('_')[0];
-        
-        const sampleName = sampleNames[baseWellId] || 'Unknown';
-        const cqValue = cqData[baseWellId] || null;
+        // Original wellKey includes fluorophore suffix (e.g., A1_Cy5)
+        // Lookup using full key to match parsed sampleNames and cqData
+        const sampleName = sampleNames[wellKey] || 'Unknown';
+        const cqValue = cqData[wellKey] || null;
         
         wellData[wellKey].sample_name = sampleName;
         wellData[wellKey].cq_value = cqValue;
@@ -4451,12 +4437,12 @@ function prepareAnalysisData(data = null) {
         // Debug first few wells
         if (['A1_Cy5', 'A2_Cy5', 'A3_Cy5'].includes(wellKey)) {
             console.log(`Well ${wellKey} integration:`, {
-                baseWellId: baseWellId,
-                availableInSamples: baseWellId in sampleNames,
-                sampleFromParsing: sampleNames[baseWellId],
+                wellKey: wellKey,
+                availableInSamples: wellKey in sampleNames,
+                sampleFromParsing: sampleNames[wellKey],
                 finalSample: sampleName,
-                availableInCq: baseWellId in cqData,
-                cqFromParsing: cqData[baseWellId],
+                availableInCq: wellKey in cqData,
+                cqFromParsing: cqData[wellKey],
                 finalCq: cqValue
             });
         }
@@ -4754,7 +4740,6 @@ function combineMultiFluorophoreResults(allResults) {
     console.log('=== COMBINING MULTI-FLUOROPHORE RESULTS ===');
     const fluorophores = Object.keys(allResults);
     const firstResult = allResults[fluorophores[0]];
-    
     console.log('Uploaded fluorophores:', fluorophores);
     console.log('Processing fluorophore-specific sample integration...');
     
@@ -4772,11 +4757,9 @@ function combineMultiFluorophoreResults(allResults) {
     fluorophores.forEach(fluorophore => {
         const results = allResults[fluorophore];
         
-        // Parse fluorophore-specific sample names and Cq data
+        // Parse fluorophore-specific sample names from CSV to fill missing names
         const fluorSampleNames = parseSampleNames(fluorophore);
-        const fluorCqData = parseCqData(fluorophore);
-        
-        console.log(`${fluorophore} - samples: ${Object.keys(fluorSampleNames).length}, Cq: ${Object.keys(fluorCqData).length}`);
+        // Cq values come from SQL integration in wellResult.cq_value
         
         if (results.good_curves) {
             totalGoodCurves += results.good_curves.length;
@@ -4789,9 +4772,14 @@ function combineMultiFluorophoreResults(allResults) {
                 const wellResult = results.individual_results[wellKey];
                 const newWellKey = `${wellKey}_${fluorophore}`;
                 
-                // Use fluorophore-specific sample data
-                const sampleName = fluorSampleNames[wellKey] || 'Unknown';
-                const cqValue = fluorCqData[wellKey] || null;
+                // Determine sampleName: prefer existing, else fallback to parsed CSV mapping using full key
+                const parsedSample = fluorSampleNames[newWellKey];
+                // Debug fallback mapping for each well
+                console.log('combine fallback', newWellKey, 'orig sample_name=', wellResult.sample_name, 'parsedSample=', parsedSample);
+                const sampleName = wellResult.sample_name || wellResult.sample || parsedSample || 'Unknown';
+                const cqValue = (wellResult.cq_value !== undefined && wellResult.cq_value !== null)
+                    ? wellResult.cq_value
+                    : null;
                 
                 combined.individual_results[newWellKey] = {
                     ...wellResult,
@@ -4935,6 +4923,8 @@ function combineMultiFluorophoreResultsSQL(allResults) {
                 combined.individual_results[newWellKey] = {
                     ...wellResult,
                     fluorophore: fluorophore,
+                    sample_name: sampleName,
+                    cq_value: cqValue,
                     // Ensure threshold_value is explicitly preserved
                     threshold_value: wellResult.threshold_value
                 };
@@ -12416,4 +12406,3 @@ function showPathogenGrid(tabIndex) {
     if (activeButton) activeButton.classList.add('active');
     if (activeContent) activeContent.classList.add('active');
 }
-

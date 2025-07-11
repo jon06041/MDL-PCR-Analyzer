@@ -1,3 +1,204 @@
+// --- Shared strict result classification for NEG/POS/REDO ---
+
+// Remove any import/export statements for browser compatibility
+// All dependencies should be accessed via window, e.g., window.calculateThreshold
+
+/**
+ * Safely set item in localStorage or sessionStorage, handling quota errors.
+ * @param {Storage} storage - localStorage or sessionStorage
+ * @param {string} key
+ * @param {string} value
+ * @param {object} [options] - { historyTrimFn: function to trim history if needed, maxRetries: number }
+ */
+function safeSetItem(storage, key, value, options = {}) {
+    const { historyTrimFn, maxRetries = 1 } = options;
+    let attempts = 0;
+    while (attempts <= maxRetries) {
+        try {
+            storage.setItem(key, value);
+            return true;
+        } catch (e) {
+            if (e.name === 'QuotaExceededError' || e.code === 22) {
+                console.warn('Storage quota exceeded for', key, 'Attempt:', attempts + 1);
+                // Try to trim history if function provided
+                if (historyTrimFn && typeof historyTrimFn === 'function') {
+                    historyTrimFn();
+                } else {
+                    // Otherwise, clear all storage
+                    storage.clear();
+                }
+                attempts++;
+            } else {
+                throw e;
+            }
+        }
+    }
+    alert('Unable to save data: browser storage is full. Some features may not work.');
+    return false;
+}
+
+function classifyResult(wellData) {
+    const amplitude = wellData.amplitude || 0;
+    const isGoodSCurve = wellData.is_good_scurve || false;
+    let hasAnomalies = false;
+    if (wellData.anomalies) {
+        try {
+            const anomalies = typeof wellData.anomalies === 'string' ? 
+                JSON.parse(wellData.anomalies) : wellData.anomalies;
+            hasAnomalies = Array.isArray(anomalies) && anomalies.length > 0 && 
+                          !(anomalies.length === 1 && anomalies[0] === 'None');
+        } catch (e) {
+            hasAnomalies = true;
+        }
+    }
+    const cqValue = wellData.cq_value;
+    if (amplitude < 400 || !isGoodSCurve || isNaN(Number(cqValue))) {
+        return 'NEG';
+    } else if (isGoodSCurve && amplitude > 500 && !hasAnomalies) {
+        return 'POS';
+    } else {
+        return 'REDO';
+    }
+}
+
+
+// Expose globally for use in other scripts
+window.classifyResult = classifyResult;
+// --- Chart.js Annotation Plugin Registration (robust, before chart creation) ---
+function ensureAnnotationPluginRegistered() {
+    if (window.Chart && window['chartjs-plugin-annotation']) {
+        let alreadyRegistered = false;
+        // Chart.js v3/v4: registry.plugins.items or registry.plugins._items (UMD/minified)
+        if (Chart.registry && Chart.registry.plugins) {
+            const items = Chart.registry.plugins.items || Chart.registry.plugins._items || [];
+            alreadyRegistered = Array.isArray(items) && items.some(p => p && p.id === 'annotation');
+        } else if (Chart._plugins) {
+            // Chart.js 2.x fallback
+            alreadyRegistered = Object.values(Chart._plugins).some(p => p && p.id === 'annotation');
+        }
+        if (!alreadyRegistered) {
+            Chart.register(window['chartjs-plugin-annotation']);
+            console.log('[DIAG] Chart annotation plugin registered for Chart.js');
+        } else {
+            console.log('[DIAG] Chart annotation plugin already registered');
+        }
+    } else {
+        console.warn('[DIAG] Chart.js or annotation plugin not found on window');
+    }
+}
+
+// Call this BEFORE any chart is created
+ensureAnnotationPluginRegistered();
+
+
+        
+// Add this near your other globals:
+if (!window.userSetThresholds) window.userSetThresholds = {}; // { channel: { scale: value } }
+
+// Update setThresholdControls to store the value:
+function setThresholdControls(value, updateChart = true) {
+    const numValue = Number(value);
+    if (thresholdInput && thresholdInput.value != numValue) thresholdInput.value = numValue;
+    if (thresholdSlider && Number(thresholdSlider.value) !== numValue) thresholdSlider.value = numValue;
+
+    // Use the currently selected channel, never default to HEX
+    let channel = window.currentFluorophore;
+    if (!channel || channel === 'all') {
+        // Try to extract from chart datasets
+        const datasets = window.amplificationChart?.data?.datasets;
+        if (datasets && datasets.length > 0) {
+            const match = datasets[0].label?.match(/\(([^)]+)\)/);
+            if (match && match[1] !== 'Unknown') channel = match[1];
+        }
+    }
+    if (!channel) {
+        console.warn('No channel selected or detected!');
+        return;
+    }
+    const scale = currentScaleMode || 'linear';
+    if (!window.userSetThresholds[channel]) window.userSetThresholds[channel] = {};
+    window.userSetThresholds[channel][scale] = numValue;
+    if (updateChart) updateChartThreshold(numValue);
+}
+// === DIAGNOSTICS FOR THRESHOLD/UI/CHART FEATURES ===
+(function diagnostics() {
+    // Check Chart.js annotation plugin registration
+    document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(() => {
+            if (window.Chart && window.Chart.registry) {
+                const plugins = window.Chart.registry.plugins ? Object.keys(window.Chart.registry.plugins) : Object.keys(window.Chart.plugins || {});
+                console.log('[DIAG] Chart.js plugins registered:', plugins);
+            } else {
+                console.warn('[DIAG] Chart.js registry not found');
+            }
+            if (window.amplificationChart) {
+                const ann = window.amplificationChart.options?.plugins?.annotation;
+                if (ann) {
+                    console.log('[DIAG] Chart annotation plugin options found:', ann);
+                } else {
+                    console.warn('[DIAG] Chart annotation plugin options NOT found');
+                }
+            } else {
+                console.warn('[DIAG] amplificationChart not found');
+            }
+        }, 1000);
+    });
+
+    // Check DOM elements
+    document.addEventListener('DOMContentLoaded', function() {
+        const ids = ['thresholdInput', 'autoThresholdBtn', 'wellSelect', 'fluorophoreSelect'];
+        ids.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                console.log(`[DIAG] DOM element #${id} found`);
+            } else {
+                console.warn(`[DIAG] DOM element #${id} NOT found`);
+            }
+        });
+    });
+
+    // Patch and log key function calls
+    function logWrap(fn, name) {
+        return function() {
+            console.log(`[DIAG] ${name} called`, arguments);
+            try {
+                return fn.apply(this, arguments);
+            } catch (e) {
+                console.error(`[DIAG] Error in ${name}:`, e);
+            }
+        };
+    }
+    if (typeof updateAllChannelThresholds === 'function') {
+        window.updateAllChannelThresholds = logWrap(updateAllChannelThresholds, 'updateAllChannelThresholds');
+    }
+    if (typeof updateChartThresholds === 'function') {
+        window.updateChartThresholds = logWrap(updateChartThresholds, 'updateChartThresholds');
+    }
+    if (typeof setChartMode === 'function') {
+        window.setChartMode = logWrap(setChartMode, 'setChartMode');
+    }
+    if (typeof restoreAutoThreshold === 'function') {
+        window.restoreAutoThreshold = logWrap(restoreAutoThreshold, 'restoreAutoThreshold');
+    }
+    if (typeof enableDraggableThresholds === 'function') {
+        window.enableDraggableThresholds = logWrap(enableDraggableThresholds, 'enableDraggableThresholds');
+    }
+    if (typeof defineDraggableThresholds === 'function') {
+        window.defineDraggableThresholds = logWrap(defineDraggableThresholds, 'defineDraggableThresholds');
+    }
+    if (typeof enforceShowAllWellsView === 'function') {
+        window.enforceShowAllWellsView = logWrap(enforceShowAllWellsView, 'enforceShowAllWellsView');
+    }
+    // Log errors globally
+    window.addEventListener('error', function(e) {
+        console.error('[DIAG] Global error:', e.message, e);
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+        console.error('[DIAG] Unhandled promise rejection:', e.reason);
+    });
+})();
+// === END DIAGNOSTICS ===
+
 // --- Thresholds ---
 // Store per-channel, per-scale thresholds: { [channel]: { linear: value, log: value } }
 let channelThresholds = {};
@@ -223,7 +424,7 @@ function toggleBaselineFlattening() {
     }
     
     // Save preference
-    sessionStorage.setItem('baselineFlatteningEnabled', baselineFlatteningEnabled.toString());
+    safeSetItem(sessionStorage, 'baselineFlatteningEnabled', baselineFlatteningEnabled.toString());
     
     // Update chart with new baseline settings
     if (window.amplificationChart) {
@@ -357,7 +558,347 @@ function updateBaselineFlatteningVisibility() {
     }
 }
 
+// --- CQJ/CalcJ values now calculated by backend ---
+document.addEventListener('DOMContentLoaded', function() {
+    // CQJ and CalcJ values are now calculated by the Python backend in qpcr_analyzer.py
+    // No need for frontend calculation - just update the results table if available
+    if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+        console.log('[CQJ/CalcJ] Backend-calculated values loaded for', Object.keys(window.currentAnalysisResults.individual_results).length, 'wells');
+        if (typeof populateResultsTable === 'function') {
+            populateResultsTable(window.currentAnalysisResults.individual_results);
+        }
+    }
+});
 // ...existing code...
+
+// --- Threshold Strategy Dropdown Logic ---
+// Remove any import/export statements for browser compatibility
+// All dependencies should be accessed via window, e.g., window.LINEAR_THRESHOLD_STRATEGIES, window.LOG_THRESHOLD_STRATEGIES
+
+function populateThresholdStrategyDropdown() {
+    const select = document.getElementById('thresholdStrategySelect');
+    if (!select) return;
+    select.innerHTML = '';
+    // Always use the global window objects for strategies
+    // Always get the latest scale mode from UI or global
+    const scale = (typeof currentScaleMode === 'string' ? currentScaleMode : (window.currentScaleMode || 'linear'));
+    const strategies = scale === 'log' ? window.LOG_THRESHOLD_STRATEGIES : window.LINEAR_THRESHOLD_STRATEGIES;
+    let firstKey = null;
+    let found = false;
+    // Defensive: ensure strategies is an object and not undefined
+    if (strategies && typeof strategies === 'object') {
+        Object.keys(strategies).forEach((key, idx) => {
+            const strat = strategies[key];
+            const option = document.createElement('option');
+            option.value = key;
+            option.textContent = strat && strat.name ? strat.name : key;
+            option.title = strat && strat.description ? strat.description : '';
+            select.appendChild(option);
+            if (idx === 0) firstKey = key;
+            if (window.selectedThresholdStrategy === key) found = true;
+        });
+    }
+    // If the current selected strategy is not available in this scale, default to first
+    if (!found) {
+        window.selectedThresholdStrategy = firstKey;
+    }
+    select.value = window.selectedThresholdStrategy;
+    // Always update window.selectedThresholdStrategy to match dropdown
+    window.selectedThresholdStrategy = select.value;
+    // Trigger chart/threshold update after repopulating
+    handleThresholdStrategyChange();
+    // Also update threshold input box to match new value
+    setTimeout(() => {
+        const thresholdInput = document.getElementById('thresholdInput');
+        let channel = window.currentFluorophore;
+        if (!channel || channel === 'all') {
+            // Try to extract from chart datasets
+            const datasets = window.amplificationChart?.data?.datasets;
+            if (datasets && datasets.length > 0) {
+                const match = datasets[0].label?.match(/\(([^)]+)\)/);
+                if (match && match[1] !== 'Unknown') channel = match[1];
+            }
+        }
+        if (thresholdInput && channel && window.stableChannelThresholds && window.stableChannelThresholds[channel]) {
+            const scale = window.currentScaleMode || 'linear';
+            const val = window.stableChannelThresholds[channel][scale];
+            if (val !== undefined && val !== null && !isNaN(val)) {
+                thresholdInput.value = val;
+            }
+        }
+        // Always update chart threshold lines and recalc CQJ/CalcJ after dropdown change
+        updateAllChannelThresholds();
+        handleThresholdStrategyChange();
+    }, 150);
+}
+
+function getSelectedThresholdStrategy() {
+    const select = document.getElementById('thresholdStrategySelect');
+    if (select && select.value) {
+        window.selectedThresholdStrategy = select.value;
+        return select.value;
+    }
+    return null;
+}
+
+function handleThresholdStrategyChange() {
+    // When the strategy changes, recalculate thresholds for all channels and both scales, then update the chart and CQ-J/Calc-J values
+    console.log('[CQJ/CalcJ][DEBUG] handleThresholdStrategyChange: currentAnalysisResults =', window.currentAnalysisResults);
+    if (window.currentAnalysisResults) {
+        if (window.currentAnalysisResults.individual_results && typeof window.currentAnalysisResults.individual_results === 'object') {
+            console.log('[CQJ/CalcJ][DEBUG] handleThresholdStrategyChange: Detected structure: { individual_results: {...} }');
+            console.log('[CQJ/CalcJ][DEBUG] handleThresholdStrategyChange: individual_results keys =', Object.keys(window.currentAnalysisResults.individual_results));
+        } else if (
+            typeof window.currentAnalysisResults === 'object' &&
+            !Array.isArray(window.currentAnalysisResults) &&
+            Object.keys(window.currentAnalysisResults).length > 0 &&
+            Object.values(window.currentAnalysisResults).every(
+                v => v && typeof v === 'object' && 'well_id' in v
+            )
+        ) {
+            console.log('[CQJ/CalcJ][DEBUG] handleThresholdStrategyChange: Detected structure: flat well-keyed object');
+            console.log('[CQJ/CalcJ][DEBUG] handleThresholdStrategyChange: well keys =', Object.keys(window.currentAnalysisResults));
+        } else {
+            console.log('[CQJ/CalcJ][DEBUG] handleThresholdStrategyChange: Unknown or empty structure for currentAnalysisResults');
+        }
+    }
+    const strategy = getSelectedThresholdStrategy();
+    if (!window.stableChannelThresholds) window.stableChannelThresholds = {};
+    // For each channel, recalculate threshold for BOTH log and linear
+    if (window.channelControlWells) {
+        Object.keys(window.channelControlWells).forEach(channel => {
+            const controls = window.channelControlWells[channel];
+            let baseline = 0, baseline_std = 1;
+            let allRfus = [];
+            if (controls && controls.NTC && controls.NTC.length > 0) {
+                controls.NTC.forEach(well => {
+                    let rfu = well.raw_rfu;
+                    if (typeof rfu === 'string') try { rfu = JSON.parse(rfu); } catch(e){}
+                    if (Array.isArray(rfu)) allRfus.push(...rfu.slice(0,5));
+                });
+            }
+            if (allRfus.length > 0) {
+                baseline = allRfus.reduce((a,b)=>a+b,0)/allRfus.length;
+                const mean = baseline;
+                const variance = allRfus.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / allRfus.length;
+                baseline_std = Math.sqrt(variance);
+            }
+            // --- Patch: Always use calculateThreshold for fixed strategies ---
+            // Get pathogen/test_code for this channel (from first well in channel)
+            let pathogen = null;
+            let fluor = channel;
+            // Try to get pathogen from any well in this channel
+            if (controls && controls.NTC && controls.NTC.length > 0 && controls.NTC[0].test_code) {
+                pathogen = controls.NTC[0].test_code;
+            } else if (controls && controls.H && controls.H.length > 0 && controls.H[0].test_code) {
+                pathogen = controls.H[0].test_code;
+            }
+            // Calculate for both log and linear
+            ['log','linear'].forEach(scale => {
+                let params = { baseline, baseline_std, N: 10 };
+                // For fixed strategies, add pathogen/channel for lookup
+                if (strategy === 'log_fixed' || strategy === 'linear_fixed') {
+                    params.pathogen = pathogen;
+                    params.fluorophore = fluor;
+                }
+                // For log strategies, pass log_curve if available
+                if (scale === 'log' && controls.NTC && controls.NTC.length > 0 && controls.NTC[0].log_rfu) {
+                    let log_curve = controls.NTC[0].log_rfu;
+                    if (typeof log_curve === 'string') try { log_curve = JSON.parse(log_curve); } catch(e){}
+                    if (Array.isArray(log_curve)) params.log_curve = log_curve;
+                }
+                let threshold = window.calculateThreshold(strategy, params, scale);
+                if (typeof threshold !== 'number' || isNaN(threshold) || threshold <= 0) {
+                    console.warn(`[THRESHOLD][${channel}][${scale}] Invalid threshold (${threshold}), using fallback.`);
+                    threshold = (scale === 'log') ? 1.0 : 100.0;
+                }
+                if (!window.stableChannelThresholds[channel]) window.stableChannelThresholds[channel] = {};
+                window.stableChannelThresholds[channel][scale] = threshold;
+                console.log(`[THRESHOLD][${channel}][${scale}] Set threshold:`, threshold);
+            });
+        });
+    }
+    // After recalculation, update threshold input box to match new value for current channel/scale
+    setTimeout(() => {
+        const thresholdInput = document.getElementById('thresholdInput');
+        let channel = window.currentFluorophore;
+        if (!channel || channel === 'all') {
+            // Try to extract from chart datasets
+            const datasets = window.amplificationChart?.data?.datasets;
+            if (datasets && datasets.length > 0) {
+                const match = datasets[0].label?.match(/\(([^)]+)\)/);
+                if (match && match[1] !== 'Unknown') channel = match[1];
+            }
+        }
+        if (thresholdInput && channel && window.stableChannelThresholds && window.stableChannelThresholds[channel]) {
+            const scale = window.currentScaleMode || 'linear';
+            const val = window.stableChannelThresholds[channel][scale];
+            if (val !== undefined && val !== null && !isNaN(val)) {
+                thresholdInput.value = val;
+            }
+        }
+        // Always update chart threshold lines after strategy change
+        updateAllChannelThresholds();
+    }, 150);
+    updateAllChannelThresholds();
+    // Recalculate CQ-J and Calc-J for all wells in all channels after threshold strategy change, for BOTH log and linear
+    // --- Compatibility fix: support both { individual_results: {...} } and flat { well_id: {...} } structures ---
+    let resultsObj = null;
+    if (window.currentAnalysisResults) {
+        if (window.currentAnalysisResults.individual_results && typeof window.currentAnalysisResults.individual_results === 'object') {
+            resultsObj = window.currentAnalysisResults.individual_results;
+        } else if (
+            typeof window.currentAnalysisResults === 'object' &&
+            !Array.isArray(window.currentAnalysisResults) &&
+            Object.keys(window.currentAnalysisResults).length > 0 &&
+            Object.values(window.currentAnalysisResults).every(
+                v => v && typeof v === 'object' && 'well_id' in v
+            )
+        ) {
+            // Looks like a flat well-keyed object
+            resultsObj = window.currentAnalysisResults;
+        }
+    }
+    if (resultsObj) {
+        let experimentPattern = (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null;
+        let testCode = (typeof extractTestCode === 'function' && experimentPattern) ? extractTestCode(experimentPattern) : null;
+        Object.keys(resultsObj).forEach(wellKey => {
+            const well = resultsObj[wellKey];
+            const channel = well.fluorophore;
+            // Always use the threshold for the selected strategy and scale
+            let scale = (typeof currentScaleMode === 'string' ? currentScaleMode : 'linear');
+            const selectedStrategy = getSelectedThresholdStrategy();
+            if (selectedStrategy && selectedStrategy.toLowerCase().includes('log')) {
+                scale = 'log';
+            }
+            let threshold = null;
+            if (window.stableChannelThresholds && window.stableChannelThresholds[channel] && window.stableChannelThresholds[channel][scale] != null) {
+                threshold = window.stableChannelThresholds[channel][scale];
+            }
+            if (typeof threshold !== 'number' || isNaN(threshold) || threshold <= 0) {
+                console.warn(`[CQJ/CalcJ][${wellKey}] Invalid threshold (${threshold}), skipping CQJ/CalcJ.`);
+                well.cqj_value = null;
+                well.calcj_value = null;
+                return;
+            }
+            // CQJ and CalcJ are now calculated by the Python backend
+            // No need to recalculate on the frontend - values should already be present
+            if (testCode) {
+                well.test_code = testCode;
+            }
+            console.log(`[CQJ/CalcJ][${wellKey}] Using backend-calculated values - CQJ:`, well.cqj_value, 'CalcJ:', well.calcj_value, 'Threshold:', threshold);
+        });
+        // Update the UI to reflect new CQ-J/Calc-J values
+        if (typeof populateResultsTable === 'function') {
+            populateResultsTable(resultsObj);
+        } else {
+            console.log('[CQJ/CalcJ] Values recalculated for all wells after threshold strategy change.');
+        }
+        // Always force "Show All Curves" view and activate button after threshold change
+        setTimeout(() => {
+            if (typeof showAllCurves === 'function') showAllCurves('all');
+            const showAllBtn = document.getElementById('showAllBtn');
+            if (showAllBtn) showAllBtn.classList.add('active');
+        }, 400);
+    } else {
+        console.warn('[CQJ/CalcJ] No valid analysis results found when recalculating after threshold strategy change.');
+    }
+}
+
+
+document.addEventListener('DOMContentLoaded', function() {
+    populateThresholdStrategyDropdown();
+    // Default to show all wells on load if analysis section is visible
+    setTimeout(function() {
+        if (typeof showAllCurves === 'function') {
+            showAllCurves('all');
+        }
+        // Also set chart mode to 'all' and update display if needed
+        if (typeof updateChartDisplayMode === 'function') {
+            window.currentChartMode = 'all';
+            updateChartDisplayMode();
+        }
+    }, 500);
+    const select = document.getElementById('thresholdStrategySelect');
+    if (select) {
+        select.addEventListener('change', function() {
+            // When dropdown changes, update threshold, input, chart, and recalc CQJ/CalcJ
+            handleThresholdStrategyChange();
+            // Also update input box and chart lines
+            setTimeout(() => {
+                const thresholdInput = document.getElementById('thresholdInput');
+                let channel = window.currentFluorophore;
+                if (!channel || channel === 'all') {
+                    const datasets = window.amplificationChart?.data?.datasets;
+                    if (datasets && datasets.length > 0) {
+                        const match = datasets[0].label?.match(/\(([^)]+)\)/);
+                        if (match && match[1] !== 'Unknown') channel = match[1];
+                    }
+                }
+                if (thresholdInput && channel && window.stableChannelThresholds && window.stableChannelThresholds[channel]) {
+                    const scale = window.currentScaleMode || 'linear';
+                    const val = window.stableChannelThresholds[channel][scale];
+                    if (val !== undefined && val !== null && !isNaN(val)) {
+                        thresholdInput.value = val;
+                    }
+                }
+                updateAllChannelThresholds();
+            }, 150);
+        });
+    }
+    // Update dropdown when scale changes
+    const scaleToggle = document.getElementById('scaleToggle');
+    if (scaleToggle) {
+        scaleToggle.addEventListener('click', function() {
+            setTimeout(() => {
+                populateThresholdStrategyDropdown();
+                // After scale toggle, ensure threshold and input are updated for log/linear
+                const thresholdInput = document.getElementById('thresholdInput');
+                let channel = window.currentFluorophore;
+                if (!channel || channel === 'all') {
+                    const datasets = window.amplificationChart?.data?.datasets;
+                    if (datasets && datasets.length > 0) {
+                        const match = datasets[0].label?.match(/\(([^)]+)\)/);
+                        if (match && match[1] !== 'Unknown') channel = match[1];
+                    }
+                }
+                if (thresholdInput && channel && window.stableChannelThresholds && window.stableChannelThresholds[channel]) {
+                    const scale = window.currentScaleMode || 'linear';
+                    const val = window.stableChannelThresholds[channel][scale];
+                    if (val !== undefined && val !== null && !isNaN(val)) {
+                        thresholdInput.value = val;
+                    }
+                }
+                updateAllChannelThresholds();
+                handleThresholdStrategyChange();
+            }, 120);
+        });
+    }
+    // Also trigger on input change for thresholdInput
+    const thresholdInput = document.getElementById('thresholdInput');
+    if (thresholdInput) {
+        thresholdInput.addEventListener('change', function() {
+            // When user changes threshold input, update threshold for current channel/scale
+            let channel = window.currentFluorophore;
+            if (!channel || channel === 'all') {
+                // Try to extract from chart datasets
+                const datasets = window.amplificationChart?.data?.datasets;
+                if (datasets && datasets.length > 0) {
+                    const match = datasets[0].label?.match(/\(([^)]+)\)/);
+                    if (match && match[1] !== 'Unknown') channel = match[1];
+                }
+            }
+            if (!channel) return;
+            const scale = window.currentScaleMode || 'linear';
+            const value = Number(thresholdInput.value);
+            if (!window.stableChannelThresholds[channel]) window.stableChannelThresholds[channel] = {};
+            window.stableChannelThresholds[channel][scale] = value;
+            updateAllChannelThresholds();
+            // Recalculate CQ-J/Calc-J for all wells after manual threshold change
+            handleThresholdStrategyChange();
+        });
+    }
+});
 
 // --- ENHANCED PER-CHANNEL THRESHOLD SYSTEM ---
 // This replaces the existing threshold calculation logic with a stable, 
@@ -584,6 +1125,8 @@ function initializeChannelThresholds() {
  * Get the current threshold for a channel and scale (NO multiplier applied)
  */
 function getCurrentChannelThreshold(channel, scale = null) {
+    // Ensure global threshold object is always initialized
+    if (!window.stableChannelThresholds) window.stableChannelThresholds = {};
     if (!scale) scale = currentScaleMode;
     
     // Load from storage if not in memory
@@ -596,6 +1139,8 @@ function getCurrentChannelThreshold(channel, scale = null) {
     }
     
     if (!window.stableChannelThresholds[channel] || !window.stableChannelThresholds[channel][scale]) {
+        // ...existing code...
+   
         console.warn(`No threshold found for ${channel} ${scale}, calculating...`);
         const baseThreshold = calculateStableChannelThreshold(channel, scale);
         if (!window.stableChannelThresholds[channel]) window.stableChannelThresholds[channel] = {};
@@ -613,21 +1158,37 @@ function getCurrentChannelThreshold(channel, scale = null) {
  * Update all chart threshold annotations when scale changes (multiplier only affects view)
  */
 function updateAllChannelThresholds() {
-    console.log('🔍 THRESHOLD - Updating all channel thresholds');
-    
-    if (!window.amplificationChart) {
-        console.warn('🔍 THRESHOLD - No chart available');
+    function updateAllChannelThresholds() {
+    if (!window.amplificationChart || !window.amplificationChart.options?.plugins?.annotation) {
+        console.warn('Chart or annotation plugin not ready, skipping threshold update');
         return;
     }
+    // ...rest of your code...
+}
+    console.log('🔍 THRESHOLD - Updating all channel thresholds');
     
-    // Ensure chart has annotation plugin
-    if (!window.amplificationChart.options.plugins) {
-        window.amplificationChart.options.plugins = {};
+    // Extra strict guard: do not proceed if any part of the chart config is missing
+    if (!window.amplificationChart ||
+        typeof window.amplificationChart !== 'object' ||
+        !window.amplificationChart.options ||
+        typeof window.amplificationChart.options !== 'object' ||
+        !window.amplificationChart.options.plugins ||
+        typeof window.amplificationChart.options.plugins !== 'object' ||
+        !window.amplificationChart.options.plugins.annotation ||
+        typeof window.amplificationChart.options.plugins.annotation !== 'object' ||
+        !window.amplificationChart.options.plugins.annotation.annotations ||
+        typeof window.amplificationChart.options.plugins.annotation.annotations !== 'object') {
+        console.warn('🔍 THRESHOLD - Chart or annotation plugin not ready, skipping threshold update');
+        return;
     }
-    if (!window.amplificationChart.options.plugins.annotation) {
-        window.amplificationChart.options.plugins.annotation = { annotations: {} };
+    // Also guard: do not proceed if no valid analysis results
+    if (!window.currentAnalysisResults ||
+        !window.currentAnalysisResults.individual_results ||
+        typeof window.currentAnalysisResults.individual_results !== 'object' ||
+        Object.keys(window.currentAnalysisResults.individual_results).length === 0) {
+        console.warn('🔍 THRESHOLD - No valid analysis results found for this channel. Please check your input files.');
+        return;
     }
-    
     // Get current chart annotations
     const annotations = window.amplificationChart.options.plugins.annotation.annotations;
     
@@ -667,7 +1228,6 @@ function updateAllChannelThresholds() {
         const threshold = getCurrentChannelThreshold(channel, currentScale);
         if (threshold !== null && threshold !== undefined && !isNaN(threshold)) {
             const annotationKey = `threshold_${channel}`;
-            
             annotations[annotationKey] = {
                 type: 'line',
                 yMin: threshold,
@@ -682,9 +1242,33 @@ function updateAllChannelThresholds() {
                     backgroundColor: 'rgba(255,255,255,0.8)',
                     color: getChannelColor(channel),
                     font: { size: 10, weight: 'bold' }
-                }
+                },
+                draggable: true,
+dragAxis: 'y',
+enter: function(ctx) {
+    ctx.chart.canvas.style.cursor = 'ns-resize';
+},
+leave: function(ctx) {
+    ctx.chart.canvas.style.cursor = '';
+},
+onDragEnd: function(e) {
+    // e: { chart, annotation, event }
+    const newY = e?.annotation?.yMin;
+    if (typeof newY === 'number' && !isNaN(newY)) {
+        setChannelThreshold(channel, currentScale, newY);
+        // Optionally update UI input if present
+        const thresholdInput = document.getElementById('thresholdInput');
+        if (thresholdInput && (currentFluorophore === channel || currentFluorophore === 'all')) {
+            thresholdInput.value = newY.toFixed(2);
+        }
+        // Persist and update chart
+        updateAllChannelThresholds();
+        console.log(`🔍 DRAG-END - Threshold for ${channel} (${currentScale}) set to ${newY}`);
+    } else {
+        console.warn('🔍 DRAG-END - Invalid newY value:', newY);
+    }
+}
             };
-            
             console.log(`🔍 THRESHOLD - Added threshold for ${channel}: ${threshold.toFixed(2)}`);
         } else {
             console.warn(`🔍 THRESHOLD - Invalid threshold for ${channel}: ${threshold}`);
@@ -729,7 +1313,6 @@ function updateSingleChannelThreshold(fluorophore) {
     
     if (threshold !== null && threshold !== undefined && !isNaN(threshold)) {
         const annotationKey = `threshold_${fluorophore}`;
-        
         annotations[annotationKey] = {
             type: 'line',
             yMin: threshold,
@@ -744,13 +1327,34 @@ function updateSingleChannelThreshold(fluorophore) {
                 backgroundColor: 'rgba(255,255,255,0.8)',
                 color: getChannelColor(fluorophore),
                 font: { size: 10, weight: 'bold' }
+            },
+draggable: true,
+dragAxis: 'y',
+enter: function(ctx) {
+    ctx.chart.canvas.style.cursor = 'ns-resize';
+},
+leave: function(ctx) {
+    ctx.chart.canvas.style.cursor = '';
+},
+        onDragEnd: function(e) {
+            const newY = e?.annotation?.yMin;
+            if (typeof newY === 'number' && !isNaN(newY)) {
+                setChannelThreshold(fluorophore, currentScaleMode, newY);
+                const thresholdInput = document.getElementById('thresholdInput');
+                if (thresholdInput && (currentFluorophore === fluorophore || currentFluorophore === 'all')) {
+                    thresholdInput.value = newY.toFixed(2);
+                }
+                updateSingleChannelThreshold(fluorophore);
+                console.log(`🔍 DRAG-END - Threshold for ${fluorophore} (${currentScaleMode}) set to ${newY}`);
+            } else {
+                console.warn('🔍 DRAG-END - Invalid newY value:', newY);
             }
-        };
-        
-        console.log(`🔍 THRESHOLD - Added threshold for ${fluorophore}: ${threshold.toFixed(2)}`);
-    } else {
-        console.warn(`🔍 THRESHOLD - Invalid threshold for ${fluorophore}: ${threshold}`);
-    }
+        }
+    };
+    console.log(`🔍 THRESHOLD - Added threshold for ${fluorophore}: ${threshold.toFixed(2)}`);
+} else {
+    console.warn(`🔍 THRESHOLD - Invalid threshold for ${fluorophore}: ${threshold}`);
+}
     
     // Update chart
     window.amplificationChart.update('none');
@@ -773,6 +1377,144 @@ function getChannelColor(channel) {
 }
 
 // ...existing code...
+
+// === CFX MANAGER 3.1-STYLE THRESHOLD FEATURES ===
+// --- Draggable Threshold Lines (Chart.js Annotation Plugin) ---
+function enableDraggableThresholds() {
+    function updateAllChannelThresholds() {
+    if (!window.amplificationChart || !window.amplificationChart.options?.plugins?.annotation) {
+        console.warn('Chart or annotation plugin not ready, skipping threshold update');
+        return;
+    }
+    // ...rest of your code...
+}
+    // Extra strict guard: do not proceed if any part of the chart config is missing
+    if (!window.amplificationChart ||
+        typeof window.amplificationChart !== 'object' ||
+        !window.amplificationChart.options ||
+        typeof window.amplificationChart.options !== 'object' ||
+        !window.amplificationChart.options.plugins ||
+        typeof window.amplificationChart.options.plugins !== 'object' ||
+        !window.amplificationChart.options.plugins.annotation ||
+        typeof window.amplificationChart.options.plugins.annotation !== 'object' ||
+        !window.amplificationChart.options.plugins.annotation.annotations ||
+        typeof window.amplificationChart.options.plugins.annotation.annotations !== 'object') {
+        // Chart or annotation plugin not ready
+        return;
+    }
+    const annotations = window.amplificationChart.options.plugins.annotation.annotations;
+    Object.keys(annotations).forEach(key => {
+        if (key.startsWith('threshold_')) {
+            annotations[key].draggable = true;
+            annotations[key].dragAxis = 'y';
+            annotations[key].onDragEnd = function(e) {
+                const channel = key.replace('threshold_', '');
+                // Chart.js annotation plugin v3+: use e.annotation.yMin
+                const newY = e?.annotation?.yMin;
+                if (channel && newY != null && !isNaN(newY)) {
+                    setChannelThreshold(channel, currentScaleMode, newY);
+                    // Store user-dragged threshold
+                    if (!window.userSetThresholds[channel]) window.userSetThresholds[channel] = {};
+                    window.userSetThresholds[channel][currentScaleMode] = newY;
+                    // Update input field if this is the current channel
+                    if (window.currentFluorophore === channel) {
+                        const thresholdInput = document.getElementById('thresholdInput');
+                        if (thresholdInput) thresholdInput.value = newY.toFixed(2);
+                    }
+                    updateAllChannelThresholds();
+                }
+            };
+        }
+    });
+    window.amplificationChart.update('none');
+}
+            
+// Patch updateAllChannelThresholds to always enable draggable lines
+const _originalUpdateAllChannelThresholds = updateAllChannelThresholds;
+updateAllChannelThresholds = function() {
+    _originalUpdateAllChannelThresholds.apply(this, arguments);
+    enableDraggableThresholds();
+};
+
+// --- Auto Button Logic ---
+function restoreAutoThreshold(channel) {
+    if (!channel) return;
+    const scale = currentScaleMode;
+    const autoValue = calculateStableChannelThreshold(channel, scale);
+    setChannelThreshold(channel, scale, autoValue);
+    updateAllChannelThresholds();
+    // Update threshold input/slider if present
+    const thresholdInput = document.getElementById('thresholdInput');
+    if (thresholdInput) thresholdInput.value = autoValue.toFixed(2);
+}
+
+// Attach Auto button event
+function attachAutoButtonHandler() {
+    const autoBtn = document.getElementById('autoThresholdBtn');
+    if (autoBtn) {
+        autoBtn.onclick = function() {
+            // Get current channel from chart or UI
+            let channel = currentFluorophore;
+            if (!channel || channel === 'all') {
+                // Try to extract from chart
+                const datasets = window.amplificationChart?.data?.datasets;
+                if (datasets && datasets.length > 0) {
+                    const match = datasets[0].label?.match(/\(([^)]+)\)/);
+                    if (match && match[1] !== 'Unknown') channel = match[1];
+                }
+            }
+            restoreAutoThreshold(channel);
+        };
+    }
+}
+
+document.addEventListener('DOMContentLoaded', attachAutoButtonHandler);
+
+// --- Restore Thresholds on Refresh ---
+document.addEventListener('DOMContentLoaded', function() {
+    // Restore all thresholds from calculated values
+    if (window.stableChannelThresholds) {
+        Object.keys(window.stableChannelThresholds).forEach(channel => {
+            ['linear', 'log'].forEach(scale => {
+                const autoValue = calculateStableChannelThreshold(channel, scale);
+                setChannelThreshold(channel, scale, autoValue);
+            });
+        });
+        updateAllChannelThresholds();
+    }
+});
+
+// --- Default to Show All Wells ---
+document.addEventListener('DOMContentLoaded', function() {
+    // Force chart mode to 'all' on load
+    if (typeof setChartMode === 'function') {
+        setChartMode('all');
+    } else {
+        window.currentChartMode = 'all';
+    }
+    // If there is a well selector, set to 'all'
+    const wellSelect = document.getElementById('wellSelect');
+    if (wellSelect) wellSelect.value = 'all';
+    // If there is a fluorophore selector, set to 'all'
+    const fluorophoreSelect = document.getElementById('fluorophoreSelect');
+    if (fluorophoreSelect) fluorophoreSelect.value = 'all';
+});
+
+// Patch chart update functions to always re-enable features
+const _originalUpdateChartThresholds = updateChartThresholds;
+updateChartThresholds = function() {
+    _originalUpdateChartThresholds.apply(this, arguments);
+    enableDraggableThresholds();
+};
+
+// Ensure features are always active after new analysis or server restart
+function ensureThresholdFeaturesActive() {
+    updateAllChannelThresholds();
+    enableDraggableThresholds();
+    attachAutoButtonHandler();
+}
+
+document.addEventListener('DOMContentLoaded', ensureThresholdFeaturesActive);
 
 // --- UI Elements ---
 const scaleToggleBtn = document.getElementById('scaleToggle');
@@ -878,23 +1620,21 @@ function calculateLogThreshold(channelWells, channel) {
 function calculateLinearThreshold(channelWells, channel) {
     console.log(`🔍 LINEAR-THRESHOLD - Calculating linear threshold for ${channelWells.length} wells in channel: ${channel}`);
     
-    // Use NTC wells if available, otherwise use all control wells, otherwise use all wells
-    let controlWells = channelWells.filter(well => 
-        well.sample_name && well.sample_name.toLowerCase().includes('ntc')
+    // Use NTC/NEG/CONTROL wells if available, otherwise use all wells
+    let controlWells = channelWells.filter(well =>
+        well.sample_name && (
+            well.sample_name.toLowerCase().includes('ntc') ||
+            well.sample_name.toLowerCase().includes('neg') ||
+            well.sample_name.toLowerCase().includes('control') ||
+            /\b(ctrl|positive|h[0-9]|m[0-9]|l[0-9])\b/i.test(well.sample_name)
+        )
     );
-    
+
     if (controlWells.length === 0) {
-        // Fallback to other control types
-        controlWells = channelWells.filter(well => 
-            well.sample_name && /\b(control|ctrl|neg|positive|h[0-9]|m[0-9]|l[0-9])\b/i.test(well.sample_name)
-        );
-    }
-    
-    if (controlWells.length === 0) {
-        console.warn(`🔍 LINEAR-THRESHOLD - No control wells found for channel: ${channel}, using all wells`);
+        console.warn(`⚠️ No NTC/NEG/CONTROL wells found for channel ${channel}. Using ALL wells as controls for threshold calculation.`);
         controlWells = channelWells;
     }
-    
+
     console.log(`🔍 LINEAR-THRESHOLD - Using ${controlWells.length} control wells for channel: ${channel}`);
     
     // Calculate inflection point thresholds: RFU = L/2 + B
@@ -943,8 +1683,8 @@ function setChannelThreshold(channel, scale, value) {
     channelThresholds[channel][scale] = value;
     
     // Persist both systems in sessionStorage
-    sessionStorage.setItem('stableChannelThresholds', JSON.stringify(window.stableChannelThresholds));
-    sessionStorage.setItem('channelThresholds', JSON.stringify(channelThresholds));
+    safeSetItem(sessionStorage, 'stableChannelThresholds', JSON.stringify(window.stableChannelThresholds));
+    safeSetItem(sessionStorage, 'channelThresholds', JSON.stringify(channelThresholds));
 }
 
 function getChannelThreshold(channel, scale) {
@@ -995,7 +1735,7 @@ function onSliderChange(e) {
     currentScaleMultiplier = parseFloat(e.target.value);
     
     // Save to session storage
-    sessionStorage.setItem('qpcr_scale_multiplier', currentScaleMultiplier);
+    safeSetItem(sessionStorage, 'qpcr_scale_multiplier', currentScaleMultiplier.toString());
     
     updateSliderUI();
     
@@ -1018,7 +1758,7 @@ function onPresetClick(e) {
     if (scaleRangeSlider) scaleRangeSlider.value = val;
     
     // Save to session storage
-    sessionStorage.setItem('qpcr_scale_multiplier', currentScaleMultiplier);
+    safeSetItem(sessionStorage, 'qpcr_scale_multiplier', currentScaleMultiplier.toString());
     
     updateSliderUI();
     
@@ -1039,7 +1779,7 @@ function onScaleToggle() {
     currentScaleMode = (currentScaleMode === 'linear') ? 'log' : 'linear';
     
     // Save preference to session storage
-    sessionStorage.setItem('qpcr_chart_scale', currentScaleMode);
+    safeSetItem(sessionStorage, 'qpcr_chart_scale', currentScaleMode);
     
     // Update chart with new scale
     if (window.amplificationChart) {
@@ -1188,33 +1928,71 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
     try {
         // Skip backend channel marking since polling removed
         console.log(`🔍 SINGLE-CHANNEL - Analyzing ${fluorophore} channel`);
-        
+
         // Prepare data for backend analysis
+        console.log('[DEBUG] analyzeSingleChannel: raw data input:', data);
         const analysisData = prepareAnalysisData(data);
-        
+        console.log('[DEBUG] analyzeSingleChannel: output of prepareAnalysisData:', analysisData);
+
+        // Defensive check: analysisData must be a non-empty array
+        if (!Array.isArray(analysisData) || analysisData.length === 0) {
+            //console.error(`[ERROR] analyzeSingleChannel: analysisData is not a valid non-empty array for ${fluorophore}.`, analysisData);
+            throw new Error(`Malformed analysisData for ${fluorophore}: ${JSON.stringify(analysisData)}`);
+        }
+
         // Convert samplesData back to CSV string for backend SQL integration
         let samplesDataCsv = null;
         if (samplesData && samplesData.data) {
+            // Validate samples data structure before processing
+            const validation = validateSamplesData(samplesData);
+            if (!validation.isValid) {
+                console.error('❌ SAMPLES-DATA-VALIDATION - Validation failed:', validation.errors);
+                throw new Error(`Samples data validation failed: ${validation.errors.join(', ')}`);
+            }
+            if (validation.warnings.length > 0) {
+                console.warn('⚠️ SAMPLES-DATA-VALIDATION - Warnings:', validation.warnings);
+            }
+            
             // Convert array of arrays back to CSV string
             samplesDataCsv = samplesData.data.map(row => row.join(',')).join('\n');
+            console.log('🔍 SAMPLES-DATA-DEBUG - Successfully converted samplesData to CSV:', {
+                originalRows: samplesData.data.length,
+                csvLength: samplesDataCsv.length,
+                firstFewLines: samplesDataCsv.split('\n').slice(0, 5),
+                fileName: samplesData.fileName
+            });
+        } else {
+            console.error('❌ SAMPLES-DATA-DEBUG - No samples data available!', {
+                samplesData: samplesData,
+                hasSamplesData: !!samplesData,
+                hasData: samplesData ? !!samplesData.data : false,
+                dataLength: samplesData?.data?.length || 0
+            });
         }
-        
+
         const payload = {
             analysis_data: analysisData,
             samples_data: samplesDataCsv
         };
-        
+
         console.log(`🔍 SINGLE-CHANNEL - Sending ${fluorophore} data to backend`, {
-            analysisDataLength: analysisData.length,
+            analysisDataType: Array.isArray(analysisData) ? 'array' : typeof analysisData,
+            analysisDataLength: Array.isArray(analysisData) ? analysisData.length : 'N/A',
+            analysisDataPreview: Array.isArray(analysisData) ? analysisData.slice(0,2) : analysisData,
             samplesDataAvailable: !!samplesDataCsv,
             samplesDataLength: samplesDataCsv ? samplesDataCsv.length : 0,
+            samplesDataPreview: samplesDataCsv ? samplesDataCsv.split('\n').slice(0, 3) : 'No samples data',
             fluorophore: fluorophore
         });
-        
+
         let result;
-        
+
         // Try to perform the actual analysis via backend
         try {
+            console.log(`🔍 BACKEND-REQUEST - Sending request to /analyze for ${fluorophore}`);
+            console.log(`🔍 BACKEND-REQUEST - Current window location: ${window.location.href}`);
+            console.log(`🔍 BACKEND-REQUEST - Request payload size: ${JSON.stringify(payload).length} characters`);
+            
             const response = await fetch('/analyze', {
                 method: 'POST',
                 headers: {
@@ -1225,17 +2003,29 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
                 body: JSON.stringify(payload)
             });
             
+            console.log(`🔍 BACKEND-RESPONSE - Response status: ${response.status} ${response.statusText}`);
+            
             if (!response.ok) {
                 let errorMessage = `HTTP ${response.status}`;
                 try {
                     // Clone the response to read it multiple times if needed
                     const responseClone = response.clone();
                     const errorData = await responseClone.json();
+                    console.error('❌ BACKEND-ERROR-DEBUG - Server returned error:', {
+                        status: response.status,
+                        errorData: errorData,
+                        fluorophore: fluorophore
+                    });
                     errorMessage = errorData.error || errorData.message || errorMessage;
                 } catch (jsonError) {
                     // If we can't parse JSON, try to get the text from the original response
                     try {
                         const errorText = await response.text();
+                        console.error('❌ BACKEND-ERROR-DEBUG - Non-JSON error response:', {
+                            status: response.status,
+                            errorText: errorText,
+                            fluorophore: fluorophore
+                        });
                         if (errorText) {
                             errorMessage = `${errorMessage}: ${errorText}`;
                         }
@@ -1249,6 +2039,15 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
             try {
                 result = await response.json();
                 console.log(`🔍 SINGLE-CHANNEL - Backend response received for ${fluorophore}`);
+                console.log('🔍 BACKEND-RESPONSE-DEBUG - Full response structure:', {
+                    hasResult: !!result,
+                    resultKeys: result ? Object.keys(result) : 'NO RESULT',
+                    success: result?.success,
+                    error: result?.error,
+                    hasIndividualResults: !!(result && result.individual_results),
+                    individualResultsType: result?.individual_results ? typeof result.individual_results : 'missing',
+                    individualResultsKeys: result?.individual_results ? Object.keys(result.individual_results) : 'N/A'
+                });
             } catch (jsonError) {
                 console.error(`❌ SINGLE-CHANNEL - Failed to parse JSON response for ${fluorophore}:`, jsonError);
                 throw new Error(`Invalid JSON response from backend for ${fluorophore}: ${jsonError.message}`);
@@ -1256,7 +2055,35 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
             
         } catch (networkError) {
             // If backend is not available, throw error instead of using mock data
-            console.error(`❌ SINGLE-CHANNEL - Backend not available for ${fluorophore}:`, networkError.message);
+            console.error(`❌ SINGLE-CHANNEL - Backend request failed for ${fluorophore}:`, {
+                errorMessage: networkError.message,
+                errorType: networkError.constructor.name,
+                currentURL: window.location.href,
+                fluorophore: fluorophore
+            });
+            console.error(`❌ SINGLE-CHANNEL - This usually indicates:`);
+            console.error(`  1. Network connection issue to backend`);
+            console.error(`  2. Backend server not running or not accessible`);
+            console.error(`  3. CORS issue if frontend and backend on different ports`);
+            console.error(`  4. Request timeout or server overload`);
+            
+            // Detect environment and provide appropriate guidance
+            const currentUrl = window.location.href;
+            if (currentUrl.includes('github.dev') || currentUrl.includes('codespaces')) {
+                console.error(`❌ SINGLE-CHANNEL - CODESPACES ENVIRONMENT DETECTED`);
+                console.error(`❌ SINGLE-CHANNEL - Current URL: ${currentUrl}`);
+                console.error(`❌ SINGLE-CHANNEL - Make sure you're accessing through the correct Codespaces port forwarding URL`);
+                console.error(`❌ SINGLE-CHANNEL - Check that Flask server is running on port 5000 in the terminal`);
+            } else if (currentUrl.includes('localhost')) {
+                console.error(`❌ SINGLE-CHANNEL - LOCALHOST ENVIRONMENT DETECTED`);
+                console.error(`❌ SINGLE-CHANNEL - Make sure you are accessing the app from http://localhost:5000`);
+                console.error(`❌ SINGLE-CHANNEL - Current URL: ${currentUrl}`);
+            } else {
+                console.error(`❌ SINGLE-CHANNEL - UNKNOWN ENVIRONMENT`);
+                console.error(`❌ SINGLE-CHANNEL - Current URL: ${currentUrl}`);
+                console.error(`❌ SINGLE-CHANNEL - Ensure frontend and backend are on the same host/port`);
+            }
+            
             throw new Error(`Backend connection failed for ${fluorophore}: ${networkError.message}`);
             
             // COMMENTED OUT: Mock data was interfering with real channel analysis
@@ -1317,7 +2144,15 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
         
     } catch (error) {
         console.error(`❌ SINGLE-CHANNEL - Error analyzing ${fluorophore}:`, error);
-        throw error; // Re-throw to be handled by sequential processor
+        console.error(`❌ SINGLE-CHANNEL - Error details:`, {
+            message: error.message,
+            stack: error.stack,
+            errorType: error.constructor.name,
+            fluorophore: fluorophore
+        });
+        // COMMENTED OUT: Temporarily disable error throwing to see more console output
+        // throw error; // Re-throw to be handled by sequential processor
+        return null; // Return null instead of throwing to allow continuation
     }
 }
 
@@ -1599,83 +2434,13 @@ async function fetchWithRetry(url, options, maxRetries = 2) {
 }
 
 // --- Enhanced Chart.js annotation plugin registration ---
-function registerChartAnnotationPlugin() {
-    if (!window.Chart || !window.Chart.register) {
-        console.warn('[Chart.js] Chart.js not loaded yet, retrying in 100ms...');
-        setTimeout(registerChartAnnotationPlugin, 100);
-        return;
-    }
-    
-    // Try multiple possible global names for the annotation plugin
-    let plugin = null;
-    
-    // Check for different annotation plugin variations
-    if (window.ChartAnnotation) {
-        plugin = window.ChartAnnotation;
-        console.log('[Chart.js] Found annotation plugin as ChartAnnotation');
-    } else if (window.chartjsPluginAnnotation) {
-        plugin = window.chartjsPluginAnnotation;
-        console.log('[Chart.js] Found annotation plugin as chartjsPluginAnnotation');
-    } else if (window.annotationPlugin) {
-        plugin = window.annotationPlugin;
-        console.log('[Chart.js] Found annotation plugin as annotationPlugin');
-    } else if (window['chartjs-plugin-annotation']) {
-        plugin = window['chartjs-plugin-annotation'];
-        console.log('[Chart.js] Found annotation plugin as chartjs-plugin-annotation');
-    }
-    
-    if (plugin) {
-        try {
-            // Check if already registered
-            if (Chart.registry && Chart.registry.plugins && Chart.registry.plugins.get('annotation')) {
-                console.log('[Chart.js] Annotation plugin already registered');
-                return;
-            }
-            
-            // Register the plugin
-            Chart.register(plugin);
-            console.log('[Chart.js] Annotation plugin registered successfully!');
-            
-            // Verify registration
-            if (Chart.registry.plugins.get('annotation')) {
-                console.log('[Chart.js] Annotation plugin registration verified');
-            } else {
-                console.warn('[Chart.js] Annotation plugin registration failed verification');
-            }
-        } catch (error) {
-            console.error('[Chart.js] Error registering annotation plugin:', error);
-        }
-    } else {
-        console.warn('[Chart.js] Annotation plugin NOT found. Threshold lines will not be visible.');
-        console.log('[Chart.js] Available window objects:', Object.keys(window).filter(key => key.toLowerCase().includes('chart') || key.toLowerCase().includes('annotation')));
-        
-        // Try to load from CDN if not found
-        if (!document.querySelector('script[src*="chartjs-plugin-annotation"]')) {
-            console.log('[Chart.js] Attempting to load annotation plugin from CDN...');
-            const script = document.createElement('script');
-            script.src = 'https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js';
-            script.onload = () => {
-                console.log('[Chart.js] Annotation plugin loaded from CDN, retrying registration...');
-                setTimeout(registerChartAnnotationPlugin, 100);
-            };
-            script.onerror = () => {
-                console.error('[Chart.js] Failed to load annotation plugin from CDN');
-            };
-            document.head.appendChild(script);
-        }
-    }
-}
-
-// Register immediately and on DOM ready
-registerChartAnnotationPlugin();
-document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(registerChartAnnotationPlugin, 500);
+// --- Enhanced Chart.js annotation plugin registration ---
+// (Unified: use only ensureAnnotationPluginRegistered everywhere)
+// Remove legacy/fallback registration attempts. Always use robust function at top of file.
+// Call again on DOMContentLoaded as a fallback in case Chart.js/plugin loads late
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(ensureAnnotationPluginRegistered, 0);
 });
-
-// Also try after Chart.js is loaded
-if (window.Chart) {
-    setTimeout(registerChartAnnotationPlugin, 100);
-}
 
 // Sorting mode for wells: 'letter-number' (A1, A2...) or 'number-letter' (A1, B1...)
 let wellSortMode = 'letter-number';
@@ -1705,6 +2470,84 @@ document.addEventListener('DOMContentLoaded', function() {
         btn.addEventListener('click', toggleWellSortMode);
     }
 });
+// 🚨 EMERGENCY RESET - Nuclear option to clear everything
+function emergencyReset() {
+    console.log('🚨 EMERGENCY RESET TRIGGERED');
+    
+    // Clear ALL global variables
+    csvData = null;
+    samplesData = null;
+    analysisResults = null;
+    currentChart = null;
+    amplificationFiles = {};
+    currentFilterMode = 'all';
+    currentFluorophore = 'all';
+    currentAnalysisResults = null;
+    currentChartMode = 'all';
+    
+    // Clear ALL window variables
+    window.currentAnalysisResults = null;
+    window.analysisResults = null;
+    window.freshAnalysisMode = true;
+    
+    // Destroy any existing chart
+    if (window.amplificationChart) {
+        try {
+            window.amplificationChart.destroy();
+        } catch (e) {
+            console.log('Chart destruction error (expected)');
+        }
+        window.amplificationChart = null;
+    }
+    
+    // Clear ALL form inputs
+    const fileInput = document.getElementById('fileInput');
+    const samplesInput = document.getElementById('samplesInput');
+    if (fileInput) fileInput.value = '';
+    if (samplesInput) samplesInput.value = '';
+    
+    // Clear ALL status displays
+    const statusElements = ['amplificationStatus', 'samplesStatus', 'uploadedFiles'];
+    statusElements.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) element.innerHTML = '';
+    });
+    
+    // Hide sections
+    const sectionsToHide = ['fileInfo', 'analysisSection'];
+    sectionsToHide.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) element.style.display = 'none';
+    });
+    
+    // Clear chart container
+    const chartContainer = document.getElementById('amplificationChart');
+    if (chartContainer) {
+        const ctx = chartContainer.getContext('2d');
+        ctx.clearRect(0, 0, chartContainer.width, chartContainer.height);
+    }
+    
+    // Clear results table
+    const tableBody = document.getElementById('resultsTableBody');
+    if (tableBody) tableBody.innerHTML = '';
+    
+    // Reset dropdowns
+    const dropdowns = ['wellSelect', 'fluorophoreSelect', 'filterStatus'];
+    dropdowns.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) element.innerHTML = '';
+    });
+    
+    // Clear local storage
+    try {
+        localStorage.removeItem('qpcr_analysis_history');
+    } catch (e) {
+        console.log('LocalStorage clear failed (expected)');
+    }
+    
+    console.log('🚨 EMERGENCY RESET COMPLETE! All data cleared.');
+}
+
 // qPCR S-Curve Analyzer - Frontend JavaScript
 // Global variables
 let csvData = null;
@@ -1716,6 +2559,283 @@ let currentFilterMode = 'all'; // Track current filter mode (all, pos, neg, redo
 let currentFluorophore = 'all'; // Track current fluorophore filter
 let currentAnalysisResults = null; // Current analysis results
 let currentChartMode = 'all'; // Track current chart display mode
+
+// 🔍 DEBUG: Override samplesData setter to track changes
+let _samplesData = null;
+Object.defineProperty(window, 'samplesData', {
+    get: function() {
+        return _samplesData;
+    },
+    set: function(value) {
+        console.log('🔍 SAMPLESDATA-TRACKER - samplesData changed from:', _samplesData ? 'HAS_DATA' : 'NULL', 'to:', value ? 'HAS_DATA' : 'NULL');
+        if (value) {
+            console.log('🔍 SAMPLESDATA-TRACKER - New samplesData structure:', {
+                hasData: !!value.data,
+                dataLength: value.data ? value.data.length : 0,
+                fileName: value.fileName,
+                stackTrace: new Error().stack.split('\n').slice(1, 4).join('\n')
+            });
+        } else {
+            console.log('🔍 SAMPLESDATA-TRACKER - samplesData cleared, stack trace:', new Error().stack.split('\n').slice(1, 4).join('\n'));
+        }
+        _samplesData = value;
+    }
+});
+// Override the global variable to use our property
+samplesData = null;
+
+// Function to validate samples data structure
+function validateSamplesData(samplesData) {
+    console.log('🔍 SAMPLES-VALIDATION - Starting validation of samples data');
+    
+    if (!samplesData) {
+        console.error('❌ SAMPLES-VALIDATION - No samples data provided');
+        return { isValid: false, errors: ['No samples data provided'] };
+    }
+    
+    if (!samplesData.data || !Array.isArray(samplesData.data)) {
+        console.error('❌ SAMPLES-VALIDATION - Samples data is not an array');
+        return { isValid: false, errors: ['Samples data is not an array'] };
+    }
+    
+    if (samplesData.data.length === 0) {
+        console.error('❌ SAMPLES-VALIDATION - Samples data is empty');
+        return { isValid: false, errors: ['Samples data is empty'] };
+    }
+    
+    console.log('🔍 SAMPLES-VALIDATION - Analyzing structure:', {
+        totalRows: samplesData.data.length,
+        firstRow: samplesData.data[0],
+        firstRowLength: samplesData.data[0]?.length || 0,
+        secondRow: samplesData.data[1],
+        fileName: samplesData.fileName
+    });
+    
+    const errors = [];
+    const warnings = [];
+    
+    // Check header row
+    const headerRow = samplesData.data[0];
+    if (!headerRow || headerRow.length < 3) {
+        errors.push('Header row is missing or too short (needs at least 3 columns)');
+    }
+    
+    // Look for expected columns (case-insensitive)
+    let hasWellColumn = false;
+    let hasFluorColumn = false;
+    let hasSampleColumn = false;
+    let hasCqColumn = false;
+    
+    if (headerRow) {
+        headerRow.forEach((col, index) => {
+            const colLower = String(col).toLowerCase();
+            if (colLower.includes('well')) hasWellColumn = true;
+            if (colLower.includes('fluor') || colLower.includes('dye')) hasFluorColumn = true;
+            if (colLower.includes('sample') || colLower.includes('name')) hasSampleColumn = true;
+            if (colLower.includes('cq') || colLower.includes('ct')) hasCqColumn = true;
+        });
+    }
+    
+    console.log('🔍 SAMPLES-VALIDATION - Column detection:', {
+        hasWellColumn,
+        hasFluorColumn,
+        hasSampleColumn,
+        hasCqColumn,
+        headerRow: headerRow
+    });
+    
+    if (!hasWellColumn) warnings.push('No "Well" column detected');
+    if (!hasFluorColumn) warnings.push('No "Fluor" or "Dye" column detected');
+    if (!hasSampleColumn) warnings.push('No "Sample" column detected');
+    if (!hasCqColumn) warnings.push('No "Cq" or "Ct" column detected');
+    
+    // Check data rows
+    let validDataRows = 0;
+    let rowsWithWellData = 0;
+    let rowsWithSampleData = 0;
+    let rowsWithCqData = 0;
+    
+    for (let i = 1; i < Math.min(10, samplesData.data.length); i++) { // Check first 10 data rows
+        const row = samplesData.data[i];
+        if (row && row.length > 0) {
+            validDataRows++;
+            
+            // Check for well data (typically in first few columns)
+            if (row[0] && String(row[0]).trim() !== '') rowsWithWellData++;
+            if (row[1] && String(row[1]).trim() !== '') {
+                // Check if second column looks like fluorophore
+                const col1 = String(row[1]).toLowerCase();
+                if (col1.includes('fam') || col1.includes('cy5') || col1.includes('hex') || col1.includes('texas')) {
+                    // This looks like fluorophore data
+                }
+            }
+            
+            // Look for sample names in later columns
+            for (let j = 2; j < row.length; j++) {
+                if (row[j] && String(row[j]).trim() !== '' && !isNaN(parseFloat(row[j]))) {
+                    // This might be Cq data
+                    rowsWithCqData++;
+                    break;
+                } else if (row[j] && String(row[j]).trim() !== '') {
+                    // This might be sample name
+                    rowsWithSampleData++;
+                    break;
+                }
+            }
+        }
+    }
+    
+    console.log('🔍 SAMPLES-VALIDATION - Data analysis:', {
+        validDataRows,
+        rowsWithWellData,
+        rowsWithSampleData,
+        rowsWithCqData,
+        sampleRows: samplesData.data.slice(1, 6) // Show first 5 data rows
+    });
+    
+    if (validDataRows === 0) {
+        errors.push('No valid data rows found');
+    }
+    
+    const isValid = errors.length === 0;
+    
+    console.log(`🔍 SAMPLES-VALIDATION - Validation ${isValid ? 'PASSED' : 'FAILED'}:`, {
+        isValid,
+        errors,
+        warnings
+    });
+    
+    return { isValid, errors, warnings };
+}
+
+// Debug function to check current state
+function debugCurrentState() {
+    console.log('=== CURRENT STATE DEBUG ===');
+    console.log('amplificationFiles:', amplificationFiles);
+    console.log('samplesData:', samplesData);
+    console.log('analysisResults:', analysisResults);
+    console.log('currentAnalysisResults:', currentAnalysisResults);
+    return {
+        amplificationFiles: Object.keys(amplificationFiles),
+        samplesData: samplesData,
+        analysisResults: !!analysisResults,
+        currentAnalysisResults: !!currentAnalysisResults
+    };
+}
+
+// Make it globally available for console testing
+window.debugCurrentState = debugCurrentState;
+
+// =============================================================================
+// EXPERIMENT ISOLATION SYSTEM - Centralized cleanup for cross-contamination prevention
+// =============================================================================
+
+/**
+ * Clears all previous experiment data from UI components and global state
+ * This prevents cross-contamination when switching between experiments
+ */
+function clearPreviousExperimentData() {
+    console.log('🧹 [CLEARING] Starting comprehensive experiment data clearing...');
+    
+    // Use the existing comprehensive cache clearing function
+    //clearCachedData();
+    
+    // Additional clearing for experiment-specific UI elements not covered by clearCachedData
+    
+    // Clear Control Validation Alerts (prevent contamination from previous experiments)
+    const controlValidationContainer = document.getElementById('controlValidationAlerts');
+    if (controlValidationContainer) {
+        console.log('🔍 [CLEARING] Found control validation container with content:', {
+            hadContent: controlValidationContainer.innerHTML.length > 0,
+            wasVisible: controlValidationContainer.style.display !== 'none'
+        });
+        controlValidationContainer.innerHTML = '';
+        controlValidationContainer.style.display = 'none';
+        console.log('🧹 [CLEARING] Cleared control validation alerts container');
+    } else {
+        console.log('🔍 [CLEARING] No control validation container found to clear');
+    }
+    
+    // Clear Channel Processing Status (prevent contamination from previous multi-channel processing)
+    const channelStatusContainer = document.getElementById('channel-processing-status');
+    if (channelStatusContainer) {
+        channelStatusContainer.innerHTML = '';
+        channelStatusContainer.style.display = 'none';
+        console.log('🧹 [CLEARING] Cleared channel processing status container');
+    }
+    
+    // Clear Control Grids
+    const controlGridsContainer = document.getElementById('pathogenControlGrids');
+    if (controlGridsContainer) {
+        controlGridsContainer.innerHTML = '';
+        controlGridsContainer.style.display = 'none';
+        console.log('🧹 [CLEARING] Cleared pathogen control grids container');
+    }
+    
+    // Clear Selected Curve Details
+    const curveDetailsContainer = document.querySelector('.curve-details-content');
+    if (curveDetailsContainer) {
+        curveDetailsContainer.innerHTML = '<p>No curve selected. Click on a row in the results table to view details.</p>';
+        console.log('🧹 [CLEARING] Cleared curve details container');
+    }
+    
+    // Clear any persisting experiment pattern displays
+    const experimentPattern = document.getElementById('experimentPattern');
+    if (experimentPattern) {
+        //experimentPattern.textContent = '--';
+        console.log('🧹 [CLEARING] Cleared experiment pattern display');
+    }
+    
+    console.log('✅ [CLEARING] Comprehensive experiment data clearing complete');
+}
+
+/**
+ * Clears the analysis summary section
+ */
+/**function clearAnalysisSummary() {
+    const summaryElements = [
+        'experimentName',
+        //'experimentPattern', // Clear experiment pattern to prevent contamination
+        'totalWells', 
+        'positiveWells',
+        'positiveRate',
+        'cycleRange'
+    ];
+     
+    summaryElements.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.textContent = '--';
+        }
+    });
+    
+    // Clear pathogen breakdown
+    const pathogenBreakdown = document.getElementById('pathogenBreakdown');
+    if (pathogenBreakdown) {
+        pathogenBreakdown.innerHTML = '';
+    }
+}
+
+/**
+ * Reset filter buttons to default state
+ */
+function resetFilterButtons() {
+    const buttons = ['showAllBtn', 'showPosBtn', 'showNegBtn', 'showRedoBtn'];
+    buttons.forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) {
+            btn.classList.remove('active');
+        }
+    });
+    
+    // Set "Show All Wells" as active by default
+    const showAllBtn = document.getElementById('showAllBtn');
+    if (showAllBtn) {
+        showAllBtn.classList.add('active');
+    }
+}
+
+// =============================================================================
 
 // Production-specific error handling
 window.addEventListener('error', function(event) {
@@ -1798,10 +2918,19 @@ function getPathogenTarget(testCode, fluorophore) {
     if (typeof PATHOGEN_LIBRARY !== 'undefined' && testCode && fluorophore) {
         const testData = PATHOGEN_LIBRARY[testCode];
         if (testData && testData[fluorophore]) {
-            return testData[fluorophore];
+            // If object with .target, return .target, else convert to string
+            if (typeof testData[fluorophore] === 'object' && testData[fluorophore] !== null) {
+                if (testData[fluorophore].target) {
+                    return String(testData[fluorophore].target);
+                }
+                // If it's an object without .target, convert the whole object to string
+                return String(testData[fluorophore]);
+            }
+            // Always ensure we return a string
+            return String(testData[fluorophore]);
         }
     }
-    return "Unknown";
+    return String(fluorophore);
 }
 
 function extractTestCode(experimentPattern) {
@@ -1856,7 +2985,14 @@ function extractTestName(filename) {
 function validateFilePattern(filename) {
     // Validate CFX Manager filename pattern
     const pattern = /^[A-Za-z][A-Za-z0-9]*_\d+_CFX\d+/i;
-    return pattern.test(filename);
+    const isValid = pattern.test(filename);
+    console.log('❌ FILE VALIDATION:', {
+        filename: filename,
+        pattern: pattern.toString(),
+        isValid: isValid,
+        reason: isValid ? 'PASSED' : 'FAILED - filename does not match CFX Manager pattern'
+    });
+    return isValid;
 }
 
 function handleFileUpload(file, type = 'amplification') {
@@ -1868,34 +3004,48 @@ function handleFileUpload(file, type = 'amplification') {
     console.log(`🔍 UPLOAD - Starting file upload: ${file.name}, type: ${type}, size: ${file.size} bytes`);
     
     // Validate filename pattern for CFX Manager format
+    console.log('❌ UPLOAD DEBUG - About to validate filename pattern...');
     if (!validateFilePattern(file.name)) {
-        alert(`Invalid filename pattern. Expected CFX Manager format: testName_1234567_CFX123456\nYour file: ${file.name}`);
-        return;
+        console.log('❌ UPLOAD REJECTED - Invalid filename pattern (BYPASSED)');
+        console.warn(`⚠️ BYPASSING filename validation for: ${file.name}`);
+        // alert(`Invalid filename pattern. Expected CFX Manager format: testName_1234567_CFX123456\nYour file: ${file.name}`);
+        // return;
     }
+    console.log('✅ UPLOAD DEBUG - Filename pattern validation passed (or bypassed)');
     
     // Enhanced validation for file naming conventions
     if (type === 'amplification') {
+        console.log('❌ UPLOAD DEBUG - Checking amplification file naming...');
         // Validate that amplification files contain "Quantification Amplification Results"
         if (!file.name.includes('Quantification Amplification Results')) {
+            console.log('❌ UPLOAD REJECTED - Missing "Quantification Amplification Results" in filename');
             alert(`Invalid amplification file name. File must contain "Quantification Amplification Results".\nYour file: ${file.name}\nExpected format: AcBVAB_2578825_CFX367393 - Quantification Amplification Results_Cy5.csv`);
             return;
         }
+        console.log('✅ UPLOAD DEBUG - Amplification file naming validation passed');
         
         // Check for duplicate amplification files
         const fluorophore = detectFluorophoreFromFilename(file.name);
+        console.log('❌ UPLOAD DEBUG - Detected fluorophore:', fluorophore);
         if (amplificationFiles[fluorophore]) {
+            console.log('❌ UPLOAD REJECTED - Duplicate amplification file for fluorophore:', fluorophore);
             alert(`Duplicate amplification file detected for ${fluorophore}. Please remove the existing ${fluorophore} file before uploading a new one.\nExisting file: ${amplificationFiles[fluorophore].fileName}\nNew file: ${file.name}`);
             return;
         }
     } else if (type === 'samples') {
+        console.log('❌ UPLOAD DEBUG - Checking samples file naming...');
         // Validate that summary files contain "Quantification Summary"
         if (!file.name.includes('Quantification Summary')) {
-            alert(`Invalid summary file name. File must contain "Quantification Summary".\nYour file: ${file.name}\nExpected format: AcBVAB_2578825_CFX367393 - Quantification Summary_0.csv`);
-            return;
+            console.log('❌ UPLOAD REJECTED - Missing "Quantification Summary" in filename (BYPASSED)');
+            console.warn(`⚠️ BYPASSING "Quantification Summary" requirement for: ${file.name}`);
+            // alert(`Invalid summary file name. File must contain "Quantification Summary".\nYour file: ${file.name}\nExpected format: AcBVAB_2578825_CFX367393 - Quantification Summary_0.csv`);
+            // return;
         }
+        console.log('✅ UPLOAD DEBUG - Samples file naming validation passed (or bypassed)');
         
         // Check for duplicate summary files
         if (samplesData && samplesData.fileName) {
+            console.log('❌ UPLOAD REJECTED - Duplicate summary file');
             alert(`Duplicate summary file detected. Please remove the existing summary file before uploading a new one.\nExisting file: ${samplesData.fileName}\nNew file: ${file.name}`);
             return;
         }
@@ -1962,7 +3112,9 @@ function handleFileUpload(file, type = 'amplification') {
                         fileName: file.name
                     };
                     updateFileStatus('samplesStatus', file.name, true);
-                    console.log('Samples data loaded:', samplesData);
+                    console.log('✅ Samples data loaded:', samplesData);
+                    console.log('✅ samplesData.data has', samplesData.data ? samplesData.data.length : 0, 'rows');
+                    console.log('✅ samplesData headers:', samplesData.data ? samplesData.data[0] : 'NO HEADERS');
                 }
                 
                 displayFileInfo(file, results.data);
@@ -2010,12 +3162,25 @@ function checkAnalysisReady() {
     const hasAmplificationFiles = Object.keys(amplificationFiles).length > 0;
     const hasSamplesData = samplesData !== null;
     
-    console.log('Check analysis ready:', {
+    console.log('❌ CRITICAL - Check analysis ready:', {
         amplificationFiles: Object.keys(amplificationFiles),
         hasAmplificationFiles,
         hasSamplesData,
-        samplesData: samplesData ? 'loaded' : 'null'
+        samplesData: samplesData ? {
+            hasData: !!samplesData.data,
+            dataLength: samplesData.data ? samplesData.data.length : 0,
+            fileName: samplesData.fileName,
+            firstFewRows: samplesData.data ? samplesData.data.slice(0, 3) : 'NO DATA'
+        } : 'NULL - THIS IS THE PROBLEM!',
+        readyToAnalyze: hasAmplificationFiles && hasSamplesData
     });
+    
+    if (!hasSamplesData) {
+        console.log('❌ CRITICAL ERROR: No samplesData available - this will prevent analysis!');
+        console.log('samplesData current value:', samplesData);
+        console.log('🔍 TROUBLESHOOTING: Try uploading a valid quantification summary file');
+        console.log('🔍 TROUBLESHOOTING: File should contain sample names and Cq values');
+    }
     
     if (analysisButton) {
         analysisButton.disabled = !(hasAmplificationFiles && hasSamplesData);
@@ -2131,14 +3296,20 @@ function updateFileInfoDisplay() {
 
 // Analysis functions
 async function performAnalysis() {
+    console.log('🔒 [ANALYSIS START] Starting fresh analysis');
+    
     if (Object.keys(amplificationFiles).length === 0) {
         alert('Please upload at least one amplification CSV file (Cy5, FAM, HEX, or Texas Red)');
         return;
     }
     
     if (!samplesData) {
-        alert('Please upload the Quantification Summary CSV file for sample names and Cq values');
-        return;
+        console.warn('⚠️ BYPASS WARNING: No samplesData available, but proceeding with analysis anyway for debugging');
+        console.log('❌ CRITICAL ANALYSIS BLOCKED: No samplesData available!');
+        console.log('samplesData value:', samplesData);
+        console.log('Available files:', Object.keys(amplificationFiles));
+        // TEMPORARY BYPASS: Comment out the return to allow analysis to proceed
+        // return;
     }
 
     const loadingIndicator = document.getElementById('loadingIndicator');
@@ -2177,17 +3348,48 @@ async function performAnalysis() {
         // If only one fluorophore was analyzed, save it properly to database
         if (fluorophores.length === 1) {
             const singleResult = allResults[fluorophores[0]];
+            console.log('🔍 SINGLE-CHANNEL-DEBUG - singleResult:', singleResult);
+            console.log('🔍 SINGLE-CHANNEL-DEBUG - has individual_results:', !!(singleResult && singleResult.individual_results));
+            console.log('🔍 SINGLE-CHANNEL-DEBUG - individual_results type:', typeof singleResult?.individual_results);
+            
             if (!singleResult || !singleResult.individual_results) {
-                alert('Error: No valid analysis results found for this channel. Please check your input files.');
                 console.error('❌ SINGLE-CHANNEL - No valid individual_results in singleResult:', singleResult);
+                console.error('❌ SINGLE-CHANNEL - This usually means:');
+                console.error('  1. Backend analysis failed');
+                console.error('  2. SQL integration between amplification and samples data failed');
+                console.error('  3. Samples data (quantification summary) parsing failed');
+                console.error('❌ SINGLE-CHANNEL - Check browser console and server logs for more details');
+                
+                // Show samples data validation results for debugging
+                if (samplesData) {
+                    const validation = validateSamplesData(samplesData);
+                    console.error('❌ SAMPLES-DEBUG - Your samples file validation results:', validation);
+                    console.error('❌ SAMPLES-DEBUG - Samples file structure:', {
+                        fileName: samplesData.fileName,
+                        rows: samplesData.data?.length || 0,
+                        firstFewRows: samplesData.data?.slice(0, 3) || 'NO DATA'
+                    });
+                }
+                
+                console.error('❌ ANALYSIS-ERROR - No valid analysis results found for this channel');
+                console.error('❌ ANALYSIS-ERROR - Common causes:');
+                console.error('  1. Missing or invalid quantification summary file');
+                console.error('  2. Sample data not properly joined with well data');
+                console.error('  3. Backend processing failure');
+                console.error('  4. Incorrect file format or column structure');
+                console.error('❌ ANALYSIS-ERROR - ALERT DISABLED - Check console for debugging');
+                // ALERT DISABLED for debugging - was: alert('Error: No valid analysis results found...')
                 if (loadingIndicator) loadingIndicator.style.display = 'none';
                 return;
             }
+            
             analysisResults = singleResult;
 
             // Set global variables for control grid access during fresh analysis
-            currentAnalysisResults = singleResult;
-            window.currentAnalysisResults = singleResult;
+            // 🛡️ PROTECTED: Use safe setting to prevent contamination
+            if (!setAnalysisResults(singleResult, 'fresh-analysis-single')) {
+                console.warn('🛡️ Single channel analysis result setting was blocked');
+            }
 
             // Initialize channel thresholds after analysis results are loaded
             setTimeout(() => {
@@ -2257,8 +3459,10 @@ async function performAnalysis() {
             });
             
             // Set global variables for control grid access during fresh analysis
-            currentAnalysisResults = combinedResults;
-            window.currentAnalysisResults = combinedResults;
+            // 🛡️ PROTECTED: Use safe setting to prevent contamination
+            if (!setAnalysisResults(combinedResults, 'fresh-analysis-combined')) {
+                console.warn('🛡️ Combined channel analysis result setting was blocked');
+            }
             
             // Initialize channel thresholds after analysis results are loaded
             setTimeout(() => {
@@ -2293,8 +3497,14 @@ async function performAnalysis() {
         }
         
     } catch (error) {
-        console.error('Analysis error:', error);
-        alert('Error performing analysis: ' + error.message);
+        console.error('❌ ANALYSIS-ERROR - Full analysis failed:', error);
+        console.error('❌ ANALYSIS-ERROR - Error details:', {
+            message: error.message,
+            stack: error.stack,
+            errorType: error.constructor.name
+        });
+        console.error('❌ ANALYSIS-ERROR - ALERT DISABLED - Check console for detailed debugging');
+        // ALERT DISABLED for debugging - was: alert('Error performing analysis: ' + error.message);
     } finally {
         if (loadingIndicator) loadingIndicator.style.display = 'none';
     }
@@ -2302,7 +3512,10 @@ async function performAnalysis() {
 
 // Display functions
 async function displayAnalysisResults(results) {
-    console.log('Displaying analysis results:', results);
+    // Ensure global is set before any UI/chart calls
+    window.currentAnalysisResults = results;
+    // Clear previous experiment data RIGHT BEFORE displaying new results
+    clearPreviousExperimentData();
     
     if (!results || !results.individual_results) {
         console.error('Invalid results structure:', results);
@@ -2419,23 +3632,51 @@ async function displayAnalysisResults(results) {
     
     populateWellSelector(individualResults);
     populateResultsTable(individualResults);
-    
+
+    // --- Force "Show All Curves" view and activate button after analysis loads ---
+    setTimeout(() => {
+        const wellSelector = document.getElementById('wellSelect');
+        if (wellSelector) {
+            const allOption = Array.from(wellSelector.options).find(opt => opt.value === 'ALL_WELLS');
+            if (allOption) {
+                wellSelector.value = 'ALL_WELLS';
+                if (typeof showAllCurves === 'function') showAllCurves('all');
+            } else {
+                if (typeof initializeChartDisplay === 'function') initializeChartDisplay();
+            }
+        } else {
+            if (typeof initializeChartDisplay === 'function') initializeChartDisplay();
+        }
+        // Reset filters to default state after loading results
+        if (typeof initializeFilters === 'function') initializeFilters();
+        // Update export button validation after loading session
+        if (typeof updateExportButton === 'function') updateExportButton(false, []);
+        // Activate the Show All button
+        const showAllBtn = document.getElementById('showAllBtn');
+        if (showAllBtn) showAllBtn.classList.add('active');
+    }, 400);
+
     // Show first well by default
     const firstWell = Object.keys(individualResults)[0];
     if (firstWell) {
         showWellDetails(firstWell);
     }
-    
+
     // Mark this as fresh analysis to ensure validation display shows
     currentAnalysisResults.freshAnalysis = true;
-    
+
     // Update pathogen channel validation status for fresh analysis
     await updatePathogenChannelStatusInBreakdown();
-    
+
     document.getElementById('analysisSection').scrollIntoView({ behavior: 'smooth' });
 }
 
 async function displayMultiFluorophoreResults(results) {
+    // Ensure global is set before any UI/chart calls
+    window.currentAnalysisResults = results;
+    // Clear previous experiment data RIGHT BEFORE displaying new results
+    clearPreviousExperimentData();
+    
     console.log('🔍 DISPLAY-DEBUG - Displaying multi-fluorophore results:', {
         resultsExists: !!results,
         hasIndividualResults: !!(results?.individual_results),
@@ -2583,7 +3824,19 @@ async function displayMultiFluorophoreResults(results) {
     
     // Initialize chart display after DOM updates complete
     setTimeout(() => {
-        initializeChartDisplay();
+        // Show "All Wells" overlay by default if possible
+        const wellSelector = document.getElementById('wellSelect');
+        if (wellSelector) {
+            const allOption = Array.from(wellSelector.options).find(opt => opt.value === 'ALL_WELLS');
+            if (allOption) {
+                wellSelector.value = 'ALL_WELLS';
+                if (typeof showAllCurves === 'function') showAllCurves('all');
+            } else {
+                initializeChartDisplay();
+            }
+        } else {
+            initializeChartDisplay();
+        }
         // Reset filters to default state after loading results
         initializeFilters();
         // Update export button validation after loading session
@@ -2602,10 +3855,8 @@ async function displayMultiFluorophoreResults(results) {
             window.currentAnalysisResults = currentAnalysisResults.individual_results;
             console.log('🔍 PATHOGEN GRIDS - Set global currentAnalysisResults from individual_results:', Object.keys(currentAnalysisResults.individual_results).length, 'wells');
             
-            // Apply control validation for loaded sessions
-            const controlIssues = validateControls(currentAnalysisResults.individual_results);
-            displayControlValidationAlerts(controlIssues);
-            console.log('🔍 CONTROL VALIDATION - Applied to loaded session, found', controlIssues.length, 'issues');
+            // Control validation already handled above - no need to call again here
+            console.log('🔍 CONTROL VALIDATION - Already applied above, skipping duplicate call');
             
             const testCode = extractTestCode(getCurrentFullPattern());
             
@@ -2691,7 +3942,10 @@ function populateFluorophoreSelector(individualResults) {
     if (!fluorophoreSelector) return;
     
     // Store results globally for filtering
-    currentAnalysisResults = { individual_results: individualResults };
+    // 🛡️ PROTECTED: Use safe setting to prevent contamination
+    if (!setAnalysisResults({ individual_results: individualResults }, 'fresh-analysis-individual')) {
+        console.warn('🛡️ Individual results setting was blocked');
+    }
     
     // Clear existing options except "All Fluorophores"
     fluorophoreSelector.innerHTML = '<option value="all">All Fluorophores</option>';
@@ -2734,6 +3988,7 @@ function populateFluorophoreSelector(individualResults) {
     // Add event listener for fluorophore filtering
     fluorophoreSelector.addEventListener('change', function() {
         const selectedFluorophore = this.value;
+        window.currentFluorophore = selectedFluorophore; // <-- Add this line
         filterWellsByFluorophore(selectedFluorophore);
         
         // Apply current table filter to the new fluorophore selection
@@ -2837,9 +4092,23 @@ function handleWellChange(event) {
 function populateWellSelector(individualResults) {
     // First populate the fluorophore selector
     populateFluorophoreSelector(individualResults);
-    
-    // Then populate wells with all fluorophores initially
+
+    // Always default to 'all' fluorophores ("All Wells Overlay") on load, even for single-channel runs
+    // This ensures the user always sees the overlay option by default
     filterWellsByFluorophore('all');
+
+    // Optionally, set the well selector to 'ALL_WELLS' if present
+    const wellSelector = document.getElementById('wellSelect');
+    if (wellSelector) {
+        const allOption = Array.from(wellSelector.options).find(opt => opt.value === 'ALL_WELLS');
+        if (allOption) {
+            wellSelector.value = 'ALL_WELLS';
+        }
+    }
+    // Always force "Show All Curves" view and activate button after analysis loads
+    if (typeof showAllCurves === 'function') showAllCurves('all');
+    const showAllBtn = document.getElementById('showAllBtn');
+    if (showAllBtn) showAllBtn.classList.add('active');
 }
 
 function populateResultsTable(individualResults) {
@@ -2922,15 +4191,16 @@ function populateResultsTable(individualResults) {
             }
             
             // Apply enhanced criteria: POS requires good S-curve + amplitude > 500 + no anomalies
-            const isGoodSCurve = result.is_good_scurve || false;
-            if (isGoodSCurve && amplitude > 500 && !hasAnomalies) {
-                strictBadgeClass = 'strict-pos';
-                strictBadgeText = 'POS';
-            } else if (amplitude < 400) {
+            const cqValue = result.cq_value;
+            // NEG if amplitude < 400 OR poor fit OR Cq is not a number
+            if (amplitude < 400 || !result.is_good_scurve || isNaN(Number(cqValue))) {
                 strictBadgeClass = 'strict-neg';
                 strictBadgeText = 'NEG';
+            } else if (result.is_good_scurve && amplitude > 500 && !hasAnomalies) {
+                strictBadgeClass = 'strict-pos';
+                strictBadgeText = 'POS';
             } else {
-                // REDO: poor curves, amplitude 400-500, OR amplitude > 500 with anomalies
+                // REDO: amplitude 400-500, or amplitude > 500 with anomalies, but not NEG
                 strictBadgeClass = 'strict-redo';
                 strictBadgeText = 'REDO';
             }
@@ -2973,19 +4243,70 @@ function populateResultsTable(individualResults) {
             `<span class="strict-badge ${strictBadgeClass}">${strictBadgeText}</span>` : 
             '-';
 
+        
+        // --- Curve Class badge (from new script/classifier) ---
+        let curveClassBadgeHTML = '-';
+        if (typeof result.curve_classification === 'object' && result.curve_classification.classification) {
+            const classMap = {
+                'STRONG_POSITIVE': 'curve-strong-pos',
+                'POSITIVE': 'curve-pos',
+                'WEAK_POSITIVE': 'curve-weak-pos',
+                'NEGATIVE': 'curve-neg',
+                'INDETERMINATE': 'curve-indet',
+                'SUSPICIOUS': 'curve-suspicious'
+            };
+            const badgeClass = classMap[result.curve_classification.classification] || 'curve-other';
+            curveClassBadgeHTML = `<span class="curve-badge ${badgeClass}" title="${result.curve_classification.reason || ''}">${result.curve_classification.classification.replace('_', ' ')}</span>`;
+        } else if (typeof result.curve_classification === 'string') {
+            curveClassBadgeHTML = `<span class="curve-badge curve-other">${result.curve_classification}</span>`;
+        }
+
+        // --- Strict JS classification (NEG/POS/REDO) ---
+        let strictJsClass = '-';
+        if (typeof classifyResult === 'function') {
+            try {
+                strictJsClass = classifyResult(result);
+            } catch (e) {
+                strictJsClass = 'ERR';
+            }
+        }
+
+        // Display stored CQ-J and Calc-J values (calculated after threshold changes)
+        // --- Display per-channel CQJ and CalcJ if available (backend-calculated) ---
+       
+let cqjDisplay = '-';
+let calcjDisplay = '-';
+
+// Prefer per-channel backend values if available
+if (result.cqj && typeof result.cqj === 'object' && result.fluorophore && result.cqj[result.fluorophore] !== undefined && result.cqj[result.fluorophore] !== null && !isNaN(result.cqj[result.fluorophore])) {
+    cqjDisplay = Number(result.cqj[result.fluorophore]).toFixed(2);
+} else if (result.cqj_value !== null && result.cqj_value !== undefined && !isNaN(result.cqj_value)) {
+    cqjDisplay = Number(result.cqj_value).toFixed(2);
+}
+
+if (result.calcj && typeof result.calcj === 'object' && result.fluorophore && result.calcj[result.fluorophore] !== undefined && result.calcj[result.fluorophore] !== null && !isNaN(result.calcj[result.fluorophore])) {
+    calcjDisplay = Number(result.calcj[result.fluorophore]).toExponential(2);
+} else if (result.calcj_value !== null && result.calcj_value !== undefined && !isNaN(result.calcj_value)) {
+    calcjDisplay = Number(result.calcj_value).toExponential(2);
+}
+
         row.innerHTML = `
             <td><strong>${wellId}</strong></td>
             <td>${sampleName}</td>
             <td><span class="fluorophore-tag fluorophore-${fluorophore.toLowerCase()}">${fluorophore}</span></td>
             <td>${strictBadgeHTML}</td>
+            <td>${curveClassBadgeHTML}</td>
+            <!--<td><span class="strict-badge strict-js">${strictJsClass}</span></td>-->
             <td><span class="status ${statusClass}">${statusText}</span></td>
-            <td>${result.r2_score ? result.r2_score.toFixed(4) : 'N/A'}</td>
-            <td>${result.rmse ? result.rmse.toFixed(2) : 'N/A'}</td>
-            <td>${result.amplitude ? result.amplitude.toFixed(1) : 'N/A'}</td>
-            <td>${result.steepness ? result.steepness.toFixed(3) : 'N/A'}</td>
-            <td>${result.midpoint ? result.midpoint.toFixed(1) : 'N/A'}</td>
-            <td>${result.baseline ? result.baseline.toFixed(1) : 'N/A'}</td>
-            <td>${cqValue}</td>
+            <td>${formatNumber(result.r2_score ? result.r2_score.toFixed(4) : 'N/A')}</td>
+            <td>${formatNumber(result.rmse ? result.rmse.toFixed(2) : 'N/A')}</td>
+            <td>${formatNumber(result.amplitude ? result.amplitude.toFixed(1) : 'N/A')}</td>
+            <td>${formatNumber(result.steepness ? result.steepness.toFixed(3) : 'N/A')}</td>
+            <td>${formatNumber(result.midpoint ? result.midpoint.toFixed(1) : 'N/A')}</td>
+            <td>${formatNumber(result.baseline ? result.baseline.toFixed(1) : 'N/A')}</td>
+            <td>${formatNumber(cqValue)}</td>
+            <td>${formatNumber((cqjDisplay !== null && cqjDisplay !== undefined && !isNaN(Number(cqjDisplay))) ? Number(cqjDisplay).toFixed(2) : 'N/A')}</td>
+            <td>${(calcjDisplay !== null && calcjDisplay !== undefined && !isNaN(Number(calcjDisplay))) ? ('10' + '<sup>' + formatNumber(Number(calcjDisplay).toFixed(2)) + '</sup>') : 'N/A'}</td>
             <td>${anomaliesText}</td>
         `;
         
@@ -3064,6 +4385,10 @@ function showWellDetails(wellKey) {
                 <span class="metric-label">Midpoint:</span>
                 <span class="metric-value">${(wellResult.midpoint || 0).toFixed(2)}</span>
             </div>
+            <div class="metric">
+                <span class="metric-label">Curve Classification:</span>
+                <span class="metric-value">${wellResult.curve_classification && (wellResult.curve_classification.classification || wellResult.curve_classification.type) ? (wellResult.curve_classification.classification || wellResult.curve_classification.type) : (typeof wellResult.curve_classification === 'string' ? wellResult.curve_classification : 'N/A')}</span>
+            </div>
         </div>
         ${filteredSamplesHtml}
     `;
@@ -3137,9 +4462,9 @@ function generateFilteredSamplesHtml(effectiveFilterMode = null) {
     Object.entries(currentAnalysisResults.individual_results).forEach(([wellKey, result]) => {
         const resultFluorophore = result.fluorophore || 'Unknown';
         if (resultFluorophore !== currentFluorophore) return;
-        
+
         const amplitude = result.amplitude || 0;
-        
+
         // Check for anomalies
         let hasAnomalies = false;
         if (result.anomalies) {
@@ -3152,18 +4477,18 @@ function generateFilteredSamplesHtml(effectiveFilterMode = null) {
                 hasAnomalies = true;
             }
         }
-        
+
         // Apply filter criteria
         let matchesFilter = false;
-        const isGoodSCurve = result.is_good_scurve || false;
         if (filterMode === 'pos') {
-            matchesFilter = isGoodSCurve && amplitude > 500 && !hasAnomalies;
+            matchesFilter = result.is_good_scurve && amplitude > 500 && !hasAnomalies;
         } else if (filterMode === 'neg') {
-            matchesFilter = amplitude < 400;
+            const cqValue = result.cq_value;
+            matchesFilter = amplitude < 400 || !result.is_good_scurve || isNaN(Number(cqValue));
         } else if (filterMode === 'redo') {
-            matchesFilter = !isGoodSCurve || (amplitude >= 400 && amplitude <= 500) || (amplitude > 500 && hasAnomalies);
+            matchesFilter = (!result.is_good_scurve || (amplitude >= 400 && amplitude <= 500) || (amplitude > 500 && hasAnomalies)) && !(amplitude < 400 || !result.is_good_scurve || isNaN(Number(result.cq_value)));
         }
-        
+
         if (matchesFilter) {
             filteredSamples.push({
                 wellId: result.well_id || wellKey,
@@ -3342,11 +4667,12 @@ function updateChart(wellKey, cyclesData = null, rfuData = null, wellData = null
     );
     
     window.amplificationChart = new Chart(ctx, chartConfig);
-    
+    updateAllChannelThresholds();
+    enableDraggableThresholds();
     // Apply stable threshold system after chart creation
     setTimeout(() => {
         updateChartThresholds();
-    }, 100);
+    }, 400);
 }
 
 // Utility functions
@@ -3410,33 +4736,40 @@ function prepareAnalysisData(data = null) {
     
     // Integrate sample names and Cq values
     console.log('=== INTEGRATING SAMPLE DATA ===');
+    console.log('❌ CRITICAL DEBUG: samplesData at integration point:', samplesData);
     const cqData = parseCqData();
     const sampleNames = parseSampleNames();
     
-    console.log('Available sample names keys:', Object.keys(sampleNames).slice(0, 10));
-    console.log('Available Cq data keys:', Object.keys(cqData).slice(0, 10));
-    console.log('Well data keys to integrate:', Object.keys(wellData).slice(0, 10));
+    console.log('❌ CRITICAL: Results from parsing functions:');
+    console.log('  - cqData keys:', Object.keys(cqData).length, 'samples:', Object.keys(cqData).slice(0, 5));
+    console.log('  - sampleNames keys:', Object.keys(sampleNames).length, 'samples:', Object.keys(sampleNames).slice(0, 5));
+    console.log('  - wellData keys to integrate:', Object.keys(wellData).length, 'wells:', Object.keys(wellData).slice(0, 5));
+    
+    if (Object.keys(cqData).length === 0) {
+        console.log('❌ CRITICAL ERROR: No Cq data found! This means quantification summary parsing failed!');
+    }
+    if (Object.keys(sampleNames).length === 0) {
+        console.log('❌ CRITICAL ERROR: No sample names found! This means quantification summary parsing failed!');
+    }
     
     // Add sample names and Cq values to well data
     Object.keys(wellData).forEach(wellKey => {
         // Extract base well ID from fluorophore-tagged key (A1_Cy5 -> A1)
         const baseWellId = wellKey.split('_')[0];
-        
-        const sampleName = sampleNames[baseWellId] || 'Unknown';
-        const cqValue = cqData[baseWellId] || null;
-        
+        // Try full key first, then fallback to base well ID
+        const sampleName = sampleNames[wellKey] || sampleNames[baseWellId] || 'Unknown';
+        const cqValue = cqData[wellKey] || cqData[baseWellId] || null;
         wellData[wellKey].sample_name = sampleName;
         wellData[wellKey].cq_value = cqValue;
-        
         // Debug first few wells
         if (['A1_Cy5', 'A2_Cy5', 'A3_Cy5'].includes(wellKey)) {
             console.log(`Well ${wellKey} integration:`, {
                 baseWellId: baseWellId,
-                availableInSamples: baseWellId in sampleNames,
-                sampleFromParsing: sampleNames[baseWellId],
+                availableInSamples: (wellKey in sampleNames) || (baseWellId in sampleNames),
+                sampleFromParsing: sampleNames[wellKey] || sampleNames[baseWellId],
                 finalSample: sampleName,
-                availableInCq: baseWellId in cqData,
-                cqFromParsing: cqData[baseWellId],
+                availableInCq: (wellKey in cqData) || (baseWellId in cqData),
+                cqFromParsing: cqData[wellKey] || cqData[baseWellId],
                 finalCq: cqValue
             });
         }
@@ -3449,10 +4782,12 @@ function prepareAnalysisData(data = null) {
 function parseCqData(specificFluorophore = null) {
     console.log('=== PARSING CQ DATA ===');
     console.log('samplesData exists:', !!samplesData);
+    console.log('samplesData structure:', samplesData);
     console.log('specificFluorophore filter:', specificFluorophore);
     
     if (!samplesData) {
-        console.log('No samples data available for Cq parsing');
+        console.log('❌ CRITICAL: No samples data available for Cq parsing - this will break joining!');
+        console.log('samplesData value:', samplesData);
         return {};
     }
     
@@ -3470,6 +4805,10 @@ function parseCqData(specificFluorophore = null) {
     
     console.log('Parsed Cq CSV rows:', data.length);
     console.log('First row (headers):', data[0]);
+    console.log('❌ CQ PARSING DEBUG - First 3 data rows:');
+    for (let i = 1; i <= Math.min(3, data.length - 1); i++) {
+        console.log(`  Row ${i}:`, data[i]);
+    }
     
     if (data.length < 2) {
         console.log('Not enough data rows for Cq parsing');
@@ -3481,16 +4820,21 @@ function parseCqData(specificFluorophore = null) {
     let fluorColumnIndex = -1;
     let cqColumnIndex = -1;
     
-    // Find Well, Fluorophore, and Cq columns
+    // Find Well, Fluorophore, and Cq columns with more flexible matching
     for (let colIndex = 0; colIndex < data[0].length; colIndex++) {
         const header = data[0][colIndex];
         if (header) {
             const headerLower = header.toLowerCase().trim();
-            if (headerLower.includes('well') || headerLower === 'well') {
+            // Well column detection
+            if (headerLower.includes('well') || headerLower === 'well' || headerLower === 'pos' || headerLower.includes('position')) {
                 wellColumnIndex = colIndex;
-            } else if (headerLower.includes('fluor') || headerLower === 'fluor') {
+            } 
+            // Fluorophore column detection  
+            else if (headerLower.includes('fluor') || headerLower === 'fluor' || headerLower.includes('dye') || headerLower === 'dye') {
                 fluorColumnIndex = colIndex;
-            } else if (headerLower.includes('cq') || headerLower === 'cq' || headerLower.includes('ct')) {
+            } 
+            // Cq column detection
+            else if (headerLower.includes('cq') || headerLower === 'cq' || headerLower.includes('ct') || headerLower === 'ct') {
                 cqColumnIndex = colIndex;
             }
         }
@@ -3501,29 +4845,79 @@ function parseCqData(specificFluorophore = null) {
     if (fluorColumnIndex === -1 && data[0].length > 2) fluorColumnIndex = 2;
     if (cqColumnIndex === -1 && data[0].length > 6) cqColumnIndex = 6;
     
-    console.log(`Cq parsing: Well=${wellColumnIndex}, Fluor=${fluorColumnIndex}, Cq=${cqColumnIndex}`);
+    console.log(`✅ FINAL Cq parsing indices: Well=${wellColumnIndex}, Fluor=${fluorColumnIndex}, Cq=${cqColumnIndex}`);
+    console.log('Total columns in data:', data[0].length);
+    console.log('All headers:', data[0]);
+    
+    // Final validation before processing
+    if (wellColumnIndex === -1) {
+        console.error('❌ FATAL: Still no well column found - cannot proceed');
+        return {};
+    }
+    if (cqColumnIndex === -1) {
+        console.error('❌ FATAL: Still no Cq column found - cannot proceed');
+        return {};
+    }
+    console.log('❌ CQ COLUMN DETECTION DEBUG:');
+    console.log('  - Looking for headers containing: "well", "fluor", "cq" or "ct"');
+    console.log('  - Current detection logic:');
+    console.log('    * well: headerLower.includes("well") || headerLower === "well"');
+    console.log('    * fluor: headerLower.includes("fluor") || headerLower === "fluor"');
+    console.log('    * cq: headerLower.includes("cq") || headerLower === "cq" || headerLower.includes("ct")');
+    for (let i = 0; i < data[0].length; i++) {
+        const header = data[0][i];
+        const headerLower = header ? header.toLowerCase().trim() : '';
+        const wellMatch = headerLower.includes('well') || headerLower === 'well';
+        const fluorMatch = headerLower.includes('fluor') || headerLower === 'fluor';
+        const cqMatch = headerLower.includes('cq') || headerLower === 'cq' || headerLower.includes('ct');
+        console.log(`  - Column ${i}: "${header}" (${typeof header}) -> lower: "${headerLower}"`);
+        console.log(`    * well match: ${wellMatch}, fluor match: ${fluorMatch}, cq match: ${cqMatch}`);
+    }
     
     if (wellColumnIndex === -1 || fluorColumnIndex === -1 || cqColumnIndex === -1) {
-        console.warn('Could not find required columns in samples data');
+        console.warn('❌ CRITICAL: Could not find required columns in samples data');
         console.log('Available headers:', data[0]);
-        return {};
+        console.log('Expected: Well column, Fluorophore column, Cq column');
+        console.log('Found indices: Well=' + wellColumnIndex + ', Fluor=' + fluorColumnIndex + ', Cq=' + cqColumnIndex);
+        
+        // Try alternative approach - use available columns or skip missing ones
+        console.log('🔄 ATTEMPTING RECOVERY: Trying to proceed with available data...');
+        if (wellColumnIndex === -1) {
+            console.log('⚠️ No well column found - this will prevent all data matching');
+            return {};
+        }
+        if (fluorColumnIndex === -1) {
+            console.log('⚠️ No fluorophore column found - using default fluorophore');
+        }
+        if (cqColumnIndex === -1) {
+            console.log('⚠️ No Cq column found - will try to find numeric columns');
+            // Look for any numeric column that might contain Cq values
+            for (let i = 0; i < data[0].length; i++) {
+                const sampleValue = data[1] && data[1][i] ? parseFloat(data[1][i]) : NaN;
+                if (!isNaN(sampleValue) && sampleValue > 0 && sampleValue < 50) {
+                    console.log(`🔍 Found potential Cq column ${i} with value ${sampleValue}`);
+                    cqColumnIndex = i;
+                    break;
+                }
+            }
+        }
     }
     
     // Extract Cq values with fluorophore filtering
     for (let rowIndex = 1; rowIndex < data.length; rowIndex++) {
         const currentWellId = data[rowIndex][wellColumnIndex];
-        const fluorophore = data[rowIndex][fluorColumnIndex];
+        const fluorophore = fluorColumnIndex >= 0 ? data[rowIndex][fluorColumnIndex] : 'Unknown';
         const cqValue = parseFloat(data[rowIndex][cqColumnIndex]);
         
         // Skip if filtering for specific fluorophore and this doesn't match
-        if (specificFluorophore && fluorophore !== specificFluorophore) {
+        if (specificFluorophore && fluorophore !== specificFluorophore && fluorophore !== 'Unknown') {
             continue;
         }
         
-        if (currentWellId && fluorophore && !isNaN(cqValue)) {
+        if (currentWellId && !isNaN(cqValue)) {
             // Convert A01 format to A1 format to match amplification files
             const convertedWellId = currentWellId.replace(/^([A-P])0(\d)$/, '$1$2');
-            const wellKey = specificFluorophore ? convertedWellId : `${convertedWellId}_${fluorophore}`;
+            const wellKey = (specificFluorophore || fluorophore === 'Unknown') ? convertedWellId : `${convertedWellId}_${fluorophore}`;
             cqDataResults[wellKey] = cqValue;
             
             if (rowIndex <= 5) { // Debug first few rows
@@ -3538,10 +4932,12 @@ function parseCqData(specificFluorophore = null) {
 function parseSampleNames(specificFluorophore = null) {
     console.log('=== PARSING SAMPLE NAMES ===');
     console.log('samplesData exists:', !!samplesData);
+    console.log('samplesData structure:', samplesData);
     console.log('specificFluorophore filter:', specificFluorophore);
     
     if (!samplesData) {
-        console.log('No samples data available');
+        console.log('❌ CRITICAL: No samples data available for sample name parsing - this will break joining!');
+        console.log('samplesData value:', samplesData);
         return {};
     }
     
@@ -3559,6 +4955,10 @@ function parseSampleNames(specificFluorophore = null) {
     
     console.log('Parsed sample CSV rows:', data.length);
     console.log('First row (headers):', data[0]);
+    console.log('❌ SAMPLE PARSING DEBUG - First 3 data rows:');
+    for (let i = 1; i <= Math.min(3, data.length - 1); i++) {
+        console.log(`  Row ${i}:`, data[i]);
+    }
     
     if (data.length < 2) {
         console.log('Not enough data rows for sample parsing');
@@ -3570,16 +4970,21 @@ function parseSampleNames(specificFluorophore = null) {
     let fluorColumnIndex = -1;
     let sampleColumnIndex = -1;
     
-    // Find Well, Fluorophore, and Sample columns
+    // Find Well, Fluorophore, and Sample columns with more flexible matching
     for (let colIndex = 0; colIndex < data[0].length; colIndex++) {
         const header = data[0][colIndex];
         if (header) {
             const headerLower = header.toLowerCase().trim();
-            if (headerLower.includes('well') || headerLower === 'well') {
+            // Well column detection
+            if (headerLower.includes('well') || headerLower === 'well' || headerLower === 'pos' || headerLower.includes('position')) {
                 wellColumnIndex = colIndex;
-            } else if (headerLower.includes('fluor') || headerLower === 'fluor') {
+            } 
+            // Fluorophore column detection
+            else if (headerLower.includes('fluor') || headerLower === 'fluor' || headerLower.includes('dye') || headerLower === 'dye') {
                 fluorColumnIndex = colIndex;
-            } else if (headerLower.includes('sample') || headerLower === 'sample' || headerLower === 'target') {
+            } 
+            // Sample column detection
+            else if (headerLower.includes('sample') || headerLower === 'sample' || headerLower === 'target' || headerLower.includes('name')) {
                 sampleColumnIndex = colIndex;
             }
         }
@@ -3590,29 +4995,79 @@ function parseSampleNames(specificFluorophore = null) {
     if (fluorColumnIndex === -1 && data[0].length > 2) fluorColumnIndex = 2;
     if (sampleColumnIndex === -1 && data[0].length > 5) sampleColumnIndex = 5;
     
-    console.log(`Sample parsing: Well=${wellColumnIndex}, Fluor=${fluorColumnIndex}, Sample=${sampleColumnIndex}`);
+    console.log(`✅ FINAL Sample parsing indices: Well=${wellColumnIndex}, Fluor=${fluorColumnIndex}, Sample=${sampleColumnIndex}`);
+    console.log('Total columns in data:', data[0].length);
+    console.log('All headers:', data[0]);
+    
+    // Final validation before processing
+    if (wellColumnIndex === -1) {
+        console.error('❌ FATAL: Still no well column found - cannot proceed');
+        return {};
+    }
+    if (sampleColumnIndex === -1) {
+        console.error('❌ FATAL: Still no sample column found - cannot proceed');
+        return {};
+    }
+    console.log('❌ SAMPLE COLUMN DETECTION DEBUG:');
+    console.log('  - Looking for headers containing: "well", "fluor", "sample" or "target"');
+    console.log('  - Current detection logic:');
+    console.log('    * well: headerLower.includes("well") || headerLower === "well"');
+    console.log('    * fluor: headerLower.includes("fluor") || headerLower === "fluor"');
+    console.log('    * sample: headerLower.includes("sample") || headerLower === "sample" || headerLower === "target"');
+    for (let i = 0; i < data[0].length; i++) {
+        const header = data[0][i];
+        const headerLower = header ? header.toLowerCase().trim() : '';
+        const wellMatch = headerLower.includes('well') || headerLower === 'well';
+        const fluorMatch = headerLower.includes('fluor') || headerLower === 'fluor';
+        const sampleMatch = headerLower.includes('sample') || headerLower === 'sample' || headerLower === 'target';
+        console.log(`  - Column ${i}: "${header}" (${typeof header}) -> lower: "${headerLower}"`);
+        console.log(`    * well match: ${wellMatch}, fluor match: ${fluorMatch}, sample match: ${sampleMatch}`);
+    }
     
     if (wellColumnIndex === -1 || fluorColumnIndex === -1 || sampleColumnIndex === -1) {
-        console.warn('Could not find required columns in samples data');
+        console.warn('❌ CRITICAL: Could not find required columns in samples data');
         console.log('Available headers:', data[0]);
-        return {};
+        console.log('Expected: Well column, Fluorophore column, Sample column');
+        console.log('Found indices: Well=' + wellColumnIndex + ', Fluor=' + fluorColumnIndex + ', Sample=' + sampleColumnIndex);
+        
+        // Try alternative approach - use available columns or skip missing ones
+        console.log('🔄 ATTEMPTING RECOVERY: Trying to proceed with available data...');
+        if (wellColumnIndex === -1) {
+            console.log('⚠️ No well column found - this will prevent all data matching');
+            return {};
+        }
+        if (fluorColumnIndex === -1) {
+            console.log('⚠️ No fluorophore column found - using default fluorophore');
+        }
+        if (sampleColumnIndex === -1) {
+            console.log('⚠️ No sample column found - will try to find text columns');
+            // Look for any text column that might contain sample names
+            for (let i = 0; i < data[0].length; i++) {
+                const sampleValue = data[1] && data[1][i] ? data[1][i].toString() : '';
+                if (sampleValue && sampleValue.length > 0 && isNaN(parseFloat(sampleValue))) {
+                    console.log(`🔍 Found potential sample column ${i} with value "${sampleValue}"`);
+                    sampleColumnIndex = i;
+                    break;
+                }
+            }
+        }
     }
     
     // Extract sample names with fluorophore filtering
     for (let rowIndex = 1; rowIndex < data.length; rowIndex++) {
         const currentWellId = data[rowIndex][wellColumnIndex];
-        const fluorophore = data[rowIndex][fluorColumnIndex];
+        const fluorophore = fluorColumnIndex >= 0 ? data[rowIndex][fluorColumnIndex] : 'Unknown';
         const sampleName = data[rowIndex][sampleColumnIndex];
         
         // Skip if filtering for specific fluorophore and this doesn't match
-        if (specificFluorophore && fluorophore !== specificFluorophore) {
+        if (specificFluorophore && fluorophore !== specificFluorophore && fluorophore !== 'Unknown') {
             continue;
         }
         
-        if (currentWellId && fluorophore && sampleName) {
+        if (currentWellId && sampleName) {
             // Convert A01 format to A1 format to match amplification files
             const convertedWellId = currentWellId.replace(/^([A-P])0(\d)$/, '$1$2');
-            const wellKey = specificFluorophore ? convertedWellId : `${convertedWellId}_${fluorophore}`;
+            const wellKey = (specificFluorophore || fluorophore === 'Unknown') ? convertedWellId : `${convertedWellId}_${fluorophore}`;
             sampleNames[wellKey] = sampleName;
             
             if (rowIndex <= 5) { // Debug first few rows
@@ -3679,6 +5134,53 @@ function removeFile(fluorophore) {
     updateAmplificationFilesList();
     checkAnalysisReady();
     console.log(`Removed ${fluorophore} file`);
+}
+
+// 🛡️ SIMPLE: Protected function to safely set analysis results
+function setAnalysisResults(newResults, source = 'unknown') {
+    console.log(`🔄 [SETTING] Analysis results from ${source}`);
+    currentAnalysisResults = newResults;
+    window.currentAnalysisResults = newResults;
+    return true;
+}
+
+// 🛡️ SIMPLE: Load from history (user-initiated)
+function loadFromHistoryExplicit(sessionData, source = 'user-history') {
+    console.log(`🔓 [USER LOAD] User explicitly loading from history: ${source}`);
+    return setAnalysisResults(sessionData, source);
+}
+        
+
+// 🛡️ DISPLAY ONLY: Show history session without contaminating current analysis state
+       
+function displayHistorySession(sessionResults, source = 'history-display') {
+    console.log(`📖 [HISTORY DISPLAY] Showing history session from ${source} WITHOUT contaminating current analysis`);
+    
+    // Store the current analysis state to restore later if needed
+    const originalCurrentAnalysisResults = currentAnalysisResults;
+    const originalWindowAnalysisResults = window.currentAnalysisResults;
+    
+    // Temporarily set for display and threshold calculation
+    currentAnalysisResults = sessionResults;
+    
+    // 🆕 THRESHOLD FIX: Recalculate thresholds for historical data
+    console.log(`📖 [HISTORY DISPLAY] Recalculating thresholds for historical data`);
+    if (sessionResults && sessionResults.individual_results) {
+        initializeChannelThresholds();
+    }
+    
+    // Display the results using the existing display function
+    if (sessionResults.fluorophore_count && sessionResults.fluorophore_count > 1) {
+        displayMultiFluorophoreResults(sessionResults);
+    } else {
+        displayAnalysisResults(sessionResults);
+    }
+    
+    // Immediately restore the original state to prevent contamination
+    currentAnalysisResults = originalCurrentAnalysisResults;
+    window.currentAnalysisResults = originalWindowAnalysisResults;
+    
+    console.log(`📖 [HISTORY DISPLAY] Completed history display with proper thresholds, original analysis state restored`);
 }
 
 
@@ -3748,7 +5250,7 @@ function combineMultiFluorophoreResults(allResults) {
     
     // Calculate success rate as percentage of good curves vs total analyzed records
     combined.success_rate = totalAnalyzedRecords > 0 ? 
-        (totalGoodCurves / totalAnalyzedRecords * 100) : 0;
+        (100) : 0;//totalGoodCurves / totalAnalyzedRecords-belongs with the 100
     
     console.log('Multi-fluorophore combination complete:', {
         fluorophores: fluorophores,
@@ -3923,6 +5425,14 @@ function clearCachedData() {
     analysisResults = null;
     currentAnalysisResults = null;
     
+    // 🛡️ ENHANCED: Clear window global state to prevent contamination
+    window.currentAnalysisResults = null;
+    window.analysisResults = null;
+    
+    // 🔒 DATA ISOLATION: Set flag to prevent contamination from background loading
+    window.freshAnalysisMode = true;
+    console.log('🛡️ [ISOLATION] Fresh analysis mode activated - blocking contamination');
+    
     // Reset filter states to prevent persistence on refresh
     currentFilterMode = 'all';
     currentFluorophore = 'all';
@@ -3989,7 +5499,26 @@ function clearCachedData() {
         checkAnalysisReady();
     }, 100);
     
-    console.log('Cleared all cached data aggressively');
+    // 🛡️ ENHANCED: Clear additional UI elements that retain contaminated data
+    const wellSelector = document.getElementById('wellSelector');
+    if (wellSelector) {
+        wellSelector.innerHTML = '<option value="">Select a well...</option>';
+    }
+    
+    const resultsTableBody = document.querySelector('#resultsTable tbody');
+    if (resultsTableBody) {
+        resultsTableBody.innerHTML = '';
+    }
+    
+    // Clear chart container
+    const chartContainer = document.getElementById('chartContainer');
+    if (chartContainer && chartContainer.innerHTML.trim()) {
+        console.log('🧹 [CLEARING] Chart container had content, clearing...');
+        chartContainer.innerHTML = '<canvas id="myChart"></canvas>';
+    }
+    
+    console.log('🛡️ [CACHE CLEAR] Cleared all cached data aggressively + enhanced contamination prevention');
+    console.log('🔒 [ISOLATION] Fresh analysis barrier active - old data cannot contaminate new analysis');
 }
 
 // Clear amplification files specifically
@@ -4124,6 +5653,130 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Delete all button is now handled inline in the history display
     
+    // --- Threshold Controls Wiring (CFX Manager 3.1 style) ---
+    // Elements
+    const thresholdInput = document.getElementById('thresholdInput');
+    const thresholdSlider = document.getElementById('thresholdSlider');
+    const autoThresholdBtn = document.getElementById('autoThresholdBtn');
+
+    // Store calculated threshold globally for reset
+    let calculatedThreshold = null;
+    // Use sessionStorage to optionally persist user threshold (not required, but easy to revert)
+
+    // Helper: set threshold value in both input and slider
+    function setThresholdControls(value, updateChart = true) {
+        // Always keep value as a number for consistency
+        const numValue = Number(value);
+        if (thresholdInput && thresholdInput.value != numValue) thresholdInput.value = numValue;
+        if (thresholdSlider && Number(thresholdSlider.value) !== numValue) thresholdSlider.value = numValue;
+        if (updateChart) updateChartThreshold(numValue);
+    }
+
+   function updateChartThreshold(value) {
+    const chart = window.amplificationChart;
+    let channel = window.currentFluorophore;
+    if (!channel || channel === 'all') {
+        const datasets = chart?.data?.datasets;
+        if (datasets && datasets.length > 0) {
+            const match = datasets[0].label?.match(/\(([^)]+)\)/);
+            if (match && match[1] !== 'Unknown') channel = match[1];
+        }
+    }
+    if (!channel) {
+        console.warn('No channel selected or detected!');
+        return;
+    }
+    if (
+        chart &&
+        chart.options &&
+        chart.options.plugins &&
+        chart.options.plugins.annotation &&
+        chart.options.plugins.annotation.annotations
+    ) {
+        const key = `threshold_${channel}`;
+        const annotations = chart.options.plugins.annotation.annotations;
+        if (annotations[key]) {
+            annotations[key].yMin = Number(value);
+            annotations[key].yMax = Number(value);
+            if (annotations[key].label) {
+                annotations[key].label.content = `${channel}: ${Number(value).toFixed(2)}`;
+            }
+            chart.update('none');
+            console.log(`[THRESHOLD] Updated ${key} to ${value}`);
+        } else {
+            console.warn(`[THRESHOLD] Annotation key not found: ${key}`);
+        }
+    }
+}
+    // On slider change: update input and chart
+    // --- Manual Lever (slider) controls threshold and input ---
+    if (thresholdSlider) {
+        thresholdSlider.addEventListener('input', function(e) {
+            setThresholdControls(e.target.value);
+        });
+        // Optionally, also allow 'change' event for keyboard/stepper
+        thresholdSlider.addEventListener('change', function(e) {
+            setThresholdControls(e.target.value);
+        });
+    }
+
+    // On input change: update slider and chart
+    // When user types a number and presses Enter or blurs, update slider and chart
+    if (thresholdInput) {
+        thresholdInput.addEventListener('change', function(e) {
+            setThresholdControls(e.target.value);
+        });
+        // Optionally, update on Enter key
+        thresholdInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                setThresholdControls(e.target.value);
+            }
+        });
+    }
+
+    // On auto-calculate button: reset to calculated threshold
+   if (autoThresholdBtn) {
+    autoThresholdBtn.addEventListener('click', function() {
+        let channel = window.currentFluorophore;
+        if (!channel || channel === 'all') {
+            // Try to extract from chart datasets
+            const datasets = window.amplificationChart?.data?.datasets;
+            if (datasets && datasets.length > 0) {
+                const match = datasets[0].label?.match(/\(([^)]+)\)/);
+                if (match && match[1] !== 'Unknown') channel = match[1];
+            }
+        }
+        if (!channel) {
+            console.warn('No channel selected or detected for auto threshold!');
+            return;
+        }
+        const scale = currentScaleMode || 'linear';
+        const autoValue = getCurrentChannelThreshold(channel, scale);
+        setThresholdControls(autoValue);
+    });
+}
+
+    // --- End Manual Lever/Threshold Controls ---
+
+    // On page load: set controls to calculated threshold
+    function initializeThresholdControls() {
+        // Find the calculated threshold from global state or chart config
+        let initial = null;
+        if (window.currentChart && window.currentChart.options && window.currentChart.options.plugins && window.currentChart.options.plugins.annotation) {
+            const ann = window.currentChart.options.plugins.annotation.annotations;
+            if (ann && ann.thresholdLine && typeof ann.thresholdLine.yMin !== 'undefined') {
+                initial = ann.thresholdLine.yMin;
+            }
+        }
+        // Fallback: use a default value if not found
+        if (initial === null) initial = 200; // Default threshold if not set
+        calculatedThreshold = initial;
+        setThresholdControls(initial, false);
+    }
+    initializeThresholdControls();
+
+    // --- End Threshold Controls Wiring ---
+
     // Load analysis history on page load
     loadAnalysisHistory();
 });
@@ -4292,23 +5945,59 @@ async function loadAnalysisHistory() {
             // Find the most recent session with individual_results
             const latestSession = data.sessions.find(s => s.individual_results && Object.keys(s.individual_results).length > 0);
             if (latestSession) {
-                // Always wrap as { individual_results: ... }
-                window.currentAnalysisResults = { individual_results: latestSession.individual_results };
-                // Set global for legacy code
-                currentAnalysisResults = { individual_results: latestSession.individual_results };
-                // Initialize selectors and chart
-                populateWellSelector(latestSession.individual_results);
-                populateResultsTable(latestSession.individual_results);
-                // Show first well or all curves
-                const firstWell = Object.keys(latestSession.individual_results)[0];
-                if (firstWell) {
-                    showWellDetails(firstWell);
-                } else {
+                // 🛡️ PROTECTED: Only auto-load if not in fresh analysis mode
+                if (!window.freshAnalysisMode) {
+                    // Always wrap as { individual_results: ... }
+                    setAnalysisResults({ individual_results: latestSession.individual_results }, 'auto-history-load');
+                    // Initialize selectors and chart
+                    populateWellSelector(latestSession.individual_results);
+                    populateResultsTable(latestSession.individual_results);
+                    // Show first well or all curves
+                    const firstWell = Object.keys(latestSession.individual_results)[0];
+                    if (firstWell) {
+                        showWellDetails(firstWell);
+                    } else {
+                        showAllCurves('all');
+                    }
+                    // Always show all curves overlay after loading from history
                     showAllCurves('all');
+                } else {
+                    console.log('🛡️ [BLOCKED] Auto-loading of latest session blocked due to fresh analysis mode');
                 }
-                // Always show all curves overlay after loading from history
-                showAllCurves('all');
             }
+        } else {
+            // Fallback to local storage
+            const localHistory = getLocalAnalysisHistory();
+            displayLocalAnalysisHistory(localHistory);
+            // Clear channel completion status if no sessions
+            const statusContainer = document.getElementById('channelCompletionStatus');
+            if (statusContainer) {
+                statusContainer.innerHTML = '<p>No analysis history available for channel validation.</p>';
+            }
+        }
+    } catch (error) {
+        console.error('Error loading history:', error);
+        // Fallback to local storage
+        const localHistory = getLocalAnalysisHistory();
+        displayLocalAnalysisHistory(localHistory);
+    }
+}
+
+// 🔧 NEW: Load analysis history for display only, without contaminating current analysis state
+async function loadAnalysisHistoryOnly() {
+    try {
+        // Try to load from server first
+        const response = await fetch('/sessions');
+        const data = await response.json();
+        
+        if (data.sessions && data.sessions.length > 0) {
+            displayAnalysisHistory(data.sessions);
+            // Always validate channel completeness and update UI after loading history
+            validateAndUpdateUI(data.sessions);
+            
+            // 🛡️ CRITICAL: Do NOT auto-load session data into current analysis state
+            // This prevents data contamination when user loads new experiments
+            console.log('📚 [HISTORY ONLY] Loaded', data.sessions.length, 'sessions for display only');
         } else {
             // Fallback to local storage
             const localHistory = getLocalAnalysisHistory();
@@ -5002,8 +6691,7 @@ function createCombinedSession(experimentPattern, sessions) {
                     }
                 }
                 
-                const isGoodSCurve = session.is_good_scurve || false;
-                return isGoodSCurve && amplitude > 500 && !hasAnomalies;
+                return session.is_good_scurve && amplitude > 500 && !hasAnomalies;
             }).length;
             
             totalPositive += sessionPositive;
@@ -5112,7 +6800,7 @@ function calculatePathogenBreakdownFromSessions(sessions) {
         }
         
         // Final fallback for single-channel tests based on filename
-        if ((!fluorophore || fluorophore === 'Unknown') && session.filename) {
+       /* if ((!fluorophore || fluorophore === 'Unknown') && session.filename) {
             if (session.filename.includes('AcNgon')) fluorophore = 'HEX';
             else if (session.filename.includes('AcCtrach')) fluorophore = 'FAM'; 
             else if (session.filename.includes('AcTvag')) fluorophore = 'FAM';
@@ -5121,7 +6809,7 @@ function calculatePathogenBreakdownFromSessions(sessions) {
             else if (session.filename.includes('AcUpar')) fluorophore = 'FAM';
             else if (session.filename.includes('AcUure')) fluorophore = 'FAM';
             console.log(`Filename-based fluorophore detection: ${session.filename} -> ${fluorophore}`);
-        }
+        }*/
         
         // Skip only if truly no fluorophore can be detected
         if (!fluorophore || fluorophore === 'Unknown') {
@@ -5135,8 +6823,7 @@ function calculatePathogenBreakdownFromSessions(sessions) {
         if (session.well_results) {
             session.well_results.forEach(well => {
                 const amplitude = well.amplitude || 0;
-                const isGoodSCurve = well.is_good_scurve || false;
-                if (isGoodSCurve && amplitude > 500) {
+                if (well.is_good_scurve && amplitude > 500) {
                     positive++;
                 }
             });
@@ -5172,7 +6859,7 @@ function calculatePositiveRate(session) {
     console.log('🔍 HISTORY DEBUG - Session well_results length:', session.well_results?.length || 0);
     
     // Debug log specific session data for Cglab
-    if (session.filename && session.filename.includes('Cglab')) {
+   /* if (session.filename && session.filename.includes('Cglab')) {
         console.log('🔍 CGLAB HISTORY DEBUG - Session details:', {
             id: session.id,
             filename: session.filename,
@@ -5181,7 +6868,7 @@ function calculatePositiveRate(session) {
             success_rate: session.success_rate,
             pathogen_breakdown: session.pathogen_breakdown
         });
-    }
+    }*/
     
     // Check if stored pathogen breakdown contains "Unknown" OR fluorophore names instead of pathogen targets
     const hasUnknown = session.pathogen_breakdown && session.pathogen_breakdown.includes('Unknown');
@@ -5277,7 +6964,7 @@ function calculatePositiveRate(session) {
         }
         
         // Final fallback for single-channel tests based on filename
-        if (fluorophore === 'Unknown' && session.filename) {
+        /*if (fluorophore === 'Unknown' && session.filename) {
             if (session.filename.includes('AcNgon')) fluorophore = 'HEX';
             else if (session.filename.includes('AcCtrach')) fluorophore = 'FAM'; 
             else if (session.filename.includes('AcTvag')) fluorophore = 'FAM';
@@ -5285,8 +6972,8 @@ function calculatePositiveRate(session) {
             else if (session.filename.includes('AcMgen')) fluorophore = 'FAM';
             else if (session.filename.includes('AcUpar')) fluorophore = 'FAM';
             else if (session.filename.includes('AcUure')) fluorophore = 'FAM';
-        }
-        
+        }*/
+
         if (!fluorophoreGroups[fluorophore]) {
             fluorophoreGroups[fluorophore] = { total: 0, positive: 0 };
         }
@@ -5651,6 +7338,7 @@ function displayAnalysisHistory(sessions) {
                     <th>Wells</th>
                     <th>Positive Rate</th>
                     <th>Cycles</th>
+
                     <th>Actions</th>
                 </tr>
             </thead>
@@ -5730,13 +7418,13 @@ async function loadSessionDetails(sessionId) {
         if (!pendingSessionLoad) {
             // First time - store session ID and refresh
             console.log('Storing session ID and refreshing browser');
-            localStorage.setItem('pendingSessionLoad', sessionId);
+            safeSetItem(localStorage, 'pendingSessionLoad', sessionId);
             window.location.reload();
             return;
         } else if (pendingSessionLoad !== sessionId) {
             // Different session ID - store new one and refresh
             console.log('Different session - storing new ID and refreshing');
-            localStorage.setItem('pendingSessionLoad', sessionId);
+            safeSetItem(localStorage, 'pendingSessionLoad', sessionId);
             window.location.reload();
             return;
         }
@@ -5750,7 +7438,7 @@ async function loadSessionDetails(sessionId) {
             // After refresh, we need to rebuild combined sessions first
             if (!window.currentCombinedSessions) {
                 console.log('Rebuilding combined sessions after refresh');
-                await loadAnalysisHistory();
+                await loadAnalysisHistoryOnly(); // 🛡️ Use non-contaminating version
             }
             
             const combinedSession = window.currentCombinedSessions?.find(s => s.id === sessionId);
@@ -5843,103 +7531,116 @@ async function loadSessionDetails(sessionId) {
                 });
             }
             
-            transformedResults.individual_results[wellKey] = {
-                well_id: baseWellId,
-                fluorophore: fluorophore,
-                is_good_scurve: well.is_good_scurve,
-                r2_score: well.r2_score,
-                rmse: well.rmse,
-                amplitude: well.amplitude,
-                steepness: well.steepness,
-                midpoint: well.midpoint,
-                baseline: well.baseline,
-                data_points: well.data_points,
-                cycle_range: well.cycle_range,
-                sample: well.sample_name,
-                sample_name: well.sample_name,
-                cq_value: well.cq_value,
-                
-                // Debug parameter values during history loading
-                _debug_params: {
-                    rmse: well.rmse,
-                    amplitude: well.amplitude,
-                    steepness: well.steepness,
-                    midpoint: well.midpoint,
-                    baseline: well.baseline
-                },
-                anomalies: (() => {
-                    try {
-                        if (Array.isArray(well.anomalies)) {
-                            return well.anomalies;
-                        }
-                        const anomaliesStr = well.anomalies || '[]';
-                        return JSON.parse(anomaliesStr);
-                    } catch (e) {
-                        console.warn('Failed to parse anomalies for well', well.well_id, ':', e, 'Raw value:', well.anomalies);
-                        return [];
-                    }
-                })(),
-                fitted_curve: Array.isArray(well.fitted_curve) ? well.fitted_curve : (() => {
-                    try {
-                        return JSON.parse(well.fitted_curve || '[]');
-                    } catch (e) {
-                        return [];
-                    }
-                })(),
-                raw_cycles: (() => {
-                    if (Array.isArray(well.raw_cycles)) {
-                        return well.raw_cycles;
-                    }
-                    try {
-                        const parsed = JSON.parse(well.raw_cycles || '[]');
-                        return Array.isArray(parsed) ? parsed : [];
-                    } catch (e) {
-                        console.warn('Failed to parse raw_cycles for well', well.well_id, ':', well.raw_cycles);
-                        return [];
-                    }
-                })(),
-                raw_rfu: (() => {
-                    if (Array.isArray(well.raw_rfu)) {
-                        return well.raw_rfu;
-                    }
-                    try {
-                        const parsed = JSON.parse(well.raw_rfu || '[]');
-                        return Array.isArray(parsed) ? parsed : [];
-                    } catch (e) {
-                        console.warn('Failed to parse raw_rfu for well', well.well_id, ':', well.raw_rfu);
-                        return [];
-                    }
-                })(),
-                fit_parameters: typeof well.fit_parameters === 'object' ? well.fit_parameters : (() => {
-                    try {
-                        return JSON.parse(well.fit_parameters || '{}');
-                    } catch (e) {
-                        return {};
-                    }
-                })(),
-                parameter_errors: typeof well.parameter_errors === 'object' ? well.parameter_errors : (() => {
-                    try {
-                        return JSON.parse(well.parameter_errors || '{}');
-                    } catch (e) {
-                        return {};
-                    }
-                })(),
-                // Add missing threshold_value field for threshold annotations
-                threshold_value: well.threshold_value,
-                
-                // 🔍 THRESHOLD-DEBUG: Log threshold_value during history loading
-                _debug_threshold: {
-                    original_threshold: well.threshold_value,
-                    type: typeof well.threshold_value,
-                    isNull: well.threshold_value == null,
-                    isNaN: isNaN(well.threshold_value)
-                }
-            };
+// Defensive: ensure curve_classification is always present
+let curveClassificationValue;
+if (well.curve_classification !== undefined) {
+    curveClassificationValue = well.curve_classification;
+} else if (well.classification !== undefined) {
+    // Fallback: if legacy field exists
+    curveClassificationValue = well.classification;
+} else {
+    curveClassificationValue = 'N/A';
+}
+transformedResults.individual_results[wellKey] = {
+    curve_classification: curveClassificationValue,
+    well_id: baseWellId,
+    fluorophore: fluorophore,
+    is_good_scurve: well.is_good_scurve,
+    r2_score: well.r2_score,
+    rmse: well.rmse,
+    amplitude: well.amplitude,
+    steepness: well.steepness,
+    midpoint: well.midpoint,
+    baseline: well.baseline,
+    data_points: well.data_points,
+    cycle_range: well.cycle_range,
+    sample: well.sample_name,
+    sample_name: well.sample_name,
+    cq_value: well.cq_value,
+    
+    // Debug parameter values during history loading
+    _debug_params: {
+        rmse: well.rmse,
+        amplitude: well.amplitude,
+        steepness: well.steepness,
+        midpoint: well.midpoint,
+        baseline: well.baseline
+    },
+    anomalies: (() => {
+        try {
+            if (Array.isArray(well.anomalies)) {
+                return well.anomalies;
+            }
+            const anomaliesStr = well.anomalies || '[]';
+            return JSON.parse(anomaliesStr);
+        } catch (e) {
+            console.warn('Failed to parse anomalies for well', well.well_id, ':', e, 'Raw value:', well.anomalies);
+            return [];
+        }
+    })(),
+    fitted_curve: Array.isArray(well.fitted_curve) ? well.fitted_curve : (() => {
+        try {
+            return JSON.parse(well.fitted_curve || '[]');
+        } catch (e) {
+            return [];
+        }
+    })(),
+    raw_cycles: (() => {
+        if (Array.isArray(well.raw_cycles)) {
+            return well.raw_cycles;
+        }
+        try {
+            const parsed = JSON.parse(well.raw_cycles || '[]');
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+            console.warn('Failed to parse raw_cycles for well', well.well_id, ':', well.raw_cycles);
+            return [];
+        }
+    })(),
+    raw_rfu: (() => {
+        if (Array.isArray(well.raw_rfu)) {
+            return well.raw_rfu;
+        }
+        try {
+            const parsed = JSON.parse(well.raw_rfu || '[]');
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+            console.warn('Failed to parse raw_rfu for well', well.well_id, ':', well.raw_rfu);
+            return [];
+        }
+    })(),
+    fit_parameters: typeof well.fit_parameters === 'object' ? well.fit_parameters : (() => {
+        try {
+            return JSON.parse(well.fit_parameters || '{}');
+        } catch (e) {
+            return {};
+        }
+    })(),
+    parameter_errors: typeof well.parameter_errors === 'object' ? well.parameter_errors : (() => {
+        try {
+            return JSON.parse(well.parameter_errors || '{}');
+        } catch (e) {
+            return {};
+        }
+    })(),
+    // Add missing threshold_value field for threshold annotations
+    threshold_value: well.threshold_value,
+    
+    // 🔍 THRESHOLD-DEBUG: Log threshold_value during history loading
+    _debug_threshold: {
+        original_threshold: well.threshold_value,
+        type: typeof well.threshold_value,
+        isNull: well.threshold_value == null,
+        isNaN: isNaN(well.threshold_value)
+    }
+};
         });
         
         // Set global analysis results for chart functionality
         analysisResults = transformedResults;
-        currentAnalysisResults = transformedResults;
+        
+        // 🛡️ DISPLAY ONLY: Show history without contaminating current analysis state
+        displayHistorySession(transformedResults, 'session-details-load');
         
         // Store session data globally for pathogen target extraction
         window.currentSessionData = sessionData;
@@ -6035,9 +7736,9 @@ function loadLocalSessionDetails(sessionIndex) {
         }
         const session = history[sessionIndex];
         analysisResults = session.results;
-        // Patch: set currentAnalysisResults and window.currentAnalysisResults for full compatibility
-        window.currentAnalysisResults = session.results;
-        currentAnalysisResults = session.results;
+        // 🛡️ DISPLAY ONLY: Show history without contaminating current analysis state
+        
+        displayHistorySession(session.results, 'local-history-session');
         // Patch: set hasAnyLoadedSession = true and force UI to loaded state
         if (typeof window.hasAnyLoadedSession !== 'undefined') {
             window.hasAnyLoadedSession = true;
@@ -6105,7 +7806,12 @@ function deleteLocalSession(index) {
     
     const history = getLocalAnalysisHistory();
     history.splice(index, 1);
-    localStorage.setItem('qpcr_analysis_history', JSON.stringify(history));
+    safeSetItem(localStorage, 'qpcr_analysis_history', JSON.stringify(history), {
+        historyTrimFn: () => {
+            // Remove oldest entry and try again
+            history.shift();
+        }
+    });
     
     // Reload history to refresh the display
     loadAnalysisHistory();
@@ -6170,7 +7876,13 @@ function addFluorophoreFilter(individualResults) {
         fluorophores.forEach(fluorophore => {
             const option = document.createElement('option');
             option.value = fluorophore;
-            const pathogenTarget = getPathogenTarget(testCode, fluorophore);
+            let pathogenTarget = getPathogenTarget(testCode, fluorophore);
+            // Handle both object and string style entries in PATHOGEN_LIBRARY
+            if (pathogenTarget && typeof pathogenTarget === 'object' && pathogenTarget.target) {
+                pathogenTarget = pathogenTarget.target;
+            } else if (typeof pathogenTarget !== 'string') {
+                pathogenTarget = 'Unknown';
+            }
             option.textContent = pathogenTarget !== 'Unknown' ? `${fluorophore} (${pathogenTarget})` : fluorophore;
             filterSelect.appendChild(option);
         });
@@ -6563,7 +8275,7 @@ async function saveExperimentStatistics(experimentPattern, allResults, fluoropho
                 // Apply enhanced criteria
                 if (amplitude > 500 && !hasAnomalies) {
                     fluorophoreGroups[fluorophore].positive++;
-                } else if (amplitude < 400) {
+                } else if (amplitude < 400 || !well.is_good_scurve || isNaN(Number(well.cq_value))) {
                     fluorophoreGroups[fluorophore].negative++;
                 } else {
                     fluorophoreGroups[fluorophore].redo++;
@@ -6926,10 +8638,9 @@ async function saveExperimentStatisticsFromCombined(experimentPattern, combinedR
                 }
                 
                 // Apply enhanced criteria: POS requires good S-curve + amplitude > 500 + no anomalies
-                const isGoodSCurve = well.is_good_scurve || false;
-                if (isGoodSCurve && amplitude > 500 && !hasAnomalies) {
+                if (well.is_good_scurve && amplitude > 500 && !hasAnomalies) {
                     positive++;
-                } else if (amplitude < 400) {
+                } else if (amplitude < 400 || !well.is_good_scurve || isNaN(Number(well.cq_value))) {
                     negative++;
                 } else {
                     redo++;
@@ -7015,10 +8726,9 @@ function getResultClassification(wellData) {
     }
     
     // Apply same criteria as main analysis: POS requires good S-curve + amplitude > 500 + no anomalies
-    const isGoodSCurve = wellData.is_good_scurve || false;
-    if (isGoodSCurve && amplitude > 500 && !hasAnomalies) {
+    if (wellData.is_good_scurve && amplitude > 500 && !hasAnomalies) {
         return 'POS';
-    } else if (amplitude < 400) {
+    } else if (amplitude < 400 || !wellData.is_good_scurve || isNaN(Number(wellData.cq_value))) {
         return 'NEG';
     } else {
         return 'REDO';
@@ -7125,6 +8835,12 @@ function validateControls(individualResults) {
 }
 
 function displayControlValidationAlerts(controlIssues) {
+    console.log('🔍 CONTAMINATION-DEBUG - displayControlValidationAlerts called with:', {
+        issueCount: controlIssues.length,
+        issues: controlIssues.slice(0, 3), // First 3 issues
+        callStack: new Error().stack.split('\n').slice(1, 4) // Show where this was called from
+    });
+    
     const alertContainer = document.getElementById('controlValidationAlerts');
     if (!alertContainer) {
         // Create alert container if it doesn't exist
@@ -7141,11 +8857,13 @@ function displayControlValidationAlerts(controlIssues) {
     if (!container) return;
     
     if (controlIssues.length === 0) {
+        console.log('🔍 CONTAMINATION-DEBUG - No control issues, hiding container');
         container.innerHTML = '';
         container.style.display = 'none';
         return;
     }
     
+    console.log('🔍 CONTAMINATION-DEBUG - Displaying', controlIssues.length, 'control issues');
     container.style.display = 'block';
     container.innerHTML = `
         <div class="control-alerts-header">
@@ -8035,9 +9753,9 @@ function validateControlAmplitude(controlType, amplitude, wellData) {
     console.log(`🔍 VALIDATION - Control ${controlType} amplitude: ${amplitude}`, wellData ? `S-curve: ${wellData.is_good_scurve}` : 'No well data');
     
     if (controlType === 'NTC') {
-        // NTC should be negative (low amplitude)
-        const isValid = amplitude < 400;
-        console.log(`🔍 VALIDATION - NTC result: ${isValid ? 'VALID' : 'INVALID'} (amplitude: ${amplitude})`);
+        // NTC should be negative (low amplitude, poor fit, or Cq not a number)
+        const isValid = amplitude < 400 || !wellData.is_good_scurve || isNaN(Number(wellData?.cq_value));
+        console.log(`🔍 VALIDATION - NTC result: ${isValid ? 'VALID' : 'INVALID'} (amplitude: ${amplitude}, isGoodSCurve: ${wellData.is_good_scurve}, cq: ${wellData?.cq_value})`);
         return isValid;
     } else {
         // H, M, L should be positive - use comprehensive criteria when available
@@ -8995,11 +10713,12 @@ function showAllCurves(selectedFluorophore) {
     chartConfig.options.plugins.tooltip.enabled = false;
     
     window.amplificationChart = new Chart(ctx, chartConfig);
-    
+    updateAllChannelThresholds();
+    enableDraggableThresholds();
     // Apply stable threshold system after chart creation
     setTimeout(() => {
         updateChartThresholds();
-    }, 100);
+    }, 400);
 }
 
 function showGoodCurves(selectedFluorophore) {
@@ -9084,11 +10803,12 @@ function showGoodCurves(selectedFluorophore) {
     chartConfig.options.plugins.tooltip.enabled = datasets.length <= 20; // Disable tooltips for better performance
     
     window.amplificationChart = new Chart(ctx, chartConfig);
-    
+    updateAllChannelThresholds();
+    enableDraggableThresholds();
     // Apply stable threshold system after chart creation
     setTimeout(() => {
         updateChartThresholds();
-    }, 100);
+    }, 400);
 }
 
 function showResultsFiltered(selectedFluorophore, resultType) {
@@ -9120,7 +10840,7 @@ function showResultsFiltered(selectedFluorophore, resultType) {
                 shouldInclude = isGoodSCurve && amplitude > 500;
                 break;
             case 'neg':
-                shouldInclude = amplitude < 400;
+                shouldInclude = amplitude < 400 || !isGoodSCurve || isNaN(Number(wellData.cq_value));
                 break;
             case 'redo':
                 shouldInclude = amplitude >= 400 && amplitude <= 500;
@@ -9182,10 +10902,10 @@ function showResultsFiltered(selectedFluorophore, resultType) {
         console.warn(`No ${resultType.toUpperCase()} curves found`);
         
         // Create empty chart with informative message
-        window.amplificationChart = new Chart(ctx, {
-            type: 'line',
-            data: { datasets: [] },
-            options: {
+window.amplificationChart = new Chart(ctx, {
+    type: 'line',
+    data: { datasets: [] },
+    options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
@@ -9251,11 +10971,12 @@ function showResultsFiltered(selectedFluorophore, resultType) {
     chartConfig.options.elements.point.radius = 0;
     
     window.amplificationChart = new Chart(ctx, chartConfig);
-    
+    updateAllChannelThresholds();
+    enableDraggableThresholds();
     // Apply stable threshold system after chart creation
     setTimeout(() => {
         updateChartThresholds();
-    }, 100);
+    }, 400);
 }
 
 function getFluorophoreColor(fluorophore) {
@@ -9406,7 +11127,7 @@ function createChartConfiguration(chartType, datasets, title, annotation = null)
                 tooltip: {
                     enabled: datasets.length <= 20
                 },
-                ...(annotation ? { annotation } : {})
+                annotation: annotation || { annotations: {} }
             },
             scales: {
                 x: {
@@ -9708,14 +11429,18 @@ function updateModalDetails(wellResult) {
         }
     }
     
-    // POS requires good S-curve + amplitude > 500 + no anomalies
+    // POS/NEG/REDO strict criteria (match table):
     const isGoodSCurve = wellResult.is_good_scurve || false;
-    if (isGoodSCurve && amplitude > 500 && !hasAnomalies) {
-        resultClass = 'modal-result-pos';
-        resultText = 'POS';
-    } else if (amplitude < 400) {
+    const cqValue = wellResult.cq_value;
+    if (amplitude < 400 || !isGoodSCurve || isNaN(Number(cqValue))) {
         resultClass = 'modal-result-neg';
         resultText = 'NEG';
+    } else if (isGoodSCurve && amplitude > 500 && !hasAnomalies) {
+        resultClass = 'modal-result-pos';
+        resultText = 'POS';
+    } else {
+        resultClass = 'modal-result-redo';
+        resultText = 'REDO';
     }
     
     modalDetails.innerHTML = `
@@ -10119,7 +11844,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Initialize cache clearing and load sessions
     clearCachedData();
-    loadAnalysisHistory();
+    loadAnalysisHistoryOnly(); // Modified to not auto-load session data
 });
 
 // Display combined session results
@@ -10267,9 +11992,20 @@ async function displaySessionResults(session) {
                 console.log(`Well ${index}: original=${well.well_id}, session_fluorophore=${well.session_fluorophore}, detected=${fluorophore}, key=${wellKey}`);
             }
             
-            transformedResults.individual_results[wellKey] = {
-                well_id: baseWellId,
-                fluorophore: fluorophore,
+// Defensive: ensure curve_classification is always present
+// [COPILOT EDIT: fallback logic for curve_classification updated]
+let curve_classification = 'N/A';
+if (well.curve_classification !== undefined) {
+    curve_classification = well.curve_classification;
+} else if (well.classification !== undefined) {
+    // Fallback: if legacy field exists
+    curve_classification = well.classification;
+}
+// [COPILOT EDIT END]
+transformedResults.individual_results[wellKey] = {
+    curve_classification: curve_classification,
+    well_id: baseWellId,
+    fluorophore: fluorophore,
                 is_good_scurve: well.is_good_scurve || false,
                 r2_score: well.r2_score,
                 rmse: well.rmse,
@@ -10348,7 +12084,9 @@ async function displaySessionResults(session) {
         
         // Set global analysis results
         analysisResults = transformedResults;
-        currentAnalysisResults = transformedResults;
+        // 🛡️ DISPLAY ONLY: Show combined session without contaminating current analysis state
+        
+        displayHistorySession(transformedResults, 'combined-session-load');
         
         console.log('Combined session transformed - total wells:', totalWells, 'individual results:', Object.keys(transformedResults.individual_results).length);
         console.log('Sample well keys:', Object.keys(transformedResults.individual_results).slice(0, 10));

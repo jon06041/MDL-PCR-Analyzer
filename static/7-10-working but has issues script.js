@@ -1,3 +1,204 @@
+// --- Shared strict result classification for NEG/POS/REDO ---
+
+// Remove any import/export statements for browser compatibility
+// All dependencies should be accessed via window, e.g., window.calculateThreshold
+
+/**
+ * Safely set item in localStorage or sessionStorage, handling quota errors.
+ * @param {Storage} storage - localStorage or sessionStorage
+ * @param {string} key
+ * @param {string} value
+ * @param {object} [options] - { historyTrimFn: function to trim history if needed, maxRetries: number }
+ */
+function safeSetItem(storage, key, value, options = {}) {
+    const { historyTrimFn, maxRetries = 1 } = options;
+    let attempts = 0;
+    while (attempts <= maxRetries) {
+        try {
+            storage.setItem(key, value);
+            return true;
+        } catch (e) {
+            if (e.name === 'QuotaExceededError' || e.code === 22) {
+                console.warn('Storage quota exceeded for', key, 'Attempt:', attempts + 1);
+                // Try to trim history if function provided
+                if (historyTrimFn && typeof historyTrimFn === 'function') {
+                    historyTrimFn();
+                } else {
+                    // Otherwise, clear all storage
+                    storage.clear();
+                }
+                attempts++;
+            } else {
+                throw e;
+            }
+        }
+    }
+    alert('Unable to save data: browser storage is full. Some features may not work.');
+    return false;
+}
+
+function classifyResult(wellData) {
+    const amplitude = wellData.amplitude || 0;
+    const isGoodSCurve = wellData.is_good_scurve || false;
+    let hasAnomalies = false;
+    if (wellData.anomalies) {
+        try {
+            const anomalies = typeof wellData.anomalies === 'string' ? 
+                JSON.parse(wellData.anomalies) : wellData.anomalies;
+            hasAnomalies = Array.isArray(anomalies) && anomalies.length > 0 && 
+                          !(anomalies.length === 1 && anomalies[0] === 'None');
+        } catch (e) {
+            hasAnomalies = true;
+        }
+    }
+    const cqValue = wellData.cq_value;
+    if (amplitude < 400 || !isGoodSCurve || isNaN(Number(cqValue))) {
+        return 'NEG';
+    } else if (isGoodSCurve && amplitude > 500 && !hasAnomalies) {
+        return 'POS';
+    } else {
+        return 'REDO';
+    }
+}
+
+
+// Expose globally for use in other scripts
+window.classifyResult = classifyResult;
+// --- Chart.js Annotation Plugin Registration (robust, before chart creation) ---
+function ensureAnnotationPluginRegistered() {
+    if (window.Chart && window['chartjs-plugin-annotation']) {
+        let alreadyRegistered = false;
+        // Chart.js v3/v4: registry.plugins.items or registry.plugins._items (UMD/minified)
+        if (Chart.registry && Chart.registry.plugins) {
+            const items = Chart.registry.plugins.items || Chart.registry.plugins._items || [];
+            alreadyRegistered = Array.isArray(items) && items.some(p => p && p.id === 'annotation');
+        } else if (Chart._plugins) {
+            // Chart.js 2.x fallback
+            alreadyRegistered = Object.values(Chart._plugins).some(p => p && p.id === 'annotation');
+        }
+        if (!alreadyRegistered) {
+            Chart.register(window['chartjs-plugin-annotation']);
+            console.log('[DIAG] Chart annotation plugin registered for Chart.js');
+        } else {
+            console.log('[DIAG] Chart annotation plugin already registered');
+        }
+    } else {
+        console.warn('[DIAG] Chart.js or annotation plugin not found on window');
+    }
+}
+
+// Call this BEFORE any chart is created
+ensureAnnotationPluginRegistered();
+
+
+        
+// Add this near your other globals:
+if (!window.userSetThresholds) window.userSetThresholds = {}; // { channel: { scale: value } }
+
+// Update setThresholdControls to store the value:
+function setThresholdControls(value, updateChart = true) {
+    const numValue = Number(value);
+    if (thresholdInput && thresholdInput.value != numValue) thresholdInput.value = numValue;
+    if (thresholdSlider && Number(thresholdSlider.value) !== numValue) thresholdSlider.value = numValue;
+
+    // Use the currently selected channel, never default to HEX
+    let channel = window.currentFluorophore;
+    if (!channel || channel === 'all') {
+        // Try to extract from chart datasets
+        const datasets = window.amplificationChart?.data?.datasets;
+        if (datasets && datasets.length > 0) {
+            const match = datasets[0].label?.match(/\(([^)]+)\)/);
+            if (match && match[1] !== 'Unknown') channel = match[1];
+        }
+    }
+    if (!channel) {
+        console.warn('No channel selected or detected!');
+        return;
+    }
+    const scale = currentScaleMode || 'linear';
+    if (!window.userSetThresholds[channel]) window.userSetThresholds[channel] = {};
+    window.userSetThresholds[channel][scale] = numValue;
+    if (updateChart) updateChartThreshold(numValue);
+}
+// === DIAGNOSTICS FOR THRESHOLD/UI/CHART FEATURES ===
+(function diagnostics() {
+    // Check Chart.js annotation plugin registration
+    document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(() => {
+            if (window.Chart && window.Chart.registry) {
+                const plugins = window.Chart.registry.plugins ? Object.keys(window.Chart.registry.plugins) : Object.keys(window.Chart.plugins || {});
+                console.log('[DIAG] Chart.js plugins registered:', plugins);
+            } else {
+                console.warn('[DIAG] Chart.js registry not found');
+            }
+            if (window.amplificationChart) {
+                const ann = window.amplificationChart.options?.plugins?.annotation;
+                if (ann) {
+                    console.log('[DIAG] Chart annotation plugin options found:', ann);
+                } else {
+                    console.warn('[DIAG] Chart annotation plugin options NOT found');
+                }
+            } else {
+                console.warn('[DIAG] amplificationChart not found');
+            }
+        }, 1000);
+    });
+
+    // Check DOM elements
+    document.addEventListener('DOMContentLoaded', function() {
+        const ids = ['thresholdInput', 'autoThresholdBtn', 'wellSelect', 'fluorophoreSelect'];
+        ids.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                console.log(`[DIAG] DOM element #${id} found`);
+            } else {
+                console.warn(`[DIAG] DOM element #${id} NOT found`);
+            }
+        });
+    });
+
+    // Patch and log key function calls
+    function logWrap(fn, name) {
+        return function() {
+            console.log(`[DIAG] ${name} called`, arguments);
+            try {
+                return fn.apply(this, arguments);
+            } catch (e) {
+                console.error(`[DIAG] Error in ${name}:`, e);
+            }
+        };
+    }
+    if (typeof updateAllChannelThresholds === 'function') {
+        window.updateAllChannelThresholds = logWrap(updateAllChannelThresholds, 'updateAllChannelThresholds');
+    }
+    if (typeof updateChartThresholds === 'function') {
+        window.updateChartThresholds = logWrap(updateChartThresholds, 'updateChartThresholds');
+    }
+    if (typeof setChartMode === 'function') {
+        window.setChartMode = logWrap(setChartMode, 'setChartMode');
+    }
+    if (typeof restoreAutoThreshold === 'function') {
+        window.restoreAutoThreshold = logWrap(restoreAutoThreshold, 'restoreAutoThreshold');
+    }
+    if (typeof enableDraggableThresholds === 'function') {
+        window.enableDraggableThresholds = logWrap(enableDraggableThresholds, 'enableDraggableThresholds');
+    }
+    if (typeof defineDraggableThresholds === 'function') {
+        window.defineDraggableThresholds = logWrap(defineDraggableThresholds, 'defineDraggableThresholds');
+    }
+    if (typeof enforceShowAllWellsView === 'function') {
+        window.enforceShowAllWellsView = logWrap(enforceShowAllWellsView, 'enforceShowAllWellsView');
+    }
+    // Log errors globally
+    window.addEventListener('error', function(e) {
+        console.error('[DIAG] Global error:', e.message, e);
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+        console.error('[DIAG] Unhandled promise rejection:', e.reason);
+    });
+})();
+// === END DIAGNOSTICS ===
+
 // --- Thresholds ---
 // Store per-channel, per-scale thresholds: { [channel]: { linear: value, log: value } }
 let channelThresholds = {};
@@ -223,7 +424,7 @@ function toggleBaselineFlattening() {
     }
     
     // Save preference
-    sessionStorage.setItem('baselineFlatteningEnabled', baselineFlatteningEnabled.toString());
+    safeSetItem(sessionStorage, 'baselineFlatteningEnabled', baselineFlatteningEnabled.toString());
     
     // Update chart with new baseline settings
     if (window.amplificationChart) {
@@ -357,7 +558,257 @@ function updateBaselineFlatteningVisibility() {
     }
 }
 
-// ...existing code...
+// --- Force CQJ calculation and table update after analysis results load ---
+document.addEventListener('DOMContentLoaded', function() {
+    // If analysis results are present, calculate CQJ for all wells and update table
+    if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+        Object.keys(window.currentAnalysisResults.individual_results).forEach(wellKey => {
+            const well = window.currentAnalysisResults.individual_results[wellKey];
+            const channel = well.fluorophore;
+            let scale = (typeof currentScaleMode === 'string' ? currentScaleMode : 'linear');
+            let threshold = null;
+            if (window.stableChannelThresholds && window.stableChannelThresholds[channel] && window.stableChannelThresholds[channel][scale] != null) {
+                threshold = window.stableChannelThresholds[channel][scale];
+            }
+            if (typeof window.calculateCqForWell === 'function' && well.cycles && well.rfu && threshold != null) {
+                well.cqj_value = window.calculateCqForWell({ cycles: well.cycles, rfu: well.rfu }, threshold);
+            } else {
+                console.warn('[CQJ/CalcJ][DEBUG] CQJ not calculated for well', wellKey, {
+                    hasCycles: !!well.cycles,
+                    hasRfu: !!well.rfu,
+                    threshold,
+                    calculateCqForWellType: typeof window.calculateCqForWell
+                });
+                well.cqj_value = null;
+            }
+        });
+        if (typeof populateResultsTable === 'function') {
+            populateResultsTable(window.currentAnalysisResults.individual_results);
+        }
+    }
+});
+
+
+
+
+
+// --- Threshold Strategy Dropdown Logic ---
+// Remove any import/export statements for browser compatibility
+// All dependencies should be accessed via window, e.g., window.LINEAR_THRESHOLD_STRATEGIES, window.LOG_THRESHOLD_STRATEGIES
+
+function populateThresholdStrategyDropdown() {
+    const select = document.getElementById('thresholdStrategySelect');
+    if (!select) return;
+    select.innerHTML = '';
+    // Always use the global window objects for strategies
+    const scale = (typeof currentScaleMode === 'string' ? currentScaleMode : 'linear');
+    const strategies = scale === 'log' ? window.LOG_THRESHOLD_STRATEGIES : window.LINEAR_THRESHOLD_STRATEGIES;
+    let firstKey = null;
+    let found = false;
+    // Defensive: ensure strategies is an object and not undefined
+    if (strategies && typeof strategies === 'object') {
+        Object.keys(strategies).forEach((key, idx) => {
+            const strat = strategies[key];
+            const option = document.createElement('option');
+            option.value = key;
+            option.textContent = strat && strat.name ? strat.name : key;
+            option.title = strat && strat.description ? strat.description : '';
+            select.appendChild(option);
+            if (idx === 0) firstKey = key;
+            if (window.selectedThresholdStrategy === key) found = true;
+        });
+    }
+    // If the current selected strategy is not available in this scale, default to first
+    if (!found) {
+        window.selectedThresholdStrategy = firstKey;
+    }
+    select.value = window.selectedThresholdStrategy;
+    // Always update window.selectedThresholdStrategy to match dropdown
+    window.selectedThresholdStrategy = select.value;
+    // Trigger chart/threshold update after repopulating
+    handleThresholdStrategyChange();
+}
+
+function getSelectedThresholdStrategy() {
+    const select = document.getElementById('thresholdStrategySelect');
+    if (select && select.value) {
+        window.selectedThresholdStrategy = select.value;
+        return select.value;
+    }
+    return null;
+}
+
+function handleThresholdStrategyChange() {
+    // When the strategy changes, recalculate thresholds for all channels and both scales, then update the chart and CQ-J/Calc-J values
+    console.log('[CQJ/CalcJ][DEBUG] handleThresholdStrategyChange: currentAnalysisResults =', window.currentAnalysisResults);
+    if (window.currentAnalysisResults) {
+        if (window.currentAnalysisResults.individual_results && typeof window.currentAnalysisResults.individual_results === 'object') {
+            console.log('[CQJ/CalcJ][DEBUG] handleThresholdStrategyChange: Detected structure: { individual_results: {...} }');
+            console.log('[CQJ/CalcJ][DEBUG] handleThresholdStrategyChange: individual_results keys =', Object.keys(window.currentAnalysisResults.individual_results));
+        } else if (
+            typeof window.currentAnalysisResults === 'object' &&
+            !Array.isArray(window.currentAnalysisResults) &&
+            Object.keys(window.currentAnalysisResults).length > 0 &&
+            Object.values(window.currentAnalysisResults).every(
+                v => v && typeof v === 'object' && 'well_id' in v
+            )
+        ) {
+            console.log('[CQJ/CalcJ][DEBUG] handleThresholdStrategyChange: Detected structure: flat well-keyed object');
+            console.log('[CQJ/CalcJ][DEBUG] handleThresholdStrategyChange: well keys =', Object.keys(window.currentAnalysisResults));
+        } else {
+            console.log('[CQJ/CalcJ][DEBUG] handleThresholdStrategyChange: Unknown or empty structure for currentAnalysisResults');
+        }
+    }
+    const strategy = getSelectedThresholdStrategy();
+    if (!window.stableChannelThresholds) window.stableChannelThresholds = {};
+    // For each channel, recalculate threshold for BOTH log and linear
+    if (window.channelControlWells) {
+        Object.keys(window.channelControlWells).forEach(channel => {
+            const controls = window.channelControlWells[channel];
+            let baseline = 0, baseline_std = 1;
+            let allRfus = [];
+            if (controls && controls.NTC && controls.NTC.length > 0) {
+                controls.NTC.forEach(well => {
+                    let rfu = well.raw_rfu;
+                    if (typeof rfu === 'string') try { rfu = JSON.parse(rfu); } catch(e){}
+                    if (Array.isArray(rfu)) allRfus.push(...rfu.slice(0,5));
+                });
+            }
+            if (allRfus.length > 0) {
+                baseline = allRfus.reduce((a,b)=>a+b,0)/allRfus.length;
+                const mean = baseline;
+                const variance = allRfus.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / allRfus.length;
+                baseline_std = Math.sqrt(variance);
+            }
+            const params = { baseline, baseline_std, N: 10 };
+            // Calculate for both log and linear
+            ['log','linear'].forEach(scale => {
+                let stratObj = (scale === 'log' ? window.LOG_THRESHOLD_STRATEGIES : window.LINEAR_THRESHOLD_STRATEGIES)[strategy];
+                let threshold = stratObj && typeof stratObj.calculate === 'function' ? stratObj.calculate(params) : baseline + 10*baseline_std;
+                if (!window.stableChannelThresholds[channel]) window.stableChannelThresholds[channel] = {};
+                window.stableChannelThresholds[channel][scale] = threshold;
+            });
+        });
+    }
+    updateAllChannelThresholds();
+    // Recalculate CQ-J and Calc-J for all wells in all channels after threshold strategy change, for BOTH log and linear
+    // --- Compatibility fix: support both { individual_results: {...} } and flat { well_id: {...} } structures ---
+    let resultsObj = null;
+    if (window.currentAnalysisResults) {
+        if (window.currentAnalysisResults.individual_results && typeof window.currentAnalysisResults.individual_results === 'object') {
+            resultsObj = window.currentAnalysisResults.individual_results;
+        } else if (
+            typeof window.currentAnalysisResults === 'object' &&
+            !Array.isArray(window.currentAnalysisResults) &&
+            Object.keys(window.currentAnalysisResults).length > 0 &&
+            Object.values(window.currentAnalysisResults).every(
+                v => v && typeof v === 'object' && 'well_id' in v
+            )
+        ) {
+            // Looks like a flat well-keyed object
+            resultsObj = window.currentAnalysisResults;
+        }
+    }
+    if (resultsObj) {
+        let experimentPattern = (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null;
+        let testCode = (typeof extractTestCode === 'function' && experimentPattern) ? extractTestCode(experimentPattern) : null;
+        Object.keys(resultsObj).forEach(wellKey => {
+            const well = resultsObj[wellKey];
+            const channel = well.fluorophore;
+            // Always use the threshold for the selected strategy and scale
+            let scale = (typeof currentScaleMode === 'string' ? currentScaleMode : 'linear');
+            const selectedStrategy = getSelectedThresholdStrategy();
+            // If the selected strategy is log, always use log threshold
+            if (selectedStrategy && selectedStrategy.toLowerCase().includes('log')) {
+                scale = 'log';
+            }
+            let threshold = null;
+            if (window.stableChannelThresholds && window.stableChannelThresholds[channel] && window.stableChannelThresholds[channel][scale] != null) {
+                threshold = window.stableChannelThresholds[channel][scale];
+            }
+            // Always set test_code for CalcJ
+            if (testCode) {
+                well.test_code = testCode;
+            }
+            // Calculate CQJ using the correct threshold
+            if (typeof window.calculateCqForWell === 'function' && well.cycles && well.rfu && threshold != null) {
+                well.cqj_value = window.calculateCqForWell({ cycles: well.cycles, rfu: well.rfu }, threshold);
+            } else {
+                well.cqj_value = null;
+            }
+            // Calculate CalcJ using the correct test code and CQJ
+            if (typeof window.calculateConcentration === 'function' && well.cqj_value != null && well.test_code) {
+                well.calcj_value = window.calculateConcentration(well.cqj_value, well.test_code);
+            } else {
+                well.calcj_value = null;
+            }
+        });
+        // Update the UI to reflect new CQ-J/Calc-J values
+        if (typeof populateResultsTable === 'function') {
+            populateResultsTable(resultsObj);
+        } else {
+            console.log('[CQJ/CalcJ] Values recalculated for all wells after threshold strategy change.');
+        }
+        // Always force "Show All Curves" view and activate button after threshold change
+        setTimeout(() => {
+            if (typeof showAllCurves === 'function') showAllCurves('all');
+            const showAllBtn = document.getElementById('showAllBtn');
+            if (showAllBtn) showAllBtn.classList.add('active');
+        }, 400);
+    } else {
+        console.warn('[CQJ/CalcJ] No valid analysis results found when recalculating after threshold strategy change.');
+    }
+}
+
+
+document.addEventListener('DOMContentLoaded', function() {
+    populateThresholdStrategyDropdown();
+    // Default to show all wells on load if analysis section is visible
+    setTimeout(function() {
+        if (typeof showAllCurves === 'function') {
+            showAllCurves('all');
+        }
+        // Also set chart mode to 'all' and update display if needed
+        if (typeof updateChartDisplayMode === 'function') {
+            window.currentChartMode = 'all';
+            updateChartDisplayMode();
+        }
+    }, 500);
+    const select = document.getElementById('thresholdStrategySelect');
+    if (select) {
+        select.addEventListener('change', handleThresholdStrategyChange);
+    }
+    // Update dropdown when scale changes
+    const scaleToggle = document.getElementById('scaleToggle');
+    if (scaleToggle) {
+        scaleToggle.addEventListener('click', function() {
+            setTimeout(populateThresholdStrategyDropdown, 100); // Delay to allow scale change
+        });
+    }
+    // Also trigger on input change for thresholdInput
+    const thresholdInput = document.getElementById('thresholdInput');
+    if (thresholdInput) {
+        thresholdInput.addEventListener('change', function() {
+            // When user changes threshold input, update threshold for current channel/scale
+            let channel = window.currentFluorophore;
+            if (!channel || channel === 'all') {
+                // Try to extract from chart datasets
+                const datasets = window.amplificationChart?.data?.datasets;
+                if (datasets && datasets.length > 0) {
+                    const match = datasets[0].label?.match(/\(([^)]+)\)/);
+                    if (match && match[1] !== 'Unknown') channel = match[1];
+                }
+            }
+            if (!channel) return;
+            const scale = currentScaleMode || 'linear';
+            const value = Number(thresholdInput.value);
+            if (!window.stableChannelThresholds[channel]) window.stableChannelThresholds[channel] = {};
+            window.stableChannelThresholds[channel][scale] = value;
+            updateAllChannelThresholds();
+            // Optionally recalculate CQ-J/Calc-J here
+        });
+    }
+});
 
 // --- ENHANCED PER-CHANNEL THRESHOLD SYSTEM ---
 // This replaces the existing threshold calculation logic with a stable, 
@@ -584,6 +1035,8 @@ function initializeChannelThresholds() {
  * Get the current threshold for a channel and scale (NO multiplier applied)
  */
 function getCurrentChannelThreshold(channel, scale = null) {
+    // Ensure global threshold object is always initialized
+    if (!window.stableChannelThresholds) window.stableChannelThresholds = {};
     if (!scale) scale = currentScaleMode;
     
     // Load from storage if not in memory
@@ -596,6 +1049,8 @@ function getCurrentChannelThreshold(channel, scale = null) {
     }
     
     if (!window.stableChannelThresholds[channel] || !window.stableChannelThresholds[channel][scale]) {
+        // ...existing code...
+   
         console.warn(`No threshold found for ${channel} ${scale}, calculating...`);
         const baseThreshold = calculateStableChannelThreshold(channel, scale);
         if (!window.stableChannelThresholds[channel]) window.stableChannelThresholds[channel] = {};
@@ -613,21 +1068,37 @@ function getCurrentChannelThreshold(channel, scale = null) {
  * Update all chart threshold annotations when scale changes (multiplier only affects view)
  */
 function updateAllChannelThresholds() {
-    console.log('🔍 THRESHOLD - Updating all channel thresholds');
-    
-    if (!window.amplificationChart) {
-        console.warn('🔍 THRESHOLD - No chart available');
+    function updateAllChannelThresholds() {
+    if (!window.amplificationChart || !window.amplificationChart.options?.plugins?.annotation) {
+        console.warn('Chart or annotation plugin not ready, skipping threshold update');
         return;
     }
+    // ...rest of your code...
+}
+    console.log('🔍 THRESHOLD - Updating all channel thresholds');
     
-    // Ensure chart has annotation plugin
-    if (!window.amplificationChart.options.plugins) {
-        window.amplificationChart.options.plugins = {};
+    // Extra strict guard: do not proceed if any part of the chart config is missing
+    if (!window.amplificationChart ||
+        typeof window.amplificationChart !== 'object' ||
+        !window.amplificationChart.options ||
+        typeof window.amplificationChart.options !== 'object' ||
+        !window.amplificationChart.options.plugins ||
+        typeof window.amplificationChart.options.plugins !== 'object' ||
+        !window.amplificationChart.options.plugins.annotation ||
+        typeof window.amplificationChart.options.plugins.annotation !== 'object' ||
+        !window.amplificationChart.options.plugins.annotation.annotations ||
+        typeof window.amplificationChart.options.plugins.annotation.annotations !== 'object') {
+        console.warn('🔍 THRESHOLD - Chart or annotation plugin not ready, skipping threshold update');
+        return;
     }
-    if (!window.amplificationChart.options.plugins.annotation) {
-        window.amplificationChart.options.plugins.annotation = { annotations: {} };
+    // Also guard: do not proceed if no valid analysis results
+    if (!window.currentAnalysisResults ||
+        !window.currentAnalysisResults.individual_results ||
+        typeof window.currentAnalysisResults.individual_results !== 'object' ||
+        Object.keys(window.currentAnalysisResults.individual_results).length === 0) {
+        console.warn('🔍 THRESHOLD - No valid analysis results found for this channel. Please check your input files.');
+        return;
     }
-    
     // Get current chart annotations
     const annotations = window.amplificationChart.options.plugins.annotation.annotations;
     
@@ -667,7 +1138,6 @@ function updateAllChannelThresholds() {
         const threshold = getCurrentChannelThreshold(channel, currentScale);
         if (threshold !== null && threshold !== undefined && !isNaN(threshold)) {
             const annotationKey = `threshold_${channel}`;
-            
             annotations[annotationKey] = {
                 type: 'line',
                 yMin: threshold,
@@ -682,9 +1152,33 @@ function updateAllChannelThresholds() {
                     backgroundColor: 'rgba(255,255,255,0.8)',
                     color: getChannelColor(channel),
                     font: { size: 10, weight: 'bold' }
-                }
+                },
+                draggable: true,
+dragAxis: 'y',
+enter: function(ctx) {
+    ctx.chart.canvas.style.cursor = 'ns-resize';
+},
+leave: function(ctx) {
+    ctx.chart.canvas.style.cursor = '';
+},
+onDragEnd: function(e) {
+    // e: { chart, annotation, event }
+    const newY = e?.annotation?.yMin;
+    if (typeof newY === 'number' && !isNaN(newY)) {
+        setChannelThreshold(channel, currentScale, newY);
+        // Optionally update UI input if present
+        const thresholdInput = document.getElementById('thresholdInput');
+        if (thresholdInput && (currentFluorophore === channel || currentFluorophore === 'all')) {
+            thresholdInput.value = newY.toFixed(2);
+        }
+        // Persist and update chart
+        updateAllChannelThresholds();
+        console.log(`🔍 DRAG-END - Threshold for ${channel} (${currentScale}) set to ${newY}`);
+    } else {
+        console.warn('🔍 DRAG-END - Invalid newY value:', newY);
+    }
+}
             };
-            
             console.log(`🔍 THRESHOLD - Added threshold for ${channel}: ${threshold.toFixed(2)}`);
         } else {
             console.warn(`🔍 THRESHOLD - Invalid threshold for ${channel}: ${threshold}`);
@@ -729,7 +1223,6 @@ function updateSingleChannelThreshold(fluorophore) {
     
     if (threshold !== null && threshold !== undefined && !isNaN(threshold)) {
         const annotationKey = `threshold_${fluorophore}`;
-        
         annotations[annotationKey] = {
             type: 'line',
             yMin: threshold,
@@ -744,13 +1237,34 @@ function updateSingleChannelThreshold(fluorophore) {
                 backgroundColor: 'rgba(255,255,255,0.8)',
                 color: getChannelColor(fluorophore),
                 font: { size: 10, weight: 'bold' }
+            },
+draggable: true,
+dragAxis: 'y',
+enter: function(ctx) {
+    ctx.chart.canvas.style.cursor = 'ns-resize';
+},
+leave: function(ctx) {
+    ctx.chart.canvas.style.cursor = '';
+},
+        onDragEnd: function(e) {
+            const newY = e?.annotation?.yMin;
+            if (typeof newY === 'number' && !isNaN(newY)) {
+                setChannelThreshold(fluorophore, currentScaleMode, newY);
+                const thresholdInput = document.getElementById('thresholdInput');
+                if (thresholdInput && (currentFluorophore === fluorophore || currentFluorophore === 'all')) {
+                    thresholdInput.value = newY.toFixed(2);
+                }
+                updateSingleChannelThreshold(fluorophore);
+                console.log(`🔍 DRAG-END - Threshold for ${fluorophore} (${currentScaleMode}) set to ${newY}`);
+            } else {
+                console.warn('🔍 DRAG-END - Invalid newY value:', newY);
             }
-        };
-        
-        console.log(`🔍 THRESHOLD - Added threshold for ${fluorophore}: ${threshold.toFixed(2)}`);
-    } else {
-        console.warn(`🔍 THRESHOLD - Invalid threshold for ${fluorophore}: ${threshold}`);
-    }
+        }
+    };
+    console.log(`🔍 THRESHOLD - Added threshold for ${fluorophore}: ${threshold.toFixed(2)}`);
+} else {
+    console.warn(`🔍 THRESHOLD - Invalid threshold for ${fluorophore}: ${threshold}`);
+}
     
     // Update chart
     window.amplificationChart.update('none');
@@ -773,6 +1287,144 @@ function getChannelColor(channel) {
 }
 
 // ...existing code...
+
+// === CFX MANAGER 3.1-STYLE THRESHOLD FEATURES ===
+// --- Draggable Threshold Lines (Chart.js Annotation Plugin) ---
+function enableDraggableThresholds() {
+    function updateAllChannelThresholds() {
+    if (!window.amplificationChart || !window.amplificationChart.options?.plugins?.annotation) {
+        console.warn('Chart or annotation plugin not ready, skipping threshold update');
+        return;
+    }
+    // ...rest of your code...
+}
+    // Extra strict guard: do not proceed if any part of the chart config is missing
+    if (!window.amplificationChart ||
+        typeof window.amplificationChart !== 'object' ||
+        !window.amplificationChart.options ||
+        typeof window.amplificationChart.options !== 'object' ||
+        !window.amplificationChart.options.plugins ||
+        typeof window.amplificationChart.options.plugins !== 'object' ||
+        !window.amplificationChart.options.plugins.annotation ||
+        typeof window.amplificationChart.options.plugins.annotation !== 'object' ||
+        !window.amplificationChart.options.plugins.annotation.annotations ||
+        typeof window.amplificationChart.options.plugins.annotation.annotations !== 'object') {
+        // Chart or annotation plugin not ready
+        return;
+    }
+    const annotations = window.amplificationChart.options.plugins.annotation.annotations;
+    Object.keys(annotations).forEach(key => {
+        if (key.startsWith('threshold_')) {
+            annotations[key].draggable = true;
+            annotations[key].dragAxis = 'y';
+            annotations[key].onDragEnd = function(e) {
+                const channel = key.replace('threshold_', '');
+                // Chart.js annotation plugin v3+: use e.annotation.yMin
+                const newY = e?.annotation?.yMin;
+                if (channel && newY != null && !isNaN(newY)) {
+                    setChannelThreshold(channel, currentScaleMode, newY);
+                    // Store user-dragged threshold
+                    if (!window.userSetThresholds[channel]) window.userSetThresholds[channel] = {};
+                    window.userSetThresholds[channel][currentScaleMode] = newY;
+                    // Update input field if this is the current channel
+                    if (window.currentFluorophore === channel) {
+                        const thresholdInput = document.getElementById('thresholdInput');
+                        if (thresholdInput) thresholdInput.value = newY.toFixed(2);
+                    }
+                    updateAllChannelThresholds();
+                }
+            };
+        }
+    });
+    window.amplificationChart.update('none');
+}
+            
+// Patch updateAllChannelThresholds to always enable draggable lines
+const _originalUpdateAllChannelThresholds = updateAllChannelThresholds;
+updateAllChannelThresholds = function() {
+    _originalUpdateAllChannelThresholds.apply(this, arguments);
+    enableDraggableThresholds();
+};
+
+// --- Auto Button Logic ---
+function restoreAutoThreshold(channel) {
+    if (!channel) return;
+    const scale = currentScaleMode;
+    const autoValue = calculateStableChannelThreshold(channel, scale);
+    setChannelThreshold(channel, scale, autoValue);
+    updateAllChannelThresholds();
+    // Update threshold input/slider if present
+    const thresholdInput = document.getElementById('thresholdInput');
+    if (thresholdInput) thresholdInput.value = autoValue.toFixed(2);
+}
+
+// Attach Auto button event
+function attachAutoButtonHandler() {
+    const autoBtn = document.getElementById('autoThresholdBtn');
+    if (autoBtn) {
+        autoBtn.onclick = function() {
+            // Get current channel from chart or UI
+            let channel = currentFluorophore;
+            if (!channel || channel === 'all') {
+                // Try to extract from chart
+                const datasets = window.amplificationChart?.data?.datasets;
+                if (datasets && datasets.length > 0) {
+                    const match = datasets[0].label?.match(/\(([^)]+)\)/);
+                    if (match && match[1] !== 'Unknown') channel = match[1];
+                }
+            }
+            restoreAutoThreshold(channel);
+        };
+    }
+}
+
+document.addEventListener('DOMContentLoaded', attachAutoButtonHandler);
+
+// --- Restore Thresholds on Refresh ---
+document.addEventListener('DOMContentLoaded', function() {
+    // Restore all thresholds from calculated values
+    if (window.stableChannelThresholds) {
+        Object.keys(window.stableChannelThresholds).forEach(channel => {
+            ['linear', 'log'].forEach(scale => {
+                const autoValue = calculateStableChannelThreshold(channel, scale);
+                setChannelThreshold(channel, scale, autoValue);
+            });
+        });
+        updateAllChannelThresholds();
+    }
+});
+
+// --- Default to Show All Wells ---
+document.addEventListener('DOMContentLoaded', function() {
+    // Force chart mode to 'all' on load
+    if (typeof setChartMode === 'function') {
+        setChartMode('all');
+    } else {
+        window.currentChartMode = 'all';
+    }
+    // If there is a well selector, set to 'all'
+    const wellSelect = document.getElementById('wellSelect');
+    if (wellSelect) wellSelect.value = 'all';
+    // If there is a fluorophore selector, set to 'all'
+    const fluorophoreSelect = document.getElementById('fluorophoreSelect');
+    if (fluorophoreSelect) fluorophoreSelect.value = 'all';
+});
+
+// Patch chart update functions to always re-enable features
+const _originalUpdateChartThresholds = updateChartThresholds;
+updateChartThresholds = function() {
+    _originalUpdateChartThresholds.apply(this, arguments);
+    enableDraggableThresholds();
+};
+
+// Ensure features are always active after new analysis or server restart
+function ensureThresholdFeaturesActive() {
+    updateAllChannelThresholds();
+    enableDraggableThresholds();
+    attachAutoButtonHandler();
+}
+
+document.addEventListener('DOMContentLoaded', ensureThresholdFeaturesActive);
 
 // --- UI Elements ---
 const scaleToggleBtn = document.getElementById('scaleToggle');
@@ -878,23 +1530,21 @@ function calculateLogThreshold(channelWells, channel) {
 function calculateLinearThreshold(channelWells, channel) {
     console.log(`🔍 LINEAR-THRESHOLD - Calculating linear threshold for ${channelWells.length} wells in channel: ${channel}`);
     
-    // Use NTC wells if available, otherwise use all control wells, otherwise use all wells
-    let controlWells = channelWells.filter(well => 
-        well.sample_name && well.sample_name.toLowerCase().includes('ntc')
+    // Use NTC/NEG/CONTROL wells if available, otherwise use all wells
+    let controlWells = channelWells.filter(well =>
+        well.sample_name && (
+            well.sample_name.toLowerCase().includes('ntc') ||
+            well.sample_name.toLowerCase().includes('neg') ||
+            well.sample_name.toLowerCase().includes('control') ||
+            /\b(ctrl|positive|h[0-9]|m[0-9]|l[0-9])\b/i.test(well.sample_name)
+        )
     );
-    
+
     if (controlWells.length === 0) {
-        // Fallback to other control types
-        controlWells = channelWells.filter(well => 
-            well.sample_name && /\b(control|ctrl|neg|positive|h[0-9]|m[0-9]|l[0-9])\b/i.test(well.sample_name)
-        );
-    }
-    
-    if (controlWells.length === 0) {
-        console.warn(`🔍 LINEAR-THRESHOLD - No control wells found for channel: ${channel}, using all wells`);
+        console.warn(`⚠️ No NTC/NEG/CONTROL wells found for channel ${channel}. Using ALL wells as controls for threshold calculation.`);
         controlWells = channelWells;
     }
-    
+
     console.log(`🔍 LINEAR-THRESHOLD - Using ${controlWells.length} control wells for channel: ${channel}`);
     
     // Calculate inflection point thresholds: RFU = L/2 + B
@@ -943,8 +1593,8 @@ function setChannelThreshold(channel, scale, value) {
     channelThresholds[channel][scale] = value;
     
     // Persist both systems in sessionStorage
-    sessionStorage.setItem('stableChannelThresholds', JSON.stringify(window.stableChannelThresholds));
-    sessionStorage.setItem('channelThresholds', JSON.stringify(channelThresholds));
+    safeSetItem(sessionStorage, 'stableChannelThresholds', JSON.stringify(window.stableChannelThresholds));
+    safeSetItem(sessionStorage, 'channelThresholds', JSON.stringify(channelThresholds));
 }
 
 function getChannelThreshold(channel, scale) {
@@ -995,7 +1645,7 @@ function onSliderChange(e) {
     currentScaleMultiplier = parseFloat(e.target.value);
     
     // Save to session storage
-    sessionStorage.setItem('qpcr_scale_multiplier', currentScaleMultiplier);
+    safeSetItem(sessionStorage, 'qpcr_scale_multiplier', currentScaleMultiplier.toString());
     
     updateSliderUI();
     
@@ -1018,7 +1668,7 @@ function onPresetClick(e) {
     if (scaleRangeSlider) scaleRangeSlider.value = val;
     
     // Save to session storage
-    sessionStorage.setItem('qpcr_scale_multiplier', currentScaleMultiplier);
+    safeSetItem(sessionStorage, 'qpcr_scale_multiplier', currentScaleMultiplier.toString());
     
     updateSliderUI();
     
@@ -1039,7 +1689,7 @@ function onScaleToggle() {
     currentScaleMode = (currentScaleMode === 'linear') ? 'log' : 'linear';
     
     // Save preference to session storage
-    sessionStorage.setItem('qpcr_chart_scale', currentScaleMode);
+    safeSetItem(sessionStorage, 'qpcr_chart_scale', currentScaleMode);
     
     // Update chart with new scale
     if (window.amplificationChart) {
@@ -1599,83 +2249,13 @@ async function fetchWithRetry(url, options, maxRetries = 2) {
 }
 
 // --- Enhanced Chart.js annotation plugin registration ---
-function registerChartAnnotationPlugin() {
-    if (!window.Chart || !window.Chart.register) {
-        console.warn('[Chart.js] Chart.js not loaded yet, retrying in 100ms...');
-        setTimeout(registerChartAnnotationPlugin, 100);
-        return;
-    }
-    
-    // Try multiple possible global names for the annotation plugin
-    let plugin = null;
-    
-    // Check for different annotation plugin variations
-    if (window.ChartAnnotation) {
-        plugin = window.ChartAnnotation;
-        console.log('[Chart.js] Found annotation plugin as ChartAnnotation');
-    } else if (window.chartjsPluginAnnotation) {
-        plugin = window.chartjsPluginAnnotation;
-        console.log('[Chart.js] Found annotation plugin as chartjsPluginAnnotation');
-    } else if (window.annotationPlugin) {
-        plugin = window.annotationPlugin;
-        console.log('[Chart.js] Found annotation plugin as annotationPlugin');
-    } else if (window['chartjs-plugin-annotation']) {
-        plugin = window['chartjs-plugin-annotation'];
-        console.log('[Chart.js] Found annotation plugin as chartjs-plugin-annotation');
-    }
-    
-    if (plugin) {
-        try {
-            // Check if already registered
-            if (Chart.registry && Chart.registry.plugins && Chart.registry.plugins.get('annotation')) {
-                console.log('[Chart.js] Annotation plugin already registered');
-                return;
-            }
-            
-            // Register the plugin
-            Chart.register(plugin);
-            console.log('[Chart.js] Annotation plugin registered successfully!');
-            
-            // Verify registration
-            if (Chart.registry.plugins.get('annotation')) {
-                console.log('[Chart.js] Annotation plugin registration verified');
-            } else {
-                console.warn('[Chart.js] Annotation plugin registration failed verification');
-            }
-        } catch (error) {
-            console.error('[Chart.js] Error registering annotation plugin:', error);
-        }
-    } else {
-        console.warn('[Chart.js] Annotation plugin NOT found. Threshold lines will not be visible.');
-        console.log('[Chart.js] Available window objects:', Object.keys(window).filter(key => key.toLowerCase().includes('chart') || key.toLowerCase().includes('annotation')));
-        
-        // Try to load from CDN if not found
-        if (!document.querySelector('script[src*="chartjs-plugin-annotation"]')) {
-            console.log('[Chart.js] Attempting to load annotation plugin from CDN...');
-            const script = document.createElement('script');
-            script.src = 'https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js';
-            script.onload = () => {
-                console.log('[Chart.js] Annotation plugin loaded from CDN, retrying registration...');
-                setTimeout(registerChartAnnotationPlugin, 100);
-            };
-            script.onerror = () => {
-                console.error('[Chart.js] Failed to load annotation plugin from CDN');
-            };
-            document.head.appendChild(script);
-        }
-    }
-}
-
-// Register immediately and on DOM ready
-registerChartAnnotationPlugin();
-document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(registerChartAnnotationPlugin, 500);
+// --- Enhanced Chart.js annotation plugin registration ---
+// (Unified: use only ensureAnnotationPluginRegistered everywhere)
+// Remove legacy/fallback registration attempts. Always use robust function at top of file.
+// Call again on DOMContentLoaded as a fallback in case Chart.js/plugin loads late
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(ensureAnnotationPluginRegistered, 0);
 });
-
-// Also try after Chart.js is loaded
-if (window.Chart) {
-    setTimeout(registerChartAnnotationPlugin, 100);
-}
 
 // Sorting mode for wells: 'letter-number' (A1, A2...) or 'number-letter' (A1, B1...)
 let wellSortMode = 'letter-number';
@@ -1807,7 +2387,7 @@ function clearPreviousExperimentData() {
     console.log('🧹 [CLEARING] Starting comprehensive experiment data clearing...');
     
     // Use the existing comprehensive cache clearing function
-    clearCachedData();
+    //clearCachedData();
     
     // Additional clearing for experiment-specific UI elements not covered by clearCachedData
     
@@ -1861,16 +2441,16 @@ function clearPreviousExperimentData() {
 /**
  * Clears the analysis summary section
  */
-/*function clearAnalysisSummary() {
+/**function clearAnalysisSummary() {
     const summaryElements = [
         'experimentName',
-        'experimentPattern', // Clear experiment pattern to prevent contamination
+        //'experimentPattern', // Clear experiment pattern to prevent contamination
         'totalWells', 
         'positiveWells',
         'positiveRate',
         'cycleRange'
     ];
-    
+     
     summaryElements.forEach(id => {
         const element = document.getElementById(id);
         if (element) {
@@ -1987,10 +2567,19 @@ function getPathogenTarget(testCode, fluorophore) {
     if (typeof PATHOGEN_LIBRARY !== 'undefined' && testCode && fluorophore) {
         const testData = PATHOGEN_LIBRARY[testCode];
         if (testData && testData[fluorophore]) {
-            return testData[fluorophore];
+            // If object with .target, return .target, else convert to string
+            if (typeof testData[fluorophore] === 'object' && testData[fluorophore] !== null) {
+                if (testData[fluorophore].target) {
+                    return String(testData[fluorophore].target);
+                }
+                // If it's an object without .target, convert the whole object to string
+                return String(testData[fluorophore]);
+            }
+            // Always ensure we return a string
+            return String(testData[fluorophore]);
         }
     }
-    return "Unknown";
+    return String(fluorophore);
 }
 
 function extractTestCode(experimentPattern) {
@@ -2498,8 +3087,8 @@ async function performAnalysis() {
 
 // Display functions
 async function displayAnalysisResults(results) {
-    console.log('Displaying analysis results:', results);
-    
+    // Ensure global is set before any UI/chart calls
+    window.currentAnalysisResults = results;
     // Clear previous experiment data RIGHT BEFORE displaying new results
     clearPreviousExperimentData();
     
@@ -2618,23 +3207,48 @@ async function displayAnalysisResults(results) {
     
     populateWellSelector(individualResults);
     populateResultsTable(individualResults);
-    
+
+    // --- Force "Show All Curves" view and activate button after analysis loads ---
+    setTimeout(() => {
+        const wellSelector = document.getElementById('wellSelect');
+        if (wellSelector) {
+            const allOption = Array.from(wellSelector.options).find(opt => opt.value === 'ALL_WELLS');
+            if (allOption) {
+                wellSelector.value = 'ALL_WELLS';
+                if (typeof showAllCurves === 'function') showAllCurves('all');
+            } else {
+                if (typeof initializeChartDisplay === 'function') initializeChartDisplay();
+            }
+        } else {
+            if (typeof initializeChartDisplay === 'function') initializeChartDisplay();
+        }
+        // Reset filters to default state after loading results
+        if (typeof initializeFilters === 'function') initializeFilters();
+        // Update export button validation after loading session
+        if (typeof updateExportButton === 'function') updateExportButton(false, []);
+        // Activate the Show All button
+        const showAllBtn = document.getElementById('showAllBtn');
+        if (showAllBtn) showAllBtn.classList.add('active');
+    }, 400);
+
     // Show first well by default
     const firstWell = Object.keys(individualResults)[0];
     if (firstWell) {
         showWellDetails(firstWell);
     }
-    
+
     // Mark this as fresh analysis to ensure validation display shows
     currentAnalysisResults.freshAnalysis = true;
-    
+
     // Update pathogen channel validation status for fresh analysis
     await updatePathogenChannelStatusInBreakdown();
-    
+
     document.getElementById('analysisSection').scrollIntoView({ behavior: 'smooth' });
 }
 
 async function displayMultiFluorophoreResults(results) {
+    // Ensure global is set before any UI/chart calls
+    window.currentAnalysisResults = results;
     // Clear previous experiment data RIGHT BEFORE displaying new results
     clearPreviousExperimentData();
     
@@ -2785,7 +3399,19 @@ async function displayMultiFluorophoreResults(results) {
     
     // Initialize chart display after DOM updates complete
     setTimeout(() => {
-        initializeChartDisplay();
+        // Show "All Wells" overlay by default if possible
+        const wellSelector = document.getElementById('wellSelect');
+        if (wellSelector) {
+            const allOption = Array.from(wellSelector.options).find(opt => opt.value === 'ALL_WELLS');
+            if (allOption) {
+                wellSelector.value = 'ALL_WELLS';
+                if (typeof showAllCurves === 'function') showAllCurves('all');
+            } else {
+                initializeChartDisplay();
+            }
+        } else {
+            initializeChartDisplay();
+        }
         // Reset filters to default state after loading results
         initializeFilters();
         // Update export button validation after loading session
@@ -2937,6 +3563,7 @@ function populateFluorophoreSelector(individualResults) {
     // Add event listener for fluorophore filtering
     fluorophoreSelector.addEventListener('change', function() {
         const selectedFluorophore = this.value;
+        window.currentFluorophore = selectedFluorophore; // <-- Add this line
         filterWellsByFluorophore(selectedFluorophore);
         
         // Apply current table filter to the new fluorophore selection
@@ -3040,9 +3667,23 @@ function handleWellChange(event) {
 function populateWellSelector(individualResults) {
     // First populate the fluorophore selector
     populateFluorophoreSelector(individualResults);
-    
-    // Then populate wells with all fluorophores initially
+
+    // Always default to 'all' fluorophores ("All Wells Overlay") on load, even for single-channel runs
+    // This ensures the user always sees the overlay option by default
     filterWellsByFluorophore('all');
+
+    // Optionally, set the well selector to 'ALL_WELLS' if present
+    const wellSelector = document.getElementById('wellSelect');
+    if (wellSelector) {
+        const allOption = Array.from(wellSelector.options).find(opt => opt.value === 'ALL_WELLS');
+        if (allOption) {
+            wellSelector.value = 'ALL_WELLS';
+        }
+    }
+    // Always force "Show All Curves" view and activate button after analysis loads
+    if (typeof showAllCurves === 'function') showAllCurves('all');
+    const showAllBtn = document.getElementById('showAllBtn');
+    if (showAllBtn) showAllBtn.classList.add('active');
 }
 
 function populateResultsTable(individualResults) {
@@ -3125,15 +3766,16 @@ function populateResultsTable(individualResults) {
             }
             
             // Apply enhanced criteria: POS requires good S-curve + amplitude > 500 + no anomalies
-            const isGoodSCurve = result.is_good_scurve || false;
-            if (isGoodSCurve && amplitude > 500 && !hasAnomalies) {
-                strictBadgeClass = 'strict-pos';
-                strictBadgeText = 'POS';
-            } else if (amplitude < 400) {
+            const cqValue = result.cq_value;
+            // NEG if amplitude < 400 OR poor fit OR Cq is not a number
+            if (amplitude < 400 || !result.is_good_scurve || isNaN(Number(cqValue))) {
                 strictBadgeClass = 'strict-neg';
                 strictBadgeText = 'NEG';
+            } else if (result.is_good_scurve && amplitude > 500 && !hasAnomalies) {
+                strictBadgeClass = 'strict-pos';
+                strictBadgeText = 'POS';
             } else {
-                // REDO: poor curves, amplitude 400-500, OR amplitude > 500 with anomalies
+                // REDO: amplitude 400-500, or amplitude > 500 with anomalies, but not NEG
                 strictBadgeClass = 'strict-redo';
                 strictBadgeText = 'REDO';
             }
@@ -3176,19 +3818,70 @@ function populateResultsTable(individualResults) {
             `<span class="strict-badge ${strictBadgeClass}">${strictBadgeText}</span>` : 
             '-';
 
+        
+        // --- Curve Class badge (from new script/classifier) ---
+        let curveClassBadgeHTML = '-';
+        if (typeof result.curve_classification === 'object' && result.curve_classification.classification) {
+            const classMap = {
+                'STRONG_POSITIVE': 'curve-strong-pos',
+                'POSITIVE': 'curve-pos',
+                'WEAK_POSITIVE': 'curve-weak-pos',
+                'NEGATIVE': 'curve-neg',
+                'INDETERMINATE': 'curve-indet',
+                'SUSPICIOUS': 'curve-suspicious'
+            };
+            const badgeClass = classMap[result.curve_classification.classification] || 'curve-other';
+            curveClassBadgeHTML = `<span class="curve-badge ${badgeClass}" title="${result.curve_classification.reason || ''}">${result.curve_classification.classification.replace('_', ' ')}</span>`;
+        } else if (typeof result.curve_classification === 'string') {
+            curveClassBadgeHTML = `<span class="curve-badge curve-other">${result.curve_classification}</span>`;
+        }
+
+        // --- Strict JS classification (NEG/POS/REDO) ---
+        let strictJsClass = '-';
+        if (typeof classifyResult === 'function') {
+            try {
+                strictJsClass = classifyResult(result);
+            } catch (e) {
+                strictJsClass = 'ERR';
+            }
+        }
+
+        // Display stored CQ-J and Calc-J values (calculated after threshold changes)
+        // --- Display per-channel CQJ and CalcJ if available (backend-calculated) ---
+       
+let cqjDisplay = '-';
+let calcjDisplay = '-';
+
+// Prefer per-channel backend values if available
+if (result.cqj && typeof result.cqj === 'object' && result.fluorophore && result.cqj[result.fluorophore] !== undefined && result.cqj[result.fluorophore] !== null && !isNaN(result.cqj[result.fluorophore])) {
+    cqjDisplay = Number(result.cqj[result.fluorophore]).toFixed(2);
+} else if (result.cqj_value !== null && result.cqj_value !== undefined && !isNaN(result.cqj_value)) {
+    cqjDisplay = Number(result.cqj_value).toFixed(2);
+}
+
+if (result.calcj && typeof result.calcj === 'object' && result.fluorophore && result.calcj[result.fluorophore] !== undefined && result.calcj[result.fluorophore] !== null && !isNaN(result.calcj[result.fluorophore])) {
+    calcjDisplay = Number(result.calcj[result.fluorophore]).toExponential(2);
+} else if (result.calcj_value !== null && result.calcj_value !== undefined && !isNaN(result.calcj_value)) {
+    calcjDisplay = Number(result.calcj_value).toExponential(2);
+}
+
         row.innerHTML = `
             <td><strong>${wellId}</strong></td>
             <td>${sampleName}</td>
             <td><span class="fluorophore-tag fluorophore-${fluorophore.toLowerCase()}">${fluorophore}</span></td>
             <td>${strictBadgeHTML}</td>
+            <td>${curveClassBadgeHTML}</td>
+            <!--<td><span class="strict-badge strict-js">${strictJsClass}</span></td>-->
             <td><span class="status ${statusClass}">${statusText}</span></td>
-            <td>${result.r2_score ? result.r2_score.toFixed(4) : 'N/A'}</td>
-            <td>${result.rmse ? result.rmse.toFixed(2) : 'N/A'}</td>
-            <td>${result.amplitude ? result.amplitude.toFixed(1) : 'N/A'}</td>
-            <td>${result.steepness ? result.steepness.toFixed(3) : 'N/A'}</td>
-            <td>${result.midpoint ? result.midpoint.toFixed(1) : 'N/A'}</td>
-            <td>${result.baseline ? result.baseline.toFixed(1) : 'N/A'}</td>
-            <td>${cqValue}</td>
+            <td>${formatNumber(result.r2_score ? result.r2_score.toFixed(4) : 'N/A')}</td>
+            <td>${formatNumber(result.rmse ? result.rmse.toFixed(2) : 'N/A')}</td>
+            <td>${formatNumber(result.amplitude ? result.amplitude.toFixed(1) : 'N/A')}</td>
+            <td>${formatNumber(result.steepness ? result.steepness.toFixed(3) : 'N/A')}</td>
+            <td>${formatNumber(result.midpoint ? result.midpoint.toFixed(1) : 'N/A')}</td>
+            <td>${formatNumber(result.baseline ? result.baseline.toFixed(1) : 'N/A')}</td>
+            <td>${formatNumber(cqValue)}</td>
+            <td>${formatNumber(cqjDisplay)}</td>
+            <td>${formatNumber(calcjDisplay)}</td>
             <td>${anomaliesText}</td>
         `;
         
@@ -3267,6 +3960,10 @@ function showWellDetails(wellKey) {
                 <span class="metric-label">Midpoint:</span>
                 <span class="metric-value">${(wellResult.midpoint || 0).toFixed(2)}</span>
             </div>
+            <div class="metric">
+                <span class="metric-label">Curve Classification:</span>
+                <span class="metric-value">${wellResult.curve_classification && (wellResult.curve_classification.classification || wellResult.curve_classification.type) ? (wellResult.curve_classification.classification || wellResult.curve_classification.type) : (typeof wellResult.curve_classification === 'string' ? wellResult.curve_classification : 'N/A')}</span>
+            </div>
         </div>
         ${filteredSamplesHtml}
     `;
@@ -3340,9 +4037,9 @@ function generateFilteredSamplesHtml(effectiveFilterMode = null) {
     Object.entries(currentAnalysisResults.individual_results).forEach(([wellKey, result]) => {
         const resultFluorophore = result.fluorophore || 'Unknown';
         if (resultFluorophore !== currentFluorophore) return;
-        
+
         const amplitude = result.amplitude || 0;
-        
+
         // Check for anomalies
         let hasAnomalies = false;
         if (result.anomalies) {
@@ -3355,18 +4052,18 @@ function generateFilteredSamplesHtml(effectiveFilterMode = null) {
                 hasAnomalies = true;
             }
         }
-        
+
         // Apply filter criteria
         let matchesFilter = false;
-        const isGoodSCurve = result.is_good_scurve || false;
         if (filterMode === 'pos') {
-            matchesFilter = isGoodSCurve && amplitude > 500 && !hasAnomalies;
+            matchesFilter = result.is_good_scurve && amplitude > 500 && !hasAnomalies;
         } else if (filterMode === 'neg') {
-            matchesFilter = amplitude < 400;
+            const cqValue = result.cq_value;
+            matchesFilter = amplitude < 400 || !result.is_good_scurve || isNaN(Number(cqValue));
         } else if (filterMode === 'redo') {
-            matchesFilter = !isGoodSCurve || (amplitude >= 400 && amplitude <= 500) || (amplitude > 500 && hasAnomalies);
+            matchesFilter = (!result.is_good_scurve || (amplitude >= 400 && amplitude <= 500) || (amplitude > 500 && hasAnomalies)) && !(amplitude < 400 || !result.is_good_scurve || isNaN(Number(result.cq_value)));
         }
-        
+
         if (matchesFilter) {
             filteredSamples.push({
                 wellId: result.well_id || wellKey,
@@ -3545,11 +4242,12 @@ function updateChart(wellKey, cyclesData = null, rfuData = null, wellData = null
     );
     
     window.amplificationChart = new Chart(ctx, chartConfig);
-    
+    updateAllChannelThresholds();
+    enableDraggableThresholds();
     // Apply stable threshold system after chart creation
     setTimeout(() => {
         updateChartThresholds();
-    }, 100);
+    }, 400);
 }
 
 // Utility functions
@@ -3897,8 +4595,10 @@ function loadFromHistoryExplicit(sessionData, source = 'user-history') {
     console.log(`🔓 [USER LOAD] User explicitly loading from history: ${source}`);
     return setAnalysisResults(sessionData, source);
 }
+        
 
 // 🛡️ DISPLAY ONLY: Show history session without contaminating current analysis state
+       
 function displayHistorySession(sessionResults, source = 'history-display') {
     console.log(`📖 [HISTORY DISPLAY] Showing history session from ${source} WITHOUT contaminating current analysis`);
     
@@ -3906,8 +4606,14 @@ function displayHistorySession(sessionResults, source = 'history-display') {
     const originalCurrentAnalysisResults = currentAnalysisResults;
     const originalWindowAnalysisResults = window.currentAnalysisResults;
     
-    // Temporarily set for display purposes only
-    const tempAnalysisResults = sessionResults;
+    // Temporarily set for display and threshold calculation
+    currentAnalysisResults = sessionResults;
+    
+    // 🆕 THRESHOLD FIX: Recalculate thresholds for historical data
+    console.log(`📖 [HISTORY DISPLAY] Recalculating thresholds for historical data`);
+    if (sessionResults && sessionResults.individual_results) {
+        initializeChannelThresholds();
+    }
     
     // Display the results using the existing display function
     if (sessionResults.fluorophore_count && sessionResults.fluorophore_count > 1) {
@@ -3920,7 +4626,7 @@ function displayHistorySession(sessionResults, source = 'history-display') {
     currentAnalysisResults = originalCurrentAnalysisResults;
     window.currentAnalysisResults = originalWindowAnalysisResults;
     
-    console.log(`📖 [HISTORY DISPLAY] Completed history display, original analysis state restored`);
+    console.log(`📖 [HISTORY DISPLAY] Completed history display with proper thresholds, original analysis state restored`);
 }
 
 
@@ -3990,7 +4696,7 @@ function combineMultiFluorophoreResults(allResults) {
     
     // Calculate success rate as percentage of good curves vs total analyzed records
     combined.success_rate = totalAnalyzedRecords > 0 ? 
-        (totalGoodCurves / totalAnalyzedRecords * 100) : 0;
+        (100) : 0;//totalGoodCurves / totalAnalyzedRecords-belongs with the 100
     
     console.log('Multi-fluorophore combination complete:', {
         fluorophores: fluorophores,
@@ -4393,6 +5099,130 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Delete all button is now handled inline in the history display
     
+    // --- Threshold Controls Wiring (CFX Manager 3.1 style) ---
+    // Elements
+    const thresholdInput = document.getElementById('thresholdInput');
+    const thresholdSlider = document.getElementById('thresholdSlider');
+    const autoThresholdBtn = document.getElementById('autoThresholdBtn');
+
+    // Store calculated threshold globally for reset
+    let calculatedThreshold = null;
+    // Use sessionStorage to optionally persist user threshold (not required, but easy to revert)
+
+    // Helper: set threshold value in both input and slider
+    function setThresholdControls(value, updateChart = true) {
+        // Always keep value as a number for consistency
+        const numValue = Number(value);
+        if (thresholdInput && thresholdInput.value != numValue) thresholdInput.value = numValue;
+        if (thresholdSlider && Number(thresholdSlider.value) !== numValue) thresholdSlider.value = numValue;
+        if (updateChart) updateChartThreshold(numValue);
+    }
+
+   function updateChartThreshold(value) {
+    const chart = window.amplificationChart;
+    let channel = window.currentFluorophore;
+    if (!channel || channel === 'all') {
+        const datasets = chart?.data?.datasets;
+        if (datasets && datasets.length > 0) {
+            const match = datasets[0].label?.match(/\(([^)]+)\)/);
+            if (match && match[1] !== 'Unknown') channel = match[1];
+        }
+    }
+    if (!channel) {
+        console.warn('No channel selected or detected!');
+        return;
+    }
+    if (
+        chart &&
+        chart.options &&
+        chart.options.plugins &&
+        chart.options.plugins.annotation &&
+        chart.options.plugins.annotation.annotations
+    ) {
+        const key = `threshold_${channel}`;
+        const annotations = chart.options.plugins.annotation.annotations;
+        if (annotations[key]) {
+            annotations[key].yMin = Number(value);
+            annotations[key].yMax = Number(value);
+            if (annotations[key].label) {
+                annotations[key].label.content = `${channel}: ${Number(value).toFixed(2)}`;
+            }
+            chart.update('none');
+            console.log(`[THRESHOLD] Updated ${key} to ${value}`);
+        } else {
+            console.warn(`[THRESHOLD] Annotation key not found: ${key}`);
+        }
+    }
+}
+    // On slider change: update input and chart
+    // --- Manual Lever (slider) controls threshold and input ---
+    if (thresholdSlider) {
+        thresholdSlider.addEventListener('input', function(e) {
+            setThresholdControls(e.target.value);
+        });
+        // Optionally, also allow 'change' event for keyboard/stepper
+        thresholdSlider.addEventListener('change', function(e) {
+            setThresholdControls(e.target.value);
+        });
+    }
+
+    // On input change: update slider and chart
+    // When user types a number and presses Enter or blurs, update slider and chart
+    if (thresholdInput) {
+        thresholdInput.addEventListener('change', function(e) {
+            setThresholdControls(e.target.value);
+        });
+        // Optionally, update on Enter key
+        thresholdInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                setThresholdControls(e.target.value);
+            }
+        });
+    }
+
+    // On auto-calculate button: reset to calculated threshold
+   if (autoThresholdBtn) {
+    autoThresholdBtn.addEventListener('click', function() {
+        let channel = window.currentFluorophore;
+        if (!channel || channel === 'all') {
+            // Try to extract from chart datasets
+            const datasets = window.amplificationChart?.data?.datasets;
+            if (datasets && datasets.length > 0) {
+                const match = datasets[0].label?.match(/\(([^)]+)\)/);
+                if (match && match[1] !== 'Unknown') channel = match[1];
+            }
+        }
+        if (!channel) {
+            console.warn('No channel selected or detected for auto threshold!');
+            return;
+        }
+        const scale = currentScaleMode || 'linear';
+        const autoValue = getCurrentChannelThreshold(channel, scale);
+        setThresholdControls(autoValue);
+    });
+}
+
+    // --- End Manual Lever/Threshold Controls ---
+
+    // On page load: set controls to calculated threshold
+    function initializeThresholdControls() {
+        // Find the calculated threshold from global state or chart config
+        let initial = null;
+        if (window.currentChart && window.currentChart.options && window.currentChart.options.plugins && window.currentChart.options.plugins.annotation) {
+            const ann = window.currentChart.options.plugins.annotation.annotations;
+            if (ann && ann.thresholdLine && typeof ann.thresholdLine.yMin !== 'undefined') {
+                initial = ann.thresholdLine.yMin;
+            }
+        }
+        // Fallback: use a default value if not found
+        if (initial === null) initial = 200; // Default threshold if not set
+        calculatedThreshold = initial;
+        setThresholdControls(initial, false);
+    }
+    initializeThresholdControls();
+
+    // --- End Threshold Controls Wiring ---
+
     // Load analysis history on page load
     loadAnalysisHistory();
 });
@@ -5307,8 +6137,7 @@ function createCombinedSession(experimentPattern, sessions) {
                     }
                 }
                 
-                const isGoodSCurve = session.is_good_scurve || false;
-                return isGoodSCurve && amplitude > 500 && !hasAnomalies;
+                return session.is_good_scurve && amplitude > 500 && !hasAnomalies;
             }).length;
             
             totalPositive += sessionPositive;
@@ -5417,7 +6246,7 @@ function calculatePathogenBreakdownFromSessions(sessions) {
         }
         
         // Final fallback for single-channel tests based on filename
-        if ((!fluorophore || fluorophore === 'Unknown') && session.filename) {
+       /* if ((!fluorophore || fluorophore === 'Unknown') && session.filename) {
             if (session.filename.includes('AcNgon')) fluorophore = 'HEX';
             else if (session.filename.includes('AcCtrach')) fluorophore = 'FAM'; 
             else if (session.filename.includes('AcTvag')) fluorophore = 'FAM';
@@ -5426,7 +6255,7 @@ function calculatePathogenBreakdownFromSessions(sessions) {
             else if (session.filename.includes('AcUpar')) fluorophore = 'FAM';
             else if (session.filename.includes('AcUure')) fluorophore = 'FAM';
             console.log(`Filename-based fluorophore detection: ${session.filename} -> ${fluorophore}`);
-        }
+        }*/
         
         // Skip only if truly no fluorophore can be detected
         if (!fluorophore || fluorophore === 'Unknown') {
@@ -5440,8 +6269,7 @@ function calculatePathogenBreakdownFromSessions(sessions) {
         if (session.well_results) {
             session.well_results.forEach(well => {
                 const amplitude = well.amplitude || 0;
-                const isGoodSCurve = well.is_good_scurve || false;
-                if (isGoodSCurve && amplitude > 500) {
+                if (well.is_good_scurve && amplitude > 500) {
                     positive++;
                 }
             });
@@ -5477,7 +6305,7 @@ function calculatePositiveRate(session) {
     console.log('🔍 HISTORY DEBUG - Session well_results length:', session.well_results?.length || 0);
     
     // Debug log specific session data for Cglab
-    if (session.filename && session.filename.includes('Cglab')) {
+   /* if (session.filename && session.filename.includes('Cglab')) {
         console.log('🔍 CGLAB HISTORY DEBUG - Session details:', {
             id: session.id,
             filename: session.filename,
@@ -5486,7 +6314,7 @@ function calculatePositiveRate(session) {
             success_rate: session.success_rate,
             pathogen_breakdown: session.pathogen_breakdown
         });
-    }
+    }*/
     
     // Check if stored pathogen breakdown contains "Unknown" OR fluorophore names instead of pathogen targets
     const hasUnknown = session.pathogen_breakdown && session.pathogen_breakdown.includes('Unknown');
@@ -5582,7 +6410,7 @@ function calculatePositiveRate(session) {
         }
         
         // Final fallback for single-channel tests based on filename
-        if (fluorophore === 'Unknown' && session.filename) {
+        /*if (fluorophore === 'Unknown' && session.filename) {
             if (session.filename.includes('AcNgon')) fluorophore = 'HEX';
             else if (session.filename.includes('AcCtrach')) fluorophore = 'FAM'; 
             else if (session.filename.includes('AcTvag')) fluorophore = 'FAM';
@@ -5590,8 +6418,8 @@ function calculatePositiveRate(session) {
             else if (session.filename.includes('AcMgen')) fluorophore = 'FAM';
             else if (session.filename.includes('AcUpar')) fluorophore = 'FAM';
             else if (session.filename.includes('AcUure')) fluorophore = 'FAM';
-        }
-        
+        }*/
+
         if (!fluorophoreGroups[fluorophore]) {
             fluorophoreGroups[fluorophore] = { total: 0, positive: 0 };
         }
@@ -5956,6 +6784,7 @@ function displayAnalysisHistory(sessions) {
                     <th>Wells</th>
                     <th>Positive Rate</th>
                     <th>Cycles</th>
+
                     <th>Actions</th>
                 </tr>
             </thead>
@@ -6035,13 +6864,13 @@ async function loadSessionDetails(sessionId) {
         if (!pendingSessionLoad) {
             // First time - store session ID and refresh
             console.log('Storing session ID and refreshing browser');
-            localStorage.setItem('pendingSessionLoad', sessionId);
+            safeSetItem(localStorage, 'pendingSessionLoad', sessionId);
             window.location.reload();
             return;
         } else if (pendingSessionLoad !== sessionId) {
             // Different session ID - store new one and refresh
             console.log('Different session - storing new ID and refreshing');
-            localStorage.setItem('pendingSessionLoad', sessionId);
+            safeSetItem(localStorage, 'pendingSessionLoad', sessionId);
             window.location.reload();
             return;
         }
@@ -6148,102 +6977,114 @@ async function loadSessionDetails(sessionId) {
                 });
             }
             
-            transformedResults.individual_results[wellKey] = {
-                well_id: baseWellId,
-                fluorophore: fluorophore,
-                is_good_scurve: well.is_good_scurve,
-                r2_score: well.r2_score,
-                rmse: well.rmse,
-                amplitude: well.amplitude,
-                steepness: well.steepness,
-                midpoint: well.midpoint,
-                baseline: well.baseline,
-                data_points: well.data_points,
-                cycle_range: well.cycle_range,
-                sample: well.sample_name,
-                sample_name: well.sample_name,
-                cq_value: well.cq_value,
-                
-                // Debug parameter values during history loading
-                _debug_params: {
-                    rmse: well.rmse,
-                    amplitude: well.amplitude,
-                    steepness: well.steepness,
-                    midpoint: well.midpoint,
-                    baseline: well.baseline
-                },
-                anomalies: (() => {
-                    try {
-                        if (Array.isArray(well.anomalies)) {
-                            return well.anomalies;
-                        }
-                        const anomaliesStr = well.anomalies || '[]';
-                        return JSON.parse(anomaliesStr);
-                    } catch (e) {
-                        console.warn('Failed to parse anomalies for well', well.well_id, ':', e, 'Raw value:', well.anomalies);
-                        return [];
-                    }
-                })(),
-                fitted_curve: Array.isArray(well.fitted_curve) ? well.fitted_curve : (() => {
-                    try {
-                        return JSON.parse(well.fitted_curve || '[]');
-                    } catch (e) {
-                        return [];
-                    }
-                })(),
-                raw_cycles: (() => {
-                    if (Array.isArray(well.raw_cycles)) {
-                        return well.raw_cycles;
-                    }
-                    try {
-                        const parsed = JSON.parse(well.raw_cycles || '[]');
-                        return Array.isArray(parsed) ? parsed : [];
-                    } catch (e) {
-                        console.warn('Failed to parse raw_cycles for well', well.well_id, ':', well.raw_cycles);
-                        return [];
-                    }
-                })(),
-                raw_rfu: (() => {
-                    if (Array.isArray(well.raw_rfu)) {
-                        return well.raw_rfu;
-                    }
-                    try {
-                        const parsed = JSON.parse(well.raw_rfu || '[]');
-                        return Array.isArray(parsed) ? parsed : [];
-                    } catch (e) {
-                        console.warn('Failed to parse raw_rfu for well', well.well_id, ':', well.raw_rfu);
-                        return [];
-                    }
-                })(),
-                fit_parameters: typeof well.fit_parameters === 'object' ? well.fit_parameters : (() => {
-                    try {
-                        return JSON.parse(well.fit_parameters || '{}');
-                    } catch (e) {
-                        return {};
-                    }
-                })(),
-                parameter_errors: typeof well.parameter_errors === 'object' ? well.parameter_errors : (() => {
-                    try {
-                        return JSON.parse(well.parameter_errors || '{}');
-                    } catch (e) {
-                        return {};
-                    }
-                })(),
-                // Add missing threshold_value field for threshold annotations
-                threshold_value: well.threshold_value,
-                
-                // 🔍 THRESHOLD-DEBUG: Log threshold_value during history loading
-                _debug_threshold: {
-                    original_threshold: well.threshold_value,
-                    type: typeof well.threshold_value,
-                    isNull: well.threshold_value == null,
-                    isNaN: isNaN(well.threshold_value)
-                }
-            };
+// Defensive: ensure curve_classification is always present
+let curveClassificationValue;
+if (well.curve_classification !== undefined) {
+    curveClassificationValue = well.curve_classification;
+} else if (well.classification !== undefined) {
+    // Fallback: if legacy field exists
+    curveClassificationValue = well.classification;
+} else {
+    curveClassificationValue = 'N/A';
+}
+transformedResults.individual_results[wellKey] = {
+    curve_classification: curveClassificationValue,
+    well_id: baseWellId,
+    fluorophore: fluorophore,
+    is_good_scurve: well.is_good_scurve,
+    r2_score: well.r2_score,
+    rmse: well.rmse,
+    amplitude: well.amplitude,
+    steepness: well.steepness,
+    midpoint: well.midpoint,
+    baseline: well.baseline,
+    data_points: well.data_points,
+    cycle_range: well.cycle_range,
+    sample: well.sample_name,
+    sample_name: well.sample_name,
+    cq_value: well.cq_value,
+    
+    // Debug parameter values during history loading
+    _debug_params: {
+        rmse: well.rmse,
+        amplitude: well.amplitude,
+        steepness: well.steepness,
+        midpoint: well.midpoint,
+        baseline: well.baseline
+    },
+    anomalies: (() => {
+        try {
+            if (Array.isArray(well.anomalies)) {
+                return well.anomalies;
+            }
+            const anomaliesStr = well.anomalies || '[]';
+            return JSON.parse(anomaliesStr);
+        } catch (e) {
+            console.warn('Failed to parse anomalies for well', well.well_id, ':', e, 'Raw value:', well.anomalies);
+            return [];
+        }
+    })(),
+    fitted_curve: Array.isArray(well.fitted_curve) ? well.fitted_curve : (() => {
+        try {
+            return JSON.parse(well.fitted_curve || '[]');
+        } catch (e) {
+            return [];
+        }
+    })(),
+    raw_cycles: (() => {
+        if (Array.isArray(well.raw_cycles)) {
+            return well.raw_cycles;
+        }
+        try {
+            const parsed = JSON.parse(well.raw_cycles || '[]');
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+            console.warn('Failed to parse raw_cycles for well', well.well_id, ':', well.raw_cycles);
+            return [];
+        }
+    })(),
+    raw_rfu: (() => {
+        if (Array.isArray(well.raw_rfu)) {
+            return well.raw_rfu;
+        }
+        try {
+            const parsed = JSON.parse(well.raw_rfu || '[]');
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+            console.warn('Failed to parse raw_rfu for well', well.well_id, ':', well.raw_rfu);
+            return [];
+        }
+    })(),
+    fit_parameters: typeof well.fit_parameters === 'object' ? well.fit_parameters : (() => {
+        try {
+            return JSON.parse(well.fit_parameters || '{}');
+        } catch (e) {
+            return {};
+        }
+    })(),
+    parameter_errors: typeof well.parameter_errors === 'object' ? well.parameter_errors : (() => {
+        try {
+            return JSON.parse(well.parameter_errors || '{}');
+        } catch (e) {
+            return {};
+        }
+    })(),
+    // Add missing threshold_value field for threshold annotations
+    threshold_value: well.threshold_value,
+    
+    // 🔍 THRESHOLD-DEBUG: Log threshold_value during history loading
+    _debug_threshold: {
+        original_threshold: well.threshold_value,
+        type: typeof well.threshold_value,
+        isNull: well.threshold_value == null,
+        isNaN: isNaN(well.threshold_value)
+    }
+};
         });
         
         // Set global analysis results for chart functionality
         analysisResults = transformedResults;
+        
         // 🛡️ DISPLAY ONLY: Show history without contaminating current analysis state
         displayHistorySession(transformedResults, 'session-details-load');
         
@@ -6342,6 +7183,7 @@ function loadLocalSessionDetails(sessionIndex) {
         const session = history[sessionIndex];
         analysisResults = session.results;
         // 🛡️ DISPLAY ONLY: Show history without contaminating current analysis state
+        
         displayHistorySession(session.results, 'local-history-session');
         // Patch: set hasAnyLoadedSession = true and force UI to loaded state
         if (typeof window.hasAnyLoadedSession !== 'undefined') {
@@ -6410,7 +7252,12 @@ function deleteLocalSession(index) {
     
     const history = getLocalAnalysisHistory();
     history.splice(index, 1);
-    localStorage.setItem('qpcr_analysis_history', JSON.stringify(history));
+    safeSetItem(localStorage, 'qpcr_analysis_history', JSON.stringify(history), {
+        historyTrimFn: () => {
+            // Remove oldest entry and try again
+            history.shift();
+        }
+    });
     
     // Reload history to refresh the display
     loadAnalysisHistory();
@@ -6475,7 +7322,13 @@ function addFluorophoreFilter(individualResults) {
         fluorophores.forEach(fluorophore => {
             const option = document.createElement('option');
             option.value = fluorophore;
-            const pathogenTarget = getPathogenTarget(testCode, fluorophore);
+            let pathogenTarget = getPathogenTarget(testCode, fluorophore);
+            // Handle both object and string style entries in PATHOGEN_LIBRARY
+            if (pathogenTarget && typeof pathogenTarget === 'object' && pathogenTarget.target) {
+                pathogenTarget = pathogenTarget.target;
+            } else if (typeof pathogenTarget !== 'string') {
+                pathogenTarget = 'Unknown';
+            }
             option.textContent = pathogenTarget !== 'Unknown' ? `${fluorophore} (${pathogenTarget})` : fluorophore;
             filterSelect.appendChild(option);
         });
@@ -6868,7 +7721,7 @@ async function saveExperimentStatistics(experimentPattern, allResults, fluoropho
                 // Apply enhanced criteria
                 if (amplitude > 500 && !hasAnomalies) {
                     fluorophoreGroups[fluorophore].positive++;
-                } else if (amplitude < 400) {
+                } else if (amplitude < 400 || !well.is_good_scurve || isNaN(Number(well.cq_value))) {
                     fluorophoreGroups[fluorophore].negative++;
                 } else {
                     fluorophoreGroups[fluorophore].redo++;
@@ -7231,10 +8084,9 @@ async function saveExperimentStatisticsFromCombined(experimentPattern, combinedR
                 }
                 
                 // Apply enhanced criteria: POS requires good S-curve + amplitude > 500 + no anomalies
-                const isGoodSCurve = well.is_good_scurve || false;
-                if (isGoodSCurve && amplitude > 500 && !hasAnomalies) {
+                if (well.is_good_scurve && amplitude > 500 && !hasAnomalies) {
                     positive++;
-                } else if (amplitude < 400) {
+                } else if (amplitude < 400 || !well.is_good_scurve || isNaN(Number(well.cq_value))) {
                     negative++;
                 } else {
                     redo++;
@@ -7320,10 +8172,9 @@ function getResultClassification(wellData) {
     }
     
     // Apply same criteria as main analysis: POS requires good S-curve + amplitude > 500 + no anomalies
-    const isGoodSCurve = wellData.is_good_scurve || false;
-    if (isGoodSCurve && amplitude > 500 && !hasAnomalies) {
+    if (wellData.is_good_scurve && amplitude > 500 && !hasAnomalies) {
         return 'POS';
-    } else if (amplitude < 400) {
+    } else if (amplitude < 400 || !wellData.is_good_scurve || isNaN(Number(wellData.cq_value))) {
         return 'NEG';
     } else {
         return 'REDO';
@@ -8348,9 +9199,9 @@ function validateControlAmplitude(controlType, amplitude, wellData) {
     console.log(`🔍 VALIDATION - Control ${controlType} amplitude: ${amplitude}`, wellData ? `S-curve: ${wellData.is_good_scurve}` : 'No well data');
     
     if (controlType === 'NTC') {
-        // NTC should be negative (low amplitude)
-        const isValid = amplitude < 400;
-        console.log(`🔍 VALIDATION - NTC result: ${isValid ? 'VALID' : 'INVALID'} (amplitude: ${amplitude})`);
+        // NTC should be negative (low amplitude, poor fit, or Cq not a number)
+        const isValid = amplitude < 400 || !wellData.is_good_scurve || isNaN(Number(wellData?.cq_value));
+        console.log(`🔍 VALIDATION - NTC result: ${isValid ? 'VALID' : 'INVALID'} (amplitude: ${amplitude}, isGoodSCurve: ${wellData.is_good_scurve}, cq: ${wellData?.cq_value})`);
         return isValid;
     } else {
         // H, M, L should be positive - use comprehensive criteria when available
@@ -8633,7 +9484,7 @@ function updateControlValidationDisplay(controlSets) {
         // DISABLED: Create individual pathogen control grids to prevent duplicates
         // createPathogenControlGrids(controlSets);
         console.log('🔍 CONTROL VALIDATION - Skipping pathogen control grids creation to prevent duplicates');
-    }s
+    }
 
     // Legacy control validation section (can be hidden now)
     const controlValidationSection = document.getElementById('controlValidation');
@@ -9308,11 +10159,12 @@ function showAllCurves(selectedFluorophore) {
     chartConfig.options.plugins.tooltip.enabled = false;
     
     window.amplificationChart = new Chart(ctx, chartConfig);
-    
+    updateAllChannelThresholds();
+    enableDraggableThresholds();
     // Apply stable threshold system after chart creation
     setTimeout(() => {
         updateChartThresholds();
-    }, 100);
+    }, 400);
 }
 
 function showGoodCurves(selectedFluorophore) {
@@ -9397,11 +10249,12 @@ function showGoodCurves(selectedFluorophore) {
     chartConfig.options.plugins.tooltip.enabled = datasets.length <= 20; // Disable tooltips for better performance
     
     window.amplificationChart = new Chart(ctx, chartConfig);
-    
+    updateAllChannelThresholds();
+    enableDraggableThresholds();
     // Apply stable threshold system after chart creation
     setTimeout(() => {
         updateChartThresholds();
-    }, 100);
+    }, 400);
 }
 
 function showResultsFiltered(selectedFluorophore, resultType) {
@@ -9433,7 +10286,7 @@ function showResultsFiltered(selectedFluorophore, resultType) {
                 shouldInclude = isGoodSCurve && amplitude > 500;
                 break;
             case 'neg':
-                shouldInclude = amplitude < 400;
+                shouldInclude = amplitude < 400 || !isGoodSCurve || isNaN(Number(wellData.cq_value));
                 break;
             case 'redo':
                 shouldInclude = amplitude >= 400 && amplitude <= 500;
@@ -9495,10 +10348,10 @@ function showResultsFiltered(selectedFluorophore, resultType) {
         console.warn(`No ${resultType.toUpperCase()} curves found`);
         
         // Create empty chart with informative message
-        window.amplificationChart = new Chart(ctx, {
-            type: 'line',
-            data: { datasets: [] },
-            options: {
+window.amplificationChart = new Chart(ctx, {
+    type: 'line',
+    data: { datasets: [] },
+    options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
@@ -9564,11 +10417,12 @@ function showResultsFiltered(selectedFluorophore, resultType) {
     chartConfig.options.elements.point.radius = 0;
     
     window.amplificationChart = new Chart(ctx, chartConfig);
-    
+    updateAllChannelThresholds();
+    enableDraggableThresholds();
     // Apply stable threshold system after chart creation
     setTimeout(() => {
         updateChartThresholds();
-    }, 100);
+    }, 400);
 }
 
 function getFluorophoreColor(fluorophore) {
@@ -9719,7 +10573,7 @@ function createChartConfiguration(chartType, datasets, title, annotation = null)
                 tooltip: {
                     enabled: datasets.length <= 20
                 },
-                ...(annotation ? { annotation } : {})
+                annotation: annotation || { annotations: {} }
             },
             scales: {
                 x: {
@@ -10021,14 +10875,18 @@ function updateModalDetails(wellResult) {
         }
     }
     
-    // POS requires good S-curve + amplitude > 500 + no anomalies
+    // POS/NEG/REDO strict criteria (match table):
     const isGoodSCurve = wellResult.is_good_scurve || false;
-    if (isGoodSCurve && amplitude > 500 && !hasAnomalies) {
-        resultClass = 'modal-result-pos';
-        resultText = 'POS';
-    } else if (amplitude < 400) {
+    const cqValue = wellResult.cq_value;
+    if (amplitude < 400 || !isGoodSCurve || isNaN(Number(cqValue))) {
         resultClass = 'modal-result-neg';
         resultText = 'NEG';
+    } else if (isGoodSCurve && amplitude > 500 && !hasAnomalies) {
+        resultClass = 'modal-result-pos';
+        resultText = 'POS';
+    } else {
+        resultClass = 'modal-result-redo';
+        resultText = 'REDO';
     }
     
     modalDetails.innerHTML = `
@@ -10580,9 +11438,20 @@ async function displaySessionResults(session) {
                 console.log(`Well ${index}: original=${well.well_id}, session_fluorophore=${well.session_fluorophore}, detected=${fluorophore}, key=${wellKey}`);
             }
             
-            transformedResults.individual_results[wellKey] = {
-                well_id: baseWellId,
-                fluorophore: fluorophore,
+// Defensive: ensure curve_classification is always present
+// [COPILOT EDIT: fallback logic for curve_classification updated]
+let curve_classification = 'N/A';
+if (well.curve_classification !== undefined) {
+    curve_classification = well.curve_classification;
+} else if (well.classification !== undefined) {
+    // Fallback: if legacy field exists
+    curve_classification = well.classification;
+}
+// [COPILOT EDIT END]
+transformedResults.individual_results[wellKey] = {
+    curve_classification: curve_classification,
+    well_id: baseWellId,
+    fluorophore: fluorophore,
                 is_good_scurve: well.is_good_scurve || false,
                 r2_score: well.r2_score,
                 rmse: well.rmse,
@@ -10662,6 +11531,7 @@ async function displaySessionResults(session) {
         // Set global analysis results
         analysisResults = transformedResults;
         // 🛡️ DISPLAY ONLY: Show combined session without contaminating current analysis state
+        
         displayHistorySession(transformedResults, 'combined-session-load');
         
         console.log('Combined session transformed - total wells:', totalWells, 'individual results:', Object.keys(transformedResults.individual_results).length);

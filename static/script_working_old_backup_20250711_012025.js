@@ -1,6 +1,141 @@
 // ======================================
 // HYBRID SCRIPT: PATTERN RECOGNITION + SMART CONTAMINATION PREVENTION
 // ======================================
+
+// ======================================
+// EXPERIMENT-SPECIFIC CHANNEL ISOLATION
+// ======================================
+
+/**
+ * Get the expected fluorophores for the current experiment pattern
+ * This prevents contamination from previous experiments
+ */
+function getCurrentExperimentFluorophores() {
+    // Get current experiment pattern
+    const currentPattern = getCurrentFullPattern() || window.currentExperimentPattern;
+    
+    console.log('🔒 ISOLATION - getCurrentExperimentFluorophores debug:');
+    console.log('🔒 ISOLATION - currentPattern:', currentPattern);
+    console.log('🔒 ISOLATION - window.currentSessionFilename:', window.currentSessionFilename);
+    console.log('🔒 ISOLATION - amplificationFiles count:', amplificationFiles ? Object.keys(amplificationFiles).length : 0);
+    console.log('🔒 ISOLATION - analysisResults.filename:', analysisResults?.filename);
+    
+    if (!currentPattern || currentPattern === 'Unknown Pattern') {
+        console.warn('🔒 ISOLATION - No current experiment pattern found, cannot determine expected fluorophores');
+        return [];
+    }
+    
+    console.log('🔒 ISOLATION - Getting expected fluorophores for pattern:', currentPattern);
+    
+    // Extract test code from pattern (e.g., "BVPanelPCR3" from "BVPanelPCR3_A1-H12_20231201_120000")
+    const testCode = extractTestCode(currentPattern);
+    console.log('🔒 ISOLATION - Extracted test code:', testCode);
+    
+    // For single-channel experiments, detect from filename
+    if (currentPattern.includes('_Cy5') || currentPattern.includes('_FAM') || 
+        currentPattern.includes('_HEX') || currentPattern.includes('_Texas')) {
+        const detectedFluorophore = detectFluorophoreFromFilename(currentPattern);
+        if (detectedFluorophore !== 'Unknown') {
+            console.log('🔒 ISOLATION - Single-channel experiment detected:', detectedFluorophore);
+            return [detectedFluorophore];
+        }
+    }
+    
+    // For multi-channel experiments, get from pathogen library
+    const pathogenMapping = getPathogenMappingForTest(testCode);
+    const expectedFluorophores = Object.keys(pathogenMapping || {});
+    
+    console.log('🔒 ISOLATION - Expected fluorophores for experiment:', expectedFluorophores);
+    return expectedFluorophores.length > 0 ? expectedFluorophores : []; // Don't fallback to all fluorophores
+}
+
+/**
+ * Filter wells to only include those belonging to current experiment
+ */
+function filterWellsForCurrentExperiment(individualResults) {
+    if (!individualResults) return {};
+    
+    const expectedFluorophores = getCurrentExperimentFluorophores();
+    console.log('🔒 ISOLATION - filterWellsForCurrentExperiment called');
+    console.log('🔒 ISOLATION - Expected fluorophores:', expectedFluorophores);
+    console.log('🔒 ISOLATION - Session filename:', window.currentSessionFilename);
+    console.log('🔒 ISOLATION - Analysis results filename:', analysisResults?.filename);
+    
+    // 🛡️ DEFENSIVE: If no current experiment can be determined, return all wells
+    // This prevents over-filtering when experiment context isn't properly set
+    if (!expectedFluorophores || expectedFluorophores.length === 0) {
+        console.warn('🔒 ISOLATION - No expected fluorophores found, returning all wells (no filtering)');
+        return individualResults;
+    }
+    
+    const filteredResults = {};
+    let filteredCount = 0;
+    let totalCount = 0;
+    
+    Object.keys(individualResults).forEach(wellKey => {
+        const well = individualResults[wellKey];
+        totalCount++;
+        
+        // Check if this well belongs to the current experiment
+        if (well.fluorophore && expectedFluorophores.includes(well.fluorophore)) {
+            filteredResults[wellKey] = well;
+            filteredCount++;
+        } else {
+            console.log(`🔒 ISOLATION - Filtered out well ${wellKey} with fluorophore ${well.fluorophore} (expected: ${expectedFluorophores.join(', ')})`);
+        }
+    });
+    
+    console.log(`🔒 ISOLATION - Filtered ${totalCount} wells down to ${filteredCount} wells for current experiment`);
+    return filteredResults;
+}
+
+/**
+ * Validate that fluorophore belongs to current experiment
+ */
+function isFluorophoreValidForCurrentExperiment(fluorophore) {
+    const expectedFluorophores = getCurrentExperimentFluorophores();
+    const isValid = expectedFluorophores.includes(fluorophore);
+    
+    if (!isValid) {
+        console.log(`🔒 ISOLATION - Fluorophore ${fluorophore} is not valid for current experiment. Expected: [${expectedFluorophores.join(', ')}]`);
+    }
+    
+    return isValid;
+}
+
+/**
+ * Enhanced well key formatting to prevent duplication
+ */
+function sanitizeWellKey(wellId, fluorophore) {
+    // Remove any existing fluorophore suffixes to prevent duplication like "A1_CY5_CY5"
+    let cleanWellId = wellId;
+    
+    // Remove existing fluorophore suffixes
+    const fluorophores = ['Cy5', 'FAM', 'HEX', 'Texas Red', 'ROX'];
+    fluorophores.forEach(fluor => {
+        const pattern1 = `_${fluor}`;
+        const pattern2 = `_${fluor}_${fluor}`;
+        
+        // Remove double fluorophore first
+        if (cleanWellId.includes(pattern2)) {
+            cleanWellId = cleanWellId.replace(pattern2, '');
+        }
+        // Then remove single fluorophore
+        if (cleanWellId.includes(pattern1)) {
+            cleanWellId = cleanWellId.replace(pattern1, '');
+        }
+    });
+    
+    // Ensure we only have base well ID (e.g., "A1")
+    const wellMatch = cleanWellId.match(/^([A-H]\d+)/);
+    if (wellMatch) {
+        return wellMatch[1]; // Return just the base well ID like "A1"
+    }
+    
+    // Fallback: return original if no match
+    return cleanWellId;
+}
+
 // Based on: fix-threshold-pathogen-tabs (working pattern recognition)
 // Enhanced with: selective contamination prevention from fix/threshold-integrity-stats
 // Strategy: Preserve pattern-critical data while preventing experiment mixing
@@ -33,7 +168,16 @@ function emergencyReset() {
     
     // Clear chart instances to prevent data mixing
     if (window.amplificationChart) {
-        window.amplificationChart.destroy();
+        try {
+            // Check if destroy method exists before calling it
+            if (typeof window.amplificationChart.destroy === 'function') {
+                window.amplificationChart.destroy();
+            } else {
+                console.warn('🔄 Chart destroy method not available, clearing reference only');
+            }
+        } catch (e) {
+            console.warn('🔄 Error destroying chart:', e);
+        }
         window.amplificationChart = null;
     }
     
@@ -49,14 +193,66 @@ function emergencyReset() {
         resultsTableBody.innerHTML = '';
     }
     
-    // Clear pathogen breakdown displays
+    // 🧹 COMPREHENSIVE: Clear fluorophore filter dropdown
+    const fluorophoreFilterRow = document.querySelector('#fluorophoreFilterRow');
+    if (fluorophoreFilterRow) {
+        fluorophoreFilterRow.remove();
+    }
+    
+    // 🧹 COMPREHENSIVE: Clear pathogen breakdown displays  
     clearPathogenBreakdownDisplay();
     
-    // Clear control validation alerts
+    // 🧹 COMPREHENSIVE: Clear control validation alerts
     const controlValidationAlerts = document.getElementById('controlValidationAlerts');
     if (controlValidationAlerts) {
         controlValidationAlerts.innerHTML = '';
         controlValidationAlerts.style.display = 'none';
+    }
+    
+    // 🧹 COMPREHENSIVE: Clear pathogen control grids
+    const pathogenControlsContainer = document.getElementById('pathogenControlsContainer');
+    if (pathogenControlsContainer) {
+        pathogenControlsContainer.innerHTML = '';
+        pathogenControlsContainer.style.display = 'none';
+    }
+    
+    // 🧹 COMPREHENSIVE: Clear pathogen grids section
+    const pathogenGridsSection = document.getElementById('pathogen-grids-section');
+    if (pathogenGridsSection) {
+        pathogenGridsSection.innerHTML = '';
+        pathogenGridsSection.style.display = 'none';
+    }
+    
+    // 🧹 COMPREHENSIVE: Clear control validation grid
+    const controlValidationGrid = document.getElementById('controlValidationGrid');
+    if (controlValidationGrid) {
+        controlValidationGrid.innerHTML = '';
+        controlValidationGrid.style.display = 'none';
+    }
+    
+    // 🧹 COMPREHENSIVE: Clear summary statistics
+    const summaryElements = [
+        'experimentPattern', 'totalPositive', 'positivePercentage', 'cycleRangeResult',
+        'wellsAnalysisTitle', 'patientControlStats', 'controlStats'
+    ];
+    summaryElements.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.textContent = '';
+        }
+    });
+    
+    // 🧹 COMPREHENSIVE: Clear fluorophore breakdown displays
+    const fluorophoreBreakdown = document.getElementById('fluorophoreBreakdown');
+    if (fluorophoreBreakdown) {
+        fluorophoreBreakdown.innerHTML = '';
+        fluorophoreBreakdown.style.display = 'none';
+    }
+    
+    // 🧹 COMPREHENSIVE: Reset any active filters
+    const statusFilter = document.getElementById('statusFilter');
+    if (statusFilter) {
+        statusFilter.value = 'all';
     }
     
     // NOTE: We DO NOT clear window.stableChannelThresholds here
@@ -1788,7 +1984,9 @@ async function markChannelFailed(experimentPattern, fluorophore, errorMessage) {
 /**
  * Get current experiment pattern for tracking
  */
-function getCurrentFullPattern() {
+// DISABLED: Simple version that doesn't handle history loading properly
+// Use the comprehensive version at line 6951 instead
+/* function getCurrentFullPattern() {
     // Extract pattern from first uploaded file
     const firstFile = Object.values(amplificationFiles)[0];
     if (!firstFile || !firstFile.fileName) {
@@ -1798,7 +1996,7 @@ function getCurrentFullPattern() {
     // Remove extension and create pattern
     const baseName = firstFile.fileName.replace(/\.(csv|txt)$/i, '');
     return baseName;
-}
+} */
 
 // ========================================
 // END MULTICHANNEL SEQUENTIAL PROCESSING
@@ -2550,21 +2748,28 @@ async function performAnalysis() {
 
 // Display functions
 async function displayAnalysisResults(results) {
-    console.log('Displaying analysis results:', results);
+    console.log('🔒 ISOLATION - Displaying analysis results with channel isolation:', results);
     
     if (!results || !results.individual_results) {
         console.error('Invalid results structure:', results);
         alert('Error: Invalid analysis results received');
         return;
     }
-    
+
     const analysisSection = document.getElementById('analysisSection');
     if (analysisSection) {
         analysisSection.style.display = 'block';
     }
+
+    // 🔒 ISOLATION: Filter wells to only include current experiment channels
+    const allIndividualResults = results.individual_results || {};
+    const filteredIndividualResults = filterWellsForCurrentExperiment(allIndividualResults);
     
-    // Handle different response structures
-    const individualResults = results.individual_results || {};
+    console.log('🔒 ISOLATION - Original wells:', Object.keys(allIndividualResults).length);
+    console.log('🔒 ISOLATION - Filtered wells:', Object.keys(filteredIndividualResults).length);
+    
+    // Use filtered results for all subsequent operations
+    const individualResults = filteredIndividualResults;
     const cycleInfo = results.cycle_info || results.summary?.cycle_info;
     
     // Calculate statistics separated by patient samples and controls
@@ -2944,8 +3149,17 @@ function populateFluorophoreSelector(individualResults) {
     // Clear existing options except "All Fluorophores"
     fluorophoreSelector.innerHTML = '<option value="all">All Fluorophores</option>';
     
-    // Get unique fluorophores
-    const fluorophores = [...new Set(Object.values(individualResults).map(result => result.fluorophore || 'Unknown'))];
+    // 🔒 ISOLATION: Get unique fluorophores, but only for current experiment
+    const allFluorophores = [...new Set(Object.values(individualResults).map(result => result.fluorophore || 'Unknown'))];
+    const expectedFluorophores = getCurrentExperimentFluorophores();
+    
+    // Filter to only show fluorophores that belong to current experiment
+    const fluorophores = allFluorophores.filter(fluor => expectedFluorophores.includes(fluor));
+    
+    console.log('🔒 ISOLATION - Chart selector: All detected fluorophores:', allFluorophores);
+    console.log('🔒 ISOLATION - Chart selector: Expected for current experiment:', expectedFluorophores);
+    console.log('🔒 ISOLATION - Chart selector: Filtered fluorophores for display:', fluorophores);
+    
     const fluorophoreOrder = ['Cy5', 'FAM', 'HEX', 'Texas Red'];
     
     // Sort fluorophores
@@ -3968,11 +4182,14 @@ function combineMultiFluorophoreResults(allResults) {
             totalAnalyzedRecords += Object.keys(results.individual_results).length;
             Object.keys(results.individual_results).forEach(wellKey => {
                 const wellResult = results.individual_results[wellKey];
-                const newWellKey = `${wellKey}_${fluorophore}`;
+                
+                // 🔧 FIX: Sanitize well key to prevent duplication like A1_CY5_CY5
+                const baseWellId = sanitizeWellKey(wellKey, fluorophore);
+                const newWellKey = `${baseWellId}_${fluorophore}`;
                 
                 // Use fluorophore-specific sample data
-                const sampleName = fluorSampleNames[wellKey] || 'Unknown';
-                const cqValue = fluorCqData[wellKey] || null;
+                const sampleName = fluorSampleNames[baseWellId] || fluorSampleNames[wellKey] || 'Unknown';
+                const cqValue = fluorCqData[baseWellId] || fluorCqData[wellKey] || null;
                 
                 combined.individual_results[newWellKey] = {
                     ...wellResult,
@@ -4100,7 +4317,12 @@ function combineMultiFluorophoreResultsSQL(allResults) {
             
             Object.keys(results.individual_results).forEach(wellKey => {
                 const wellResult = results.individual_results[wellKey];
-                const newWellKey = `${wellKey}_${fluorophore}`;
+                
+                // 🔧 FIX: Sanitize well key to prevent duplication like A1_CY5_CY5
+                const baseWellId = sanitizeWellKey(wellKey, fluorophore);
+                const newWellKey = `${baseWellId}_${fluorophore}`;
+                
+                console.log(`🔧 WELL-KEY-FIX - Original: ${wellKey}, Base: ${baseWellId}, New: ${newWellKey}`);
                 
                 // 🔍 COMBINE-THRESHOLD-DEBUG: Check threshold preservation
                 if (wellKey.includes('A1')) {
@@ -6076,23 +6298,31 @@ async function loadSessionDetails(sessionId) {
                 fluorophore = detectFluorophoreFromFilename(session.filename);
             }
             
+            // 🔒 ISOLATION: Sanitize well key to prevent duplication and validate fluorophore
+            const sanitizedBaseWellId = sanitizeWellKey(well.well_id, fluorophore);
+            
+            // Only include wells that belong to current experiment
+            if (!isFluorophoreValidForCurrentExperiment(fluorophore)) {
+                console.log(`🔒 ISOLATION - Skipping well ${well.well_id} with fluorophore ${fluorophore} (not in current experiment)`);
+                return; // Skip this well
+            }
+            
             const wellKey = well.well_id; // Use the full well_id as stored in database
             
             // Debug first few wells from database
             if (index < 3) {
-                console.log(`History well ${well.well_id} raw data:`, {
+                console.log(`🔒 ISOLATION - History well ${well.well_id} processed:`, {
+                    original_well_id: well.well_id,
+                    sanitized_base_well_id: sanitizedBaseWellId,
+                    fluorophore: fluorophore,
+                    valid_for_experiment: isFluorophoreValidForCurrentExperiment(fluorophore),
                     rmse: well.rmse,
-                    amplitude: well.amplitude,
-                    steepness: well.steepness,
-                    midpoint: well.midpoint,
-                    baseline: well.baseline,
-                    raw_cycles: typeof well.raw_cycles + ' length:' + (well.raw_cycles?.length || 'N/A'),
-                    raw_rfu: typeof well.raw_rfu + ' length:' + (well.raw_rfu?.length || 'N/A')
+                    amplitude: well.amplitude
                 });
             }
             
             transformedResults.individual_results[wellKey] = {
-                well_id: baseWellId,
+                well_id: sanitizedBaseWellId, // Use sanitized base well ID
                 fluorophore: fluorophore,
                 is_good_scurve: well.is_good_scurve,
                 r2_score: well.r2_score,
@@ -6190,6 +6420,10 @@ async function loadSessionDetails(sessionId) {
         
         // Store session data globally for pathogen target extraction
         window.currentSessionData = sessionData;
+        
+        // 🔒 ISOLATION: Store session filename for experiment pattern detection
+        window.currentSessionFilename = session.filename;
+        console.log('🔒 ISOLATION - Set currentSessionFilename for history:', session.filename);
         
         // Auto-detect fluorophore for individual channel sessions and set filter
         const sessionFluorophores = [...new Set(Object.values(transformedResults.individual_results).map(well => well.fluorophore))];
@@ -6375,56 +6609,61 @@ function clearAllLocalData() {
 
 
 function addFluorophoreFilter(individualResults) {
-    // Extract unique fluorophores from results
-    const fluorophores = [...new Set(Object.values(individualResults).map(result => result.fluorophore).filter(Boolean))];
+    // 🔒 ISOLATION: Extract unique fluorophores from results, but only for current experiment
+    const allFluorophores = [...new Set(Object.values(individualResults).map(result => result.fluorophore).filter(Boolean))];
+    const expectedFluorophores = getCurrentExperimentFluorophores();
     
-    console.log('Fluorophores found in results:', fluorophores);
-    console.log('Number of fluorophores:', fluorophores.length);
+    // Filter to only show fluorophores that belong to current experiment
+    const fluorophores = allFluorophores.filter(fluor => expectedFluorophores.includes(fluor));
+    
+    console.log('🔒 ISOLATION - All detected fluorophores:', allFluorophores);
+    console.log('� ISOLATION - Expected for current experiment:', expectedFluorophores);
+    console.log('🔒 ISOLATION - Filtered fluorophores for display:', fluorophores);
+    
+    // 🧹 DEFENSIVE: Remove any existing filter row first to prevent accumulation
+    const existingFilterRow = document.querySelector('#fluorophoreFilterRow');
+    if (existingFilterRow) {
+        existingFilterRow.remove();
+        console.log('🧹 Removed existing fluorophore filter to prevent contamination');
+    }
     
     // Always show fluorophore filter for context, even with single fluorophore
     // Single fluorophore sessions benefit from showing pathogen target information
     
-    // Check if filter already exists
-    let filterRow = document.querySelector('#fluorophoreFilterRow');
-    if (!filterRow) {
-        // Create filter row above table headers
-        const tableHeader = document.querySelector('#resultsTable thead tr');
-        if (tableHeader) {
-            filterRow = document.createElement('tr');
-            filterRow.id = 'fluorophoreFilterRow';
-            filterRow.innerHTML = `
-                <td colspan="12" style="background: #f8f9fa; padding: 10px; border-bottom: 2px solid #dee2e6;">
-                    <label for="fluorophoreFilter" style="margin-right: 10px; font-weight: bold;">Filter by Fluorophore:</label>
-                    <select id="fluorophoreFilter" style="padding: 5px 10px; border: 1px solid #ddd; border-radius: 4px;">
-                        <option value="all">All Fluorophores</option>
-                    </select>
-                    <span id="filterStats" style="margin-left: 15px; color: #666;"></span>
-                </td>
-            `;
-            tableHeader.parentNode.insertBefore(filterRow, tableHeader.nextSibling);
+    // Create fresh filter row above table headers
+    const tableHeader = document.querySelector('#resultsTable thead tr');
+    if (tableHeader) {
+        const filterRow = document.createElement('tr');
+        filterRow.id = 'fluorophoreFilterRow';
+        filterRow.innerHTML = `
+            <td colspan="12" style="background: #f8f9fa; padding: 10px; border-bottom: 2px solid #dee2e6;">
+                <label for="fluorophoreFilter" style="margin-right: 10px; font-weight: bold;">Filter by Fluorophore:</label>
+                <select id="fluorophoreFilter" style="padding: 5px 10px; border: 1px solid #ddd; border-radius: 4px;">
+                    <option value="all">All Fluorophores</option>
+                </select>
+                <span id="filterStats" style="margin-left: 15px; color: #666;"></span>
+            </td>
+        `;
+        tableHeader.parentNode.insertBefore(filterRow, tableHeader.nextSibling);
+        
+        const filterSelect = document.getElementById('fluorophoreFilter');
+        if (filterSelect) {
+            // Add fluorophore options with pathogen targets
+            const experimentPattern = getCurrentFullPattern();
+            const testCode = extractTestCode(experimentPattern);
+            
+            fluorophores.forEach(fluorophore => {
+                const option = document.createElement('option');
+                option.value = fluorophore;
+                const pathogenTarget = getPathogenTarget(testCode, fluorophore);
+                option.textContent = pathogenTarget !== 'Unknown' ? `${fluorophore} (${pathogenTarget})` : fluorophore;
+                filterSelect.appendChild(option);
+            });
+            
+            // Add event listener
+            filterSelect.addEventListener('change', filterTableByFluorophore);
+            console.log('✅ Fresh fluorophore filter created with', fluorophores.length, 'options');
         }
-    }
-    
-    const filterSelect = document.getElementById('fluorophoreFilter');
-    if (filterSelect) {
-        // Clear existing options except "All"
-        filterSelect.innerHTML = '<option value="all">All Fluorophores</option>';
-        
-        // Add fluorophore options with pathogen targets
-        const experimentPattern = getCurrentFullPattern();
-        const testCode = extractTestCode(experimentPattern);
-        
-        fluorophores.forEach(fluorophore => {
-            const option = document.createElement('option');
-            option.value = fluorophore;
-            const pathogenTarget = getPathogenTarget(testCode, fluorophore);
-            option.textContent = pathogenTarget !== 'Unknown' ? `${fluorophore} (${pathogenTarget})` : fluorophore;
-            filterSelect.appendChild(option);
-        });
-        
-        // Add event listener
-        filterSelect.removeEventListener('change', filterTableByFluorophore);
-        filterSelect.addEventListener('change', filterTableByFluorophore);
     }
 }
 
@@ -7274,9 +7513,14 @@ function getResultClassification(wellData) {
 
 function validateControls(individualResults) {
     console.log('🔍 VALIDATE CONTROLS - Starting validation with', Object.keys(individualResults).length, 'results');
+    
+    // 🔒 ISOLATION: Filter to only include wells from current experiment
+    const filteredResults = filterWellsForCurrentExperiment(individualResults);
+    console.log('🔒 ISOLATION - Control validation filtered to', Object.keys(filteredResults).length, 'wells for current experiment');
+    
     const controlIssues = [];
     
-    Object.entries(individualResults).forEach(([wellKey, result]) => {
+    Object.entries(filteredResults).forEach(([wellKey, result]) => {
         const sampleName = result.sample_name || result.sample || '';
         const amplitude = result.amplitude || 0;
         const controlType = identifyControlType(sampleName);
@@ -11326,21 +11570,39 @@ function getControlValidationForPathogen(pathogenName, controlType, setNumber) {
 END TEST 2 COMMENT */
 
 function createPathogenControlGrids(controlsByChannel, testName) {
-    console.log('🔍 PATHOGEN GRIDS - Creating grids for test:', testName);
-    console.log('🔍 PATHOGEN GRIDS - Received controls by channel:', Object.keys(controlsByChannel));
+    console.log('� ISOLATION - Creating pathogen grids for test:', testName);
+    console.log('� ISOLATION - Received controls by channel:', Object.keys(controlsByChannel));
     
-    // Use the passed controlsByChannel data directly
-    console.log('🔍 PATHOGEN GRIDS - Extracted controls by channel:', Object.keys(controlsByChannel));
+    // 🔒 ISOLATION: Filter controls to only include channels for current experiment
+    const expectedFluorophores = getCurrentExperimentFluorophores();
+    const filteredControlsByChannel = {};
+    
+    Object.keys(controlsByChannel).forEach(channel => {
+        if (isFluorophoreValidForCurrentExperiment(channel)) {
+            filteredControlsByChannel[channel] = controlsByChannel[channel];
+            console.log(`� ISOLATION - Including channel ${channel} in pathogen grids`);
+        } else {
+            console.log(`🔒 ISOLATION - Excluding channel ${channel} from pathogen grids (not in current experiment)`);
+        }
+    });
+    
+    console.log('🔒 ISOLATION - Filtered controls by channel:', Object.keys(filteredControlsByChannel));
+    
+    // Only proceed if we have valid channels for current experiment
+    if (Object.keys(filteredControlsByChannel).length === 0) {
+        console.log('🔒 ISOLATION - No valid channels for current experiment, skipping pathogen grid creation');
+        return;
+    }
     
     // Organize controls into sets based on grid position
-    const organizedControlSets = organizeControlsIntoSets(controlsByChannel);
+    const organizedControlSets = organizeControlsIntoSets(filteredControlsByChannel);
     
     // Update existing CSS grid with real coordinates
     setTimeout(() => {
         updateControlGridWithRealCoordinates(organizedControlSets);
     }, 500); // Small delay to ensure grids are rendered
     
-    console.log('🔍 PATHOGEN GRIDS - Real control extraction complete');
+    console.log('� ISOLATION - Pathogen grid creation complete with experiment isolation');
 }
 
 function showPathogenGrid(tabIndex) {
