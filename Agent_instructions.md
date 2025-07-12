@@ -1,4 +1,3 @@
-
 # [2025-07-10] Threshold Strategy System: Per-Pathogen, Per-Channel, Per-Scale Fixed Values
 
 ## New Feature: Pathogen/Channel/Scale-Specific Fixed Thresholds
