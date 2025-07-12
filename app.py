@@ -166,6 +166,8 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
         
         print(f"DEBUG: Individual channel session - filename: {filename}, fluorophore: {fluorophore}")
         print(f"DEBUG: Completion tracking - base_pattern: {base_pattern}, test_code: {test_code}")
+        app.logger.info(f"Individual channel session - filename: {filename}, fluorophore: {fluorophore}")
+        app.logger.info(f"Completion tracking - base_pattern: {base_pattern}, test_code: {test_code}")
         
         # Enhanced fluorophore detection from filename if not provided
         if not fluorophore:
@@ -180,6 +182,7 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                     break
             
             print(f"DEBUG: Enhanced fluorophore detection result: {fluorophore}")
+            app.logger.info(f"Enhanced fluorophore detection result: {fluorophore}")
         
         # Get pathogen target for naming purposes
         pathogen_target = get_pathogen_target(test_code, fluorophore)
@@ -250,11 +253,13 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                 test_code = test_code[2:]  # Remove "Ac" prefix
             
             print(f"DEBUG: Test code extraction - filename: {filename}, base_pattern: {base_pattern}, test_code: {test_code}")
+            app.logger.info(f"Test code extraction - filename: {filename}, base_pattern: {base_pattern}, test_code: {test_code}")
             
             # Use centralized pathogen mapping
             pathogen_target = get_pathogen_target(test_code, fluorophore)
             
             print(f"Backend pathogen mapping: {test_code} + {fluorophore} -> {pathogen_target}")
+            app.logger.info(f"Backend pathogen mapping: {test_code} + {fluorophore} -> {pathogen_target}")
             
             # Calculate positive percentage for this channel
             pos_count = 0
@@ -269,8 +274,10 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             pathogen_breakdown_display = f"{pathogen_target}: {positive_percentage:.1f}%"
             
             print(f"Individual channel pathogen breakdown: {pathogen_breakdown_display} (fluorophore: {fluorophore}, target: {pathogen_target})")
+            app.logger.info(f"Individual channel pathogen breakdown: {pathogen_breakdown_display} (fluorophore: {fluorophore}, target: {pathogen_target})")
         else:
             print(f"No fluorophore detected for individual channel session: {filename}")
+            app.logger.warning(f"No fluorophore detected for individual channel session: {filename}")
         
         # Check for existing session with same complete filename and overwrite
         existing_session = AnalysisSession.query.filter_by(filename=experiment_name).first()
@@ -309,10 +316,12 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
         
         # Debug the individual_results structure
         print(f"Individual results type: {type(individual_results)}")
+        app.logger.info(f"Individual results type: {type(individual_results)}")
         if individual_results:
             first_key = next(iter(individual_results)) if isinstance(individual_results, dict) else None
             if first_key:
                 print(f"First key: {first_key}, First value type: {type(individual_results[first_key])}")
+                app.logger.info(f"First key: {first_key}, First value type: {type(individual_results[first_key])}")
         
         # Handle both dict and list formats for individual_results
         if isinstance(individual_results, dict):
@@ -330,6 +339,7 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                     # Debug well_id construction and control sample detection
                     sample_name = result.get('sample_name', '')
                     print(f"[CONTROL DEBUG] Well {well_key}: sample_name='{sample_name}', fluorophore='{fluorophore}'")
+                    app.logger.info(f"[CONTROL DEBUG] Well {well_key}: sample_name='{sample_name}', fluorophore='{fluorophore}'")
                     
                     # Ensure well data has fluorophore and coordinate info for control grid
                     if 'fluorophore' not in result and fluorophore:
@@ -352,6 +362,7 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             # Ensure well_data is a dictionary
             if not isinstance(well_data, dict):
                 print(f"Warning: well_data for {well_key} is not a dict: {type(well_data)}")
+                app.logger.warning(f"Warning: well_data for {well_key} is not a dict: {type(well_data)}")
                 continue
                 
             # Debug control sample information before saving to database
@@ -359,6 +370,7 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             coordinate = well_data.get('coordinate', '')
             if sample_name and any(control in sample_name.upper() for control in ['H1', 'H2', 'H3', 'H4', 'M1', 'M2', 'M3', 'M4', 'L1', 'L2', 'L3', 'L4', 'NTC']):
                 print(f"[CONTROL SAVE] Control well {well_key}: sample='{sample_name}', coord='{coordinate}', fluor='{fluorophore}'")
+                app.logger.info(f"[CONTROL SAVE] Control well {well_key}: sample='{sample_name}', coord='{coordinate}', fluor='{fluorophore}'")
                 
             try:
                 well_result = WellResult()
@@ -392,6 +404,7 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                 # Debug fluorophore assignment for control wells
                 if well_result.sample_name and any(control in well_result.sample_name.upper() for control in ['H1', 'H2', 'H3', 'H4', 'M1', 'M2', 'M3', 'M4', 'L1', 'L2', 'L3', 'L4', 'NTC']):
                     print(f"[CONTROL FLUOR] {well_key}: sample='{well_result.sample_name}', final_fluorophore='{final_fluorophore}' (param={fluorophore}, data={well_fluorophore})")
+                    app.logger.info(f"[CONTROL FLUOR] {well_key}: sample='{well_result.sample_name}', final_fluorophore='{final_fluorophore}' (param={fluorophore}, data={well_fluorophore})")
                 
                 # Set threshold_value if present
 
@@ -421,8 +434,10 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                 if well_count % 50 == 0:
                     db.session.commit()
                 print(f"[DB DEBUG] Saved well {well_key}: {well_result.to_dict()}")
+                app.logger.info(f"[DB DEBUG] Saved well {well_key}: {well_result.to_dict()}")
             except Exception as e:
                 print(f"Error saving well {well_key}: {e}")
+                app.logger.error(f"Error saving well {well_key}: {e}")
                 continue
         
         # Final commit
@@ -431,6 +446,7 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             db.session.commit()
             db.session.flush()
             print(f"[DB DEBUG] Final commit done for {well_count} wells.")
+            app.logger.info(f"[DB DEBUG] Final commit done for {well_count} wells.")
             
         except Exception as commit_error:
             db.session.rollback()
@@ -438,6 +454,7 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             raise
         
         print(f"Individual channel session saved: {experiment_name} with {well_count} wells")
+        app.logger.info(f"Individual channel session saved: {experiment_name} with {well_count} wells")
         return True
         
     except Exception as e:
@@ -509,20 +526,27 @@ def analyze_data():
         
         print(f"[ANALYZE] Request headers - Filename: {filename}, Fluorophore: {fluorophore}")
         print(f"[ANALYZE] Request data type: {type(request_data)}, Length: {len(request_data) if request_data else 0}")
+        app.logger.info(f"[ANALYZE] Request headers - Filename: {filename}, Fluorophore: {fluorophore}")
+        app.logger.info(f"[ANALYZE] Request data type: {type(request_data)}, Length: {len(request_data) if request_data else 0}")
         
         # Debug request structure
         if request_data:
             print(f"[ANALYZE-DEBUG] Request keys: {list(request_data.keys()) if isinstance(request_data, dict) else 'Not a dict'}")
+            app.logger.info(f"[ANALYZE-DEBUG] Request keys: {list(request_data.keys()) if isinstance(request_data, dict) else 'Not a dict'}")
             if isinstance(request_data, dict):
                 if 'analysis_data' in request_data:
                     print(f"[ANALYZE-DEBUG] analysis_data type: {type(request_data['analysis_data'])}, length: {len(request_data['analysis_data']) if request_data['analysis_data'] else 0}")
+                    app.logger.info(f"[ANALYZE-DEBUG] analysis_data type: {type(request_data['analysis_data'])}, length: {len(request_data['analysis_data']) if request_data['analysis_data'] else 0}")
                 if 'samples_data' in request_data:
                     samples_data_info = request_data.get('samples_data')
                     if samples_data_info:
                         print(f"[ANALYZE-DEBUG] samples_data length: {len(samples_data_info)}")
                         print(f"[ANALYZE-DEBUG] samples_data preview: {samples_data_info[:200]}...")
+                        app.logger.info(f"[ANALYZE-DEBUG] samples_data length: {len(samples_data_info)}")
+                        app.logger.info(f"[ANALYZE-DEBUG] samples_data preview: {samples_data_info[:200]}...")
                     else:
                         print(f"[ANALYZE-DEBUG] samples_data is None or empty")
+                        app.logger.info(f"[ANALYZE-DEBUG] samples_data is None or empty")
         
         if not request_data:
             print(f"[ANALYZE ERROR] No data provided")
@@ -608,6 +632,7 @@ def analyze_data():
                         sample_name = well_data.get('sample_name', '')
                         if sample_name and any(control in sample_name.upper() for control in ['H1', 'H2', 'H3', 'H4', 'M1', 'M2', 'M3', 'M4', 'L1', 'L2', 'L3', 'L4', 'NTC']):
                             print(f"[FRESH CONTROL] {new_well_key}: sample='{sample_name}', coord='{well_data.get('coordinate', '')}', fluor='{fluorophore}'")
+                            app.logger.info(f"[FRESH CONTROL] {new_well_key}: sample='{sample_name}', coord='{well_data.get('coordinate', '')}', fluor='{fluorophore}'")
                         
                         updated_individual_results[new_well_key] = well_data
                 
@@ -621,19 +646,24 @@ def analyze_data():
             
             # Debug the original results structure from analysis
             print(f"[FRESH ANALYSIS] Original results structure:")
+            app.logger.info(f"[FRESH ANALYSIS] Original results structure:")
             if 'individual_results' in results:
                 individual_results = results['individual_results']
                 print(f"[FRESH ANALYSIS] individual_results type: {type(individual_results)}")
+                app.logger.info(f"[FRESH ANALYSIS] individual_results type: {type(individual_results)}")
                 if individual_results:
                     first_key = next(iter(individual_results)) if isinstance(individual_results, dict) else None
                     if first_key:
                         first_well = individual_results[first_key]
                         print(f"[FRESH ANALYSIS] First well_key: '{first_key}', well_data type: {type(first_well)}")
+                        app.logger.info(f"[FRESH ANALYSIS] First well_key: '{first_key}', well_data type: {type(first_well)}")
                         if isinstance(first_well, dict):
                             print(f"[FRESH ANALYSIS] First well fields: {list(first_well.keys())}")
+                            app.logger.info(f"[FRESH ANALYSIS] First well fields: {list(first_well.keys())}")
                             sample_name = first_well.get('sample_name', '')
                             well_id_in_data = first_well.get('well_id', 'MISSING')
                             print(f"[FRESH ANALYSIS] First well sample_name: '{sample_name}', well_id in data: '{well_id_in_data}'")
+                            app.logger.info(f"[FRESH ANALYSIS] First well sample_name: '{sample_name}', well_id in data: '{well_id_in_data}'")
                 
             print(f"[ANALYZE] Analysis completed successfully")
         except Exception as analysis_error:
@@ -815,6 +845,8 @@ def get_session_details(session_id):
         
         print(f"[HISTORY LOAD] Loading session {session_id}: {session.filename}")
         print(f"[HISTORY LOAD] Found {len(wells)} wells in database")
+        app.logger.info(f"[HISTORY LOAD] Loading session {session_id}: {session.filename}")
+        app.logger.info(f"[HISTORY LOAD] Found {len(wells)} wells in database")
         
         # Robustly handle both dict and list for wells
         if isinstance(wells, dict):
@@ -912,6 +944,7 @@ def save_combined_session():
         total_wells = len(individual_results)
         
         print(f"Multi-fluorophore session: {total_wells} total wells, fluorophores: {fluorophores_list}")
+        app.logger.info(f"Multi-fluorophore session: {total_wells} total wells, fluorophores: {fluorophores_list}")
         
         # Calculate fluorophore-specific statistics for multi-fluorophore display
         fluorophore_breakdown = {}
@@ -934,6 +967,7 @@ def save_combined_session():
                 if sample_name and any(control in sample_name.upper() for control in ['H1', 'H2', 'H3', 'H4', 'M1', 'M2', 'M3', 'M4', 'L1', 'L2', 'L3', 'L4', 'NTC']):
                     control_wells_by_fluorophore[fluorophore] += 1
                     print(f"[COMBINED CONTROL] {well_key}: sample='{sample_name}', fluorophore='{fluorophore}'")
+                    app.logger.info(f"[COMBINED CONTROL] {well_key}: sample='{sample_name}', fluorophore='{fluorophore}'")
                 
                 # Check if well is positive (amplitude > 500)
                 amplitude = well_data.get('amplitude', 0)

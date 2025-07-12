@@ -24,7 +24,8 @@
       });
     </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" defer></script>
-    <script src="/static/pathogen_library.js?v=1751381539" defer></script>
+    <!-- Load pathogen library BEFORE script.js to ensure getRequiredChannels is available -->
+    <script src="/static/pathogen_library.js?v=1751381539"></script>
     <link rel="stylesheet" href="/static/style.css?v=1751381539">
     <link rel="stylesheet" href="/static/results-table-custom.css?v=1751381539">
 </head>
@@ -359,6 +360,6 @@
         }
     });
     </script>
-    <script src="/static/script.js?v=20250710"></script>
+    <script src="/static/script.js?v=20250710" defer></script>
 </body>
 </html>

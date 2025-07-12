@@ -180,12 +180,21 @@ def process_with_sql_integration(amplification_data, samples_csv_data, fluoropho
                 
                 print(f"[SQL-SUCCESS] SQL integration complete: {len(sample_mapping)} samples, {len(cq_mapping)} Cq values for {fluorophore}")
                 
-                # Apply SQL results to analysis results - restore simpler approach
+                # Apply SQL results to analysis results - restore simpler approach but preserve existing data
                 if 'individual_results' in analysis_results:
                     for well_id, well_result in analysis_results['individual_results'].items():
-                        # Add fluorophore-specific sample data (restore original logic)
-                        well_result['sample_name'] = sample_mapping.get(well_id, 'Unknown')
-                        well_result['cq_value'] = cq_mapping.get(well_id, None)
+                        # Only update sample_name if we found one in CSV, otherwise preserve existing
+                        if well_id in sample_mapping:
+                            well_result['sample_name'] = sample_mapping[well_id]
+                            well_result['sample'] = sample_mapping[well_id]  # Set both for compatibility
+                        elif 'sample_name' not in well_result or well_result['sample_name'] is None:
+                            well_result['sample_name'] = 'Unknown'
+                        
+                        # Only update cq_value if we found one in CSV
+                        if well_id in cq_mapping:
+                            well_result['cq_value'] = cq_mapping[well_id]
+                        
+                        # Always set fluorophore
                         well_result['fluorophore'] = fluorophore
                 
                 # Clean up temporary table (SQLite will auto-drop on connection close)
@@ -193,6 +202,14 @@ def process_with_sql_integration(amplification_data, samples_csv_data, fluoropho
                 
             else:
                 print(f"[SQL-WARNING] No valid sample records found for {fluorophore}")
+                # Still add fluorophore info and ensure sample_name is set
+                if 'individual_results' in analysis_results:
+                    for well_id, well_result in analysis_results['individual_results'].items():
+                        # Preserve existing sample_name, set to Unknown only if missing
+                        if 'sample_name' not in well_result or well_result['sample_name'] is None:
+                            well_result['sample_name'] = 'Unknown'
+                        # Always set fluorophore
+                        well_result['fluorophore'] = fluorophore
         
     except Exception as sql_error:
         print(f"[SQL-ERROR] SQL integration error: {sql_error}")

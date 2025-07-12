@@ -834,6 +834,13 @@ function handleThresholdStrategyChange() {
 
 
 document.addEventListener('DOMContentLoaded', function() {
+    // Check if pathogen library is loaded
+    waitForPathogenLibrary().then(loaded => {
+        if (!loaded) {
+            console.error('⚠️ Warning: Pathogen library failed to load. Some features may not work correctly.');
+        }
+    });
+    
     populateThresholdStrategyDropdown();
     // Default to show all wells on load if analysis section is visible
     setTimeout(function() {
@@ -2659,6 +2666,22 @@ function initializeFilters() {
     currentFluorophore = 'all';
 }
 
+// Utility function to wait for pathogen library to load
+async function waitForPathogenLibrary(maxWaitMs = 5000) {
+    const startTime = Date.now();
+    
+    while (Date.now() - startTime < maxWaitMs) {
+        if (typeof getRequiredChannels === 'function' && typeof PATHOGEN_LIBRARY !== 'undefined') {
+            console.log('✅ Pathogen library loaded successfully');
+            return true;
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    console.warn('⚠️ Pathogen library failed to load within timeout');
+    return false;
+}
+
 // Pathogen target functions
 function getPathogenTarget(testCode, fluorophore) {
     // Use PATHOGEN_LIBRARY directly if available, otherwise fallback
@@ -2679,6 +2702,30 @@ function getPathogenTarget(testCode, fluorophore) {
     }
     return String(fluorophore);
 }
+
+// Debug function to check pathogen library status
+function debugPathogenLibrary() {
+    console.log('🔍 Pathogen Library Debug:', {
+        getRequiredChannelsAvailable: typeof getRequiredChannels === 'function',
+        pathogenLibraryAvailable: typeof PATHOGEN_LIBRARY !== 'undefined',
+        pathogenLibraryEntries: typeof PATHOGEN_LIBRARY !== 'undefined' ? Object.keys(PATHOGEN_LIBRARY).length : 0,
+        sampleEntries: typeof PATHOGEN_LIBRARY !== 'undefined' ? Object.keys(PATHOGEN_LIBRARY).slice(0, 5) : [],
+        validateChannelCompletenessAvailable: typeof validateChannelCompleteness === 'function'
+    });
+    
+    // Test getRequiredChannels with a known test
+    if (typeof getRequiredChannels === 'function') {
+        try {
+            const testChannels = getRequiredChannels('Megasphaera');
+            console.log('✅ getRequiredChannels test (Megasphaera):', testChannels);
+        } catch (error) {
+            console.error('❌ getRequiredChannels test failed:', error);
+        }
+    }
+}
+
+// Expose debug function to window for manual testing
+window.debugPathogenLibrary = debugPathogenLibrary;
 
 function extractTestCode(experimentPattern) {
     if (!experimentPattern) return "";
@@ -3833,8 +3880,8 @@ function populateResultsTable(individualResults) {
         });
 
         entries.forEach(([wellKey, result]) => {
-        const row = document.createElement('tr');
-        row.setAttribute('data-well-key', wellKey); // Store actual wellKey for modal navigation
+            const row = document.createElement('tr');
+            row.setAttribute('data-well-key', wellKey); // Store actual wellKey for modal navigation
         
         // Existing quality badge
         const statusClass = result.is_good_scurve ? 'status-good' : 'status-poor';
@@ -3898,14 +3945,16 @@ function populateResultsTable(individualResults) {
         
         let wellId = result.well_id || wellKey.split('_')[0];
         const fluorophore = result.fluorophore || 'Unknown';
-        const sampleName = result.sample || result.sample_name || 'N/A';
+        const sampleName = result.sample || result.sample_name || 'Unknown';
         
         // Debug sample name for troubleshooting
         if (wellKey.includes('A1')) {
             console.log(`Sample debug for ${wellKey}:`, {
                 sample: result.sample,
                 sample_name: result.sample_name,
-                final: sampleName
+                final: sampleName,
+                wellKey: wellKey,
+                resultKeys: Object.keys(result)
             });
         }
         const cqValue = result.cq_value !== null && result.cq_value !== undefined ? 
@@ -5709,14 +5758,22 @@ function updateExportButton(hasIncompleteTests, incompleteTestsInfo) {
         
         // Check if THIS specific experiment is complete according to pathogen library
         const testCode = extractTestCode(currentPattern);
-        if (!testCode || !getRequiredChannels) {
+        
+        // Enhanced check for pathogen library availability
+        if (!testCode || typeof getRequiredChannels !== 'function' || typeof PATHOGEN_LIBRARY === 'undefined') {
+            console.log('Export enabled: Cannot determine test requirements', { 
+                testCode, 
+                getRequiredChannelsType: typeof getRequiredChannels,
+                pathogenLibraryType: typeof PATHOGEN_LIBRARY,
+                pathogenLibraryLoaded: typeof window.PATHOGEN_LIBRARY !== 'undefined'
+            });
+            
             // Can't determine requirements - allow export
             exportButton.disabled = false;
             exportButton.style.opacity = '1';
             exportButton.style.cursor = 'pointer';
             exportButton.title = 'Export current analysis results to CSV';
             exportButton.textContent = 'Export Results';
-            console.log('Export enabled: Cannot determine test requirements');
             return;
         }
         
