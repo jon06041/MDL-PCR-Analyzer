@@ -2,6 +2,7 @@
     margin: 0;
     padding: 0;
     box-sizing: border-box;
+}
 
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -355,11 +356,51 @@ body {
     cursor: pointer;
     transition: all 0.3s ease;
     box-shadow: 0 5px 15px rgba(39, 174, 96, 0.3);
+    position: relative;
+    overflow: hidden;
 }
 
 .analyze-btn:hover {
     transform: translateY(-2px);
     box-shadow: 0 8px 25px rgba(39, 174, 96, 0.4);
+}
+
+.analyze-btn:disabled {
+    background: linear-gradient(135deg, #95a5a6, #7f8c8d);
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: 0 2px 8px rgba(149, 165, 166, 0.3);
+}
+
+.analyze-btn.processing {
+    background: linear-gradient(135deg, #3498db, #2980b9);
+    animation: analyzing-pulse 2s infinite;
+    cursor: wait;
+}
+
+.analyze-btn.processing::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+    animation: analyzing-sweep 1.5s infinite;
+}
+
+@keyframes analyzing-pulse {
+    0%, 100% { 
+        box-shadow: 0 5px 15px rgba(52, 152, 219, 0.4);
+    }
+    50% { 
+        box-shadow: 0 8px 25px rgba(52, 152, 219, 0.6);
+    }
+}
+
+@keyframes analyzing-sweep {
+    0% { left: -100%; }
+    100% { left: 100%; }
 }
 
 .analysis-section {
@@ -2830,14 +2871,253 @@ tr:hover::before {
     color: #721c24;
 }
 
-/* Channel Processing Status (Enhancement to existing completion status) */
-.channel-processing-status {
-    background: #f8f9fa;
-    border: 1px solid #e9ecef;
-    border-radius: 8px;
-    padding: 20px;
+/* Enhanced Channel Processing Status Styles */
+.channel-processing-container {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 15px;
+    padding: 25px;
     margin: 20px 0;
-    font-family: Arial, sans-serif;
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.channel-processing-header {
+    text-align: center;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #f0f0f0;
+}
+
+.channel-processing-header h3 {
+    color: #2c3e50;
+    margin-bottom: 15px;
+    font-size: 1.4rem;
+    font-weight: 600;
+}
+
+.channel-overall-progress {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    justify-content: center;
+}
+
+.progress-bar {
+    flex: 1;
+    max-width: 300px;
+    height: 8px;
+    background: #e9ecef;
+    border-radius: 10px;
+    overflow: hidden;
+    position: relative;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3498db, #2ecc71);
+    border-radius: 10px;
+    transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+}
+
+.progress-fill::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+    animation: progress-shimmer 2s infinite;
+}
+
+@keyframes progress-shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+.progress-text {
+    font-weight: 600;
+    color: #495057;
+    font-size: 0.9rem;
+    min-width: 100px;
+}
+
+.channel-status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.channel-status-item {
+    background: white;
+    border: 2px solid #e9ecef;
+    border-radius: 12px;
+    padding: 16px;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.channel-status-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+.channel-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.channel-name {
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: #2c3e50;
+}
+
+.channel-number {
+    background: #f8f9fa;
+    color: #6c757d;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
+.channel-progress {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.status-indicator {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 14px;
+    transition: all 0.3s ease;
+}
+
+.status-indicator.status-waiting {
+    background: #f8f9fa;
+    border: 2px solid #dee2e6;
+    color: #6c757d;
+}
+
+.status-indicator.status-processing {
+    background: linear-gradient(45deg, #3498db, #2980b9);
+    color: white;
+    animation: status-pulse 1.5s infinite;
+    box-shadow: 0 0 10px rgba(52, 152, 219, 0.5);
+}
+
+.status-indicator.status-completed {
+    background: linear-gradient(45deg, #27ae60, #2ecc71);
+    color: white;
+    box-shadow: 0 0 10px rgba(39, 174, 96, 0.3);
+}
+
+.status-indicator.status-failed {
+    background: linear-gradient(45deg, #e74c3c, #c0392b);
+    color: white;
+    box-shadow: 0 0 10px rgba(231, 76, 60, 0.3);
+}
+
+.status-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top: 2px solid white;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.status-spinner.active {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes status-pulse {
+    0%, 100% { 
+        transform: scale(1);
+        box-shadow: 0 0 10px rgba(52, 152, 219, 0.5);
+    }
+    50% { 
+        transform: scale(1.1);
+        box-shadow: 0 0 20px rgba(52, 152, 219, 0.8);
+    }
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.status-text {
+    font-weight: 600;
+    font-size: 0.95rem;
+    flex: 1;
+}
+
+.channel-processing-footer {
+    text-align: center;
+    padding-top: 15px;
+    border-top: 1px solid #e9ecef;
+}
+
+.processing-note {
+    color: #6c757d;
+    font-style: italic;
+    font-size: 0.9rem;
+}
+
+/* Mobile responsiveness for enhanced progress indicators */
+@media (max-width: 768px) {
+    .channel-status-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    
+    .channel-overall-progress {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .progress-bar {
+        max-width: 100%;
+    }
+    
+    .channel-processing-container {
+        padding: 20px;
+        margin: 15px 0;
+    }
+}
+
+@media (max-width: 480px) {
+    .channel-processing-header h3 {
+        font-size: 1.2rem;
+    }
+    
+    .channel-name {
+        font-size: 1rem;
+    }
+    
+    .channel-status-item {
+        padding: 12px;
+    }
+    
+    .status-indicator {
+        width: 20px;
+        height: 20px;
+        font-size: 12px;
+    }
 }
 
 .processing-status-header {

@@ -94,7 +94,9 @@ const LOG_THRESHOLD_STRATEGIES = {
 
 // Pathogen-specific fixed threshold values (per channel/fluorophore)
 window.PATHOGEN_FIXED_THRESHOLDS = {
-  "BVAB": { "default": { linear: 250, log: 250 } },
+  "BVAB": { 
+    "FAM": { linear: 250, log: 250 }
+  },
   "BVPanelPCR1": {
     "FAM": { linear: 200, log: 200 },
     "HEX": { linear: 250, log: 250 },
@@ -107,24 +109,60 @@ window.PATHOGEN_FIXED_THRESHOLDS = {
     "Texas Red": { linear: 200, log: 200 },
     "CY5": { linear: 350, log: 350 }
   },
-  "BVPanelPCR3": { "default": { linear: 100, log: 100 } },
-  "Calb": { "default": { linear: 150, log: 150 } },
-  "Cglab": { "default": { linear: 150, log: 150 } },
-  "CHVIC": { "default": { linear: 250, log: 250 } },
-  "Ckru": { "default": { linear: 280, log: 280 } },
-  "Cpara": { "default": { linear: 200, log: 200 } },
-  "Ctrach": { "default": { linear: 150, log: 150 } },
-  "Ctrop": { "default": { linear: 200, log: 200 } },
-  "Efaecalis": { "default": { linear: 200, log: 200 } },
+  "BVPanelPCR3": { 
+    "CY5": { linear: 250, log: 250 },      // Fixed: CY5 (uppercase)
+    "Cy5": { linear: 250, log: 250 },      // Backup: Cy5 (mixed case)
+    "FAM": { linear: 300, log: 300 },
+    "HEX": { linear: 275, log: 275 },
+    "Texas Red": { linear: 225, log: 225 }
+  },
+  "Calb": { 
+    "FAM": { linear: 150, log: 150 }
+  },
+  "Cglab": { 
+    "FAM": { linear: 150, log: 150 }
+  },
+  "CHVIC": { 
+    "FAM": { linear: 250, log: 250 }
+  },
+  "Ckru": { 
+    "FAM": { linear: 280, log: 280 }
+  },
+  "Cpara": { 
+    "FAM": { linear: 200, log: 200 }
+  },
+  "Ctrach": { 
+    "FAM": { linear: 150, log: 150 }
+  },
+  "Ctrop": { 
+    "FAM": { linear: 200, log: 200 }
+  },
+  "Efaecalis": { 
+    "FAM": { linear: 200, log: 200 }
+  },
   "FLUA": { "FAM": { linear: 265, log: 265 } },
   "FLUB": { "CY5": { linear: 225, log: 225 } },
-  "GBS": { "default": { linear: 300, log: 300 } },
-  "Lacto": { "default": { linear: 150, log: 150 } },
-  "Mgen": { "default": { linear: 500, log: 500 } },
-  "Ngon": { "default": { linear: 200, log: 200 } },
-  "NOV": { "default": { linear: 500, log: 500 } },
-  "Saureus": { "default": { linear: 250, log: 250 } },
-  "Tvag": { "default": { linear: 250, log: 250 } }
+  "GBS": { 
+    "FAM": { linear: 300, log: 300 }
+  },
+  "Lacto": { 
+    "FAM": { linear: 150, log: 150 }
+  },
+  "Mgen": { 
+    "FAM": { linear: 500, log: 500 }
+  },
+  "Ngon": { 
+    "FAM": { linear: 200, log: 200 }
+  },
+  "NOV": { 
+    "FAM": { linear: 500, log: 500 }
+  },
+  "Saureus": { 
+    "FAM": { linear: 250, log: 250 }
+  },
+  "Tvag": { 
+    "FAM": { linear: 250, log: 250 }
+  }
 };
 
 
@@ -157,19 +195,56 @@ function calculateThreshold(strategy, params, scale = 'log') {
     // Try to auto-populate fixed_value from PATHOGEN_FIXED_THRESHOLDS
     const pathogen = params.pathogen || params.test_code || params.target || params.pathogen_code;
     const fluor = params.fluorophore || params.channel;
+    
+    console.log(`🔍 FIXED-THRESHOLD-DEBUG - Strategy: ${strategy}, Scale: ${scale}`);
+    console.log(`🔍 FIXED-THRESHOLD-DEBUG - Pathogen: "${pathogen}" (from params.pathogen=${params.pathogen}, params.test_code=${params.test_code})`);
+    console.log(`🔍 FIXED-THRESHOLD-DEBUG - Fluorophore: "${fluor}" (from params.fluorophore=${params.fluorophore}, params.channel=${params.channel})`);
+    console.log(`🔍 FIXED-THRESHOLD-DEBUG - PATHOGEN_FIXED_THRESHOLDS available:`, Object.keys(window.PATHOGEN_FIXED_THRESHOLDS || {}));
+    
     if (window.PATHOGEN_FIXED_THRESHOLDS && pathogen) {
       const pathogenEntry = window.PATHOGEN_FIXED_THRESHOLDS[pathogen];
+      console.log(`🔍 FIXED-THRESHOLD-DEBUG - Pathogen entry for "${pathogen}":`, pathogenEntry);
+      
       if (pathogenEntry) {
+        console.log(`🔍 FIXED-THRESHOLD-DEBUG - Available fluorophores in ${pathogen}:`, Object.keys(pathogenEntry));
         const channelEntry = (fluor && pathogenEntry[fluor]) ? pathogenEntry[fluor] : pathogenEntry['default'];
+        console.log(`🔍 FIXED-THRESHOLD-DEBUG - Channel entry for "${fluor}":`, channelEntry);
+        
         if (channelEntry && typeof channelEntry === 'object' && scale in channelEntry) {
-          params.fixed_value = channelEntry[scale];
+          // CRITICAL: Ensure fixed_value is always a number, not a string
+          const rawValue = channelEntry[scale];
+          params.fixed_value = typeof rawValue === 'string' ? parseFloat(rawValue) : rawValue;
+          console.log(`🔍 FIXED-THRESHOLD-DEBUG - SUCCESS: Using fixed threshold for ${pathogen}/${fluor}/${scale}: ${params.fixed_value} (type: ${typeof params.fixed_value})`);
+        } else {
+          console.warn(`🔍 FIXED-THRESHOLD-DEBUG - FAIL: No ${scale} threshold found for ${pathogen}/${fluor}. channelEntry:`, channelEntry);
         }
+      } else {
+        console.warn(`🔍 FIXED-THRESHOLD-DEBUG - FAIL: Pathogen "${pathogen}" not found in PATHOGEN_FIXED_THRESHOLDS`);
       }
+    } else {
+      console.warn(`🔍 FIXED-THRESHOLD-DEBUG - FAIL: Missing data - PATHOGEN_FIXED_THRESHOLDS:`, !!window.PATHOGEN_FIXED_THRESHOLDS, `pathogen: "${pathogen}"`);
     }
   }
 
+  // Ensure all numeric parameters are actually numbers (database might return strings)
+  if (params) {
+    Object.keys(params).forEach(key => {
+      if (['fixed_value', 'L', 'B', 'baseline', 'baseline_std', 'N'].includes(key)) {
+        const value = params[key];
+        if (value !== null && value !== undefined && typeof value === 'string' && !isNaN(value)) {
+          params[key] = parseFloat(value);
+          console.log(`🔍 THRESHOLD-DEBUG - Converted ${key} from string to number: ${params[key]}`);
+        }
+      }
+    });
+  }
+
   try {
-    return strat.calculate(params);
+    const result = strat.calculate(params);
+    // Ensure result is always a number
+    const finalResult = typeof result === 'string' ? parseFloat(result) : result;
+    console.log(`🔍 THRESHOLD-DEBUG - Strategy '${strategy}' calculated: ${finalResult} (type: ${typeof finalResult})`);
+    return finalResult;
   } catch (e) {
     console.warn(`Threshold strategy '${strategy}' failed, using default.`, e);
     if (scale === 'linear') {

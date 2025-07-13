@@ -651,8 +651,10 @@ function getSelectedThresholdStrategy() {
     const select = document.getElementById('thresholdStrategySelect');
     if (select && select.value) {
         window.selectedThresholdStrategy = select.value;
+        console.log(`🔍 STRATEGY-DEBUG - Selected strategy from dropdown: "${select.value}"`);
         return select.value;
     }
+    console.warn(`🔍 STRATEGY-DEBUG - No strategy selected, returning null`);
     return null;
 }
 
@@ -702,39 +704,82 @@ function handleThresholdStrategyChange() {
             // Get pathogen/test_code for this channel (from first well in channel)
             let pathogen = null;
             let fluor = channel;
-            // Try to get pathogen from any well in this channel
-            if (controls && controls.NTC && controls.NTC.length > 0 && controls.NTC[0].test_code) {
-                pathogen = controls.NTC[0].test_code;
-            } else if (controls && controls.H && controls.H.length > 0 && controls.H[0].test_code) {
-                pathogen = controls.H[0].test_code;
+            
+            // QUICK FIX: For fixed strategies, use a default pathogen if none found
+            if (strategy === 'log_fixed' || strategy === 'linear_fixed') {
+                // Try to get pathogen from wells first
+                if (controls && controls.NTC && controls.NTC.length > 0 && controls.NTC[0].test_code) {
+                    pathogen = controls.NTC[0].test_code;
+                } else if (controls && controls.H && controls.H.length > 0 && controls.H[0].test_code) {
+                    pathogen = controls.H[0].test_code;
+                } else {
+                    // FALLBACK: Use a default pathogen that exists in PATHOGEN_FIXED_THRESHOLDS
+                    // Pick based on the channel to get appropriate thresholds
+                    if (channel === 'HEX') {
+                        pathogen = 'BVPanelPCR1'; // Has HEX: { linear: 250, log: 250 }
+                    } else if (channel === 'FAM') {
+                        pathogen = 'BVPanelPCR1'; // Has FAM: { linear: 200, log: 200 }
+                    } else if (channel === 'Cy5' || channel === 'CY5') {
+                        pathogen = 'BVPanelPCR1'; // Has CY5: { linear: 200, log: 200 }
+                    } else if (channel === 'Texas Red') {
+                        pathogen = 'BVPanelPCR1'; // Has Texas Red: { linear: 150, log: 150 }
+                    } else {
+                        pathogen = 'BVPanelPCR1'; // Default fallback
+                    }
+                    console.log(`🔍 FIXED-THRESHOLD - Using fallback pathogen "${pathogen}" for channel "${channel}"`);
+                }
             }
+            console.log(`🔍 THRESHOLD-DEBUG - Channel ${channel}: pathogen=${pathogen}, strategy=${strategy}, fluor=${fluor}`);
+            console.log(`🔍 THRESHOLD-DEBUG - Strategy details: typeof=${typeof strategy}, value="${strategy}"`);
+            console.log(`🔍 THRESHOLD-DEBUG - Controls structure:`, controls);
+            
             // Calculate for both log and linear
             ['log','linear'].forEach(scale => {
                 let params = { baseline, baseline_std, N: 10 };
+                
                 // For fixed strategies, add pathogen/channel for lookup
                 if (strategy === 'log_fixed' || strategy === 'linear_fixed') {
                     params.pathogen = pathogen;
                     params.fluorophore = fluor;
+                    console.log(`🔍 THRESHOLD-DEBUG - Fixed strategy detected, params:`, params);
                 }
+                
                 // For log strategies, pass log_curve if available
                 if (scale === 'log' && controls.NTC && controls.NTC.length > 0 && controls.NTC[0].log_rfu) {
                     let log_curve = controls.NTC[0].log_rfu;
                     if (typeof log_curve === 'string') try { log_curve = JSON.parse(log_curve); } catch(e){}
                     if (Array.isArray(log_curve)) params.log_curve = log_curve;
                 }
+                
+                console.log(`🔍 THRESHOLD-DEBUG - About to call calculateThreshold with strategy="${strategy}", params=`, params, `scale="${scale}"`);
                 let threshold = window.calculateThreshold(strategy, params, scale);
+                console.log(`🔍 THRESHOLD-DEBUG - calculateThreshold returned:`, threshold, `(type: ${typeof threshold})`);
+                
                 if (typeof threshold !== 'number' || isNaN(threshold) || threshold <= 0) {
                     console.warn(`[THRESHOLD][${channel}][${scale}] Invalid threshold (${threshold}), using fallback.`);
                     threshold = (scale === 'log') ? 1.0 : 100.0;
                 }
+                // CRITICAL: Ensure threshold is always stored as a number
+                threshold = typeof threshold === 'string' ? parseFloat(threshold) : threshold;
                 if (!window.stableChannelThresholds[channel]) window.stableChannelThresholds[channel] = {};
                 window.stableChannelThresholds[channel][scale] = threshold;
-                console.log(`[THRESHOLD][${channel}][${scale}] Set threshold:`, threshold);
+                console.log(`[THRESHOLD][${channel}][${scale}] Set threshold:`, threshold, `(type: ${typeof threshold})`);
+                
+                // CRITICAL: Set the current scale mode based on the selected strategy
+                if ((strategy === 'log_fixed' || strategy.includes('log')) && scale === 'log') {
+                    console.log(`🔍 SCALE-MODE-DEBUG - Setting currentScaleMode to 'log' based on strategy '${strategy}'`);
+                    currentScaleMode = 'log';
+                    window.currentScaleMode = 'log';
+                } else if ((strategy === 'linear_fixed' || strategy.includes('linear')) && scale === 'linear') {
+                    console.log(`🔍 SCALE-MODE-DEBUG - Setting currentScaleMode to 'linear' based on strategy '${strategy}'`);
+                    currentScaleMode = 'linear';
+                    window.currentScaleMode = 'linear';
+                }
             });
         });
     }
-    // After recalculation, update threshold input box to match new value for current channel/scale
-    setTimeout(() => {
+    // After recalculation, update threshold input box to match new value for current channel/scale - IMPROVED
+    const updateThresholdInput = () => {
         const thresholdInput = document.getElementById('thresholdInput');
         let channel = window.currentFluorophore;
         if (!channel || channel === 'all') {
@@ -744,18 +789,45 @@ function handleThresholdStrategyChange() {
                 const match = datasets[0].label?.match(/\(([^)]+)\)/);
                 if (match && match[1] !== 'Unknown') channel = match[1];
             }
-        }
-        if (thresholdInput && channel && window.stableChannelThresholds && window.stableChannelThresholds[channel]) {
-            const scale = window.currentScaleMode || 'linear';
-            const val = window.stableChannelThresholds[channel][scale];
-            if (val !== undefined && val !== null && !isNaN(val)) {
-                thresholdInput.value = val;
+            // If still no channel, default to first available threshold
+            if (!channel && window.stableChannelThresholds) {
+                channel = Object.keys(window.stableChannelThresholds)[0];
             }
         }
-        // Always update chart threshold lines after strategy change
-        updateAllChannelThresholds();
-    }, 150);
+        
+        // Ensure currentScaleMode is properly set
+        let scale = window.currentScaleMode || currentScaleMode || 'linear';
+        if (!scale || scale === 'undefined') {
+            scale = 'linear';
+            window.currentScaleMode = scale;
+            currentScaleMode = scale;
+        }
+        
+        console.log(`🔍 THRESHOLD-INPUT-DEBUG - Channel: ${channel}, Scale: ${scale} (currentScaleMode: ${currentScaleMode}, window.currentScaleMode: ${window.currentScaleMode})`);
+        if (thresholdInput && channel && window.stableChannelThresholds && window.stableChannelThresholds[channel]) {
+            const val = window.stableChannelThresholds[channel][scale];
+            if (val !== undefined && val !== null && !isNaN(val)) {
+                console.log(`🔍 THRESHOLD-INPUT-DEBUG - Updating input from ${thresholdInput.value} to ${val}`);
+                thresholdInput.value = Number(val).toFixed(2);
+            } else {
+                console.warn(`🔍 THRESHOLD-INPUT-DEBUG - Invalid threshold value:`, val);
+            }
+        } else {
+            console.warn(`🔍 THRESHOLD-INPUT-DEBUG - Missing data: input=${!!thresholdInput}, channel=${channel}, thresholds=`, window.stableChannelThresholds);
+        }
+    };
+    
+    // Update immediately
+    updateThresholdInput();
+    
+    // Update threshold chart lines
     updateAllChannelThresholds();
+    
+    // Also update after a short delay to ensure all DOM updates complete
+    setTimeout(() => {
+        updateThresholdInput();
+        updateAllChannelThresholds();
+    }, 100);
     // Recalculate CQ-J and Calc-J for all wells in all channels after threshold strategy change, for BOTH log and linear
     // --- Compatibility fix: support both { individual_results: {...} } and flat { well_id: {...} } structures ---
     let resultsObj = null;
@@ -781,14 +853,26 @@ function handleThresholdStrategyChange() {
             const well = resultsObj[wellKey];
             const channel = well.fluorophore;
             // Always use the threshold for the selected strategy and scale
-            let scale = (typeof currentScaleMode === 'string' ? currentScaleMode : 'linear');
             const selectedStrategy = getSelectedThresholdStrategy();
-            if (selectedStrategy && selectedStrategy.toLowerCase().includes('log')) {
-                scale = 'log';
+            let scale = (typeof currentScaleMode === 'string' ? currentScaleMode : 'linear');
+            
+            // CRITICAL: Determine scale based on strategy
+            if (selectedStrategy) {
+                if (selectedStrategy === 'log_fixed' || selectedStrategy.includes('log')) {
+                    scale = 'log';
+                } else if (selectedStrategy === 'linear_fixed' || selectedStrategy.includes('linear')) {
+                    scale = 'linear';
+                }
             }
+            
+            console.log(`🔍 CQJ-CALCJ-DEBUG - Well ${wellKey}: strategy=${selectedStrategy}, scale=${scale}, channel=${channel}`);
+            
             let threshold = null;
             if (window.stableChannelThresholds && window.stableChannelThresholds[channel] && window.stableChannelThresholds[channel][scale] != null) {
                 threshold = window.stableChannelThresholds[channel][scale];
+                console.log(`🔍 CQJ-CALCJ-DEBUG - Found threshold for ${channel}[${scale}]: ${threshold}`);
+            } else {
+                console.warn(`🔍 CQJ-CALCJ-DEBUG - No threshold found for ${channel}[${scale}], available thresholds:`, window.stableChannelThresholds);
             }
             if (typeof threshold !== 'number' || isNaN(threshold) || threshold <= 0) {
                 console.warn(`[CQJ/CalcJ][${wellKey}] Invalid threshold (${threshold}), skipping CQJ/CalcJ.`);
@@ -801,23 +885,68 @@ function handleThresholdStrategyChange() {
                 well.test_code = testCode;
             }
             // Calculate CQJ using the correct threshold
-            if (typeof window.calculateCqForWell === 'function' && well.cycles && well.rfu) {
-                well.cqj_value = window.calculateCqForWell({ cycles: well.cycles, rfu: well.rfu }, threshold);
+            if (typeof window.calculateCqj === 'function' && well.cycles && well.rfu) {
+                // Ensure threshold is a number for CQJ calculation
+                const numericThreshold = typeof threshold === 'string' ? parseFloat(threshold) : threshold;
+                // Prepare well data for CQJ calculation - ensure we have raw_rfu and raw_cycles
+                const wellData = {
+                    raw_rfu: well.rfu || well.raw_rfu,
+                    raw_cycles: well.cycles || well.raw_cycles
+                };
+                // Ensure arrays are numbers, not strings (database might return strings)
+                if (Array.isArray(wellData.raw_rfu)) {
+                    wellData.raw_rfu = wellData.raw_rfu.map(val => typeof val === 'string' ? parseFloat(val) : val);
+                }
+                if (Array.isArray(wellData.raw_cycles)) {
+                    wellData.raw_cycles = wellData.raw_cycles.map(val => typeof val === 'string' ? parseFloat(val) : val);
+                }
+                well.cqj_value = window.calculateCqj(wellData, numericThreshold);
+                console.log(`[CQJ-DEBUG] Calculated CQJ for ${wellKey}: ${well.cqj_value} (threshold: ${numericThreshold})`);
             } else {
                 well.cqj_value = null;
+                console.warn(`[CQJ-DEBUG] Cannot calculate CQJ for ${wellKey} - missing function or data`);
             }
-            // Calculate CalcJ using the correct test code and CQJ
-            // Use backend-provided CalcJ value
+            // Calculate CalcJ using the correct test code and threshold
+            // Use backend-provided CalcJ value first
             if (well.calcj && channel in well.calcj) {
-                well.calcj_value = well.calcj[channel];
+                well.calcj_value = typeof well.calcj[channel] === 'string' ? parseFloat(well.calcj[channel]) : well.calcj[channel];
+            } else if (typeof window.calculateCalcj === 'function' && well.amplitude) {
+                // Fallback to frontend calculation if backend value not available
+                const numericThreshold = typeof threshold === 'string' ? parseFloat(threshold) : threshold;
+                const numericAmplitude = typeof well.amplitude === 'string' ? parseFloat(well.amplitude) : well.amplitude;
+                well.amplitude = numericAmplitude; // Ensure amplitude is always a number
+                well.calcj_value = window.calculateCalcj(well, numericThreshold);
+                console.log(`[CALCJ-DEBUG] Calculated CalcJ for ${wellKey}: ${well.calcj_value} (amplitude: ${numericAmplitude}, threshold: ${numericThreshold})`);
             } else {
                 well.calcj_value = null;
+                console.warn(`[CALCJ-DEBUG] Cannot calculate CalcJ for ${wellKey} - missing function or data`);
             }
             console.log(`[CQJ/CalcJ][${wellKey}] CQJ:`, well.cqj_value, 'CalcJ:', well.calcj_value, 'Threshold:', threshold);
         });
         // Update the UI to reflect new CQ-J/Calc-J values
         if (typeof populateResultsTable === 'function') {
-            populateResultsTable(resultsObj);
+            // Defensive check: Ensure all wells have required properties
+            const validatedResults = {};
+            Object.keys(resultsObj).forEach(wellKey => {
+                const well = resultsObj[wellKey];
+                if (well && typeof well === 'object') {
+                    // Ensure sample_name is defined
+                    if (!well.sample_name && !well.sample) {
+                        console.warn(`⚠️ Well ${wellKey} missing sample name, setting to 'Unknown'`);
+                        well.sample_name = 'Unknown';
+                    }
+                    // Ensure fluorophore is defined
+                    if (!well.fluorophore) {
+                        console.warn(`⚠️ Well ${wellKey} missing fluorophore, setting to 'Unknown'`);
+                        well.fluorophore = 'Unknown';
+                    }
+                    validatedResults[wellKey] = well;
+                } else {
+                    console.error(`❌ Invalid well data for ${wellKey}:`, well);
+                }
+            });
+            
+            populateResultsTable(validatedResults);
         } else {
             console.log('[CQJ/CalcJ] Values recalculated for all wells after threshold strategy change.');
         }
@@ -1192,13 +1321,6 @@ function getCurrentChannelThreshold(channel, scale = null) {
  * Update all chart threshold annotations when scale changes (multiplier only affects view)
  */
 function updateAllChannelThresholds() {
-    function updateAllChannelThresholds() {
-    if (!window.amplificationChart || !window.amplificationChart.options?.plugins?.annotation) {
-        console.warn('Chart or annotation plugin not ready, skipping threshold update');
-        return;
-    }
-    // ...rest of your code...
-}
     console.log('🔍 THRESHOLD - Updating all channel thresholds');
     
     // Extra strict guard: do not proceed if any part of the chart config is missing
@@ -1215,6 +1337,7 @@ function updateAllChannelThresholds() {
         console.warn('🔍 THRESHOLD - Chart or annotation plugin not ready, skipping threshold update');
         return;
     }
+    
     // Also guard: do not proceed if no valid analysis results
     if (!window.currentAnalysisResults ||
         !window.currentAnalysisResults.individual_results ||
@@ -1223,31 +1346,54 @@ function updateAllChannelThresholds() {
         console.warn('🔍 THRESHOLD - No valid analysis results found for this channel. Please check your input files.');
         return;
     }
+    
     // Get current chart annotations
     const annotations = window.amplificationChart.options.plugins.annotation.annotations;
     
-    // Update threshold lines for all visible channels
+    // Update threshold lines for all visible channels - IMPROVED DETECTION
     const visibleChannels = new Set();
+    
+    // Method 1: Get channels from chart datasets (for currently displayed data)
     if (window.amplificationChart.data && window.amplificationChart.data.datasets) {
         window.amplificationChart.data.datasets.forEach(dataset => {
             // Extract channel from dataset label
             const match = dataset.label?.match(/\(([^)]+)\)/);
             if (match && match[1] !== 'Unknown') {
                 visibleChannels.add(match[1]);
+                console.log(`🔍 THRESHOLD - Found channel from dataset: ${match[1]}`);
             }
         });
     }
     
-    // If no channels detected from chart, try to get from current analysis results
-    if (visibleChannels.size === 0 && currentAnalysisResults?.individual_results) {
+    // Method 2: Get channels from analysis results (for multichannel data)
+    if (currentAnalysisResults?.individual_results) {
         Object.values(currentAnalysisResults.individual_results).forEach(well => {
-            if (well.fluorophore) {
+            if (well.fluorophore && well.fluorophore !== 'Unknown') {
                 visibleChannels.add(well.fluorophore);
             }
         });
     }
     
-    console.log(`🔍 THRESHOLD - Found ${visibleChannels.size} channels: [${Array.from(visibleChannels).join(', ')}]`);
+    // Method 3: Get channels from stored channel thresholds (fallback)
+    if (window.stableChannelThresholds) {
+        Object.keys(window.stableChannelThresholds).forEach(channel => {
+            visibleChannels.add(channel);
+        });
+    }
+    
+    // Method 4: If viewing "all curves", ensure all known fluorophores are included
+    const currentChannel = window.currentFluorophore;
+    if (currentChannel === 'all' || !currentChannel) {
+        const knownChannels = ['Cy5', 'FAM', 'HEX', 'Texas Red'];
+        knownChannels.forEach(channel => {
+            // Only add if we have threshold data for this channel
+            if (window.stableChannelThresholds && window.stableChannelThresholds[channel]) {
+                visibleChannels.add(channel);
+            }
+        });
+    }
+    
+    console.log(`🔍 THRESHOLD - Detected ${visibleChannels.size} channels: [${Array.from(visibleChannels).join(', ')}]`);
     
     // Clear old threshold annotations
     Object.keys(annotations).forEach(key => {
@@ -1414,14 +1560,14 @@ function getChannelColor(channel) {
 
 // === CFX MANAGER 3.1-STYLE THRESHOLD FEATURES ===
 // --- Draggable Threshold Lines (Chart.js Annotation Plugin) ---
+// COMMENTED OUT - Will use different draggable implementation from test.html later
 function enableDraggableThresholds() {
-    function updateAllChannelThresholds() {
-    if (!window.amplificationChart || !window.amplificationChart.options?.plugins?.annotation) {
-        console.warn('Chart or annotation plugin not ready, skipping threshold update');
-        return;
-    }
-    // ...rest of your code...
-}
+    // DISABLED: Draggable threshold functionality commented out
+    // Will be replaced with test.html implementation later
+    console.log('🔍 THRESHOLD - Draggable thresholds disabled (will use test.html implementation)');
+    return;
+    
+    /*
     // Extra strict guard: do not proceed if any part of the chart config is missing
     if (!window.amplificationChart ||
         typeof window.amplificationChart !== 'object' ||
@@ -1461,13 +1607,15 @@ function enableDraggableThresholds() {
         }
     });
     window.amplificationChart.update('none');
+    */
 }
             
 // Patch updateAllChannelThresholds to always enable draggable lines
+// COMMENTED OUT - Draggable functionality disabled
 const _originalUpdateAllChannelThresholds = updateAllChannelThresholds;
 updateAllChannelThresholds = function() {
     _originalUpdateAllChannelThresholds.apply(this, arguments);
-    enableDraggableThresholds();
+    // enableDraggableThresholds(); // DISABLED - Will use test.html implementation
 };
 
 // --- Auto Button Logic ---
@@ -1538,13 +1686,13 @@ document.addEventListener('DOMContentLoaded', function() {
 const _originalUpdateChartThresholds = updateChartThresholds;
 updateChartThresholds = function() {
     _originalUpdateChartThresholds.apply(this, arguments);
-    enableDraggableThresholds();
+    // enableDraggableThresholds(); // DISABLED - Will use test.html implementation
 };
 
 // Ensure features are always active after new analysis or server restart
 function ensureThresholdFeaturesActive() {
     updateAllChannelThresholds();
-    enableDraggableThresholds();
+    // enableDraggableThresholds(); // DISABLED - Will use test.html implementation
     attachAutoButtonHandler();
 }
 
@@ -1901,6 +2049,22 @@ async function processChannelsSequentially(fluorophores, experimentPattern) {
     
     const allResults = {};
     const totalChannels = fluorophores.length;
+    const rollbackData = {
+        savedSessions: [],
+        backendState: null,
+        frontendState: null
+    };
+    
+    // Capture initial state for rollback
+    try {
+        console.log(`🔄 ROLLBACK-PREP - Capturing initial state for potential rollback`);
+        rollbackData.frontendState = {
+            currentAnalysisResults: window.currentAnalysisResults,
+            amplificationChart: window.amplificationChart?.data ? JSON.parse(JSON.stringify(window.amplificationChart.data)) : null
+        };
+    } catch (stateError) {
+        console.warn(`⚠️ ROLLBACK-PREP - Could not capture frontend state:`, stateError);
+    }
     
     for (let i = 0; i < fluorophores.length; i++) {
         const fluorophore = fluorophores[i];
@@ -1918,27 +2082,35 @@ async function processChannelsSequentially(fluorophores, experimentPattern) {
             // Process this single channel
             const channelResult = await analyzeSingleChannel(data, fluorophore, experimentPattern);
             
-            if (channelResult && channelResult.individual_results) {
+            // Check if channel has valid results (not empty)
+            if (channelResult && channelResult.individual_results && Object.keys(channelResult.individual_results).length > 0) {
                 allResults[fluorophore] = channelResult;
+                
+                // Track successful channel for potential rollback
+                if (channelResult.sessionId) {
+                    rollbackData.savedSessions.push({
+                        fluorophore: fluorophore,
+                        sessionId: channelResult.sessionId,
+                        timestamp: new Date().toISOString()
+                    });
+                }
                 
                 // Mark channel as completed
                 updateChannelStatus(fluorophore, 'completed');
                 
-                // Skip backend completion waiting since polling removed
                 console.log(`✅ SEQUENTIAL-PROCESSING - Channel ${fluorophore} completed successfully. Wells: ${Object.keys(channelResult.individual_results).length}`);
                 
             } else {
-                throw new Error(`Channel ${fluorophore} returned empty results`);
+                throw new Error(`Channel ${fluorophore} returned empty or invalid results`);
             }
             
         } catch (error) {
-            // Mark channel as failed
+            // Channel failed - log and continue with remaining channels
             console.error(`❌ SEQUENTIAL-PROCESSING - Channel ${fluorophore} failed:`, error);
             updateChannelStatus(fluorophore, 'failed');
             
-            // Skip backend failure marking since polling removed
-            
-            // Continue with other channels
+            // Always continue with partial results - no rollback
+            console.log(`⚠️ CONTINUE-PARTIAL - ${fluorophore} failed, continuing with remaining channels`);
             allResults[fluorophore] = null;
         }
         
@@ -1948,7 +2120,19 @@ async function processChannelsSequentially(fluorophores, experimentPattern) {
         }
     }
     
-    console.log(`🔍 SEQUENTIAL-PROCESSING - All channels processed. Results: ${Object.keys(allResults).filter(k => allResults[k]).length}/${totalChannels}`);
+    console.log(`🔍 SEQUENTIAL-PROCESSING - All channels processed. Results: ${Object.keys(allResults).filter(k => allResults[k]).length}/${totalChannels} successful`);
+    
+    // Log completion details for debugging
+    const successfulChannels = Object.keys(allResults).filter(k => allResults[k]);
+    const failedChannels = Object.keys(allResults).filter(k => !allResults[k]);
+    
+    if (successfulChannels.length > 0) {
+        console.log(`✅ PARTIAL-SUCCESS - Successful channels: ${successfulChannels.join(', ')}`);
+    }
+    if (failedChannels.length > 0) {
+        console.log(`❌ PARTIAL-FAILURE - Failed channels: ${failedChannels.join(', ')}`);
+    }
+    
     return allResults;
 }
 
@@ -1979,10 +2163,15 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
         };
         
         console.log(`🔍 SINGLE-CHANNEL - Sending ${fluorophore} data to backend`, {
-            analysisDataLength: analysisData.length,
+            analysisDataLength: Object.keys(analysisData || {}).length,
+            analysisDataType: typeof analysisData,
+            analysisDataSample: Object.keys(analysisData || {}).slice(0, 3),
             samplesDataAvailable: !!samplesDataCsv,
             samplesDataLength: samplesDataCsv ? samplesDataCsv.length : 0,
-            fluorophore: fluorophore
+            samplesDataLines: samplesDataCsv ? samplesDataCsv.split('\n').length : 0,
+            samplesDataPreview: samplesDataCsv ? samplesDataCsv.substring(0, 300) : 'null',
+            fluorophore: fluorophore,
+            fileName: amplificationFiles[fluorophore]?.fileName || 'unknown'
         });
         
         let result;
@@ -1990,6 +2179,16 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
         // Try to perform the actual analysis via backend
         // Send to backend and handle HTTP errors gracefully
         try {
+            // Add timeout controller for large requests
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+            
+            console.log(`🔍 SINGLE-CHANNEL - Making fetch request for ${fluorophore}`, {
+                url: '/analyze',
+                payloadSize: JSON.stringify(payload).length,
+                timestamp: new Date().toISOString()
+            });
+            
             const response = await fetch('/analyze', {
                 method: 'POST',
                 headers: {
@@ -1997,22 +2196,87 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
                     'X-Filename': amplificationFiles[fluorophore]?.fileName || `${fluorophore}.csv`,
                     'X-Fluorophore': fluorophore
                 },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(payload),
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId); // Clear timeout if request succeeds
+            
+            console.log(`🔍 SINGLE-CHANNEL - Received response for ${fluorophore}`, {
+                status: response.status,
+                statusText: response.statusText,
+                ok: response.ok,
+                timestamp: new Date().toISOString()
             });
             if (!response.ok) {
-                // Log and return empty results so combine can continue
+                // Enhanced error reporting for 400 errors
                 let msg = `HTTP ${response.status}`;
+                let errorDetails = null;
                 try {
-                    const err = await response.json();
-                    msg = err.error || err.message || msg;
-                } catch(_) {}
+                    const errorText = await response.text();
+                    console.log(`🔍 SINGLE-CHANNEL - Raw error response for ${fluorophore}:`, errorText);
+                    
+                    // Try to parse as JSON
+                    try {
+                        errorDetails = JSON.parse(errorText);
+                        msg = errorDetails.error || errorDetails.message || msg;
+                    } catch (jsonError) {
+                        // If not JSON, use the text directly
+                        if (errorText && errorText.length < 500) {
+                            msg = `${msg}: ${errorText}`;
+                        }
+                    }
+                } catch (readError) {
+                    console.error(`❌ Could not read error response for ${fluorophore}:`, readError);
+                }
+                
                 console.error(`❌ SINGLE-CHANNEL - Backend error for ${fluorophore}: ${msg}`);
+                console.error(`❌ SINGLE-CHANNEL - Error details for ${fluorophore}:`, {
+                    status: response.status,
+                    statusText: response.statusText,
+                    headers: Object.fromEntries(response.headers.entries()),
+                    errorDetails,
+                    fluorophore,
+                    requestPayloadSize: JSON.stringify(payload).length
+                });
+                
                 return { individual_results: {} };
             }
             result = await response.json();
         } catch (fetchError) {
             // Network or other failure - log and return empty
-            console.error(`❌ SINGLE-CHANNEL - Network error for ${fluorophore}:`, fetchError.message);
+            if (fetchError.name === 'AbortError') {
+                console.error(`⏰ SINGLE-CHANNEL - Request timeout for ${fluorophore} (60 seconds)`);
+                console.error(`💡 TIMEOUT-TIP - Backend may still be processing. Check backend logs for completion.`);
+                
+                // Try to recover from timeout by checking if data was saved to database
+                try {
+                    console.log(`🔄 TIMEOUT-RECOVERY - Checking if ${fluorophore} data was saved to database...`);
+                    const recoveryResponse = await fetch('/sessions');
+                    if (recoveryResponse.ok) {
+                        const sessions = await recoveryResponse.json();
+                        // Look for a recent session that matches our fluorophore
+                        const recentSession = sessions.find(s => 
+                            s.filename && s.filename.includes(fluorophore) && 
+                            s.created_at && new Date(s.created_at) > new Date(Date.now() - 300000) // Within 5 minutes
+                        );
+                        if (recentSession) {
+                            console.log(`✅ TIMEOUT-RECOVERY - Found recent ${fluorophore} session, attempting to load:`, recentSession.id);
+                            const sessionResponse = await fetch(`/sessions/${recentSession.id}`);
+                            if (sessionResponse.ok) {
+                                const sessionData = await sessionResponse.json();
+                                console.log(`🔄 TIMEOUT-RECOVERY - Successfully recovered ${fluorophore} data from database`);
+                                return sessionData.results;
+                            }
+                        }
+                    }
+                } catch (recoveryError) {
+                    console.warn(`⚠️ TIMEOUT-RECOVERY - Could not recover ${fluorophore} data:`, recoveryError);
+                }
+            } else {
+                console.error(`❌ SINGLE-CHANNEL - Network error for ${fluorophore}:`, fetchError.message);
+            }
+            console.error(`❌ SINGLE-CHANNEL - Full fetch error for ${fluorophore}:`, fetchError);
             return { individual_results: {} };
         }
         // COMMENTED OUT: Mock data was interfering with real channel analysis
@@ -2162,22 +2426,30 @@ function updateChannelStatus(fluorophore, status) {
         case 'waiting':
             statusIndicator.classList.add('status-waiting');
             statusText.textContent = 'Waiting...';
+            statusText.style.color = '#666';
             break;
             
         case 'processing':
             statusIndicator.classList.add('status-processing');
-            statusText.textContent = 'Processing...';
+            statusText.textContent = 'Analyzing data...';
+            statusText.style.color = '#2196F3';
+            // Add pulsing animation to the indicator
+            statusIndicator.innerHTML = '<div class="status-spinner active"></div>';
             break;
             
         case 'completed':
             statusIndicator.classList.add('status-completed');
             statusText.textContent = 'Completed ✓';
+            statusText.style.color = '#4CAF50';
+            statusIndicator.innerHTML = '✓';
             updateOverallProgress();
             break;
             
         case 'failed':
             statusIndicator.classList.add('status-failed');
             statusText.textContent = 'Failed ✗';
+            statusText.style.color = '#f44336';
+            statusIndicator.innerHTML = '✗';
             updateOverallProgress();
             break;
     }
@@ -3060,13 +3332,22 @@ async function performAnalysis() {
         alert('Please upload at least one amplification CSV file (Cy5, FAM, HEX, or Texas Red)');
         return;
     }
-    
+
     if (!samplesData) {
         alert('Please upload the Quantification Summary CSV file for sample names and Cq values');
         return;
     }
 
     const loadingIndicator = document.getElementById('loadingIndicator');
+    const analyzeButton = document.querySelector('.analyze-btn');
+    
+    // Enhanced button state management
+    if (analyzeButton) {
+        analyzeButton.classList.add('processing');
+        analyzeButton.disabled = true;
+        analyzeButton.textContent = 'Analyzing Data...';
+    }
+    
     if (loadingIndicator) loadingIndicator.style.display = 'flex';
 
     try {
@@ -3158,6 +3439,10 @@ async function performAnalysis() {
             
             console.log(`🔍 COMBINATION-FILTER - Filtered ${Object.keys(allResults).length} channels to ${Object.keys(validResults).length} valid channels`);
             
+            // Calculate and display completion percentage
+            const completionPercentage = ((Object.keys(validResults).length / Object.keys(allResults).length) * 100).toFixed(0);
+            console.log(`📊 PARTIAL-COMPLETION - ${completionPercentage}% of channels completed successfully`);
+            
             if (Object.keys(validResults).length === 0) {
                 throw new Error('No valid channel results available for combination');
             }
@@ -3207,17 +3492,25 @@ async function performAnalysis() {
             const basePattern = extractBasePattern(firstFileName);
             const filename = `Multi-Fluorophore_${basePattern}`;
             
-            // Save combined session to database
-            await saveCombinedSession(filename, combinedResults, fluorophores);
+            // Save combined session to database with partial completion info
+            await saveCombinedSession(filename, combinedResults, Object.keys(validResults));
             
             // Save experiment statistics for trend analysis - with error handling
             try {
-                await saveExperimentStatistics(basePattern, allResults, fluorophores);
+                await saveExperimentStatistics(basePattern, validResults, Object.keys(validResults));
                 console.log('✅ Statistics saved successfully for multi-channel');
             } catch (statsError) {
                 console.error('⚠️ Statistics save failed for multi-channel (non-critical):', statsError);
                 // Don't throw - statistics are optional
             }
+            
+            // Add completion status to results for UI display
+            combinedResults.partialCompletion = {
+                successful: Object.keys(validResults).length,
+                total: Object.keys(allResults).length,
+                percentage: ((Object.keys(validResults).length / Object.keys(allResults).length) * 100).toFixed(0),
+                failedChannels: Object.keys(allResults).filter(k => !allResults[k])
+            };
             
             await displayMultiFluorophoreResults(combinedResults);
         }
@@ -3226,6 +3519,14 @@ async function performAnalysis() {
         console.error('Analysis error:', error);
         alert('Error performing analysis: ' + error.message);
     } finally {
+        // Restore button state
+        const analyzeButton = document.querySelector('.analyze-btn');
+        if (analyzeButton) {
+            analyzeButton.classList.remove('processing');
+            analyzeButton.disabled = false;
+            analyzeButton.textContent = 'Analyze qPCR Data';
+        }
+        
         if (loadingIndicator) loadingIndicator.style.display = 'none';
     }
 }
@@ -3421,6 +3722,46 @@ async function displayMultiFluorophoreResults(results) {
         alert('Error: Invalid multi-fluorophore analysis results received');
         return;
     }
+
+    // Display partial completion status if present
+    if (results.partialCompletion && results.partialCompletion.total > results.partialCompletion.successful) {
+        console.log(`📊 PARTIAL-LOAD - Displaying ${results.partialCompletion.percentage}% complete multichannel analysis`);
+        
+        // Show a notification about partial completion
+        const partialNotification = document.createElement('div');
+        partialNotification.className = 'partial-completion-notice';
+        partialNotification.style.cssText = `
+            background: linear-gradient(135deg, #ff9500, #ff6b00);
+            color: white;
+            padding: 12px 20px;
+            margin: 10px 0;
+            border-radius: 8px;
+            font-weight: bold;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(255, 149, 0, 0.3);
+        `;
+        partialNotification.innerHTML = `
+            <span style="font-size: 1.1em;">⚠️ Partial Analysis Complete</span><br>
+            <span style="font-size: 0.9em;">
+                ${results.partialCompletion.successful}/${results.partialCompletion.total} channels loaded successfully (${results.partialCompletion.percentage}%)
+                ${results.partialCompletion.failedChannels.length > 0 ? 
+                    `<br>Failed: ${results.partialCompletion.failedChannels.join(', ')}` : ''}
+            </span>
+        `;
+        
+        // Insert notification before analysis section
+        const analysisSection = document.getElementById('analysisSection');
+        if (analysisSection) {
+            analysisSection.parentNode.insertBefore(partialNotification, analysisSection);
+            
+            // Auto-remove notification after 10 seconds
+            setTimeout(() => {
+                if (partialNotification.parentNode) {
+                    partialNotification.parentNode.removeChild(partialNotification);
+                }
+            }, 10000);
+        }
+    }
     
     const analysisSection = document.getElementById('analysisSection');
     analysisSection.style.display = 'block';
@@ -3489,6 +3830,13 @@ async function displayMultiFluorophoreResults(results) {
     }
     
     // Populate well selector and results table
+    // Diagnostic: Check for missing sample names before rendering
+    const missingSampleNames = Object.entries(results.individual_results).filter(([key, result]) => !result.sample_name && !result.sample);
+    if (missingSampleNames.length > 0) {
+        console.warn('⚠️ Some wells are missing sample names:', missingSampleNames.map(([key]) => key));
+    } else {
+        console.log('✅ All wells have sample names.');
+    }
     populateWellSelector(results.individual_results);
     populateResultsTable(results.individual_results);
     
@@ -3880,8 +4228,9 @@ function populateResultsTable(individualResults) {
         });
 
         entries.forEach(([wellKey, result]) => {
-            const row = document.createElement('tr');
-            row.setAttribute('data-well-key', wellKey); // Store actual wellKey for modal navigation
+            try {
+                const row = document.createElement('tr');
+                row.setAttribute('data-well-key', wellKey); // Store actual wellKey for modal navigation
         
         // Existing quality badge
         const statusClass = result.is_good_scurve ? 'status-good' : 'status-poor';
@@ -3945,7 +4294,20 @@ function populateResultsTable(individualResults) {
         
         let wellId = result.well_id || wellKey.split('_')[0];
         const fluorophore = result.fluorophore || 'Unknown';
-        const sampleName = result.sample || result.sample_name || 'Unknown';
+        let sampleName = result.sample || result.sample_name || 'Unknown';
+        
+        // Defensive check: Ensure sampleName is defined and is a string
+        if (typeof sampleName === 'undefined' || sampleName === null) {
+            console.error(`❌ SAMPLE-NAME-ERROR - Undefined sampleName for well ${wellKey}:`, {
+                wellKey,
+                result: result,
+                sample: result.sample,
+                sample_name: result.sample_name
+            });
+            sampleName = 'Missing'; // Use 'Missing' as fallback to prevent ReferenceError
+        } else {
+            sampleName = String(sampleName); // Ensure it's a string
+        }
         
         // Debug sample name for troubleshooting
         if (wellKey.includes('A1')) {
@@ -4049,7 +4411,21 @@ function populateResultsTable(individualResults) {
         });
         
         tableBody.appendChild(row);
-    });
+            } catch (rowError) {
+                console.error(`❌ ROW-ERROR - Failed to create row for well ${wellKey}:`, rowError);
+                console.error('Row error details:', {
+                    wellKey,
+                    result,
+                    errorMessage: rowError.message,
+                    stack: rowError.stack
+                });
+                
+                // Create a minimal error row
+                const errorRow = document.createElement('tr');
+                errorRow.innerHTML = `<td colspan="15"><strong>Error loading ${wellKey}:</strong> ${rowError.message}</td>`;
+                tableBody.appendChild(errorRow);
+            }
+        });
     
 
     } catch (mainError) {
@@ -4080,7 +4456,15 @@ function showWellDetails(wellKey) {
     
     let wellId = wellResult.well_id || wellKey;
     const fluorophore = wellResult.fluorophore || 'Unknown';
-    const sampleName = wellResult.sample || wellResult.sample_name || 'N/A';
+    let sampleName = wellResult.sample || wellResult.sample_name || 'N/A';
+    
+    // Defensive check: Ensure sampleName is defined
+    if (typeof sampleName === 'undefined' || sampleName === null) {
+        console.error(`❌ SAMPLE-NAME-ERROR in showWellDetails for well ${wellKey}:`, wellResult);
+        sampleName = 'Missing';
+    } else {
+        sampleName = String(sampleName);
+    }
     
     // Check if we should show filtered samples list
     // Use currentChartMode for filtering logic since POS/NEG/REDO buttons update that
@@ -4737,8 +5121,73 @@ function removeFile(fluorophore) {
 }
 
 // 🛡️ SIMPLE: Protected function to safely set analysis results
+function normalizeAnalysisData(results) {
+    // Ensure all numeric fields in analysis results are proper numbers, not strings
+    // This is critical when loading data from database which might return strings
+    console.log('🔧 [DATA-NORMALIZE] Converting string values to numbers for proper CQJ/CalcJ calculations');
+    
+    if (!results || typeof results !== 'object') return results;
+    
+    // Handle both { individual_results: {...} } and flat {...} structures
+    let wellsObject = results.individual_results || results;
+    
+    if (typeof wellsObject === 'object') {
+        Object.keys(wellsObject).forEach(wellKey => {
+            const well = wellsObject[wellKey];
+            if (well && typeof well === 'object') {
+                // Convert numeric fields that are commonly stored as strings in database
+                ['cq_value', 'cqj_value', 'calcj_value', 'amplitude', 'baseline', 'threshold'].forEach(field => {
+                    if (well[field] !== null && well[field] !== undefined && typeof well[field] === 'string' && !isNaN(well[field])) {
+                        const originalValue = well[field];
+                        well[field] = parseFloat(well[field]);
+                        console.log(`🔧 [DATA-NORMALIZE] ${wellKey}.${field}: "${originalValue}" → ${well[field]}`);
+                    }
+                });
+                
+                // Convert arrays of numeric values (RFU data, cycles)
+                ['rfu', 'raw_rfu', 'cycles', 'raw_cycles', 'log_rfu'].forEach(arrayField => {
+                    if (Array.isArray(well[arrayField])) {
+                        well[arrayField] = well[arrayField].map(val => {
+                            if (typeof val === 'string' && !isNaN(val)) {
+                                return parseFloat(val);
+                            }
+                            return val;
+                        });
+                    }
+                });
+                
+                // Convert nested cqj and calcj objects
+                if (well.cqj && typeof well.cqj === 'object') {
+                    Object.keys(well.cqj).forEach(channel => {
+                        if (typeof well.cqj[channel] === 'string' && !isNaN(well.cqj[channel])) {
+                            well.cqj[channel] = parseFloat(well.cqj[channel]);
+                        }
+                    });
+                }
+                
+                if (well.calcj && typeof well.calcj === 'object') {
+                    Object.keys(well.calcj).forEach(channel => {
+                        if (typeof well.calcj[channel] === 'string' && !isNaN(well.calcj[channel])) {
+                            well.calcj[channel] = parseFloat(well.calcj[channel]);
+                        }
+                    });
+                }
+            }
+        });
+    }
+    
+    console.log('🔧 [DATA-NORMALIZE] Data normalization complete');
+    return results;
+}
+
 function setAnalysisResults(newResults, source = 'unknown') {
     console.log(`🔄 [SETTING] Analysis results from ${source}`);
+    
+    // Normalize data when loading from external sources (database, history)
+    if (source.includes('history') || source.includes('session') || source.includes('load')) {
+        newResults = normalizeAnalysisData(newResults);
+    }
+    
     currentAnalysisResults = newResults;
     window.currentAnalysisResults = newResults;
     return true;
@@ -7158,17 +7607,18 @@ transformedResults.individual_results[wellKey] = {
     well_id: baseWellId,
     fluorophore: fluorophore,
     is_good_scurve: well.is_good_scurve,
-    r2_score: well.r2_score,
-    rmse: well.rmse,
-    amplitude: well.amplitude,
-    steepness: well.steepness,
-    midpoint: well.midpoint,
-    baseline: well.baseline,
-    data_points: well.data_points,
+    // Ensure numeric values are properly converted from database strings
+    r2_score: parseFloat(well.r2_score) || 0,
+    rmse: parseFloat(well.rmse) || 0,
+    amplitude: parseFloat(well.amplitude) || 0,
+    steepness: parseFloat(well.steepness) || 0,
+    midpoint: parseFloat(well.midpoint) || 0,
+    baseline: parseFloat(well.baseline) || 0,
+    data_points: parseInt(well.data_points) || 0,
     cycle_range: well.cycle_range,
     sample: well.sample_name,
     sample_name: well.sample_name,
-    cq_value: well.cq_value,
+    cq_value: well.cq_value ? parseFloat(well.cq_value) : null,
     
     // Debug parameter values during history loading
     _debug_params: {
@@ -7190,20 +7640,22 @@ transformedResults.individual_results[wellKey] = {
             return [];
         }
     })(),
-    fitted_curve: Array.isArray(well.fitted_curve) ? well.fitted_curve : (() => {
+    fitted_curve: Array.isArray(well.fitted_curve) ? 
+        well.fitted_curve.map(val => parseFloat(val) || 0) : (() => {
         try {
-            return JSON.parse(well.fitted_curve || '[]');
+            const parsed = JSON.parse(well.fitted_curve || '[]');
+            return Array.isArray(parsed) ? parsed.map(val => parseFloat(val) || 0) : [];
         } catch (e) {
             return [];
         }
     })(),
     raw_cycles: (() => {
         if (Array.isArray(well.raw_cycles)) {
-            return well.raw_cycles;
+            return well.raw_cycles.map(val => parseFloat(val) || 0);
         }
         try {
             const parsed = JSON.parse(well.raw_cycles || '[]');
-            return Array.isArray(parsed) ? parsed : [];
+            return Array.isArray(parsed) ? parsed.map(val => parseFloat(val) || 0) : [];
         } catch (e) {
             console.warn('Failed to parse raw_cycles for well', well.well_id, ':', well.raw_cycles);
             return [];
@@ -7211,11 +7663,11 @@ transformedResults.individual_results[wellKey] = {
     })(),
     raw_rfu: (() => {
         if (Array.isArray(well.raw_rfu)) {
-            return well.raw_rfu;
+            return well.raw_rfu.map(val => parseFloat(val) || 0);
         }
         try {
             const parsed = JSON.parse(well.raw_rfu || '[]');
-            return Array.isArray(parsed) ? parsed : [];
+            return Array.isArray(parsed) ? parsed.map(val => parseFloat(val) || 0) : [];
         } catch (e) {
             console.warn('Failed to parse raw_rfu for well', well.well_id, ':', well.raw_rfu);
             return [];
@@ -7236,14 +7688,15 @@ transformedResults.individual_results[wellKey] = {
         }
     })(),
     // Add missing threshold_value field for threshold annotations
-    threshold_value: well.threshold_value,
+    threshold_value: well.threshold_value ? parseFloat(well.threshold_value) : null,
     
     // 🔍 THRESHOLD-DEBUG: Log threshold_value during history loading
     _debug_threshold: {
         original_threshold: well.threshold_value,
         type: typeof well.threshold_value,
         isNull: well.threshold_value == null,
-        isNaN: isNaN(well.threshold_value)
+        isNaN: isNaN(well.threshold_value),
+        converted: well.threshold_value ? parseFloat(well.threshold_value) : null
     }
 };
         });

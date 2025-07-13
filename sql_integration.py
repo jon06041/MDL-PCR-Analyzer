@@ -268,6 +268,10 @@ def create_multi_fluorophore_sql_analysis(all_fluorophore_data, samples_csv_data
             total_analyzed_records += len(fluor_results['individual_results'])
             for well_id, well_result in fluor_results['individual_results'].items():
                 tagged_well_id = f"{well_id}_{fluorophore}"
+                # Force sample_name and sample to always be a string
+                sample_name = well_result.get('sample_name') or well_result.get('sample') or 'Unknown'
+                well_result['sample_name'] = sample_name
+                well_result['sample'] = sample_name
                 combined_results['individual_results'][tagged_well_id] = well_result
     
     # Calculate combined metrics
