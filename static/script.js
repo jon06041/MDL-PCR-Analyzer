@@ -3,7 +3,7 @@
 // All threshold strategies should be defined in threshold_strategies.js
 
 // Simple CQJ calculation function - FIXED: Skip first 5 cycles and return null for negatives
-function calculateThresholdCrossing(rfuArray, cyclesArray, threshold) {
+/*function calculateThresholdCrossing(rfuArray, cyclesArray, threshold) {
     if (!rfuArray || !cyclesArray || rfuArray.length !== cyclesArray.length) return null;
     
     // CRITICAL FIX: Skip first 5 cycles for baseline noise reduction
@@ -32,7 +32,7 @@ function calculateThresholdCrossing(rfuArray, cyclesArray, threshold) {
     // No threshold crossing found - return null (will be displayed as N/A)
     console.log(`[CQJ-DEBUG] No threshold crossing found (threshold: ${threshold.toFixed(2)}, max RFU: ${Math.max(...rfuArray.map(r => parseFloat(r))).toFixed(2)})`);
     return null;
-}
+}*/
 
 // Debug: Check if CQJ/CalcJ functions are available
 document.addEventListener('DOMContentLoaded', function() {
@@ -644,7 +644,7 @@ document.addEventListener('DOMContentLoaded', function() {
 // Remove any import/export statements for browser compatibility
 // All dependencies should be accessed via window, e.g., window.LINEAR_THRESHOLD_STRATEGIES, window.LOG_THRESHOLD_STRATEGIES
 
-function populateThresholdStrategyDropdown() {
+/*function populateThresholdStrategyDropdown() {
     const select = document.getElementById('thresholdStrategySelect');
     if (!select) return;
     
@@ -711,9 +711,9 @@ function populateThresholdStrategyDropdown() {
         // For manual strategy, just update the input box to current threshold
         updateThresholdInputForCurrentScale();
     }
-}
+}*/
 
-function getSelectedThresholdStrategy() {
+/*function getSelectedThresholdStrategy() {
     const select = document.getElementById('thresholdStrategySelect');
     if (select && select.value) {
         window.selectedThresholdStrategy = select.value;
@@ -722,7 +722,7 @@ function getSelectedThresholdStrategy() {
     }
     console.warn(`🔍 STRATEGY-DEBUG - No strategy selected, returning null`);
     return null;
-}
+}*/
 
 // Removed calculateStrategySpecificThreshold - using threshold_strategies.js calculateThreshold instead
 
@@ -730,7 +730,7 @@ function getSelectedThresholdStrategy() {
  * Recalculate CQJ/CalcJ values for all wells with current thresholds
  * This version works with any threshold strategy by using current threshold values
  */
-function recalculateCQJValues() {
+/*function recalculateCQJValues() {
     console.log('🔍 CQJ-RECALC - Recalculating CQJ/CalcJ values with current thresholds');
     
     if (!window.currentAnalysisResults) {
@@ -803,13 +803,13 @@ function recalculateCQJValues() {
     }
     
     console.log('🔍 CQJ-RECALC - CQJ recalculation complete');
-}
+}*/
 
 /**
  * Recalculate CQJ/CalcJ values for all wells after manual threshold input
  * This version doesn't trigger strategy recalculation, just uses the manually set threshold
  */
-function recalculateCQJValuesForManualThreshold() {
+/*function recalculateCQJValuesForManualThreshold() {
     console.log('🔍 MANUAL-THRESHOLD - Recalculating CQJ/CalcJ values after manual threshold input');
     
     if (!window.currentAnalysisResults) {
@@ -880,7 +880,7 @@ function recalculateCQJValuesForManualThreshold() {
     if (typeof displayResultsInTable === 'function') {
         displayResultsInTable(resultsObj);
     }
-}
+}*/
 
 async function handleThresholdStrategyChange() {
     // When the strategy changes, recalculate thresholds for all channels and both scales, then update the chart and CQ-J/Calc-J values

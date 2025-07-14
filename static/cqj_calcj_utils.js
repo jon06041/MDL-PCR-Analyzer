@@ -1,3 +1,69 @@
+// --- Threshold Strategy Dropdown and Calculation Logic ---
+function populateThresholdStrategyDropdown() {
+    const select = document.getElementById('thresholdStrategySelect');
+    if (!select) return;
+    select.innerHTML = '';
+    const scale = window.currentScaleMode || 'linear';
+    console.log(`[DROPDOWN-DEBUG] Scale: ${scale}, currentScaleMode: ${window.currentScaleMode}`);
+    console.log(`[DROPDOWN-DEBUG] window.LOG_THRESHOLD_STRATEGIES: ${typeof window.LOG_THRESHOLD_STRATEGIES}, window.LINEAR_THRESHOLD_STRATEGIES: ${typeof window.LINEAR_THRESHOLD_STRATEGIES}`);
+    const strategies = scale === 'log' ? window.LOG_THRESHOLD_STRATEGIES : window.LINEAR_THRESHOLD_STRATEGIES;
+    if (!strategies || typeof strategies !== 'object') {
+        console.error('STRATEGY-DROPDOWN - Threshold strategies not available', {
+            scale: scale,
+            strategies: strategies,
+            window_log: window.LOG_THRESHOLD_STRATEGIES,
+            window_linear: window.LINEAR_THRESHOLD_STRATEGIES
+        });
+        return;
+    }
+    let firstKey = null;
+    let found = false;
+    Object.keys(strategies).forEach((key, idx) => {
+        const strat = strategies[key];
+        const option = document.createElement('option');
+        option.value = key;
+        option.textContent = strat.name || key;
+        option.title = strat.description || '';
+        select.appendChild(option);
+        if (idx === 0) firstKey = key;
+        if (window.selectedThresholdStrategy === key) found = true;
+    });
+    const manualOption = document.createElement('option');
+    manualOption.value = 'manual';
+    manualOption.textContent = 'Manual (User-Defined)';
+    manualOption.title = 'Use manually entered threshold value';
+    select.appendChild(manualOption);
+    if (window.selectedThresholdStrategy === 'manual') found = true;
+    if (!found && firstKey) {
+        window.selectedThresholdStrategy = firstKey;
+    }
+    select.value = window.selectedThresholdStrategy || firstKey;
+    window.selectedThresholdStrategy = select.value;
+    console.log(`[STRATEGY-DROPDOWN] Populated with ${Object.keys(strategies).length} ${scale} strategies, selected: ${select.value}`);
+    if (select.value !== 'manual') {
+        if (typeof window.handleThresholdStrategyChange === 'function') {
+            window.handleThresholdStrategyChange();
+        }
+    } else {
+        if (typeof window.updateThresholdInputForCurrentScale === 'function') {
+            window.updateThresholdInputForCurrentScale();
+        }
+    }
+}
+
+function getSelectedThresholdStrategy() {
+    const select = document.getElementById('thresholdStrategySelect');
+    if (select && select.value) {
+        window.selectedThresholdStrategy = select.value;
+        console.log(`[STRATEGY-DEBUG] Selected strategy from dropdown: "${select.value}"`);
+        return select.value;
+    }
+    console.warn(`[STRATEGY-DEBUG] No strategy selected, returning null`);
+    return null;
+}
+
+window.populateThresholdStrategyDropdown = populateThresholdStrategyDropdown;
+window.getSelectedThresholdStrategy = getSelectedThresholdStrategy;
 // Utility to calculate CQ-J and Calc-J for a well given its data and a threshold
 // Assumes well.raw_rfu (array of RFU values) and well.raw_cycles (array of cycle numbers)
 
@@ -64,6 +130,34 @@ function calculateCalcj(well, threshold) {
     return calcjResult;
 }
 
+/**
+ * Simple CQJ calculation function - FIXED: Skip first 5 cycles and return null for negatives
+ * @param {Array<number>} rfuArray - Array of RFU values
+ * @param {Array<number>} cyclesArray - Array of cycle numbers
+ * @param {number} threshold - Threshold value
+ * @returns {number|null} Interpolated cycle value or null if not found
+ */
+function calculateThresholdCrossing(rfuArray, cyclesArray, threshold) {
+    if (!rfuArray || !cyclesArray || rfuArray.length !== cyclesArray.length) return null;
+    const startCycle = 5; // Skip cycles 1-5 (indices 0-4)
+    for (let i = startCycle; i < rfuArray.length; i++) {
+        const rfu = parseFloat(rfuArray[i]);
+        const cycle = parseFloat(cyclesArray[i]);
+        if (rfu >= threshold) {
+            if (i === startCycle) return cycle;
+            const prevRfu = parseFloat(rfuArray[i - 1]);
+            const prevCycle = parseFloat(cyclesArray[i - 1]);
+            if (rfu === prevRfu) return cycle;
+            const interpolatedCq = prevCycle + (threshold - prevRfu) * (cycle - prevCycle) / (rfu - prevRfu);
+            console.log(`[CQJ-DEBUG] Threshold crossing found at cycle ${interpolatedCq.toFixed(2)} (between cycles ${prevCycle}-${cycle}, RFU: ${prevRfu.toFixed(2)}-${rfu.toFixed(2)}, threshold: ${threshold.toFixed(2)})`);
+            return interpolatedCq;
+        }
+    }
+    console.log(`[CQJ-DEBUG] No threshold crossing found (threshold: ${threshold.toFixed(2)}, max RFU: ${Math.max(...rfuArray.map(r => parseFloat(r))).toFixed(2)})`);
+    return null;
+}
+
 // Export for use in script.js
 window.calculateCqj = calculateCqj;
 window.calculateCalcj = calculateCalcj;
+window.calculateThresholdCrossing = calculateThresholdCrossing;

@@ -1,6 +1,24 @@
 # [2025-07-14] CRITICAL: Threshold Strategy System Cleanup Required
 
-## URGENT ISSUE: Multiple Problems After Rollback
+## Backend Refactor Instructions (2025-07-14)
+
+1. All threshold strategy logic and CQJ/CalcJ calculations must be separated into distinct backend scripts:
+   - Threshold strategies: Place in a dedicated module (e.g., `threshold_strategies.py`).
+   - CQJ/CalcJ calculations: Place in a dedicated module (e.g., `cqj_calcj_utils.py`).
+   - Only import and call these modules from `app.py` when required.
+
+2. Before making any backend changes, always:
+   - Add and commit the current state of the workspace to git.
+   - Document any missing or recreated logic in commit messages.
+
+3. If any backend logic is missing, recreate it in the appropriate module and document the recreation in the commit.
+
+4. Maintain clear separation between threshold strategy selection and CQJ/CalcJ calculation logic in all backend code.
+
+5. After refactoring, update this instruction file to reflect any new module names or workflow changes.
+
+---
+Last updated: 2025-07-14
 User reported multiple issues after rollback:
 1. **1.00 showing instead of N/A** for negative samples that don't cross threshold
 2. **Lost Baseline button** functionality
@@ -843,3 +861,23 @@ if (strategy === 'log_fixed' || strategy === 'linear_fixed') {
 2. Implement proper pathogen detection from experiment data/filename
 3. Re-implement draggable thresholds using test.html approach
 4. Test full threshold system integration
+
+# [2025-07-14] BEGIN THRESHOLD/CQJ/CALCJ MODULARIZATION REFACTOR
+
+## PLAN
+- Move threshold, CQJ, and CalcJ logic out of static/script.js into dedicated resource files (threshold_strategies.js, cqj_calcj_utils.js, etc.)
+- Refactor one function at a time, testing after each change.
+- Log each step and checkpoint here before/after every move, so progress is tracked and can be restored if the website crashes.
+
+## CHECKPOINT 0
+- Status: Starting refactor. No code moved yet.
+- Next: Identify first function to move (suggested: calculateThresholdCrossing).
+
+## Modularization Progress Log
+
+### Checkpoint 1 (2025-07-14)
+- Moved `calculateThresholdCrossing` from `script.js` to `cqj_calcj_utils.js`.
+- Exposed as `window.calculateThresholdCrossing` for browser/global usage.
+- Updated all usages in `script.js` to use `window.calculateThresholdCrossing`.
+- Added comments referencing new location for clarity.
+- Next: User to test and report any issues before proceeding to next function.

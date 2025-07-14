@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Threshold Strategies</title>
+</head>
+<body>
+    <h1>Threshold Strategies Test</h1>
+    <div id="output"></div>
+
+    <script src="static/threshold_strategies.js"></script>
+    <script>
+        // Test threshold strategies
+        function testThresholdStrategies() {
+            const output = document.getElementById('output');
+            let html = '<h2>Testing Threshold Strategies</h2>';
+            
+            // Test parameters
+            const testParams = {
+                baseline: 50,
+                baseline_std: 10,
+                L: 1000,
+                B: 50,
+                pathogen: 'BVPanelPCR1',
+                fluorophore: 'FAM'
+            };
+            
+            html += '<h3>Linear Strategies:</h3><ul>';
+            if (window.LINEAR_THRESHOLD_STRATEGIES) {
+                Object.keys(window.LINEAR_THRESHOLD_STRATEGIES).forEach(strategy => {
+                    try {
+                        const result = window.calculateThreshold(strategy, testParams, 'linear');
+                        html += `<li><strong>${strategy}</strong>: ${result} (${typeof result})</li>`;
+                    } catch (error) {
+                        html += `<li><strong>${strategy}</strong>: ERROR - ${error.message}</li>`;
+                    }
+                });
+            } else {
+                html += '<li>LINEAR_THRESHOLD_STRATEGIES not available</li>';
+            }
+            html += '</ul>';
+            
+            html += '<h3>Log Strategies:</h3><ul>';
+            if (window.LOG_THRESHOLD_STRATEGIES) {
+                Object.keys(window.LOG_THRESHOLD_STRATEGIES).forEach(strategy => {
+                    try {
+                        const result = window.calculateThreshold(strategy, testParams, 'log');
+                        html += `<li><strong>${strategy}</strong>: ${result} (${typeof result})</li>`;
+                    } catch (error) {
+                        html += `<li><strong>${strategy}</strong>: ERROR - ${error.message}</li>`;
+                    }
+                });
+            } else {
+                html += '<li>LOG_THRESHOLD_STRATEGIES not available</li>';
+            }
+            html += '</ul>';
+            
+            html += '<h3>Fixed Threshold Test (BVPanelPCR1/FAM):</h3><ul>';
+            if (window.PATHOGEN_FIXED_THRESHOLDS && window.PATHOGEN_FIXED_THRESHOLDS.BVPanelPCR1) {
+                const pathogenData = window.PATHOGEN_FIXED_THRESHOLDS.BVPanelPCR1;
+                if (pathogenData.FAM) {
+                    html += `<li>Linear Fixed: ${pathogenData.FAM.linear}</li>`;
+                    html += `<li>Log Fixed: ${pathogenData.FAM.log}</li>`;
+                } else {
+                    html += '<li>FAM not found in BVPanelPCR1</li>';
+                }
+            } else {
+                html += '<li>PATHOGEN_FIXED_THRESHOLDS not available</li>';
+            }
+            html += '</ul>';
+            
+            output.innerHTML = html;
+        }
+        
+        // Run test when page loads
+        window.addEventListener('load', testThresholdStrategies);
+    </script>
+</body>
+</html>
