@@ -1,3 +1,48 @@
+# [2025-07-14] CRITICAL: Threshold Strategy System Cleanup Required
+
+## URGENT ISSUE: Multiple Problems After Rollback
+User reported multiple issues after rollback:
+1. **1.00 showing instead of N/A** for negative samples that don't cross threshold
+2. **Lost Baseline button** functionality
+3. **Manual threshold input not working**
+4. **200 vs 150 threshold values** - wrong strategy being used
+5. **Dropdown problems on log scale**
+6. **Auto button showing 0**
+
+## ROOT CAUSE IDENTIFIED
+Backend logs show: `"[THRESHOLD-UPDATE] Channel FAM: Strategy=linear"` when it should be `"Strategy=log"` for CQJ calculation on log scale.
+
+## FIXES APPLIED (Partial)
+1. ✅ Fixed `populateThresholdStrategyDropdown()` scale mode detection (line 656)
+2. ✅ Enhanced `sendThresholdStrategyToBackend()` with explicit `scale_mode` parameter
+3. ✅ Added comprehensive debugging logs
+4. ✅ Restored manual threshold input event handling
+
+## REMAINING CRITICAL WORK
+**CLEANUP TASK NOT COMPLETED**: User specifically requested removal of:
+- Fallbacks that don't make sense
+- Duplicate code/logic
+- Default values that aren't needed
+- Redundant threshold calculation paths
+
+**CURRENT STATUS**: Still has 1.00 values instead of N/A, indicating backend still using wrong thresholds.
+
+## IMMEDIATE NEXT STEPS
+1. **PRIORITY 1**: Complete the cleanup of fallbacks/duplicates/defaults as originally requested
+2. **PRIORITY 2**: Verify backend receives correct log strategy names
+3. **PRIORITY 3**: Ensure negative samples return N/A instead of 1.00
+
+## TECHNICAL DETAILS
+- Frontend sends `scale_mode` and `current_scale` to backend
+- Backend needs to use log calculation methods when `scale_mode=log`
+- CQJ calculation should return null (N/A) for non-crossing samples, not 1.00
+
+## USER FEEDBACK
+"missed another deadline" - indicates urgency and frustration with incomplete work
+Need to focus on original cleanup task, not just immediate bug fixes.
+
+---
+
 # [2025-07-10] Threshold Strategy System: Per-Pathogen, Per-Channel, Per-Scale Fixed Values
 
 ## New Feature: Pathogen/Channel/Scale-Specific Fixed Thresholds
