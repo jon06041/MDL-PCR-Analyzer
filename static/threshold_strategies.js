@@ -259,3 +259,94 @@ function calculateThreshold(strategy, params, scale = 'log') {
 window.LINEAR_THRESHOLD_STRATEGIES = LINEAR_THRESHOLD_STRATEGIES;
 window.LOG_THRESHOLD_STRATEGIES = LOG_THRESHOLD_STRATEGIES;
 window.calculateThreshold = calculateThreshold;
+
+/**
+ * Main function called by frontend to calculate thresholds for a strategy
+ * @param {string} strategy - Strategy name (e.g., 'fixed', 'exponential', 'manual')
+ * @param {Object} analysisResults - Current analysis results with individual well data
+ * @param {string} currentScale - Current scale mode ('linear' or 'log')
+ * @returns {Object} Updated threshold values by channel/scale
+ */
+function calculateThresholdForStrategy(strategy, analysisResults, currentScale = 'log') {
+    console.log(`🔍 THRESHOLD-STRATEGY - Calculating strategy "${strategy}" for scale "${currentScale}"`);
+    
+    try {
+        // Check if we have valid analysis results
+        if (!analysisResults || typeof analysisResults !== 'object' || Object.keys(analysisResults).length === 0) {
+            console.warn(`⚠️ THRESHOLD-STRATEGY - No valid analysis results provided. Skipping threshold calculation.`);
+            return null;
+        }
+        
+        const updatedThresholds = {};
+        
+        // Get unique channels from analysis results
+        const channels = new Set();
+        Object.keys(analysisResults).forEach(wellKey => {
+            const wellData = analysisResults[wellKey];
+            if (wellData && wellData.fluorophore) {
+                channels.add(wellData.fluorophore);
+            }
+        });
+        
+        if (channels.size === 0) {
+            console.warn(`⚠️ THRESHOLD-STRATEGY - No channels found in analysis results. Available wells:`, Object.keys(analysisResults).slice(0, 3));
+            return null;
+        }
+        
+        console.log(`🔍 THRESHOLD-STRATEGY - Found channels:`, Array.from(channels));
+        
+        // Calculate threshold for each channel
+        channels.forEach(channel => {
+            // Get parameters for this channel from analysis data
+            const channelWells = Object.keys(analysisResults).filter(wellKey => {
+                const wellData = analysisResults[wellKey];
+                return wellData && wellData.fluorophore === channel;
+            });
+            
+            if (channelWells.length > 0) {
+                // Extract parameters from first well of this channel
+                const firstWell = analysisResults[channelWells[0]];
+                const params = {
+                    fluorophore: channel,
+                    pathogen: firstWell.pathogen || firstWell.test_code,
+                    baseline: firstWell.baseline,
+                    baseline_std: firstWell.baseline_std || (firstWell.baseline ? firstWell.baseline * 0.1 : 100), // Estimate if not available
+                    // Add other parameters as needed
+                };
+                
+                try {
+                    // Calculate threshold using the threshold_strategies.js logic
+                    const thresholdValue = calculateThreshold(strategy, params, currentScale);
+                    
+                    // Store result
+                    if (!updatedThresholds[channel]) {
+                        updatedThresholds[channel] = {};
+                    }
+                    updatedThresholds[channel][currentScale] = thresholdValue;
+                    
+                    console.log(`🔍 THRESHOLD-STRATEGY - ${channel} ${currentScale}: ${thresholdValue}`);
+                } catch (calcError) {
+                    console.warn(`⚠️ THRESHOLD-STRATEGY - Failed to calculate threshold for ${channel}:`, calcError);
+                }
+            }
+        });
+        
+        // Update global threshold state if setChannelThreshold function exists
+        if (typeof setChannelThreshold === 'function') {
+            Object.keys(updatedThresholds).forEach(channel => {
+                Object.keys(updatedThresholds[channel]).forEach(scale => {
+                    setChannelThreshold(channel, scale, updatedThresholds[channel][scale]);
+                });
+            });
+        }
+        
+        return updatedThresholds;
+        
+    } catch (error) {
+        console.error(`❌ THRESHOLD-STRATEGY - Error calculating strategy "${strategy}":`, error);
+        return null;
+    }
+}
+
+// Expose the main function
+window.calculateThresholdForStrategy = calculateThresholdForStrategy;

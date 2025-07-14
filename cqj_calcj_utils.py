@@ -34,3 +34,34 @@ def calculate_calcj(well, threshold):
     if amplitude is None or not threshold:
         return None
     return amplitude / threshold
+
+def calculate_cqj_calcj_for_well(well_data, strategy, threshold):
+    """
+    Calculate both CQJ and CalcJ for a well with the given threshold strategy.
+    Returns a dict with cqj_value and calcj_value.
+    """
+    result = {
+        'cqj_value': None,
+        'calcj_value': None,
+        'threshold_value': threshold,
+        'strategy': strategy
+    }
+    
+    try:
+        # Calculate CQJ
+        cqj_value = calculate_cqj(well_data, threshold)
+        result['cqj_value'] = cqj_value
+        
+        # Calculate CalcJ
+        calcj_value = calculate_calcj(well_data, threshold)
+        result['calcj_value'] = calcj_value
+        
+        # Add strategy-specific CQJ and CalcJ objects for compatibility
+        result['cqj'] = {strategy: cqj_value} if cqj_value is not None else {strategy: None}
+        result['calcj'] = {strategy: calcj_value} if calcj_value is not None else {strategy: None}
+        
+        return result
+        
+    except Exception as e:
+        print(f"[CQJ-CALCJ-ERROR] Error calculating for well {well_data.get('well_id', 'unknown')}: {e}")
+        return result

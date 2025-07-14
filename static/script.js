@@ -727,6 +727,85 @@ function getSelectedThresholdStrategy() {
 // Removed calculateStrategySpecificThreshold - using threshold_strategies.js calculateThreshold instead
 
 /**
+ * Recalculate CQJ/CalcJ values for all wells with current thresholds
+ * This version works with any threshold strategy by using current threshold values
+ */
+function recalculateCQJValues() {
+    console.log('🔍 CQJ-RECALC - Recalculating CQJ/CalcJ values with current thresholds');
+    
+    if (!window.currentAnalysisResults) {
+        console.warn('❌ CQJ-RECALC - No analysis results available');
+        return;
+    }
+    
+    // Get the results structure
+    let resultsObj = null;
+    if (window.currentAnalysisResults.individual_results && typeof window.currentAnalysisResults.individual_results === 'object') {
+        resultsObj = window.currentAnalysisResults.individual_results;
+    } else if (typeof window.currentAnalysisResults === 'object' && !Array.isArray(window.currentAnalysisResults)) {
+        resultsObj = window.currentAnalysisResults;
+    }
+    
+    if (!resultsObj) {
+        console.warn('❌ CQJ-RECALC - Could not find results object');
+        return;
+    }
+    
+    const currentScale = window.currentScaleMode || 'linear';
+    
+    if (!window.stableChannelThresholds) {
+        console.warn('❌ CQJ-RECALC - No threshold data available');
+        return;
+    }
+    
+    console.log(`🔍 CQJ-RECALC - Using thresholds for ${currentScale} scale:`, window.stableChannelThresholds);
+    
+    // Recalculate CQJ for all wells
+    Object.keys(resultsObj).forEach(wellKey => {
+        const well = resultsObj[wellKey];
+        const wellChannel = well.fluorophore;
+        
+        if (wellChannel && window.stableChannelThresholds[wellChannel] && window.stableChannelThresholds[wellChannel][currentScale]) {
+            const threshold = window.stableChannelThresholds[wellChannel][currentScale];
+            
+            const rfuData = well.rfu || well.raw_rfu;
+            const cyclesData = well.cycles || well.raw_cycles;
+            
+            let rfuArray = Array.isArray(rfuData) ? rfuData : (typeof rfuData === 'string' ? JSON.parse(rfuData) : []);
+            let cyclesArray = Array.isArray(cyclesData) ? cyclesData : (typeof cyclesData === 'string' ? JSON.parse(cyclesData) : []);
+            
+            // Ensure arrays are numbers
+            if (Array.isArray(rfuArray)) {
+                rfuArray = rfuArray.map(val => typeof val === 'string' ? parseFloat(val) : val);
+            }
+            if (Array.isArray(cyclesArray)) {
+                cyclesArray = cyclesArray.map(val => typeof val === 'string' ? parseFloat(val) : val);
+            }
+            
+            if (Array.isArray(rfuArray) && Array.isArray(cyclesArray) && rfuArray.length > 0) {
+                const oldCqjValue = well.cqj_value;
+                well.cqj_value = calculateThresholdCrossing(rfuArray, cyclesArray, threshold);
+                
+                // Update the CQJ object structure too
+                if (!well.cqj) well.cqj = {};
+                well.cqj[wellChannel] = well.cqj_value;
+                
+                console.log(`✅ CQJ-RECALC - ${wellKey} (${wellChannel}): ${oldCqjValue} → ${well.cqj_value} (threshold: ${threshold})`);
+            }
+        }
+    });
+    
+    // Update the results table to show new CQJ values
+    if (typeof displayResultsInTable === 'function') {
+        displayResultsInTable(resultsObj);
+    } else if (typeof populateResultsTable === 'function') {
+        populateResultsTable(resultsObj);
+    }
+    
+    console.log('🔍 CQJ-RECALC - CQJ recalculation complete');
+}
+
+/**
  * Recalculate CQJ/CalcJ values for all wells after manual threshold input
  * This version doesn't trigger strategy recalculation, just uses the manually set threshold
  */
@@ -862,22 +941,22 @@ async function handleThresholdStrategyChange() {
         }
     }
     
-     // CRITICAL AJAX REQUEST: Send threshold strategy change to backend for proper recalculation
-    console.log(`🔍 AJAX-THRESHOLD - Attempting backend update for strategy: "${strategy}"`);
-    const backendResult = await sendThresholdStrategyToBackend(strategy);
+     // APPLY THRESHOLD STRATEGY LOCALLY using threshold_strategies.js
+    console.log(`🔍 LOCAL-THRESHOLD - Applying strategy: "${strategy}" locally`);
+    const localResult = await applyThresholdStrategyLocally(strategy);
 
-    // If backend successfully handled the update, we still need to update the frontend table.
-    if (backendResult && backendResult.success) {
-        console.log(`🔍 AJAX-THRESHOLD - Backend success. Refreshing UI with merged results.`);
+    // If local calculation succeeded, update the UI
+    if (localResult && localResult.success) {
+        console.log(`🔍 LOCAL-THRESHOLD - Local calculation success. Refreshing UI.`);
         
         // Explicitly call populateResultsTable with the now-updated global results object.
         const resultsObj = window.currentAnalysisResults.individual_results || window.currentAnalysisResults;
         populateResultsTable(resultsObj);
 
-        // Apply any filter preservation after backend update
+        // Apply any filter preservation after threshold update
         setTimeout(preserveCurrentFilters, 200);
         
-        return; // Exit - backend handled the calculation, and we've updated the UI.
+        return; // Exit - local calculation handled, and we've updated the UI.
     }
     
     // Fallback: Continue with frontend calculation if backend failed or unavailable
@@ -1307,6 +1386,93 @@ function preserveCurrentFilters() {
 
 /**
  * Send threshold strategy change to backend via AJAX
+/**
+ * Apply threshold strategy locally using threshold_strategies.js
+ * @param {string} strategy - The threshold strategy to apply
+ * @returns {Object} Result object indicating success/failure
+ */
+async function applyThresholdStrategyLocally(strategy) {
+    try {
+        console.log(`🔍 LOCAL-THRESHOLD - Applying threshold strategy "${strategy}" locally`);
+        
+        // Get current scale mode
+        const currentScale = currentScaleMode || window.currentScaleMode || 'linear';
+        
+        console.log(`🔍 LOCAL-THRESHOLD - Strategy: "${strategy}", Scale Mode: "${currentScale}"`);
+        
+        // CALCULATE THRESHOLDS LOCALLY using threshold_strategies.js
+        if (typeof calculateThresholdForStrategy === 'function') {
+            // Get current analysis results
+            const currentResults = window.currentAnalysisResults?.individual_results || window.currentAnalysisResults || {};
+            
+            // Check if we have analysis data before trying to calculate thresholds
+            if (!currentResults || Object.keys(currentResults).length === 0) {
+                console.log(`🔍 LOCAL-THRESHOLD - No analysis data available yet. Strategy "${strategy}" will be applied when data is loaded.`);
+                // Still update UI to show the strategy change
+                updateAllChannelThresholds();
+                updateThresholdInput();
+                return { success: true, message: `Strategy "${strategy}" set (will apply when data is loaded)` };
+            }
+            
+            // Calculate new thresholds using local logic
+            console.log(`🔍 LOCAL-THRESHOLD - Calculating "${strategy}" thresholds for ${Object.keys(currentResults).length} wells`);
+            
+            try {
+                // Apply the strategy locally and update thresholds
+                const updatedThresholds = calculateThresholdForStrategy(strategy, currentResults, currentScale);
+                
+                if (updatedThresholds && Object.keys(updatedThresholds).length > 0) {
+                    console.log(`🔍 LOCAL-THRESHOLD - Applying calculated thresholds:`, updatedThresholds);
+                    
+                    // Update the chart lines and input boxes
+                    updateAllChannelThresholds();
+                    updateThresholdInput();
+                    
+                    // Recalculate CQJ values with new thresholds if needed
+                    if (typeof recalculateCQJValues === 'function') {
+                        recalculateCQJValues();
+                    }
+                    
+                    // Refresh UI components
+                    if (typeof populateResultsTable === 'function') {
+                        const resultsToDisplay = window.currentAnalysisResults.individual_results || window.currentAnalysisResults;
+                        populateResultsTable(resultsToDisplay);
+                    }
+                    if (typeof populateWellSelector === 'function') {
+                        const wellsForSelector = window.currentAnalysisResults.individual_results || window.currentAnalysisResults;
+                        populateWellSelector(wellsForSelector);
+                    }
+                    
+                    return { success: true, strategy: strategy, thresholds: updatedThresholds };
+                } else {
+                    console.log(`🔍 LOCAL-THRESHOLD - No thresholds calculated (no channels found or calculation failed)`);
+                    // Still update UI to reflect strategy change
+                    updateAllChannelThresholds();
+                    updateThresholdInput();
+                    return { success: true, strategy: strategy, message: 'Strategy applied (no channels to calculate)' };
+                }
+            } catch (calcError) {
+                console.error(`❌ LOCAL-THRESHOLD - Local calculation failed:`, calcError);
+                // Still update UI to reflect strategy change
+                updateAllChannelThresholds();
+                updateThresholdInput();
+                return { success: false, error: `Calculation failed: ${calcError.message}` };
+            }
+        } else {
+            console.warn(`⚠️ LOCAL-THRESHOLD - calculateThresholdForStrategy function not available`);
+            // Fallback: just update UI
+            updateAllChannelThresholds();
+            updateThresholdInput();
+            return { success: true, strategy: strategy, message: 'Strategy applied (calculation function not available)' };
+        }
+        
+    } catch (error) {
+        console.error(`❌ LOCAL-THRESHOLD - Error applying strategy "${strategy}":`, error);
+        return { success: false, error: `Failed to apply strategy: ${error.message}` };
+    }
+}
+
+/**
  * @param {string} strategy - The threshold strategy to apply
  * @returns {Promise<Object>} Backend response or null if failed
  */
@@ -1345,56 +1511,68 @@ async function sendThresholdStrategyToBackend(strategy) {
         console.log(`🔍 AJAX-RESPONSE - Backend responded:`, result);
         
         if (result.success) {
-            // --- DEFINITIVE FIX START ---
-
-            // 1. PARSE AND APPLY NEW THRESHOLD VALUES FROM BACKEND
-            if (result.new_thresholds && typeof result.new_thresholds === 'object') {
-                console.log("🔍 AJAX-THRESHOLD - Applying new thresholds from backend:", result.new_thresholds);
-                for (const channel in result.new_thresholds) {
-                    if (result.new_thresholds[channel]) {
-                        const scales = result.new_thresholds[channel];
-                        for (const scale in scales) {
-                            const value = scales[scale];
-                            // Update the frontend's internal threshold state
-                            setChannelThreshold(channel, scale, value);
-                        }
-                    }
+            console.log(`🔍 THRESHOLD-LOCAL - Backend acknowledged strategy "${strategy}". Calculating thresholds locally...`);
+            
+            // CALCULATE THRESHOLDS LOCALLY using threshold_strategies.js
+            if (typeof calculateThresholdForStrategy === 'function') {
+                // Get current analysis results
+                const currentResults = window.currentAnalysisResults?.individual_results || window.currentAnalysisResults || {};
+                
+                // Check if we have analysis data before trying to calculate thresholds
+                if (!currentResults || Object.keys(currentResults).length === 0) {
+                    console.log(`🔍 THRESHOLD-CALC - No analysis data available yet. Strategy "${strategy}" will be applied when data is loaded.`);
+                    // Still update UI to show the strategy change
+                    updateAllChannelThresholds();
+                    updateThresholdInput();
+                    return result;
                 }
-                // Update the chart lines and input box to reflect the new state
+                
+                // Calculate new thresholds using local logic
+                console.log(`🔍 THRESHOLD-CALC - Calculating "${strategy}" thresholds for ${Object.keys(currentResults).length} wells`);
+                
+                try {
+                    // Apply the strategy locally and update thresholds
+                    const updatedThresholds = calculateThresholdForStrategy(strategy, currentResults, currentScale);
+                    
+                    if (updatedThresholds && Object.keys(updatedThresholds).length > 0) {
+                        console.log(`🔍 THRESHOLD-APPLY - Applying calculated thresholds:`, updatedThresholds);
+                        
+                        // Update the chart lines and input boxes
+                        updateAllChannelThresholds();
+                        updateThresholdInput();
+                        
+                        // Recalculate CQJ values with new thresholds if needed
+                        if (typeof recalculateCQJValues === 'function') {
+                            recalculateCQJValues();
+                        }
+                        
+                        // Refresh UI components
+                        if (typeof populateResultsTable === 'function') {
+                            const resultsToDisplay = window.currentAnalysisResults.individual_results || window.currentAnalysisResults;
+                            populateResultsTable(resultsToDisplay);
+                        }
+                        if (typeof populateWellSelector === 'function') {
+                            const wellsForSelector = window.currentAnalysisResults.individual_results || window.currentAnalysisResults;
+                            populateWellSelector(wellsForSelector);
+                        }
+                    } else {
+                        console.log(`🔍 THRESHOLD-CALC - No thresholds calculated (no channels found or calculation failed)`);
+                        // Still update UI to reflect strategy change
+                        updateAllChannelThresholds();
+                        updateThresholdInput();
+                    }
+                } catch (calcError) {
+                    console.error(`❌ THRESHOLD-CALC - Local calculation failed:`, calcError);
+                    // Still update UI to reflect strategy change
+                    updateAllChannelThresholds();
+                    updateThresholdInput();
+                }
+            } else {
+                console.warn(`⚠️ THRESHOLD-CALC - calculateThresholdForStrategy function not available`);
+                // Fallback: just update UI
                 updateAllChannelThresholds();
                 updateThresholdInput();
             }
-
-            // 2. MERGE NEW ANALYSIS RESULTS (CQJ, etc.)
-            if (result.analysis_results) {
-                console.log(`🔍 AJAX-MERGE - Merging backend analysis results`);
-                const backendWells = result.analysis_results.individual_results || result.analysis_results;
-                const frontendWells = window.currentAnalysisResults.individual_results || window.currentAnalysisResults;
-
-                if (frontendWells) {
-                    for (const wellKey in backendWells) {
-                        if (frontendWells[wellKey]) {
-                            Object.assign(frontendWells[wellKey], backendWells[wellKey]);
-                        } else {
-                            frontendWells[wellKey] = backendWells[wellKey];
-                        }
-                    }
-                } else {
-                    window.currentAnalysisResults = result.analysis_results;
-                }
-            }
-
-            // 3. REDRAW THE UI WITH THE FULLY UPDATED DATA
-            console.log(`🔍 AJAX-REFRESH - Refreshing UI components.`);
-            if (typeof populateResultsTable === 'function') {
-                const resultsToDisplay = window.currentAnalysisResults.individual_results || window.currentAnalysisResults;
-                populateResultsTable(resultsToDisplay);
-            }
-            if (typeof populateWellSelector === 'function') {
-                const wellsForSelector = window.currentAnalysisResults.individual_results || window.currentAnalysisResults;
-                populateWellSelector(wellsForSelector);
-            }
-            // --- DEFINITIVE FIX END ---
         }
         
         return result;

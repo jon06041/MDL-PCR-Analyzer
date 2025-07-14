@@ -394,7 +394,7 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                 well_result.raw_cycles = safe_json_dumps(well_data.get('raw_cycles'), [])
                 well_result.raw_rfu = safe_json_dumps(well_data.get('raw_rfu'), [])
                 well_result.sample_name = str(well_data.get('sample_name', '')) if well_data.get('sample_name') else None
-                well_result.cq_value = float(well_data.get('cq_value', 0)) if well_data.get('cq_value') is not None else None
+                well_result.cq_value = float(well_data.get('cq_value')) if well_data.get('cq_value') is not None else None
                 
                 # Set fluorophore if present - prioritize function parameter over well data
                 well_fluorophore = well_data.get('fluorophore', '')
@@ -491,6 +491,13 @@ else:
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
         "pool_recycle": 300,
         "pool_pre_ping": True,
+        "pool_timeout": 30,
+        "pool_size": 10,
+        "max_overflow": 20,
+        "connect_args": {
+            "timeout": 30,
+            "check_same_thread": False
+        }
     }
     print(f"Using SQLite database for development: {sqlite_path}")
 
@@ -498,6 +505,22 @@ db.init_app(app)
 
 # Create tables for database
 with app.app_context():
+    # Configure SQLite for better concurrency and performance
+    if not database_url or not database_url.startswith("mysql"):
+        from sqlalchemy import text as sql_text
+        try:
+            # Set SQLite pragmas for better concurrency and performance
+            db.session.execute(sql_text('PRAGMA journal_mode = WAL;'))        # Write-Ahead Logging
+            db.session.execute(sql_text('PRAGMA synchronous = NORMAL;'))      # Faster writes
+            db.session.execute(sql_text('PRAGMA cache_size = 10000;'))        # Larger cache
+            db.session.execute(sql_text('PRAGMA temp_store = MEMORY;'))       # Memory temp store
+            db.session.execute(sql_text('PRAGMA busy_timeout = 30000;'))      # 30 second timeout
+            db.session.execute(sql_text('PRAGMA foreign_keys = ON;'))         # Enable foreign keys
+            db.session.commit()
+            print("SQLite performance optimizations applied")
+        except Exception as e:
+            print(f"Warning: Could not apply SQLite optimizations: {e}")
+    
     db.create_all()
     if not database_url or not database_url.startswith("mysql"):
         sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
@@ -1175,39 +1198,50 @@ def save_combined_session():
 def delete_all_sessions():
     """Delete all analysis sessions and their results"""
     try:
-        # Enable foreign key constraints for SQLite FIRST
-        from sqlalchemy import text as sql_text
-        if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
-            db.session.execute(sql_text('PRAGMA foreign_keys = ON;'))
-            db.session.commit()  # Commit the PRAGMA command
-        
+        # First, check if there are any sessions to delete
         num_sessions = AnalysisSession.query.count()
         if num_sessions == 0:
             return jsonify({'message': 'No sessions to delete'}), 200
         
         print(f"[DEBUG] Deleting {num_sessions} sessions and their well results...")
         
-        # Alternative approach: Delete well results first, then sessions
-        print("[DEBUG] Deleting all well results first...")
-        num_wells_deleted = WellResult.query.delete()
-        print(f"[DEBUG] Deleted {num_wells_deleted} well results")
-        
-        print("[DEBUG] Deleting all sessions...")
-        num_sessions_deleted = AnalysisSession.query.delete()
-        print(f"[DEBUG] Deleted {num_sessions_deleted} sessions")
-        
-        db.session.commit()
-        print(f"[API] Successfully deleted all {num_sessions} sessions and their well results.")
-        return jsonify({
-            'message': f'All {num_sessions} sessions deleted successfully',
-            'sessions_deleted': num_sessions_deleted,
-            'wells_deleted': num_wells_deleted
-        })
+        from sqlalchemy import text as sql_text
+        try:
+            # Set SQLite-specific pragmas for better concurrency
+            if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
+                db.session.execute(sql_text('PRAGMA busy_timeout = 30000;'))
+                db.session.execute(sql_text('PRAGMA journal_mode = WAL;'))
+                db.session.execute(sql_text('PRAGMA synchronous = NORMAL;'))
+            print("[DEBUG] Deleting all well results first...")
+            if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
+                result = db.session.execute(sql_text('DELETE FROM well_results'))
+                num_wells_deleted = result.rowcount
+            else:
+                num_wells_deleted = WellResult.query.delete()
+            print(f"[DEBUG] Deleted {num_wells_deleted} well results")
+            print("[DEBUG] Deleting all sessions...")
+            if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
+                result = db.session.execute(sql_text('DELETE FROM analysis_sessions'))
+                num_sessions_deleted = result.rowcount
+            else:
+                num_sessions_deleted = AnalysisSession.query.delete()
+            print(f"[DEBUG] Deleted {num_sessions_deleted} sessions")
+            db.session.commit()
+            print(f"[API] Successfully deleted all {num_sessions} sessions and their well results.")
+            return jsonify({
+                'message': f'All {num_sessions} sessions deleted successfully',
+                'sessions_deleted': num_sessions_deleted,
+                'wells_deleted': num_wells_deleted
+            })
+        except Exception as e:
+            db.session.rollback()
+            tb = traceback.format_exc()
+            print(f"[ERROR] Error deleting all sessions: {e}\nTraceback:\n{tb}")
+            return jsonify({'error': f'Database error: {str(e)}'}), 500
+    
     except Exception as e:
-        db.session.rollback()
-        import traceback
         tb = traceback.format_exc()
-        print(f"[ERROR] Error deleting all sessions: {e}\nTraceback:\n{tb}")
+        print(f"[ERROR] Outer exception deleting all sessions: {e}\nTraceback:\n{tb}")
         return jsonify({'error': f'Database error: {str(e)}'}), 500
 
 # --- Delete a single session and its results ---
@@ -1215,36 +1249,52 @@ def delete_all_sessions():
 def delete_session(session_id):
     """Delete a single analysis session and its results"""
     try:
-        # Enable foreign key constraints for SQLite FIRST
-        from sqlalchemy import text as sql_text
-        if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
-            db.session.execute(sql_text('PRAGMA foreign_keys = ON;'))
-            db.session.commit()  # Commit the PRAGMA command
-        
+        # Check if session exists first
         session = AnalysisSession.query.get_or_404(session_id)
         well_count = WellResult.query.filter_by(session_id=session.id).count()
         
         print(f"[DEBUG] Deleting session {session_id} with {well_count} well results...")
         
-        # Delete well results first, then session
-        print(f"[DEBUG] Deleting {well_count} well results for session {session_id}...")
-        num_wells_deleted = WellResult.query.filter_by(session_id=session_id).delete()
-        print(f"[DEBUG] Actually deleted {num_wells_deleted} well results")
-        
-        print(f"[DEBUG] Deleting session {session_id}...")
-        db.session.delete(session)
-        db.session.commit()
-        
-        print(f"[API] Successfully deleted session {session_id} and its {well_count} well results.")
-        return jsonify({
-            'message': f'Session {session_id} deleted successfully',
-            'wells_deleted': num_wells_deleted
-        })
+        from sqlalchemy import text as sql_text
+        try:
+            # Set SQLite-specific pragmas for better concurrency
+            if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
+                db.session.execute(sql_text('PRAGMA busy_timeout = 30000;'))
+                db.session.execute(sql_text('PRAGMA journal_mode = WAL;'))
+                db.session.execute(sql_text('PRAGMA synchronous = NORMAL;'))
+            print(f"[DEBUG] Deleting {well_count} well results for session {session_id}...")
+            if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
+                result = db.session.execute(sql_text('DELETE FROM well_results WHERE session_id = :session_id'), {'session_id': session_id})
+                num_wells_deleted = result.rowcount
+            else:
+                num_wells_deleted = WellResult.query.filter_by(session_id=session_id).delete()
+            print(f"[DEBUG] Actually deleted {num_wells_deleted} well results")
+            print(f"[DEBUG] Deleting session {session_id}...")
+            if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
+                result = db.session.execute(sql_text('DELETE FROM analysis_sessions WHERE id = :session_id'), {'session_id': session_id})
+                sessions_deleted = result.rowcount
+            else:
+                db.session.delete(session)
+                sessions_deleted = 1
+            print(f"[DEBUG] Deleted {sessions_deleted} session(s)")
+            db.session.commit()
+            print(f"[API] Successfully deleted session {session_id} and its {well_count} well results.")
+            return jsonify({
+                'message': f'Session {session_id} deleted successfully',
+                'wells_deleted': num_wells_deleted
+            })
+        except Exception as e:
+            db.session.rollback()
+            import traceback
+            tb = traceback.format_exc()
+            print(f"[ERROR] Exception deleting session {session_id}: {e}\nTraceback:\n{tb}")
+            return jsonify({'error': f'Failed to delete session: {str(e)}'}), 500
+    
     except Exception as e:
         db.session.rollback()
         import traceback
         tb = traceback.format_exc()
-        print(f"[ERROR] Exception deleting session {session_id}: {e}\nTraceback:\n{tb}")
+        print(f"[ERROR] Outer exception deleting session {session_id}: {e}\nTraceback:\n{tb}")
         return jsonify({'error': f'Failed to delete session: {str(e)}'}), 500
 
 # Alternative delete endpoint with enhanced error handling
@@ -1481,14 +1531,13 @@ def simple_delete_session(session_id):
         return jsonify({'error': f'Simple delete failed: {str(e)}'}), 500
 
 if __name__ == '__main__':
-    handler = RotatingFileHandler('flask.log', maxBytes=5_000_000, backupCount=5)
-    handler.setLevel(logging.DEBUG)
-    formatter = logging.Formatter(
-        '%(asctime)s %(levelname)-8s %(name)s %(message)s'
-    )
-    handler.setFormatter(formatter)
-    app.logger.addHandler(handler)
-    # Also capture the werkzeug (request) log
-    logging.getLogger('werkzeug').addHandler(handler)
-
-    app.run(debug=True)
+    # Get port from environment variable or use default
+    port = int(os.environ.get('PORT', 5000))
+    host = os.environ.get('HOST', '0.0.0.0')
+    debug = os.environ.get('FLASK_ENV', 'development') == 'development'
+    
+    print(f"Starting qPCR Analyzer on {host}:{port}")
+    print(f"Debug mode: {debug}")
+    
+    # Start the Flask application
+    app.run(host=host, port=port, debug=debug, threaded=True)
