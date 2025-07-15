@@ -613,6 +613,8 @@ leave: function(ctx) {
 /**
  * Calculate stable threshold for a specific channel and scale using threshold strategies
  */
+// Replace lines 616-703 (the calculateStableChannelThreshold function) with this:
+
 function calculateStableChannelThreshold(channel, scale) {
     console.log(`🔍 THRESHOLD - Calculating ${scale} threshold for channel: ${channel}`);
     
@@ -620,6 +622,72 @@ function calculateStableChannelThreshold(channel, scale) {
     const strategy = getSelectedThresholdStrategy() || 'default';
     console.log(`🔍 THRESHOLD - Using strategy: ${strategy} for ${channel} on ${scale} scale`);
     
+    // HANDLE MANUAL STRATEGY FIRST
+    if (strategy === 'manual') {
+        // For manual strategy, return the currently stored threshold value
+        if (window.stableChannelThresholds && 
+            window.stableChannelThresholds[channel] && 
+            window.stableChannelThresholds[channel][scale]) {
+            const manualValue = window.stableChannelThresholds[channel][scale];
+            console.log(`🔍 THRESHOLD-MANUAL - Returning stored manual value for ${channel}[${scale}]: ${manualValue}`);
+            return manualValue;
+        } else {
+            console.log(`🔍 THRESHOLD-MANUAL - No manual value stored for ${channel}[${scale}], returning null`);
+            return null;
+        }
+    }
+    
+    // Replace the FIXED STRATEGIES section in calculateStableChannelThreshold:
+
+// HANDLE FIXED STRATEGIES DIRECTLY
+if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
+    // Get pathogen from current analysis results
+    let pathogen = null;
+    if (window.currentAnalysisResults) {
+        const resultsToCheck = window.currentAnalysisResults.individual_results || window.currentAnalysisResults;
+        const wellKeys = Object.keys(resultsToCheck);
+        for (const wellKey of wellKeys) {
+            const well = resultsToCheck[wellKey];
+            if (well && well.fluorophore === channel && well.test_code) {
+                pathogen = well.test_code;
+                break;
+            }
+        }
+    }
+    
+    // Default pathogen if none found
+    if (!pathogen) {
+        pathogen = 'BVPanelPCR1';
+    }
+    
+    console.log(`🔍 THRESHOLD-FIXED - Using pathogen: ${pathogen} for ${strategy} strategy`);
+    
+    // Get fixed threshold value directly from PATHOGEN_FIXED_THRESHOLDS
+    if (window.PATHOGEN_FIXED_THRESHOLDS && window.PATHOGEN_FIXED_THRESHOLDS[pathogen]) {
+        const fixedValues = window.PATHOGEN_FIXED_THRESHOLDS[pathogen];
+        const scaleKey = scale === 'log' ? 'log' : 'linear';
+        
+        // Debug log to help troubleshooting
+        console.log(`🔍 THRESHOLD-DEBUG - Fixed values for ${pathogen}:`, 
+            fixedValues[channel] ? fixedValues[channel] : 'No entry for this channel');
+        
+        // Access structure is pathogen->channel->scale (not pathogen->scale->channel)
+        if (fixedValues[channel] && fixedValues[channel][scaleKey] !== undefined) {
+            const fixedValue = fixedValues[channel][scaleKey];
+            console.log(`✅ THRESHOLD-FIXED - ${channel}[${scale}]: ${fixedValue} (pathogen: ${pathogen})`);
+            return fixedValue;
+        } else {
+            console.warn(`⚠️ THRESHOLD-FIXED - No fixed value for ${channel}[${scale}] in pathogen ${pathogen}`);
+        }
+    } else {
+        console.warn(`⚠️ THRESHOLD-FIXED - No fixed thresholds found for pathogen ${pathogen}`);
+    }
+    
+    // Return null if no fixed value found
+    return null;
+}
+    
+    // HANDLE CALCULATED STRATEGIES (all other strategies)
     // Calculate baseline statistics from control wells
     let baseline = 0, baseline_std = 1;
     let allRfus = [];
@@ -642,27 +710,20 @@ function calculateStableChannelThreshold(channel, scale) {
         baseline_std = Math.sqrt(variance);
     }
     
-    // Get pathogen information for fixed strategies
+    // Get pathogen information
     let pathogen = null;
-    if (strategy === 'log_fixed' || strategy === 'linear_fixed') {
-        // Try to get pathogen from current analysis results
-        if (window.currentAnalysisResults) {
-            const resultsToCheck = window.currentAnalysisResults.individual_results || window.currentAnalysisResults;
-            const wellKeys = Object.keys(resultsToCheck);
-            for (const wellKey of wellKeys) {
-                const well = resultsToCheck[wellKey];
-                if (well && well.fluorophore === channel && well.test_code) {
-                    pathogen = well.test_code;
-                    break;
-                }
+    if (window.currentAnalysisResults) {
+        const resultsToCheck = window.currentAnalysisResults.individual_results || window.currentAnalysisResults;
+        const wellKeys = Object.keys(resultsToCheck);
+        for (const wellKey of wellKeys) {
+            const well = resultsToCheck[wellKey];
+            if (well && well.fluorophore === channel && well.test_code) {
+                pathogen = well.test_code;
+                break;
             }
         }
-        // Default pathogen for fixed strategies if none found
-        if (!pathogen) {
-            pathogen = 'BVPanelPCR1';
-        }
-        console.log(`🔍 THRESHOLD-FIXED - Using pathogen: ${pathogen} for ${strategy} strategy`);
     }
+    if (!pathogen) pathogen = 'BVPanelPCR1';
     
     // Get L and B parameters for log strategies that need them
     let L = 0, B = baseline;
@@ -722,7 +783,6 @@ function calculateStableChannelThreshold(channel, scale) {
     console.warn(`❌ THRESHOLD-FAIL - No valid threshold calculated for ${channel}[${scale}] with strategy ${strategy}`);
     return null;
 }
-
 // Expose globally
 // Expose per-channel and per-well threshold calculation functions globally
 window.calculateChannelThresholdPerChannel = calculateChannelThreshold; // (channel, scale)
