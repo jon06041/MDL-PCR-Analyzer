@@ -344,7 +344,7 @@ function updateAllChannelThresholds() {
     });
     
     // Add new threshold annotations for visible channels
-    const currentScale = window.currentScaleMode || 'linear';
+    const currentScale = window.currentScaleMode;
     Array.from(visibleChannels).forEach(channel => {
         const threshold = getCurrentChannelThreshold(channel, currentScale);
         if (threshold !== null && threshold !== undefined && !isNaN(threshold)) {
@@ -428,7 +428,7 @@ function updateSingleChannelThreshold(fluorophore) {
     });
     
     // Add new threshold annotation for this specific channel
-    const currentScale = window.currentScaleMode || 'linear';
+    const currentScale = window.currentScaleMode;
     const threshold = getCurrentChannelThreshold(fluorophore, currentScale);
     
     if (threshold !== null && threshold !== undefined && !isNaN(threshold)) {
@@ -459,13 +459,13 @@ leave: function(ctx) {
         onDragEnd: function(e) {
             const newY = e?.annotation?.yMin;
             if (typeof newY === 'number' && !isNaN(newY)) {
-                setChannelThreshold(fluorophore, window.currentScaleMode || 'linear', newY);
+                setChannelThreshold(fluorophore, window.currentScaleMode, newY);
                 const thresholdInput = document.getElementById('thresholdInput');
                 if (thresholdInput && (window.currentFluorophore === fluorophore || window.currentFluorophore === 'all')) {
                     thresholdInput.value = newY.toFixed(2);
                 }
                 updateSingleChannelThreshold(fluorophore);
-                console.log(`🔍 DRAG-END - Threshold for ${fluorophore} (${window.currentScaleMode || 'linear'}) set to ${newY}`);
+                console.log(`🔍 DRAG-END - Threshold for ${fluorophore} (${window.currentScaleMode}) set to ${newY}`);
             } else {
                 console.warn('🔍 DRAG-END - Invalid newY value:', newY);
             }
@@ -657,10 +657,10 @@ function updateThresholdInputForCurrentScale() {
     }
     
     if (thresholdInput && channel && window.stableChannelThresholds && window.stableChannelThresholds[channel]) {
-        const threshold = window.stableChannelThresholds[channel][window.currentScaleMode || 'linear'];
+        const threshold = window.stableChannelThresholds[channel][window.currentScaleMode];
         if (threshold !== null && threshold !== undefined) {
             thresholdInput.value = threshold.toFixed(2);
-            console.log(`🔍 THRESHOLD-INPUT-UPDATE - Set input to ${threshold.toFixed(2)} for ${channel} ${window.currentScaleMode || 'linear'}`);
+            console.log(`🔍 THRESHOLD-INPUT-UPDATE - Set input to ${threshold.toFixed(2)} for ${channel} ${window.currentScaleMode}`);
         }
     }
 }
@@ -730,7 +730,7 @@ function setThresholdControls(value, updateChart = true) {
         console.warn('No channel selected or detected!');
         return;
     }
-    const scale = window.currentScaleMode || 'linear';
+    const scale = window.currentScaleMode;
     if (!window.userSetThresholds) window.userSetThresholds = {};
     if (!window.userSetThresholds[channel]) window.userSetThresholds[channel] = {};
     window.userSetThresholds[channel][scale] = numValue;
@@ -743,7 +743,7 @@ function restoreAutoThreshold(channel) {
         return;
     }
     
-    const scale = window.currentScaleMode || 'linear';
+    const scale = window.currentScaleMode;
     const autoValue = window.calculateStableChannelThreshold ? window.calculateStableChannelThreshold(channel, scale) : null;
     
     if (autoValue !== null && autoValue !== undefined) {
@@ -855,7 +855,7 @@ function initializeChannelThresholds() {
 function getCurrentChannelThreshold(channel, scale = null) {
     // Ensure global threshold object is always initialized
     if (!window.stableChannelThresholds) window.stableChannelThresholds = {};
-    if (!scale) scale = window.currentScaleMode || 'linear';
+    if (!scale) scale = window.currentScaleMode;
     
     // Load from storage if not in memory
     if (!window.stableChannelThresholds[channel] && sessionStorage.getItem('stableChannelThresholds')) {
@@ -887,7 +887,7 @@ function updateThresholdInputForCurrentScale() {
     if (!thresholdInput) return;
     
     const channel = window.currentFluorophore;
-    const scale = window.currentScaleMode || 'linear';
+    const scale = window.currentScaleMode;
     
     console.log(`🔍 UPDATE-INPUT - Channel: ${channel}, Scale: ${scale}`);
     
@@ -920,7 +920,7 @@ function updateThresholdInputForCurrentScale() {
 }
 
 function createThresholdAnnotation(threshold, fluorophore, color = 'red', index = 0) {
-    const currentScaleMode = window.currentScaleMode || 'linear';
+    const currentScaleMode = window.currentScaleMode;
     const currentLogMin = window.currentLogMin || 0.1;
     
     const adjustedThreshold = currentScaleMode === 'log' ? 
@@ -1008,8 +1008,8 @@ function initializeManualThresholdControls() {
         // Function to handle manual threshold changes
         function handleManualThresholdChange() {
             const channel = window.currentFluorophore;
-            // FIXED: Get current scale properly from both sources
-            const scale = window.currentScaleMode || (typeof currentScaleMode !== 'undefined' ? currentScaleMode : 'linear');
+            // DYNAMIC ONLY: Get current scale from window.currentScaleMode (set by toggleScale)
+            const scale = window.currentScaleMode;
             const value = parseFloat(thresholdInput.value);
             
             console.log(`🔍 MANUAL-THRESHOLD-DEBUG - Channel: ${channel}, Scale: ${scale}, Value: ${value}`);
@@ -1081,7 +1081,9 @@ async function sendManualThresholdToBackend(channel, scale, value) {
             session_id: window.currentSessionId || null
         };
         
-        const response = await fetch('/threshold/update', {
+        console.log(`🔍 BACKEND-THRESHOLD - Sending manual threshold:`, payload);
+        
+        const response = await fetch('/threshold/manual', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -1089,19 +1091,41 @@ async function sendManualThresholdToBackend(channel, scale, value) {
         
         if (response.ok) {
             const result = await response.json();
+            console.log(`🔍 BACKEND-THRESHOLD - Backend response:`, result);
+            
             if (result.success && result.updated_results) {
                 // Update frontend with backend-calculated CQJ values
                 Object.assign(window.currentAnalysisResults.individual_results, result.updated_results);
+                
+                // Update results table if available
                 if (typeof populateResultsTable === 'function') {
                     populateResultsTable(window.currentAnalysisResults.individual_results);
                 }
+                
+                console.log(`✅ BACKEND-THRESHOLD - Updated ${result.recalculated_wells || 0} wells with new CQJ/CalcJ values`);
+                
+                // Trigger chart update to reflect new calculations
+                if (typeof updateChartForNewData === 'function') {
+                    updateChartForNewData();
+                }
+                
+                return result;
+            } else if (result.success) {
+                console.log(`✅ BACKEND-THRESHOLD - Manual threshold acknowledged by backend`);
+                return result;
+            } else {
+                console.warn(`⚠️ BACKEND-THRESHOLD - Backend returned success=false:`, result);
             }
+        } else {
+            console.warn(`⚠️ BACKEND-THRESHOLD - HTTP ${response.status}: ${response.statusText}`);
         }
     } catch (error) {
         console.warn(`🔍 MANUAL-THRESHOLD-BACKEND - Backend update failed, using frontend fallback:`, error);
         // Fallback to frontend recalculation
         if (window.currentAnalysisResults) {
-            if (window.recalculateCQJValuesForManualThreshold) window.recalculateCQJValuesForManualThreshold();
+            if (window.recalculateCQJValuesForManualThreshold) {
+                window.recalculateCQJValuesForManualThreshold();
+            }
         }
     }
 }
@@ -1174,10 +1198,10 @@ function populateThresholdStrategyDropdown() {
     
     select.innerHTML = '';
     
-    // FIXED: Get current scale mode properly from both sources
-    const scale = window.currentScaleMode || (typeof currentScaleMode !== 'undefined' ? currentScaleMode : 'linear');
+    // DYNAMIC ONLY: Get current scale mode from window.currentScaleMode (set by toggleScale)
+    const scale = window.currentScaleMode;
     
-    console.log(`🔍 DROPDOWN-DEBUG - Scale: ${scale}, window.currentScaleMode: ${window.currentScaleMode}, currentScaleMode: ${typeof currentScaleMode !== 'undefined' ? currentScaleMode : 'undefined'}`);
+    console.log(`🔍 DROPDOWN-DEBUG - Scale: ${scale}, window.currentScaleMode: ${window.currentScaleMode}`);
     console.log(`🔍 DROPDOWN-DEBUG - window.LOG_THRESHOLD_STRATEGIES: ${typeof window.LOG_THRESHOLD_STRATEGIES}, window.LINEAR_THRESHOLD_STRATEGIES: ${typeof window.LINEAR_THRESHOLD_STRATEGIES}`);
     
     // Use the appropriate strategies from threshold_strategies.js
@@ -1259,7 +1283,7 @@ function applyThresholdStrategy(strategy) {
     console.log(`🔍 APPLY-STRATEGY - Applying threshold strategy: ${strategy}`);
     
     const currentChannel = window.currentFluorophore;
-    const currentScale = window.currentScaleMode || 'linear';
+    const currentScale = window.currentScaleMode;
     
     if (!currentChannel || currentChannel === 'all') {
         console.warn('🔍 APPLY-STRATEGY - No specific channel selected, applying to all channels');
@@ -1315,112 +1339,8 @@ function applyThresholdStrategy(strategy) {
 }
 
 /**
- * Apply threshold strategy using threshold_strategies.js with proper log scale integration
- * This function ensures threshold strategies are applied with log scale calculations
- * for consistent backend CQJ/CalcJ processing
+ * End Strategy Integration Functions
  */
-function applyThresholdStrategy(strategy, analysisResults = null) {
-    console.log(`🔍 STRATEGY-INTEGRATION - Applying strategy "${strategy}" with log scale calculations`);
-    
-    try {
-        // Use current analysis results if not provided
-        const results = analysisResults || window.currentAnalysisResults?.individual_results || window.currentAnalysisResults;
-        
-        if (!results || Object.keys(results).length === 0) {
-            console.warn(`🔍 STRATEGY-INTEGRATION - No analysis data available for strategy "${strategy}"`);
-            return false;
-        }
-        
-        // Always use log scale for threshold calculations (required for backend CQJ/CalcJ)
-        const scale = 'log';
-        
-        // Use threshold_strategies.js integration if available
-        if (typeof window.calculateThresholdForStrategy === 'function') {
-            const updatedThresholds = window.calculateThresholdForStrategy(strategy, results, scale);
-            
-            if (updatedThresholds && Object.keys(updatedThresholds).length > 0) {
-                console.log(`🔍 STRATEGY-INTEGRATION - LOG thresholds calculated:`, updatedThresholds);
-                
-                // Apply the calculated thresholds to global storage
-                Object.keys(updatedThresholds).forEach(channel => {
-                    if (updatedThresholds[channel] && updatedThresholds[channel].log) {
-                        setChannelThreshold(channel, 'log', updatedThresholds[channel].log);
-                        console.log(`🔍 LOG-STRATEGY-APPLIED - ${channel}: ${updatedThresholds[channel].log}`);
-                    }
-                });
-                
-                // Update chart annotations and UI
-                updateAllChannelThresholds();
-                updateThresholdInputForCurrentScale();
-                
-                return true;
-            }
-        }
-        
-        // Fallback: Apply strategy per channel manually
-        return applyStrategyPerChannelFallback(strategy, results, scale);
-        
-    } catch (error) {
-        console.error(`🔍 STRATEGY-INTEGRATION - Error applying strategy "${strategy}":`, error);
-        return false;
-    }
-}
-
-/**
- * Fallback strategy application per channel
- */
-function applyStrategyPerChannelFallback(strategy, results, scale) {
-    console.log(`🔍 STRATEGY-FALLBACK - Applying strategy "${strategy}" per channel with fallback method`);
-    
-    try {
-        // Get unique channels from results
-        const channels = new Set();
-        Object.keys(results).forEach(wellKey => {
-            const well = results[wellKey];
-            if (well && well.fluorophore) {
-                channels.add(well.fluorophore);
-            }
-        });
-        
-        if (channels.size === 0) {
-            console.warn(`🔍 STRATEGY-FALLBACK - No channels found in results`);
-            return false;
-        }
-        
-        let appliedCount = 0;
-        
-        // Apply strategy to each channel
-        channels.forEach(channel => {
-            try {
-                // Calculate threshold for this channel using log scale
-                const threshold = calculateChannelThreshold(channel, scale);
-                
-                if (threshold && typeof threshold === 'number' && threshold > 0) {
-                    setChannelThreshold(channel, scale, threshold);
-                    console.log(`🔍 STRATEGY-FALLBACK - Applied ${strategy} to ${channel}: ${threshold}`);
-                    appliedCount++;
-                }
-            } catch (channelError) {
-                console.warn(`🔍 STRATEGY-FALLBACK - Failed to apply strategy to ${channel}:`, channelError);
-            }
-        });
-        
-        if (appliedCount > 0) {
-            // Update UI after successful applications
-            updateAllChannelThresholds();
-            updateThresholdInputForCurrentScale();
-            return true;
-        }
-        
-        return false;
-        
-    } catch (error) {
-        console.error(`🔍 STRATEGY-FALLBACK - Fallback strategy application failed:`, error);
-        return false;
-    }
-}
-
-// --- End Strategy Integration Functions ---
 
 // --- End Additional Functions ---
 

@@ -11,6 +11,8 @@ from qpcr_analyzer import process_csv_data, validate_csv_structure
 from models import db, AnalysisSession, WellResult, ExperimentStatistics
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.exc import OperationalError, IntegrityError, DatabaseError
+from threshold_backend import create_threshold_routes
+from cqj_calcj_utils import calculate_cqj_calcj_for_well
 
 def safe_json_dumps(value, default=None):
     """Helper function to safely serialize to JSON, avoiding double-encoding"""
@@ -527,6 +529,9 @@ with app.app_context():
         print(f"SQLite database initialized at: {sqlite_path}")
     else:
         print("MySQL database tables initialized")
+
+# Initialize threshold routes
+create_threshold_routes(app)
 
 @app.route('/')
 def index():
