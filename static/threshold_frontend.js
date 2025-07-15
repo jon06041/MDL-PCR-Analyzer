@@ -44,186 +44,93 @@ function calculateChannelThreshold(channel, scale) {
     
     console.log(`🔍 THRESHOLD-CALC - Found ${channelWells.length} wells for channel ${channel} (using ALL wells in dataset)`);
     
-    // Use threshold_strategies.js for proper log scale calculation
-    if (scale === 'log' && typeof window.calculateThreshold === 'function') {
-        return calculateLogThresholdUsingStrategies(channelWells, channel);
-    } else {
-        return calculateLinearThreshold(channelWells, channel);
-    }
-}
-
-/**
- * Calculate log threshold using threshold_strategies.js default log strategy
- * This ensures consistent log scale calculations for backend CQJ/CalcJ
- */
-function calculateLogThresholdUsingStrategies(channelWells, channel) {
-    console.log(`🔍 LOG-THRESHOLD-STRATEGIES - Using threshold_strategies.js for ${channel}`);
-    
-    try {
-        // Get first well for baseline parameters
-        const firstWell = channelWells[0];
-        if (!firstWell) return 10;
+    // Use ONLY threshold_strategies.js - no fallbacks
+    if (typeof window.calculateThreshold === 'function') {
+        const strategy = getSelectedThresholdStrategy() || 'default';
         
-        // Prepare parameters for strategy calculation
-        const params = {
-            fluorophore: channel,
-            pathogen: firstWell.pathogen || firstWell.test_code,
-            L: firstWell.amplitude || calculateAmplitudeFromWells(channelWells),
-            B: firstWell.baseline || calculateBaselineFromWells(channelWells),
-            baseline: firstWell.baseline || calculateBaselineFromWells(channelWells),
-            baseline_std: firstWell.baseline_std || (firstWell.baseline ? firstWell.baseline * 0.1 : 10)
-        };
+        // Calculate baseline statistics from control wells
+        let baseline = 0, baseline_std = 1;
+        let allRfus = [];
         
-        console.log(`🔍 LOG-THRESHOLD-STRATEGIES - Parameters for ${channel}:`, params);
-        
-        // Use the default log strategy from threshold_strategies.js
-        const threshold = window.calculateThreshold('default', params, 'log');
-        
-        if (threshold && typeof threshold === 'number' && threshold > 0) {
-            console.log(`🔍 LOG-THRESHOLD-STRATEGIES - Calculated threshold for ${channel}: ${threshold}`);
-            return threshold;
-        } else {
-            console.warn(`🔍 LOG-THRESHOLD-STRATEGIES - Invalid threshold calculated, using fallback`);
-            return calculateLogThresholdFallback(channelWells, channel);
-        }
-        
-    } catch (error) {
-        console.error(`🔍 LOG-THRESHOLD-STRATEGIES - Error calculating threshold:`, error);
-        return calculateLogThresholdFallback(channelWells, channel);
-    }
-}
-
-/**
- * Calculate amplitude from wells data
- */
-function calculateAmplitudeFromWells(wells) {
-    const amplitudes = wells
-        .map(well => well.amplitude)
-        .filter(amp => amp && typeof amp === 'number');
-    
-    if (amplitudes.length === 0) return 1000; // Default fallback
-    
-    return amplitudes.reduce((sum, amp) => sum + amp, 0) / amplitudes.length;
-}
-
-/**
- * Calculate baseline from wells data
- */
-function calculateBaselineFromWells(wells) {
-    const baselines = wells
-        .map(well => well.baseline)
-        .filter(baseline => baseline && typeof baseline === 'number');
-    
-    if (baselines.length === 0) return 50; // Default fallback
-    
-    return baselines.reduce((sum, baseline) => sum + baseline, 0) / baselines.length;
-}
-
-/**
- * Fallback log threshold calculation if strategies fail
- */
-function calculateLogThresholdFallback(channelWells, channel) {
-    console.log(`🔍 LOG-THRESHOLD-FALLBACK - Using fallback calculation for ${channel}`);
-    
-    // Collect amplification values from cycles 1-5 across all wells in this channel
-    const cycles1to5Values = [];
-    
-    channelWells.forEach(well => {
-        if (well.raw_data && Array.isArray(well.raw_data)) {
-            // Take first 5 cycles (indices 0-4)
-            const earlyCycles = well.raw_data.slice(0, 5);
-            earlyCycles.forEach(cycleData => {
-                if (cycleData && typeof cycleData.y === 'number' && cycleData.y > 0) {
-                    cycles1to5Values.push(cycleData.y);
-                }
-            });
-        } else if (well.raw_rfu) {
-            // Try to parse raw_rfu data
-            try {
-                let rfuValues = typeof well.raw_rfu === 'string' ? JSON.parse(well.raw_rfu) : well.raw_rfu;
-                if (Array.isArray(rfuValues)) {
-                    // Take first 5 values
-                    const earlyCycles = rfuValues.slice(0, 5);
-                    earlyCycles.forEach(value => {
-                        if (typeof value === 'number' && value > 0) {
-                            cycles1to5Values.push(value);
-                        }
-                    });
-                }
-            } catch (e) {
-                console.warn('🔍 LOG-THRESHOLD-FALLBACK - Error parsing raw_rfu for well:', well.well_id);
+        if (window.channelControlWells && window.channelControlWells[channel]) {
+            const controls = window.channelControlWells[channel];
+            if (controls && controls.NTC && controls.NTC.length > 0) {
+                controls.NTC.forEach(well => {
+                    let rfu = well.raw_rfu;
+                    if (typeof rfu === 'string') try { rfu = JSON.parse(rfu); } catch(e){}
+                    if (Array.isArray(rfu)) allRfus.push(...rfu.slice(0,5));
+                });
             }
         }
-    });
-    
-    if (cycles1to5Values.length === 0) {
-        console.warn(`🔍 LOG-THRESHOLD-FALLBACK - No early cycle data found for channel: ${channel}`);
-        return 10; // Return minimal fallback
-    }
-    
-    // Calculate standard deviation of cycles 1-5
-    const mean = cycles1to5Values.reduce((sum, val) => sum + val, 0) / cycles1to5Values.length;
-    const variance = cycles1to5Values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / cycles1to5Values.length;
-    const stdDev = Math.sqrt(variance);
-    
-    // Simple threshold calculation: mean + 10 * std dev (similar to baseline + 10*std approach)
-    const threshold = mean + (10 * stdDev);
-    
-    console.log(`🔍 LOG-THRESHOLD-FALLBACK - Channel ${channel}: mean=${mean.toFixed(2)}, stdDev=${stdDev.toFixed(2)}, threshold=${threshold.toFixed(2)}`);
-    
-    return Math.max(threshold, 10); // Ensure minimum threshold of 10
-}
-
-function calculateLinearThreshold(channelWells, channel) {
-    console.log(`🔍 LINEAR-THRESHOLD - Calculating linear threshold for ${channelWells.length} wells in channel: ${channel}`);
-    
-    // Use NTC/NEG/CONTROL wells if available, otherwise use all wells
-    let controlWells = channelWells.filter(well =>
-        well.sample_name && (
-            well.sample_name.toLowerCase().includes('ntc') ||
-            well.sample_name.toLowerCase().includes('neg') ||
-            well.sample_name.toLowerCase().includes('control') ||
-            /\b(ctrl|positive|h[0-9]|m[0-9]|l[0-9])\b/i.test(well.sample_name)
-        )
-    );
-
-    if (controlWells.length === 0) {
-        console.warn(`⚠️ No NTC/NEG/CONTROL wells found for channel ${channel}. Using ALL wells as controls for threshold calculation.`);
-        controlWells = channelWells;
-    }
-
-    console.log(`🔍 LINEAR-THRESHOLD - Using ${controlWells.length} control wells for channel: ${channel}`);
-    
-    // Calculate inflection point thresholds: RFU = L/2 + B
-    const inflectionThresholds = [];
-    
-    controlWells.forEach(well => {
-        if (well.amplitude && well.baseline && 
-            typeof well.amplitude === 'number' && typeof well.baseline === 'number') {
-            
-            // Inflection point: L/2 + B
-            const inflectionPoint = (well.amplitude / 2) + well.baseline;
-            inflectionThresholds.push(inflectionPoint);
-            
-            console.log(`🔍 LINEAR-THRESHOLD - Well: ${well.well_id}, L: ${well.amplitude.toFixed(2)}, B: ${well.baseline.toFixed(2)}, Inflection: ${inflectionPoint.toFixed(2)}`);
+        
+        if (allRfus.length > 0) {
+            baseline = allRfus.reduce((a,b)=>a+b,0)/allRfus.length;
+            const mean = baseline;
+            const variance = allRfus.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / allRfus.length;
+            baseline_std = Math.sqrt(variance);
         }
-    });
-    
-    if (inflectionThresholds.length === 0) {
-        console.warn(`🔍 LINEAR-THRESHOLD - No valid sigmoid parameters found for channel: ${channel}`);
-        return null; // No fallback - return null if no data
+        
+        // Get pathogen information for fixed strategies
+        let pathogen = null;
+        if (strategy === 'log_fixed' || strategy === 'linear_fixed') {
+            if (window.currentAnalysisResults) {
+                const resultsToCheck = window.currentAnalysisResults.individual_results || window.currentAnalysisResults;
+                const wellKeys = Object.keys(resultsToCheck);
+                for (const wellKey of wellKeys) {
+                    const well = resultsToCheck[wellKey];
+                    if (well && well.fluorophore === channel && well.test_code) {
+                        pathogen = well.test_code;
+                        break;
+                    }
+                }
+            }
+            if (!pathogen) pathogen = 'BVPanelPCR1';
+        }
+        
+        // Get L and B parameters for strategies that need them
+        let L = 0, B = baseline;
+        if (strategy === 'default' || strategy.includes('exponential')) {
+            if (channelWells.length > 0) {
+                const amplitudes = channelWells.filter(w => w.amplitude && w.amplitude > 0).map(w => w.amplitude);
+                const baselines = channelWells.filter(w => w.baseline !== undefined).map(w => w.baseline);
+                
+                if (amplitudes.length > 0) L = amplitudes.reduce((a,b) => a+b, 0) / amplitudes.length;
+                if (baselines.length > 0) B = baselines.reduce((a,b) => a+b, 0) / baselines.length;
+            }
+        }
+        
+        const params = {
+            baseline,
+            baseline_std,
+            N: 10,
+            pathogen,
+            fluorophore: channel,
+            channel: channel,
+            L: L,
+            B: B,
+            fixed_value: null
+        };
+        
+        try {
+            const threshold = window.calculateThreshold(strategy, params, scale);
+            if (threshold !== null && !isNaN(threshold) && threshold > 0) {
+                console.log(`✅ THRESHOLD-CALC - ${channel}[${scale}]: ${threshold.toFixed(2)} (strategy: ${strategy})`);
+                return threshold;
+            }
+        } catch (error) {
+            console.error(`❌ THRESHOLD-ERROR - Strategy calculation failed:`, error);
+        }
     }
     
-    // Use median of inflection points for robustness
-    inflectionThresholds.sort((a, b) => a - b);
-    const median = inflectionThresholds.length % 2 === 0
-        ? (inflectionThresholds[inflectionThresholds.length / 2 - 1] + inflectionThresholds[inflectionThresholds.length / 2]) / 2
-        : inflectionThresholds[Math.floor(inflectionThresholds.length / 2)];
-    
-    console.log(`🔍 LINEAR-THRESHOLD - Channel: ${channel}, Inflection points: [${inflectionThresholds.map(t => t.toFixed(2)).join(', ')}], Median: ${median.toFixed(2)}`);
-    
-    return median; // Return exact calculated value, no minimum
+    console.error(`❌ THRESHOLD-FAIL - No valid threshold calculated for ${channel}[${scale}]`);
+    return null;
 }
+
+
+
+
+
+
 
 // --- Utility Functions ---
 function safeSetItem(storage, key, value) {
@@ -1363,14 +1270,29 @@ function applyThresholdStrategy(strategy) {
 }
 
 /**
+ * Apply strategy per channel fallback function
+ */
+function applyStrategyPerChannelFallback(channel, strategy, scale) {
+    console.log(`🔍 STRATEGY-FALLBACK - Applying ${strategy} to ${channel} on ${scale} scale`);
+    
+    // Calculate threshold using strategy
+    const threshold = calculateStableChannelThreshold(channel, scale);
+    if (threshold !== null && threshold !== undefined) {
+        setChannelThreshold(channel, scale, threshold);
+        console.log(`🔍 STRATEGY-FALLBACK - Set ${channel} ${scale} threshold: ${threshold.toFixed(2)}`);
+        return threshold;
+    } else {
+        console.warn(`🔍 STRATEGY-FALLBACK - Failed to calculate threshold for ${channel} using ${strategy}`);
+        return null;
+    }
+}
+
+/**
  * End Strategy Integration Functions
  */
 
 // --- End Additional Functions ---
 
-window.calculateLogThresholdUsingStrategies = calculateLogThresholdUsingStrategies;
-window.calculateLogThresholdFallback = calculateLogThresholdFallback;
-window.calculateLinearThreshold = calculateLinearThreshold;
 window.setChannelThreshold = setChannelThreshold;
 window.getChannelThreshold = getChannelThreshold;
 window.loadChannelThresholds = loadChannelThresholds;
@@ -1388,8 +1310,6 @@ window.getCurrentChannelThreshold = getCurrentChannelThreshold;
 window.createThresholdAnnotation = createThresholdAnnotation;
 window.getFluorophoreColor = getFluorophoreColor;
 window.attachAutoButtonHandler = attachAutoButtonHandler;
-window.calculateLogThresholdUsingStrategies = calculateLogThresholdUsingStrategies;
-window.calculateLogThresholdFallback = calculateLogThresholdFallback;
 window.initializeManualThresholdControls = initializeManualThresholdControls;
 window.sendManualThresholdToBackend = sendManualThresholdToBackend;
 window.updateChartThreshold = updateChartThreshold;
