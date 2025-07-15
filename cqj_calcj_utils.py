@@ -1,3 +1,38 @@
+"""
+CQJ/CalcJ calculation utilities for qPCR analysis
+"""
+
+from typing import List, Optional
+import numpy as np
+
+def calculate_cqj(rfu: List[float], cycles: List[float], threshold: float) -> Optional[float]:
+    """
+    Calculate the cycle at which RFU crosses the threshold (linear interpolation).
+    Skips first 5 cycles for baseline noise reduction.
+    """
+    start_cycle = 5
+    for i in range(start_cycle, len(rfu)):
+        if rfu[i] >= threshold:
+            if i == start_cycle:
+                return cycles[i]
+            prev_rfu = rfu[i - 1]
+            prev_cycle = cycles[i - 1]
+            if rfu[i] == prev_rfu:
+                return cycles[i]
+            # Linear interpolation
+            interpolated_cq = prev_cycle + (threshold - prev_rfu) * (cycles[i] - prev_cycle) / (rfu[i] - prev_rfu)
+            return interpolated_cq
+    return None
+
+def calculate_calcj(amplitude: float, threshold: float) -> Optional[float]:
+    """
+    Example CalcJ calculation: amplitude / threshold
+    """
+    if threshold <= 0:
+        return None
+    return amplitude / threshold
+
+# Add more CQJ/CalcJ related utilities as needed
 # cqj_calcj_utils.py
 """
 Utility functions to calculate CQ-J and Calc-J for a well given its data and a threshold.

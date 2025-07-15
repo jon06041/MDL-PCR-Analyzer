@@ -1,38 +1,11 @@
 // qPCR Analysis Script - Main Interface Logic
+// Ensure global analysis results variable is initialized
+window.currentAnalysisResults = null;
 // Uses threshold_strategies.js for threshold calculations
 // All threshold strategies should be defined in threshold_strategies.js
 
-// Simple CQJ calculation function - FIXED: Skip first 5 cycles and return null for negatives
-/*function calculateThresholdCrossing(rfuArray, cyclesArray, threshold) {
-    if (!rfuArray || !cyclesArray || rfuArray.length !== cyclesArray.length) return null;
-    
-    // CRITICAL FIX: Skip first 5 cycles for baseline noise reduction
-    const startCycle = 5; // Skip cycles 1-5 (indices 0-4)
-    
-    for (let i = startCycle; i < rfuArray.length; i++) {
-        const rfu = parseFloat(rfuArray[i]);
-        const cycle = parseFloat(cyclesArray[i]);
-        
-        if (rfu >= threshold) {
-            // If this is the first valid cycle that crosses threshold
-            if (i === startCycle) return cycle;
-            
-            const prevRfu = parseFloat(rfuArray[i - 1]);
-            const prevCycle = parseFloat(cyclesArray[i - 1]);
-            
-            if (rfu === prevRfu) return cycle;
-            
-            // Linear interpolation between previous and current point
-            const interpolatedCq = prevCycle + (threshold - prevRfu) * (cycle - prevCycle) / (rfu - prevRfu);
-            console.log(`[CQJ-DEBUG] Threshold crossing found at cycle ${interpolatedCq.toFixed(2)} (between cycles ${prevCycle}-${cycle}, RFU: ${prevRfu.toFixed(2)}-${rfu.toFixed(2)}, threshold: ${threshold.toFixed(2)})`);
-            return interpolatedCq;
-        }
-    }
-    
-    // No threshold crossing found - return null (will be displayed as N/A)
-    console.log(`[CQJ-DEBUG] No threshold crossing found (threshold: ${threshold.toFixed(2)}, max RFU: ${Math.max(...rfuArray.map(r => parseFloat(r))).toFixed(2)})`);
-    return null;
-}*/
+// CQJ/CALCJ FUNCTIONS MOVED TO cqj_calcj_utils.js
+// Function calculateThresholdCrossing moved to cqj_calcj_utils.js
 
 // Debug: Check if CQJ/CalcJ functions are available
 document.addEventListener('DOMContentLoaded', function() {
@@ -150,31 +123,8 @@ ensureAnnotationPluginRegistered();
 // Add this near your other globals:
 if (!window.userSetThresholds) window.userSetThresholds = {}; // { channel: { scale: value } }
 
-// Update setThresholdControls to store the value:
-function setThresholdControls(value, updateChart = true) {
-    const numValue = Number(value);
-    if (thresholdInput && thresholdInput.value != numValue) thresholdInput.value = numValue;
-    if (thresholdSlider && Number(thresholdSlider.value) !== numValue) thresholdSlider.value = numValue;
-
-    // Use the currently selected channel, never default to HEX
-    let channel = window.currentFluorophore;
-    if (!channel || channel === 'all') {
-        // Try to extract from chart datasets
-        const datasets = window.amplificationChart?.data?.datasets;
-        if (datasets && datasets.length > 0) {
-            const match = datasets[0].label?.match(/\(([^)]+)\)/);
-            if (match && match[1] !== 'Unknown') channel = match[1];
-        }
-    }
-    if (!channel) {
-        console.warn('No channel selected or detected!');
-        return;
-    }
-    const scale = currentScaleMode || 'linear';
-    if (!window.userSetThresholds[channel]) window.userSetThresholds[channel] = {};
-    window.userSetThresholds[channel][scale] = numValue;
-    if (updateChart) updateChartThreshold(numValue);
-}
+// THRESHOLD FUNCTIONS MOVED TO threshold_frontend.js
+// All threshold-related functions are now centralized in threshold_frontend.js
 // === DIAGNOSTICS FOR THRESHOLD/UI/CHART FEATURES ===
 (function diagnostics() {
     // Check Chart.js annotation plugin registration
@@ -256,7 +206,7 @@ function setThresholdControls(value, updateChart = true) {
 
 // --- Thresholds ---
 // Store per-channel, per-scale thresholds: { [channel]: { linear: value, log: value } }
-let channelThresholds = {};
+// Removed duplicate declaration of channelThresholds
 // Store current scale mode: 'linear' or 'log'
 let currentScaleMode = 'linear';
 window.currentScaleMode = currentScaleMode;  // Ensure window variable is accessible globally
@@ -500,7 +450,7 @@ function toggleBaselineFlattening() {
  * Only flattens non-S-curve wells while preserving positive amplification curves
  */
 function refreshChartWithBaseline() {
-    if (!window.amplificationChart || !currentAnalysisResults) return;
+if (!window.amplificationChart || !window.currentAnalysisResults) return;
     
     // Get current chart datasets
     const datasets = window.amplificationChart.data.datasets;
@@ -523,10 +473,10 @@ function refreshChartWithBaseline() {
             
             // Extract well key from dataset label to get backend S-curve data
             let wellData = null;
-            if (currentAnalysisResults && currentAnalysisResults.individual_results) {
+            if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
                 // Try to find matching well data for this dataset
-                const wellKey = Object.keys(currentAnalysisResults.individual_results).find(key => {
-                    const result = currentAnalysisResults.individual_results[key];
+                const wellKey = Object.keys(window.currentAnalysisResults.individual_results).find(key => {
+                    const result = window.currentAnalysisResults.individual_results[key];
                     // Match by well ID and fluorophore in the dataset label
                     if (dataset.label.includes(result.well_id || key.split('_')[0])) {
                         if (result.fluorophore && dataset.label.includes(result.fluorophore)) {
@@ -537,7 +487,7 @@ function refreshChartWithBaseline() {
                 });
                 
                 if (wellKey) {
-                    wellData = currentAnalysisResults.individual_results[wellKey];
+                    wellData = window.currentAnalysisResults.individual_results[wellKey];
                 }
             }
             
@@ -709,11 +659,15 @@ document.addEventListener('DOMContentLoaded', function() {
         handleThresholdStrategyChange();
     } else {
         // For manual strategy, just update the input box to current threshold
-        updateThresholdInputForCurrentScale();
+        if (window.updateThresholdInput) {
+            window.updateThresholdInput();
+        } else {
+            window.updateThresholdInputForCurrentScale();
+        }
     }
 }*/
 
-/*function getSelectedThresholdStrategy() {
+function getSelectedThresholdStrategy() {
     const select = document.getElementById('thresholdStrategySelect');
     if (select && select.value) {
         window.selectedThresholdStrategy = select.value;
@@ -722,165 +676,15 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     console.warn(`🔍 STRATEGY-DEBUG - No strategy selected, returning null`);
     return null;
-}*/
+}
+
+// THRESHOLD STRATEGY DROPDOWN FUNCTIONS MOVED TO threshold_frontend.js
+// All threshold strategy dropdown functionality is now handled in threshold_frontend.js
 
 // Removed calculateStrategySpecificThreshold - using threshold_strategies.js calculateThreshold instead
 
-/**
- * Recalculate CQJ/CalcJ values for all wells with current thresholds
- * This version works with any threshold strategy by using current threshold values
- */
-/*function recalculateCQJValues() {
-    console.log('🔍 CQJ-RECALC - Recalculating CQJ/CalcJ values with current thresholds');
-    
-    if (!window.currentAnalysisResults) {
-        console.warn('❌ CQJ-RECALC - No analysis results available');
-        return;
-    }
-    
-    // Get the results structure
-    let resultsObj = null;
-    if (window.currentAnalysisResults.individual_results && typeof window.currentAnalysisResults.individual_results === 'object') {
-        resultsObj = window.currentAnalysisResults.individual_results;
-    } else if (typeof window.currentAnalysisResults === 'object' && !Array.isArray(window.currentAnalysisResults)) {
-        resultsObj = window.currentAnalysisResults;
-    }
-    
-    if (!resultsObj) {
-        console.warn('❌ CQJ-RECALC - Could not find results object');
-        return;
-    }
-    
-    const currentScale = window.currentScaleMode || 'linear';
-    
-    if (!window.stableChannelThresholds) {
-        console.warn('❌ CQJ-RECALC - No threshold data available');
-        return;
-    }
-    
-    console.log(`🔍 CQJ-RECALC - Using thresholds for ${currentScale} scale:`, window.stableChannelThresholds);
-    
-    // Recalculate CQJ for all wells
-    Object.keys(resultsObj).forEach(wellKey => {
-        const well = resultsObj[wellKey];
-        const wellChannel = well.fluorophore;
-        
-        if (wellChannel && window.stableChannelThresholds[wellChannel] && window.stableChannelThresholds[wellChannel][currentScale]) {
-            const threshold = window.stableChannelThresholds[wellChannel][currentScale];
-            
-            const rfuData = well.rfu || well.raw_rfu;
-            const cyclesData = well.cycles || well.raw_cycles;
-            
-            let rfuArray = Array.isArray(rfuData) ? rfuData : (typeof rfuData === 'string' ? JSON.parse(rfuData) : []);
-            let cyclesArray = Array.isArray(cyclesData) ? cyclesData : (typeof cyclesData === 'string' ? JSON.parse(cyclesData) : []);
-            
-            // Ensure arrays are numbers
-            if (Array.isArray(rfuArray)) {
-                rfuArray = rfuArray.map(val => typeof val === 'string' ? parseFloat(val) : val);
-            }
-            if (Array.isArray(cyclesArray)) {
-                cyclesArray = cyclesArray.map(val => typeof val === 'string' ? parseFloat(val) : val);
-            }
-            
-            if (Array.isArray(rfuArray) && Array.isArray(cyclesArray) && rfuArray.length > 0) {
-                const oldCqjValue = well.cqj_value;
-                well.cqj_value = calculateThresholdCrossing(rfuArray, cyclesArray, threshold);
-                
-                // Update the CQJ object structure too
-                if (!well.cqj) well.cqj = {};
-                well.cqj[wellChannel] = well.cqj_value;
-                
-                console.log(`✅ CQJ-RECALC - ${wellKey} (${wellChannel}): ${oldCqjValue} → ${well.cqj_value} (threshold: ${threshold})`);
-            }
-        }
-    });
-    
-    // Update the results table to show new CQJ values
-    if (typeof displayResultsInTable === 'function') {
-        displayResultsInTable(resultsObj);
-    } else if (typeof populateResultsTable === 'function') {
-        populateResultsTable(resultsObj);
-    }
-    
-    console.log('🔍 CQJ-RECALC - CQJ recalculation complete');
-}*/
-
-/**
- * Recalculate CQJ/CalcJ values for all wells after manual threshold input
- * This version doesn't trigger strategy recalculation, just uses the manually set threshold
- */
-/*function recalculateCQJValuesForManualThreshold() {
-    console.log('🔍 MANUAL-THRESHOLD - Recalculating CQJ/CalcJ values after manual threshold input');
-    
-    if (!window.currentAnalysisResults) {
-        console.warn('❌ MANUAL-THRESHOLD - No analysis results available');
-        return;
-    }
-    
-    // Get the results structure
-    let resultsObj = null;
-    if (window.currentAnalysisResults.individual_results && typeof window.currentAnalysisResults.individual_results === 'object') {
-        resultsObj = window.currentAnalysisResults.individual_results;
-    } else if (typeof window.currentAnalysisResults === 'object' && !Array.isArray(window.currentAnalysisResults)) {
-        resultsObj = window.currentAnalysisResults;
-    }
-    
-    if (!resultsObj) {
-        console.warn('❌ MANUAL-THRESHOLD - Could not find results object');
-        return;
-    }
-    
-    const currentChannel = window.currentFluorophore;
-    const currentScale = window.currentScaleMode || 'linear';
-    
-    if (!currentChannel || !window.stableChannelThresholds || !window.stableChannelThresholds[currentChannel]) {
-        console.warn('❌ MANUAL-THRESHOLD - Missing channel or threshold data', {
-            channel: currentChannel,
-            scale: currentScale,
-            thresholds: window.stableChannelThresholds
-        });
-        return;
-    }
-    
-    const threshold = window.stableChannelThresholds[currentChannel][currentScale];
-    console.log(`🔍 MANUAL-THRESHOLD - Using threshold ${threshold} for channel ${currentChannel} (${currentScale} scale)`);
-    
-    // Recalculate CQJ for all wells with this channel
-    Object.keys(resultsObj).forEach(wellKey => {
-        const well = resultsObj[wellKey];
-        if (well.fluorophore === currentChannel) {
-            const rfuData = well.rfu || well.raw_rfu;
-            const cyclesData = well.cycles || well.raw_cycles;
-            
-            let rfuArray = Array.isArray(rfuData) ? rfuData : (typeof rfuData === 'string' ? JSON.parse(rfuData) : []);
-            let cyclesArray = Array.isArray(cyclesData) ? cyclesData : (typeof cyclesData === 'string' ? JSON.parse(cyclesData) : []);
-            
-            // Ensure arrays are numbers
-            if (Array.isArray(rfuArray)) {
-                rfuArray = rfuArray.map(val => typeof val === 'string' ? parseFloat(val) : val);
-            }
-            if (Array.isArray(cyclesArray)) {
-                cyclesArray = cyclesArray.map(val => typeof val === 'string' ? parseFloat(val) : val);
-            }
-            
-            if (Array.isArray(rfuArray) && Array.isArray(cyclesArray) && rfuArray.length > 0) {
-                const oldCqjValue = well.cqj_value;
-                well.cqj_value = calculateThresholdCrossing(rfuArray, cyclesArray, threshold);
-                
-                // Update the CQJ object structure too
-                if (!well.cqj) well.cqj = {};
-                well.cqj[currentChannel] = well.cqj_value;
-                
-                console.log(`✅ MANUAL-THRESHOLD-CQJ - ${wellKey}: ${oldCqjValue} → ${well.cqj_value} (manual threshold: ${threshold})`);
-            }
-        }
-    });
-    
-    // Update the results table to show new CQJ values
-    if (typeof displayResultsInTable === 'function') {
-        displayResultsInTable(resultsObj);
-    }
-}*/
+// CQJ/CALCJ FUNCTIONS MOVED TO cqj_calcj_utils.js
+// Functions recalculateCQJValues and recalculateCQJValuesForManualThreshold moved to cqj_calcj_utils.js
 
 async function handleThresholdStrategyChange() {
     // When the strategy changes, recalculate thresholds for all channels and both scales, then update the chart and CQ-J/Calc-J values
@@ -900,7 +704,7 @@ async function handleThresholdStrategyChange() {
             console.log('[CQJ/CalcJ][DEBUG] handleThresholdStrategyChange: Detected structure: flat well-keyed object');
             console.log('[CQJ/CalcJ][DEBUG] handleThresholdStrategyChange: well keys =', Object.keys(window.currentAnalysisResults));
         } else {
-            console.log('[CQJ/CalcJ][DEBUG] handleThresholdStrategyChange: Unknown or empty structure for currentAnalysisResults');
+            console.log('[CQJ/CalcJ][DEBUG] handleThresholdStrategyChange: Unknown or empty structure for window.currentAnalysisResults');
         }
     }
     const strategy = getSelectedThresholdStrategy();
@@ -910,7 +714,7 @@ async function handleThresholdStrategyChange() {
     if (strategy === 'manual') {
         console.log(`🔍 MANUAL-STRATEGY - Using existing manual thresholds, only recalculating CQJ values`);
         if (window.currentAnalysisResults) {
-            recalculateCQJValuesForManualThreshold();
+            if (window.recalculateCQJValuesForManualThreshold) window.recalculateCQJValuesForManualThreshold();
         }
         return; // Don't trigger backend calculation for manual strategy
     }
@@ -1118,16 +922,19 @@ async function handleThresholdStrategyChange() {
         }
     };
     
+    // Make updateThresholdInput globally available
+    window.updateThresholdInput = updateThresholdInput;
+    
     // Update immediately
     updateThresholdInput();
     
     // Update threshold chart lines
-    updateAllChannelThresholds();
+    if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
     
     // Also update after a short delay to ensure all DOM updates complete
     setTimeout(() => {
         updateThresholdInput();
-        updateAllChannelThresholds();
+        if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
     }, 100);
     // Recalculate CQJ and CalcJ for all wells using the proper threshold strategy
     let resultsObj = null;
@@ -1199,7 +1006,7 @@ async function handleThresholdStrategyChange() {
                 if (Array.isArray(rfuArray) && Array.isArray(cyclesArray) && rfuArray.length > 0 && cyclesArray.length > 0) {
                     try {
                         const oldCqjValue = well.cqj_value;
-                        well.cqj_value = calculateThresholdCrossing(rfuArray, cyclesArray, threshold);
+                        well.cqj_value = window.calculateThresholdCrossing(rfuArray, cyclesArray, threshold);
                         
                         const maxRfu = Math.max(...rfuArray);
                         if (well.cqj_value !== null) {
@@ -1387,21 +1194,21 @@ function preserveCurrentFilters() {
 /**
  * Send threshold strategy change to backend via AJAX
 /**
- * Apply threshold strategy locally using threshold_strategies.js
+ * Apply threshold strategy locally using threshold_strategies.js with LOG SCALE calculations
+ * This ensures the backend receives log scale threshold values for proper CQJ/CalcJ calculations
  * @param {string} strategy - The threshold strategy to apply
  * @returns {Object} Result object indicating success/failure
  */
 async function applyThresholdStrategyLocally(strategy) {
     try {
-        console.log(`🔍 LOCAL-THRESHOLD - Applying threshold strategy "${strategy}" locally`);
+        console.log(`🔍 LOCAL-THRESHOLD - Applying threshold strategy "${strategy}" locally with LOG SCALE`);
         
-        // Get current scale mode
-        const currentScale = currentScaleMode || window.currentScaleMode || 'linear';
-        
-        console.log(`🔍 LOCAL-THRESHOLD - Strategy: "${strategy}", Scale Mode: "${currentScale}"`);
+        // CRITICAL: Force log scale for backend CQJ/CalcJ calculations
+        const currentScale = 'log'; // ALWAYS use log scale for threshold calculations
+        console.log(`🔍 LOCAL-THRESHOLD - FORCED LOG SCALE - Strategy: "${strategy}", Scale Mode: "${currentScale}"`);
         
         // CALCULATE THRESHOLDS LOCALLY using threshold_strategies.js
-        if (typeof calculateThresholdForStrategy === 'function') {
+        if (typeof window.calculateThresholdForStrategy === 'function') {
             // Get current analysis results
             const currentResults = window.currentAnalysisResults?.individual_results || window.currentAnalysisResults || {};
             
@@ -1409,28 +1216,36 @@ async function applyThresholdStrategyLocally(strategy) {
             if (!currentResults || Object.keys(currentResults).length === 0) {
                 console.log(`🔍 LOCAL-THRESHOLD - No analysis data available yet. Strategy "${strategy}" will be applied when data is loaded.`);
                 // Still update UI to show the strategy change
-                updateAllChannelThresholds();
-                updateThresholdInput();
+                if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
+                if (window.updateThresholdInput) window.updateThresholdInput();
                 return { success: true, message: `Strategy "${strategy}" set (will apply when data is loaded)` };
             }
             
-            // Calculate new thresholds using local logic
-            console.log(`🔍 LOCAL-THRESHOLD - Calculating "${strategy}" thresholds for ${Object.keys(currentResults).length} wells`);
+            // Calculate new thresholds using local logic with LOG SCALE
+            console.log(`🔍 LOCAL-THRESHOLD - Calculating "${strategy}" thresholds for ${Object.keys(currentResults).length} wells using LOG SCALE`);
             
             try {
-                // Apply the strategy locally and update thresholds
-                const updatedThresholds = calculateThresholdForStrategy(strategy, currentResults, currentScale);
+                // Apply the strategy locally and update thresholds with LOG calculations
+                const updatedThresholds = window.calculateThresholdForStrategy(strategy, currentResults, currentScale);
                 
                 if (updatedThresholds && Object.keys(updatedThresholds).length > 0) {
-                    console.log(`🔍 LOCAL-THRESHOLD - Applying calculated thresholds:`, updatedThresholds);
+                    console.log(`🔍 LOCAL-THRESHOLD - LOG SCALE thresholds calculated:`, updatedThresholds);
+                    
+                    // Update global threshold storage with LOG scale values
+                    Object.keys(updatedThresholds).forEach(channel => {
+                        if (updatedThresholds[channel] && updatedThresholds[channel].log) {
+                            window.setChannelThreshold(channel, 'log', updatedThresholds[channel].log);
+                            console.log(`🔍 LOG-THRESHOLD-STORED - ${channel}: ${updatedThresholds[channel].log}`);
+                        }
+                    });
                     
                     // Update the chart lines and input boxes
-                    updateAllChannelThresholds();
-                    updateThresholdInput();
+                    if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
+                    if (window.updateThresholdInput) window.updateThresholdInput();
                     
-                    // Recalculate CQJ values with new thresholds if needed
-                    if (typeof recalculateCQJValues === 'function') {
-                        recalculateCQJValues();
+                    // Recalculate CQJ values with new LOG thresholds if needed
+                    if (window.recalculateCQJValues) {
+                        window.recalculateCQJValues();
                     }
                     
                     // Refresh UI components
@@ -1443,56 +1258,58 @@ async function applyThresholdStrategyLocally(strategy) {
                         populateWellSelector(wellsForSelector);
                     }
                     
-                    return { success: true, strategy: strategy, thresholds: updatedThresholds };
+                    return { success: true, strategy: strategy, thresholds: updatedThresholds, scale: 'log' };
                 } else {
                     console.log(`🔍 LOCAL-THRESHOLD - No thresholds calculated (no channels found or calculation failed)`);
                     // Still update UI to reflect strategy change
-                    updateAllChannelThresholds();
-                    updateThresholdInput();
+                    if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
+                    if (window.updateThresholdInput) window.updateThresholdInput();
                     return { success: true, strategy: strategy, message: 'Strategy applied (no channels to calculate)' };
                 }
             } catch (calcError) {
-                console.error(`❌ LOCAL-THRESHOLD - Local calculation failed:`, calcError);
+                console.error(`❌ LOCAL-THRESHOLD - LOG scale calculation failed:`, calcError);
                 // Still update UI to reflect strategy change
-                updateAllChannelThresholds();
-                updateThresholdInput();
-                return { success: false, error: `Calculation failed: ${calcError.message}` };
+                if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
+                if (window.updateThresholdInput) window.updateThresholdInput();
+                return { success: false, error: `LOG calculation failed: ${calcError.message}` };
             }
         } else {
             console.warn(`⚠️ LOCAL-THRESHOLD - calculateThresholdForStrategy function not available`);
             // Fallback: just update UI
-            updateAllChannelThresholds();
-            updateThresholdInput();
+            if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
+            if (window.updateThresholdInput) window.updateThresholdInput();
             return { success: true, strategy: strategy, message: 'Strategy applied (calculation function not available)' };
         }
         
     } catch (error) {
-        console.error(`❌ LOCAL-THRESHOLD - Error applying strategy "${strategy}":`, error);
-        return { success: false, error: `Failed to apply strategy: ${error.message}` };
+        console.error(`❌ LOCAL-THRESHOLD - Error applying LOG strategy "${strategy}":`, error);
+        return { success: false, error: `Failed to apply LOG strategy: ${error.message}` };
     }
 }
 
 /**
+ * Send threshold strategy to backend with LOG SCALE for CQJ/CalcJ calculations
  * @param {string} strategy - The threshold strategy to apply
  * @returns {Promise<Object>} Backend response or null if failed
  */
 async function sendThresholdStrategyToBackend(strategy) {
     try {
-        console.log(`🔍 AJAX-BACKEND - Sending threshold strategy "${strategy}" to backend`);
+        console.log(`🔍 AJAX-BACKEND - Sending threshold strategy "${strategy}" to backend with LOG SCALE`);
         
-        // CRITICAL FIX: Send scale mode with strategy so backend knows to use log calculation
-        const currentScale = currentScaleMode || window.currentScaleMode || 'linear';
+        // CRITICAL: Always use log scale for backend CQJ/CalcJ calculations
+        const logScale = 'log';
         
         const payload = {
             strategy: strategy,
-            scale_mode: currentScale,  // NEW: explicit scale mode for backend
+            scale_mode: logScale,  // FORCE log scale for backend calculations
             experiment_pattern: (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null,
             session_id: window.currentSessionId || null,
-            current_scale: currentScale,  // Keep this for backward compatibility
+            current_scale: logScale,  // Ensure backend uses log scale
+            force_log_scale: true,  // NEW: explicit flag to force log calculations
             timestamp: new Date().toISOString()
         };
         
-        console.log(`🔍 AJAX-PAYLOAD - Payload to backend:`, payload);
+        console.log(`🔍 AJAX-PAYLOAD - LOG SCALE payload to backend:`, payload);
         
         // CRITICAL DEBUG: Log exactly what we're sending
         console.log(`🔍 AJAX-CRITICAL - Strategy: "${strategy}", Scale Mode: "${currentScale}", Current Scale Mode: "${currentScaleMode}"`);
@@ -1522,7 +1339,7 @@ async function sendThresholdStrategyToBackend(strategy) {
                 if (!currentResults || Object.keys(currentResults).length === 0) {
                     console.log(`🔍 THRESHOLD-CALC - No analysis data available yet. Strategy "${strategy}" will be applied when data is loaded.`);
                     // Still update UI to show the strategy change
-                    updateAllChannelThresholds();
+                    if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
                     updateThresholdInput();
                     return result;
                 }
@@ -1538,12 +1355,12 @@ async function sendThresholdStrategyToBackend(strategy) {
                         console.log(`🔍 THRESHOLD-APPLY - Applying calculated thresholds:`, updatedThresholds);
                         
                         // Update the chart lines and input boxes
-                        updateAllChannelThresholds();
+                        if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
                         updateThresholdInput();
                         
                         // Recalculate CQJ values with new thresholds if needed
-                        if (typeof recalculateCQJValues === 'function') {
-                            recalculateCQJValues();
+                        if (window.recalculateCQJValues) {
+                            window.recalculateCQJValues();
                         }
                         
                         // Refresh UI components
@@ -1558,19 +1375,19 @@ async function sendThresholdStrategyToBackend(strategy) {
                     } else {
                         console.log(`🔍 THRESHOLD-CALC - No thresholds calculated (no channels found or calculation failed)`);
                         // Still update UI to reflect strategy change
-                        updateAllChannelThresholds();
+                        window.updateAllChannelThresholds();
                         updateThresholdInput();
                     }
                 } catch (calcError) {
                     console.error(`❌ THRESHOLD-CALC - Local calculation failed:`, calcError);
                     // Still update UI to reflect strategy change
-                    updateAllChannelThresholds();
+                    window.updateAllChannelThresholds();
                     updateThresholdInput();
                 }
             } else {
                 console.warn(`⚠️ THRESHOLD-CALC - calculateThresholdForStrategy function not available`);
                 // Fallback: just update UI
-                updateAllChannelThresholds();
+                if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
                 updateThresholdInput();
             }
         }
@@ -1590,7 +1407,10 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    populateThresholdStrategyDropdown();
+    // Call the threshold dropdown function from threshold_frontend.js
+    if (typeof window.populateThresholdStrategyDropdown === 'function') {
+        window.populateThresholdStrategyDropdown();
+    }
     // Default to show all wells on load if analysis section is visible
     setTimeout(function() {
         if (typeof showAllCurves === 'function') {
@@ -1613,79 +1433,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // Scale toggle event listener is handled in the main initialization section
     // This prevents duplicate event listeners on the same button
     // See: scaleToggleButton.addEventListener('click', onScaleToggle); below
-    // Enhanced manual threshold input with multiple event types for better responsiveness
-    const thresholdInput = document.getElementById('thresholdInput');
-    if (thresholdInput) {
-        // Function to handle manual threshold changes
-        function handleManualThresholdChange() {
-            const channel = window.currentFluorophore;
-            const scale = window.currentScaleMode || 'linear';
-            const value = parseFloat(thresholdInput.value);
-            
-            if (channel && !isNaN(value)) {
-                console.log(`🔍 MANUAL-THRESHOLD-INPUT - Setting ${channel} ${scale} threshold to ${value}`);
-                
-                // Mark this threshold as manually set to prevent override
-                if (!window.manualThresholds) window.manualThresholds = {};
-                if (!window.manualThresholds[channel]) window.manualThresholds[channel] = {};
-                window.manualThresholds[channel][scale] = true;
-                
-                setChannelThreshold(channel, scale, value);
-                updateAllChannelThresholds();
-                
-                // Send manual threshold to backend for proper CQJ recalculation
-                sendManualThresholdToBackend(channel, scale, value);
-                
-                console.log(`🔍 MANUAL-THRESHOLD-SET - ${channel} ${scale} threshold set to ${value}`);
-            }
-        }
-        
-        // Add multiple event listeners for better responsiveness
-        thresholdInput.addEventListener('input', handleManualThresholdChange);
-        thresholdInput.addEventListener('change', handleManualThresholdChange);
-        thresholdInput.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                handleManualThresholdChange();
-            }
-        });
-    }
-    
-    // Send manual threshold to backend for CQJ recalculation
-    async function sendManualThresholdToBackend(channel, scale, value) {
-        try {
-            const payload = {
-                action: 'manual_threshold',
-                channel: channel,
-                scale: scale,
-                threshold: value,
-                experiment_pattern: (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null,
-                session_id: window.currentSessionId || null
-            };
-            
-            const response = await fetch('/threshold/update', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            
-            if (response.ok) {
-                const result = await response.json();
-                if (result.success && result.updated_results) {
-                    // Update frontend with backend-calculated CQJ values
-                    Object.assign(window.currentAnalysisResults.individual_results, result.updated_results);
-                    if (typeof populateResultsTable === 'function') {
-                        populateResultsTable(window.currentAnalysisResults.individual_results);
-                    }
-                }
-            }
-        } catch (error) {
-            console.warn(`🔍 MANUAL-THRESHOLD-BACKEND - Backend update failed, using frontend fallback:`, error);
-            // Fallback to frontend recalculation
-            if (window.currentAnalysisResults) {
-                recalculateCQJValuesForManualThreshold();
-            }
-        }
-    }
+    // THRESHOLD CONTROL FUNCTIONS MOVED TO threshold_frontend.js
+    // Manual threshold controls are now handled in threshold_frontend.js
+    // See initializeManualThresholdControls() function
 });
 
 // --- ENHANCED PER-CHANNEL THRESHOLD SYSTEM ---
@@ -1706,13 +1456,13 @@ if (!window.channelControlWells) {
  * Extract and categorize control wells for each channel from analysis results
  */
 function extractChannelControlWells() {
-    if (!currentAnalysisResults || !currentAnalysisResults.individual_results) {
+    if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
         console.log('No analysis results available for control extraction');
         return;
     }
     
     window.channelControlWells = {};
-    const results = currentAnalysisResults.individual_results;
+    const results = window.currentAnalysisResults.individual_results;
     
     // Group wells by channel (fluorophore)
     Object.keys(results).forEach(wellKey => {
@@ -1750,195 +1500,15 @@ function extractChannelControlWells() {
     console.log('🔍 THRESHOLD - Extracted control wells by channel:', window.channelControlWells);
 }
 
-/**
- * Calculate stable threshold for a specific channel and scale using threshold strategies
- */
-function calculateStableChannelThreshold(channel, scale) {
-    console.log(`🔍 THRESHOLD - Calculating ${scale} threshold for channel: ${channel}`);
-    
-    // Get the current threshold strategy
-    const strategy = getSelectedThresholdStrategy() || 'default';
-    
-    // Calculate baseline statistics from control wells
-    let baseline = 0, baseline_std = 1;
-    let allRfus = [];
-    
-    if (window.channelControlWells && window.channelControlWells[channel]) {
-        const controls = window.channelControlWells[channel];
-        if (controls && controls.NTC && controls.NTC.length > 0) {
-            controls.NTC.forEach(well => {
-                let rfu = well.raw_rfu;
-                if (typeof rfu === 'string') try { rfu = JSON.parse(rfu); } catch(e){}
-                if (Array.isArray(rfu)) allRfus.push(...rfu.slice(0,5));
-            });
-        }
-    }
-    
-    if (allRfus.length > 0) {
-        baseline = allRfus.reduce((a,b)=>a+b,0)/allRfus.length;
-        const mean = baseline;
-        const variance = allRfus.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / allRfus.length;
-        baseline_std = Math.sqrt(variance);
-    }
-    
-    // Get pathogen information for fixed strategies
-    let pathogen = null;
-    if (strategy === 'log_fixed' || strategy === 'linear_fixed') {
-        // Try to get pathogen from current analysis results
-        if (window.currentAnalysisResults) {
-            const resultsToCheck = window.currentAnalysisResults.individual_results || window.currentAnalysisResults;
-            const wellKeys = Object.keys(resultsToCheck);
-            for (const wellKey of wellKeys) {
-                const well = resultsToCheck[wellKey];
-                if (well && well.fluorophore === channel && well.test_code) {
-                    pathogen = well.test_code;
-                    break;
-                }
-            }
-        }
-        // Default pathogen for fixed strategies
-        if (!pathogen) {
-            pathogen = 'BVPanelPCR1';
-        }
-    }
-    
-    // Use calculateThreshold from threshold_strategies.js
-    if (typeof window.calculateThreshold === 'function') {
-        const params = {
-            baseline,
-            baseline_std,
-            N: 10,
-            pathogen,
-            fluorophore: channel,
-            channel: channel
-        };
-        
-        try {
-            const threshold = window.calculateThreshold(strategy, params, scale);
-            if (threshold !== null && !isNaN(threshold) && threshold > 0) {
-                console.log(`✅ THRESHOLD-CALC - ${channel}[${scale}]: ${threshold.toFixed(2)} (strategy: ${strategy})`);
-                return threshold;
-            }
-        } catch (error) {
-            console.error(`❌ THRESHOLD-ERROR - Failed to calculate ${strategy} for ${channel}[${scale}]:`, error);
-        }
-    }
-    
-    // Only strategy-based calculations - no fallbacks
-    console.warn(`❌ THRESHOLD-FAIL - No valid threshold calculated for ${channel}[${scale}] with strategy ${strategy}`);
-    return null;
-}
-
-/**
- * Initialize thresholds for all channels when analysis results are loaded
- */
-function initializeChannelThresholds() {
-    console.log('🔍 THRESHOLD-INIT - Initializing channel thresholds');
-    
-    // Multiple null checks for robustness
-    if (!currentAnalysisResults) {
-        console.warn('🔍 THRESHOLD-INIT - currentAnalysisResults is null, skipping initialization');
-        return;
-    }
-    
-    if (!currentAnalysisResults.individual_results) {
-        console.warn('🔍 THRESHOLD-INIT - individual_results is null, skipping initialization');
-        return;
-    }
-    
-    if (typeof currentAnalysisResults.individual_results !== 'object') {
-        console.warn('🔍 THRESHOLD-INIT - individual_results is not an object, skipping initialization');
-        return;
-    }
-    
-    // Extract all unique channels from fluorophore properties in wells
-    const channels = new Set();
-    try {
-        Object.keys(currentAnalysisResults.individual_results).forEach(wellKey => {
-            const well = currentAnalysisResults.individual_results[wellKey];
-            if (well && well.fluorophore) {
-                channels.add(well.fluorophore);
-            }
-        });
-    } catch (e) {
-        console.error('🔍 THRESHOLD-INIT - Error extracting channels:', e);
-        return;
-    }
-    
-    if (channels.size === 0) {
-        console.warn('🔍 THRESHOLD-INIT - No channels found');
-        return;
-    }
-    
-    console.log(`🔍 THRESHOLD-INIT - Found channels: [${Array.from(channels).join(', ')}]`);
-    
-    // Extract control wells for each channel before calculating thresholds
-    extractChannelControlWells();
-    
-    // Calculate and store thresholds for each channel and scale using threshold strategies
-    channels.forEach(channel => {
-        try {
-            ['linear', 'log'].forEach(scale => {
-                const threshold = calculateStableChannelThreshold(channel, scale);
-                if (threshold !== null && threshold !== undefined && !isNaN(threshold)) {
-                    setChannelThreshold(channel, scale, threshold);
-                    console.log(`✅ THRESHOLD-INIT - ${channel} ${scale}: ${threshold.toFixed(2)}`);
-                } else {
-                    console.warn(`❌ THRESHOLD-INIT - Failed to calculate threshold for ${channel} ${scale}`);
-                }
-            });
-        } catch (e) {
-            console.error(`❌ THRESHOLD-INIT - Error calculating thresholds for channel ${channel}:`, e);
-        }
-    });
-    
-    // Update UI to reflect initialized thresholds
-    updateSliderUI();
-    
-    // Update chart annotations with new thresholds
-    setTimeout(() => {
-        console.log('🔍 THRESHOLD-INIT - Triggering chart threshold updates');
-        updateAllChannelThresholds();
-    }, 200);
-}
-
-/**
- * Get the current threshold for a channel and scale (NO multiplier applied)
- */
-function getCurrentChannelThreshold(channel, scale = null) {
-    // Ensure global threshold object is always initialized
-    if (!window.stableChannelThresholds) window.stableChannelThresholds = {};
-    if (!scale) scale = currentScaleMode;
-    
-    // Load from storage if not in memory
-    if (!window.stableChannelThresholds[channel] && sessionStorage.getItem('stableChannelThresholds')) {
-        try {
-            window.stableChannelThresholds = JSON.parse(sessionStorage.getItem('stableChannelThresholds'));
-        } catch (e) {
-            console.warn('Error loading thresholds from storage:', e);
-        }
-    }
-    
-    if (!window.stableChannelThresholds[channel] || !window.stableChannelThresholds[channel][scale]) {
-        // ...existing code...
-   
-        console.warn(`No threshold found for ${channel} ${scale}, calculating...`);
-        const baseThreshold = calculateStableChannelThreshold(channel, scale);
-        if (!window.stableChannelThresholds[channel]) window.stableChannelThresholds[channel] = {};
-        window.stableChannelThresholds[channel][scale] = baseThreshold;
-    }
-    
-    const baseThreshold = window.stableChannelThresholds[channel][scale];
-    
-    // Return the base threshold WITHOUT any multiplier
-    // The scale multiplier only affects chart view, not threshold values
-    return baseThreshold;
-}
+// THRESHOLD FUNCTIONS MOVED TO threshold_frontend.js
+// All threshold-related functions like calculateStableChannelThreshold, 
+// initializeChannelThresholds, getCurrentChannelThreshold, etc. have been
+// moved to threshold_frontend.js for better organization and global access.
 
 /**
  * Update all chart threshold annotations when scale changes (multiplier only affects view)
  */
-function updateAllChannelThresholds() {
+/*function updateAllChannelThresholds() {
     console.log('🔍 THRESHOLD - Updating all channel thresholds');
     
     // Extra strict guard: do not proceed if any part of the chart config is missing
@@ -1984,8 +1554,8 @@ function updateAllChannelThresholds() {
     }
     
     // Method 2: Get channels from analysis results (for multichannel data)
-    if (currentAnalysisResults?.individual_results) {
-        Object.values(currentAnalysisResults.individual_results).forEach(well => {
+    if (window.currentAnalysisResults?.individual_results) {
+        Object.values(window.currentAnalysisResults.individual_results).forEach(well => {
             if (well.fluorophore && well.fluorophore !== 'Unknown') {
                 visibleChannels.add(well.fluorophore);
             }
@@ -2041,7 +1611,7 @@ function updateAllChannelThresholds() {
                     color: getChannelColor(channel),
                     font: { size: 10, weight: 'bold' }
                 },
-                draggable: true,
+                draggable: false,
 dragAxis: 'y',
 enter: function(ctx) {
     ctx.chart.canvas.style.cursor = 'ns-resize';
@@ -2053,14 +1623,14 @@ onDragEnd: function(e) {
     // e: { chart, annotation, event }
     const newY = e?.annotation?.yMin;
     if (typeof newY === 'number' && !isNaN(newY)) {
-        setChannelThreshold(channel, currentScale, newY);
+        if (window.setChannelThreshold) window.setChannelThreshold(channel, currentScale, newY);
         // Optionally update UI input if present
         const thresholdInput = document.getElementById('thresholdInput');
         if (thresholdInput && (currentFluorophore === channel || currentFluorophore === 'all')) {
             thresholdInput.value = newY.toFixed(2);
         }
         // Persist and update chart
-        updateAllChannelThresholds();
+        window.updateAllChannelThresholds();
         console.log(`🔍 DRAG-END - Threshold for ${channel} (${currentScale}) set to ${newY}`);
     } else {
         console.warn('🔍 DRAG-END - Invalid newY value:', newY);
@@ -2077,9 +1647,9 @@ onDragEnd: function(e) {
     window.amplificationChart.update('none');
     
     console.log(`🔍 THRESHOLD - Updated thresholds for channels: ${Array.from(visibleChannels).join(', ')}`);
-}
+}*/
 
-function updateSingleChannelThreshold(fluorophore) {
+/*function updateSingleChannelThreshold(fluorophore) {
     console.log(`🔍 THRESHOLD - Updating threshold for single channel: ${fluorophore}`);
     
     if (!window.amplificationChart) {
@@ -2137,12 +1707,12 @@ leave: function(ctx) {
         onDragEnd: function(e) {
             const newY = e?.annotation?.yMin;
             if (typeof newY === 'number' && !isNaN(newY)) {
-                setChannelThreshold(fluorophore, currentScaleMode, newY);
+                if (window.setChannelThreshold) window.setChannelThreshold(fluorophore, currentScaleMode, newY);
                 const thresholdInput = document.getElementById('thresholdInput');
                 if (thresholdInput && (currentFluorophore === fluorophore || currentFluorophore === 'all')) {
                     thresholdInput.value = newY.toFixed(2);
                 }
-                updateSingleChannelThreshold(fluorophore);
+                if (window.updateSingleChannelThreshold) window.updateSingleChannelThreshold(fluorophore);
                 console.log(`🔍 DRAG-END - Threshold for ${fluorophore} (${currentScaleMode}) set to ${newY}`);
             } else {
                 console.warn('🔍 DRAG-END - Invalid newY value:', newY);
@@ -2158,7 +1728,7 @@ leave: function(ctx) {
     window.amplificationChart.update('none');
     
     console.log(`🔍 THRESHOLD - Updated threshold for channel: ${fluorophore}`);
-}
+}*/
 
 /**
  * Get a distinct color for each channel
@@ -2177,56 +1747,8 @@ function getChannelColor(channel) {
 // ...existing code...
 
 // === CFX MANAGER 3.1-STYLE THRESHOLD FEATURES ===
-// --- Draggable Threshold Lines (Chart.js Annotation Plugin) ---
-// COMMENTED OUT - Will use different draggable implementation from test.html later
-function enableDraggableThresholds() {
-    // DISABLED: Draggable threshold functionality commented out
-    // Will be replaced with test.html implementation later
-    console.log('🔍 THRESHOLD - Draggable thresholds disabled (will use test.html implementation)');
-    return;
-    
-    /*
-    // Extra strict guard: do not proceed if any part of the chart config is missing
-    if (!window.amplificationChart ||
-        typeof window.amplificationChart !== 'object' ||
-        !window.amplificationChart.options ||
-        typeof window.amplificationChart.options !== 'object' ||
-        !window.amplificationChart.options.plugins ||
-        typeof window.amplificationChart.options.plugins !== 'object' ||
-        !window.amplificationChart.options.plugins.annotation ||
-        typeof window.amplificationChart.options.plugins.annotation !== 'object' ||
-        !window.amplificationChart.options.plugins.annotation.annotations ||
-        typeof window.amplificationChart.options.plugins.annotation.annotations !== 'object') {
-        // Chart or annotation plugin not ready
-        return;
-    }
-    const annotations = window.amplificationChart.options.plugins.annotation.annotations;
-    Object.keys(annotations).forEach(key => {
-        if (key.startsWith('threshold_')) {
-            annotations[key].draggable = true;
-            annotations[key].dragAxis = 'y';
-            annotations[key].onDragEnd = function(e) {
-                const channel = key.replace('threshold_', '');
-                // Chart.js annotation plugin v3+: use e.annotation.yMin
-                const newY = e?.annotation?.yMin;
-                if (channel && newY != null && !isNaN(newY)) {
-                    setChannelThreshold(channel, currentScaleMode, newY);
-                    // Store user-dragged threshold
-                    if (!window.userSetThresholds[channel]) window.userSetThresholds[channel] = {};
-                    window.userSetThresholds[channel][currentScaleMode] = newY;
-                    // Update input field if this is the current channel
-                    if (window.currentFluorophore === channel) {
-                        const thresholdInput = document.getElementById('thresholdInput');
-                        if (thresholdInput) thresholdInput.value = newY.toFixed(2);
-                    }
-                    updateAllChannelThresholds();
-                }
-            };
-        }
-    });
-    window.amplificationChart.update('none');
-    */
-}
+// THRESHOLD FUNCTIONS MOVED TO threshold_frontend.js
+// All threshold feature functions have been moved to threshold_frontend.js
   document.addEventListener('DOMContentLoaded', function() {
     // --- Main UI Event Listeners ---
 
@@ -2248,7 +1770,9 @@ function enableDraggableThresholds() {
     // 3. Manual Threshold Input - handled in main DOMContentLoaded above
 
     // 4. Initialize the UI on page load
-    populateThresholdStrategyDropdown();
+    if (typeof window.populateThresholdStrategyDropdown === 'function') {
+        window.populateThresholdStrategyDropdown();
+    }
 
     // 5. Default to "Show All Curves" view
     setTimeout(function() {
@@ -2263,83 +1787,19 @@ function enableDraggableThresholds() {
 });          
 // Patch updateAllChannelThresholds to always enable draggable lines
 // COMMENTED OUT - Draggable functionality disabled
-const _originalUpdateAllChannelThresholds = updateAllChannelThresholds;
-updateAllChannelThresholds = function() {
-    _originalUpdateAllChannelThresholds.apply(this, arguments);
-    // enableDraggableThresholds(); // DISABLED - Will use test.html implementation
-};
-
-// --- Auto Button Logic ---
-function restoreAutoThreshold(channel) {
-    if (!channel) {
-        console.warn('🔍 AUTO-THRESHOLD - No channel specified');
-        return;
-    }
-    
-    const scale = currentScaleMode;
-    const autoValue = calculateStableChannelThreshold(channel, scale);
-    
-    if (autoValue !== null && autoValue !== undefined) {
-        // Clear manual threshold marker for this channel/scale
-        if (window.manualThresholds && window.manualThresholds[channel]) {
-            window.manualThresholds[channel][scale] = false;
-        }
-        
-        setChannelThreshold(channel, scale, autoValue);
-        updateAllChannelThresholds();
-        
-        // Update threshold input/slider if present
-        const thresholdInput = document.getElementById('thresholdInput');
-        if (thresholdInput) {
-            thresholdInput.value = autoValue.toFixed(2);
-        }
-        
-        console.log(`🔍 AUTO-THRESHOLD - Set ${channel} ${scale} to auto value: ${autoValue.toFixed(2)}`);
-    } else {
-        console.warn(`🔍 AUTO-THRESHOLD - Could not calculate auto threshold for ${channel} ${scale}`);
-    }
+const _originalUpdateAllChannelThresholds = window.updateAllChannelThresholds;
+if (typeof _originalUpdateAllChannelThresholds === 'function') {
+    updateAllChannelThresholds = function() {
+        _originalUpdateAllChannelThresholds.apply(this, arguments);
+        // enableDraggableThresholds(); // DISABLED - Will use test.html implementation
+    };
+    window.updateAllChannelThresholds = updateAllChannelThresholds;
+} else {
+    console.warn('🔍 PATCH - window.updateAllChannelThresholds not available for patching');
 }
 
-// Attach Auto button event
-function attachAutoButtonHandler() {
-    const autoBtn = document.getElementById('autoThresholdBtn');
-    if (autoBtn) {
-        autoBtn.onclick = function() {
-            // Get current channel from global variable or analysis results
-            let channel = window.currentFluorophore;
-            
-            // If 'all' is selected or no channel, find the first available channel
-            if (!channel || channel === 'all') {
-                if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
-                    const results = window.currentAnalysisResults.individual_results;
-                    for (const wellKey in results) {
-                        if (results[wellKey].fluorophore) {
-                            channel = results[wellKey].fluorophore;
-                            break;
-                        }
-                    }
-                }
-            }
-            
-            // Fallback: try to extract from chart datasets
-            if (!channel) {
-                const datasets = window.amplificationChart?.data?.datasets;
-                if (datasets && datasets.length > 0) {
-                    const match = datasets[0].label?.match(/\(([^)]+)\)/);
-                    if (match && match[1] !== 'Unknown') channel = match[1];
-                }
-            }
-            
-            if (channel) {
-                restoreAutoThreshold(channel);
-            } else {
-                console.warn('🔍 AUTO-THRESHOLD - Could not determine current channel');
-            }
-        };
-    }
-}
-
-document.addEventListener('DOMContentLoaded', attachAutoButtonHandler);
+// THRESHOLD FUNCTIONS MOVED TO threshold_frontend.js
+// Functions like restoreAutoThreshold, attachAutoButtonHandler moved to threshold_frontend.js
 
 // --- Restore Thresholds on Refresh ---
 document.addEventListener('DOMContentLoaded', function() {
@@ -2347,11 +1807,11 @@ document.addEventListener('DOMContentLoaded', function() {
     if (window.stableChannelThresholds) {
         Object.keys(window.stableChannelThresholds).forEach(channel => {
             ['linear', 'log'].forEach(scale => {
-                const autoValue = calculateStableChannelThreshold(channel, scale);
-                setChannelThreshold(channel, scale, autoValue);
+                const autoValue = window.calculateStableChannelThreshold ? window.calculateStableChannelThreshold(channel, scale) : null;
+                if (window.setChannelThreshold && autoValue !== null) window.setChannelThreshold(channel, scale, autoValue);
             });
         });
-        updateAllChannelThresholds();
+        if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
     }
 });
 
@@ -2372,20 +1832,18 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // Patch chart update functions to always re-enable features
-const _originalUpdateChartThresholds = updateChartThresholds;
-updateChartThresholds = function() {
-    _originalUpdateChartThresholds.apply(this, arguments);
-    // enableDraggableThresholds(); // DISABLED - Will use test.html implementation
-};
-
-// Ensure features are always active after new analysis or server restart
-function ensureThresholdFeaturesActive() {
-    updateAllChannelThresholds();
-    // enableDraggableThresholds(); // DISABLED - Will use test.html implementation
-    attachAutoButtonHandler();
+const _originalUpdateChartThresholds = window.updateChartThresholds;
+if (typeof _originalUpdateChartThresholds === 'function') {
+    const patchedFunction = function() {
+        _originalUpdateChartThresholds.apply(this, arguments);
+        // enableDraggableThresholds(); // DISABLED - Will use test.html implementation
+    };
+    window.updateChartThresholds = patchedFunction;
+} else {
+    console.warn('🔍 PATCH - window.updateChartThresholds not available for patching');
 }
 
-document.addEventListener('DOMContentLoaded', ensureThresholdFeaturesActive);
+// THRESHOLD FUNCTIONS MOVED TO threshold_frontend.js
 
 // --- UI Elements ---
 const scaleToggleBtn = document.getElementById('scaleToggle');
@@ -2398,7 +1856,7 @@ const scalePresetsContainer = document.getElementById('scalePresetsContainer');
 // --- Advanced Threshold Calculation ---
 // --- Enhanced Per-Channel Threshold Calculation (ALL WELLS BASED) ---
 // This function calculates thresholds using ALL wells for each channel, not just the displayed chart
-function calculateChannelThreshold(channel, scale) {
+/*function calculateChannelThreshold(channel, scale) {
     console.log(`🔍 THRESHOLD-CALC - Calculating ${scale} threshold for channel: ${channel} using ALL wells`);
     
     // Multiple null checks for robustness
@@ -2434,9 +1892,9 @@ function calculateChannelThreshold(channel, scale) {
     } else {
         return calculateLinearThreshold(channelWells, channel);
     }
-}
+}*/
 
-function calculateLogThreshold(channelWells, channel) {
+/*function calculateLogThreshold(channelWells, channel) {
     console.log(`🔍 LOG-THRESHOLD - Calculating log threshold for ${channelWells.length} wells in channel: ${channel}`);
     
     // Collect amplification values from cycles 1-5 across all wells in this channel
@@ -2486,9 +1944,9 @@ function calculateLogThreshold(channelWells, channel) {
     console.log(`🔍 LOG-THRESHOLD - Channel: ${channel}, Values: ${cycles1to5Values.length}, Mean: ${mean.toFixed(2)}, StdDev: ${stdDev.toFixed(2)}, Threshold: ${logThreshold.toFixed(2)}`);
     
     return logThreshold; // Return exact calculated value, no minimum
-}
+}*/
 
-function calculateLinearThreshold(channelWells, channel) {
+/*function calculateLinearThreshold(channelWells, channel) {
     console.log(`🔍 LINEAR-THRESHOLD - Calculating linear threshold for ${channelWells.length} wells in channel: ${channel}`);
     
     // Use NTC/NEG/CONTROL wells if available, otherwise use all wells
@@ -2537,9 +1995,9 @@ function calculateLinearThreshold(channelWells, channel) {
     console.log(`🔍 LINEAR-THRESHOLD - Channel: ${channel}, Inflection points: [${inflectionThresholds.map(t => t.toFixed(2)).join(', ')}], Median: ${median.toFixed(2)}`);
     
     return median; // Return exact calculated value, no minimum
-}
+}*/
 
-function setChannelThreshold(channel, scale, value) {
+/*function setChannelThreshold(channel, scale, value) {
     // Use the new stable threshold system
     if (!window.stableChannelThresholds) {
         window.stableChannelThresholds = {};
@@ -2556,9 +2014,9 @@ function setChannelThreshold(channel, scale, value) {
     // Persist both systems in sessionStorage
     safeSetItem(sessionStorage, 'stableChannelThresholds', JSON.stringify(window.stableChannelThresholds));
     safeSetItem(sessionStorage, 'channelThresholds', JSON.stringify(channelThresholds));
-}
+}*/
 
-function getChannelThreshold(channel, scale) {
+/*function getChannelThreshold(channel, scale) {
     if (channelThresholds[channel] && channelThresholds[channel][scale] != null) {
         return channelThresholds[channel][scale];
     }
@@ -2566,14 +2024,14 @@ function getChannelThreshold(channel, scale) {
     const base = calculateChannelThreshold(channel, scale);
     setChannelThreshold(channel, scale, base);
     return base;
-}
+}*/
 
-function loadChannelThresholds() {
+/*function loadChannelThresholds() {
     const stored = sessionStorage.getItem('channelThresholds');
     if (stored) {
         channelThresholds = JSON.parse(stored);
     }
-}
+}*/
 
 // --- Slider Logic ---
 function updateSliderUI() {
@@ -2672,7 +2130,7 @@ function onScaleToggle() {
                 window.stableChannelThresholds[channel] = {};
             }
             if (!window.stableChannelThresholds[channel][currentScaleMode]) {
-                const threshold = calculateStableChannelThreshold(channel, currentScaleMode);
+                const threshold = window.calculateStableChannelThreshold ? window.calculateStableChannelThreshold(channel, currentScaleMode) : null;
                 if (threshold !== null) {
                     window.stableChannelThresholds[channel][currentScaleMode] = threshold;
                     console.log(`🔍 SCALE-INIT - Initialized ${channel} ${currentScaleMode} threshold: ${threshold}`);
@@ -2682,13 +2140,15 @@ function onScaleToggle() {
     }
     
     // Update threshold strategy dropdown for new scale AFTER threshold initialization
-    populateThresholdStrategyDropdown();
+    if (typeof window.populateThresholdStrategyDropdown === 'function') {
+        window.populateThresholdStrategyDropdown();
+    }
     
     // Update threshold input box for current scale
     updateThresholdInputForCurrentScale();
     
     // Update chart thresholds to ensure they're visible
-    updateAllChannelThresholds();
+    if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
     
     // Update UI (this will also sync the toggle button)
     updateSliderUI();
@@ -2699,73 +2159,8 @@ function onScaleToggle() {
     console.log(`🔍 TOGGLE - Switched to ${currentScaleMode} scale`);
 }
 
-function updateThresholdInputForCurrentScale() {
-    const thresholdInput = document.getElementById('thresholdInput');
-    let channel = window.currentFluorophore;
-    
-    // Get the first available channel if 'all' is selected
-    if (!channel || channel === 'all') {
-        if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
-            const results = window.currentAnalysisResults.individual_results;
-            for (const wellKey in results) {
-                if (results[wellKey].fluorophore) {
-                    channel = results[wellKey].fluorophore;
-                    break;
-                }
-            }
-        }
-    }
-    
-    if (thresholdInput && channel && window.stableChannelThresholds && window.stableChannelThresholds[channel]) {
-        const threshold = window.stableChannelThresholds[channel][currentScaleMode];
-        if (threshold !== null && threshold !== undefined) {
-            thresholdInput.value = threshold.toFixed(2);
-            console.log(`🔍 THRESHOLD-INPUT-UPDATE - Set input to ${threshold.toFixed(2)} for ${channel} ${currentScaleMode}`);
-        }
-    }
-}
-
-function updateChartThresholds() {
-    console.log('🔍 CHART-THRESHOLD - Updating chart thresholds');
-    
-    if (!window.amplificationChart) {
-        console.warn('🔍 CHART-THRESHOLD - No chart available');
-        return;
-    }
-    
-    // Ensure we have analysis results and channel thresholds are initialized
-    if (!currentAnalysisResults || !currentAnalysisResults.individual_results) {
-        console.warn('🔍 CHART-THRESHOLD - No analysis results available, trying to initialize thresholds');
-        // Try to initialize thresholds if we have analysis data
-        if (window.currentAnalysisResults) {
-            currentAnalysisResults = window.currentAnalysisResults;
-            initializeChannelThresholds();
-        }
-        return;
-    }
-    
-    // Check if this is a single-well chart or multi-well chart
-    const datasets = window.amplificationChart.data?.datasets || [];
-    if (datasets.length === 0) {
-        console.warn('🔍 CHART-THRESHOLD - No datasets found in chart');
-        return;
-    }
-    
-    // Extract fluorophore from first dataset label
-    const firstDataset = datasets[0];
-    const match = firstDataset.label?.match(/\(([^)]+)\)/);
-    
-    if (match && match[1] !== 'Unknown') {
-        // Single-channel chart - apply threshold for specific fluorophore
-        const fluorophore = match[1];
-        console.log(`🔍 CHART-THRESHOLD - Detected single-channel chart for ${fluorophore}`);
-        updateSingleChannelThreshold(fluorophore);
-    } else {
-        // Multi-channel chart - apply thresholds for all channels
-        console.log('🔍 CHART-THRESHOLD - Detected multi-channel chart');
-        updateAllChannelThresholds();
-    }
-}
+// THRESHOLD FUNCTIONS MOVED TO threshold_frontend.js
+// Functions updateThresholdInputForCurrentScale and updateChartThresholds moved
 
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', function() {
@@ -4178,7 +3573,7 @@ async function performAnalysis() {
 
             // Initialize channel thresholds after analysis results are loaded
             setTimeout(() => {
-                initializeChannelThresholds();
+                if (window.initializeChannelThresholds) window.initializeChannelThresholds();
             }, 100);
 
             // Debug: Log the single result structure for control grid debugging
@@ -4255,7 +3650,7 @@ async function performAnalysis() {
             
             // Initialize channel thresholds after analysis results are loaded
             setTimeout(() => {
-                initializeChannelThresholds();
+                if (window.initializeChannelThresholds) window.initializeChannelThresholds();
             }, 100);
             
             // Debug: Log the combined results structure for control grid debugging
@@ -5644,11 +5039,11 @@ function updateChart(wellKey, cyclesData = null, rfuData = null, wellData = null
     );
     
     window.amplificationChart = new Chart(ctx, chartConfig);
-    updateAllChannelThresholds();
+    if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
     // enableDraggableThresholds(); // DISABLED - Will use test.html implementation
     // Apply stable threshold system after chart creation
     setTimeout(() => {
-        updateChartThresholds();
+        if (window.updateChartThresholds) window.updateChartThresholds();
     }, 400);
 }
 
@@ -6078,7 +5473,7 @@ function displayHistorySession(sessionResults, source = 'history-display') {
     // 🆕 THRESHOLD FIX: Recalculate thresholds for historical data
     console.log(`📖 [HISTORY DISPLAY] Recalculating thresholds for historical data`);
     if (sessionResults && sessionResults.individual_results) {
-        initializeChannelThresholds();
+        if (window.initializeChannelThresholds) window.initializeChannelThresholds();
     }
     
     // Display the results using the existing display function
@@ -6164,7 +5559,7 @@ function combineMultiFluorophoreResults(allResults) {
     
     // Calculate success rate as percentage of good curves vs total analyzed records
     combined.success_rate = totalAnalyzedRecords > 0 ? 
-        (100) : 0;//totalGoodCurves / totalAnalyzedRecords-belongs with the 100
+        (totalGoodCurves / totalAnalyzedRecords * 100) : 0;
     
     console.log('Multi-fluorophore combination complete:', {
         fluorophores: fluorophores,
@@ -6575,121 +5970,11 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Delete all button is now handled inline in the history display
     
-    // --- Threshold Controls Wiring (CFX Manager 3.1 style) ---
-    // Elements
-    const thresholdInput = document.getElementById('thresholdInput');
-    const thresholdSlider = document.getElementById('thresholdSlider');
-    const autoThresholdBtn = document.getElementById('autoThresholdBtn');
+    // THRESHOLD CONTROLS MOVED TO threshold_frontend.js
+    // All manual threshold controls, auto threshold button, and slider controls
+    // are now handled in threshold_frontend.js via initializeManualThresholdControls()
 
-    // Store calculated threshold globally for reset
-    let calculatedThreshold = null;
-    // Use sessionStorage to optionally persist user threshold (not required, but easy to revert)
-
-    // Helper: set threshold value in both input and slider
-    function setThresholdControls(value, updateChart = true) {
-        // Always keep value as a number for consistency
-        const numValue = Number(value);
-        if (thresholdInput && thresholdInput.value != numValue) thresholdInput.value = numValue;
-        if (thresholdSlider && Number(thresholdSlider.value) !== numValue) thresholdSlider.value = numValue;
-        if (updateChart) updateChartThreshold(numValue);
-    }
-
-   function updateChartThreshold(value) {
-    const chart = window.amplificationChart;
-    let channel = window.currentFluorophore;
-    if (!channel || channel === 'all') {
-        const datasets = chart?.data?.datasets;
-        if (datasets && datasets.length > 0) {
-            const match = datasets[0].label?.match(/\(([^)]+)\)/);
-            if (match && match[1] !== 'Unknown') channel = match[1];
-        }
-    }
-    if (!channel) {
-        console.warn('No channel selected or detected!');
-        return;
-    }
-    if (
-        chart &&
-        chart.options &&
-        chart.options.plugins &&
-        chart.options.plugins.annotation &&
-        chart.options.plugins.annotation.annotations
-    ) {
-        const key = `threshold_${channel}`;
-        const annotations = chart.options.plugins.annotation.annotations;
-        if (annotations[key]) {
-            annotations[key].yMin = Number(value);
-            annotations[key].yMax = Number(value);
-            if (annotations[key].label) {
-                annotations[key].label.content = `${channel}: ${Number(value).toFixed(2)}`;
-            }
-            chart.update('none');
-            console.log(`[THRESHOLD] Updated ${key} to ${value}`);
-        } else {
-            console.warn(`[THRESHOLD] Annotation key not found: ${key}`);
-        }
-    }
-}
-    // On slider change: update input and chart
-    // --- Manual Lever (slider) controls threshold and input ---
-    if (thresholdSlider) {
-        thresholdSlider.addEventListener('input', function(e) {
-            setThresholdControls(e.target.value);
-        });
-        // Optionally, also allow 'change' event for keyboard/stepper
-        thresholdSlider.addEventListener('change', function(e) {
-            setThresholdControls(e.target.value);
-        });
-    }
-
-    // On input change: handled in main DOMContentLoaded above
-
-   if (autoThresholdBtn) {
-    autoThresholdBtn.addEventListener('click', function() {
-        let channel = window.currentFluorophore;
-        if (!channel || channel === 'all') {
-            // Try to extract from chart datasets
-            const datasets = window.amplificationChart?.data?.datasets;
-            if (datasets && datasets.length > 0) {
-                const match = datasets[0].label?.match(/\(([^)]+)\)/);
-                if (match && match[1] !== 'Unknown') channel = match[1];
-            }
-        }
-        if (!channel) {
-            console.warn('No channel selected or detected for auto threshold!');
-            return;
-        }
-        const scale = currentScaleMode || 'linear';
-        const autoValue = getCurrentChannelThreshold(channel, scale);
-        setThresholdControls(autoValue);
-    });
-}
-
-    // --- End Manual Lever/Threshold Controls ---
-
-    // On page load: set controls to calculated threshold
-    function initializeThresholdControls() {
-        // Find the calculated threshold from global state or chart config
-        let initial = null;
-        if (window.currentChart && window.currentChart.options && window.currentChart.options.plugins && window.currentChart.options.plugins.annotation) {
-            const ann = window.currentChart.options.plugins.annotation.annotations;
-            if (ann && ann.thresholdLine && typeof ann.thresholdLine.yMin !== 'undefined') {
-                initial = ann.thresholdLine.yMin;
-            }
-        }
-        // Only use strategy-based calculations - no fallback defaults
-        if (initial === null) {
-            console.warn('No threshold found - will use strategy-based calculation');
-            initial = null; // Let strategy calculation handle this
-        }
-        calculatedThreshold = initial;
-        if (initial !== null) {
-            setThresholdControls(initial, false);
-        }
-    }
-    initializeThresholdControls();
-
-    // --- End Threshold Controls Wiring ---
+    // --- End Threshold Controls (MOVED TO threshold_frontend.js) ---
 
     // Load analysis history on page load
     loadAnalysisHistory();
@@ -7780,7 +7065,7 @@ function calculatePathogenBreakdownFromSessions(sessions) {
     });
     
     // Order by standard fluorophore sequence
-    const orderedFluorophores = ['Cy5', 'FAM', 'HEX', 'Texas Red'];
+    const orderedFluorophores = [ 'FAM', 'HEX', 'Texas Red','Cy5'];
     const orderedStats = [];
     
     orderedFluorophores.forEach(fluorophore => {
@@ -7996,7 +7281,7 @@ function calculatePositiveRate(session) {
                 const parts = well.well_id.split('_');
                 if (parts.length > 1) {
                     const possibleFluorophore = parts[parts.length - 1];
-                    if (['Cy5', 'FAM', 'HEX', 'Texas Red'].includes(possibleFluorophore)) {
+                    if ([ 'FAM', 'HEX', 'Texas Red','Cy5'].includes(possibleFluorophore)) {
                         if (!wellIdGroups[possibleFluorophore]) {
                             wellIdGroups[possibleFluorophore] = { total: 0, positive: 0 };
                         }
@@ -8026,8 +7311,8 @@ function calculatePositiveRate(session) {
         
         // Create rates from well_id extraction with proper pathogen mapping
         const extractedRates = [];
-        const fluorophoreOrder = ['Cy5', 'FAM', 'HEX', 'Texas Red'];
-        
+        const fluorophoreOrder = [ 'FAM', 'HEX', 'Texas Red', 'Cy5' ];
+
         fluorophoreOrder.forEach(fluorophore => {
             if (wellIdGroups[fluorophore]) {
                 const group = wellIdGroups[fluorophore];
@@ -11578,7 +10863,7 @@ function showSelectedCurve(wellKey) {
 }
 
 function showAllCurves(selectedFluorophore) {
-    if (!currentAnalysisResults || !currentAnalysisResults.individual_results) {
+    if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
         console.error('No analysis results available for showAllCurves');
         return;
     }
@@ -11591,7 +10876,7 @@ function showAllCurves(selectedFluorophore) {
     safeDestroyChart();
     
     const datasets = [];
-    const results = currentAnalysisResults.individual_results;
+    const results = window.currentAnalysisResults.individual_results;
     
     Object.keys(results).forEach((wellKey, index) => {
         const wellData = results[wellKey];
@@ -11657,11 +10942,11 @@ function showAllCurves(selectedFluorophore) {
     chartConfig.options.plugins.tooltip.enabled = false;
     
     window.amplificationChart = new Chart(ctx, chartConfig);
-    updateAllChannelThresholds();
+    if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
     // enableDraggableThresholds(); // DISABLED - Will use test.html implementation
     // Apply stable threshold system after chart creation
     setTimeout(() => {
-        updateChartThresholds();
+        if (window.updateChartThresholds) window.updateChartThresholds();
     }, 400);
 }
 
@@ -11747,11 +11032,11 @@ function showGoodCurves(selectedFluorophore) {
     chartConfig.options.plugins.tooltip.enabled = datasets.length <= 20; // Disable tooltips for better performance
     
     window.amplificationChart = new Chart(ctx, chartConfig);
-    updateAllChannelThresholds();
+    if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
     // enableDraggableThresholds(); // DISABLED - Will use test.html implementation
     // Apply stable threshold system after chart creation
     setTimeout(() => {
-        updateChartThresholds();
+        if (window.updateChartThresholds) window.updateChartThresholds();
     }, 400);
 }
 
@@ -11915,11 +11200,11 @@ window.amplificationChart = new Chart(ctx, {
     chartConfig.options.elements.point.radius = 0;
     
     window.amplificationChart = new Chart(ctx, chartConfig);
-    updateAllChannelThresholds();
+    window.updateAllChannelThresholds();
     // enableDraggableThresholds(); // DISABLED - Will use test.html implementation
     // Apply stable threshold system after chart creation
     setTimeout(() => {
-        updateChartThresholds();
+        if (window.updateChartThresholds) window.updateChartThresholds();
     }, 400);
 }
 
@@ -11936,80 +11221,14 @@ function getFluorophoreColor(fluorophore) {
 }
 
 // --- Threshold Calculation Functions ---
-function calculateChannelThreshold(cycles, rfu) {
-    if (!cycles || !rfu || cycles.length !== rfu.length || cycles.length < 5) {
-        console.warn('Insufficient data for threshold calculation');
-        return null;
-    }
-    
-    // Extract RFU values for cycles 1-5
-    const earlyRfuValues = [];
-    for (let i = 0; i < Math.min(5, cycles.length); i++) {
-        if (cycles[i] <= 5 && rfu[i] !== null && rfu[i] !== undefined && rfu[i] > 0) {
-            earlyRfuValues.push(rfu[i]);
-        }
-    }
-    
-    if (earlyRfuValues.length < 3) {
-        console.warn('Insufficient early cycle data for threshold calculation');
-        return null;
-    }
-    
-    // Calculate mean and standard deviation
-    const mean = earlyRfuValues.reduce((sum, val) => sum + val, 0) / earlyRfuValues.length;
-    const variance = earlyRfuValues.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / earlyRfuValues.length;
-    const stdDev = Math.sqrt(variance);
-    
-    // Threshold = baseline + 10 * standard deviation
-    let threshold = mean + (10 * stdDev);
-    
-    // Ensure threshold is meaningful for qPCR data
-    // If threshold is too low, set it to a minimum detectable level
-    const minThreshold = Math.max(mean * 1.5, 1.0); // At least 50% above baseline or 1.0 RFU
-    threshold = Math.max(threshold, minThreshold);
-    
-    // For log scale compatibility, ensure threshold is well above noise floor
-    if (currentScaleMode === 'log') {
-        threshold = Math.max(threshold, mean * 2); // At least 2x baseline for log visibility
-    }
-    
-    console.log(`Threshold calculation - Mean: ${mean.toFixed(3)}, StdDev: ${stdDev.toFixed(3)}, Threshold: ${threshold.toFixed(3)}`);
-    
-    return {
-        threshold: threshold,
-        baseline: mean,
-        stdDev: stdDev,
-        earlyRfuValues: earlyRfuValues,
-        minThreshold: minThreshold
-    };
-}
+// ...existing code...
+
 
 // Legacy per-well threshold function removed - using channel-based thresholds instead
 
 // Deprecated threshold functions removed - using updateChartThresholds() instead
-
-function createThresholdAnnotation(threshold, fluorophore, color = 'red', index = 0) {
-    const adjustedThreshold = currentScaleMode === 'log' ? 
-        Math.max(threshold, currentLogMin || 0.1) : threshold;
-    
-    return {
-        type: 'line',
-        yMin: adjustedThreshold,
-        yMax: adjustedThreshold,
-        borderColor: color || getFluorophoreColor(fluorophore),
-        borderWidth: 2,
-        borderDash: [5, 5],
-        label: {
-            content: `${fluorophore}: ${adjustedThreshold.toFixed(2)}`,
-            enabled: true,
-            position: index % 2 === 0 ? 'start' : 'end',
-            backgroundColor: color || getFluorophoreColor(fluorophore),
-            color: 'white',
-            font: { weight: 'bold', size: 10 },
-            padding: 4
-        }
-    };
-}
+// THRESHOLD FUNCTIONS MOVED TO threshold_frontend.js
+// Function createThresholdAnnotation moved to threshold_frontend.js
 
 function getVisibleFluorophores() {
     if (!currentAnalysisResults || !currentAnalysisResults.individual_results) {

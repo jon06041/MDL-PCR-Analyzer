@@ -40,7 +40,7 @@ const LINEAR_THRESHOLD_STRATEGIES = {
 // --- Log strategies ---
 const LOG_THRESHOLD_STRATEGIES = {
   "default": {
-    name: "Exponential Phase (L/2 + B, clamped, RFU units)",
+    name: "Log: Exponential Phase (L/2 + B, clamped, RFU units)",
     calculate: ({L, B}) => {
       const min_thresh = B + 0.10 * L;
       const max_thresh = B + 0.90 * L;

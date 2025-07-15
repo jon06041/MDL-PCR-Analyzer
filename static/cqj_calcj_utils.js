@@ -157,7 +157,165 @@ function calculateThresholdCrossing(rfuArray, cyclesArray, threshold) {
     return null;
 }
 
+/**
+ * Recalculate CQJ/CalcJ values for all wells with current thresholds
+ * This version works with any threshold strategy by using current threshold values
+ */
+function recalculateCQJValues() {
+    console.log('🔍 CQJ-RECALC - Recalculating CQJ/CalcJ values with current thresholds');
+    
+    if (!window.currentAnalysisResults) {
+        console.warn('❌ CQJ-RECALC - No analysis results available');
+        return;
+    }
+    
+    // Get the results structure
+    let resultsObj = null;
+    if (window.currentAnalysisResults.individual_results && typeof window.currentAnalysisResults.individual_results === 'object') {
+        resultsObj = window.currentAnalysisResults.individual_results;
+    } else if (typeof window.currentAnalysisResults === 'object' && !Array.isArray(window.currentAnalysisResults)) {
+        resultsObj = window.currentAnalysisResults;
+    }
+    
+    if (!resultsObj) {
+        console.warn('❌ CQJ-RECALC - Could not find results object');
+        return;
+    }
+    
+    const currentScale = window.currentScaleMode || 'linear';
+    
+    if (!window.stableChannelThresholds) {
+        console.warn('❌ CQJ-RECALC - No threshold data available');
+        return;
+    }
+    
+    console.log(`🔍 CQJ-RECALC - Using thresholds for ${currentScale} scale:`, window.stableChannelThresholds);
+    
+    // Recalculate CQJ for all wells
+    Object.keys(resultsObj).forEach(wellKey => {
+        const well = resultsObj[wellKey];
+        const wellChannel = well.fluorophore;
+        
+        if (wellChannel && window.stableChannelThresholds[wellChannel] && window.stableChannelThresholds[wellChannel][currentScale]) {
+            const threshold = window.stableChannelThresholds[wellChannel][currentScale];
+            
+            const rfuData = well.rfu || well.raw_rfu;
+            const cyclesData = well.cycles || well.raw_cycles;
+            
+            let rfuArray = Array.isArray(rfuData) ? rfuData : (typeof rfuData === 'string' ? JSON.parse(rfuData) : []);
+            let cyclesArray = Array.isArray(cyclesData) ? cyclesData : (typeof cyclesData === 'string' ? JSON.parse(cyclesData) : []);
+            
+            // Ensure arrays are numbers
+            if (Array.isArray(rfuArray)) {
+                rfuArray = rfuArray.map(val => typeof val === 'string' ? parseFloat(val) : val);
+            }
+            if (Array.isArray(cyclesArray)) {
+                cyclesArray = cyclesArray.map(val => typeof val === 'string' ? parseFloat(val) : val);
+            }
+            
+            if (Array.isArray(rfuArray) && Array.isArray(cyclesArray) && rfuArray.length > 0) {
+                const oldCqjValue = well.cqj_value;
+                well.cqj_value = window.calculateThresholdCrossing(rfuArray, cyclesArray, threshold);
+                
+                // Update the CQJ object structure too
+                if (!well.cqj) well.cqj = {};
+                well.cqj[wellChannel] = well.cqj_value;
+                
+                console.log(`✅ CQJ-RECALC - ${wellKey} (${wellChannel}): ${oldCqjValue} → ${well.cqj_value} (threshold: ${threshold})`);
+            }
+        }
+    });
+    
+    // Update the results table to show new CQJ values
+    if (typeof window.displayResultsInTable === 'function') {
+        window.displayResultsInTable(resultsObj);
+    } else if (typeof window.populateResultsTable === 'function') {
+        window.populateResultsTable(resultsObj);
+    }
+    
+    console.log('🔍 CQJ-RECALC - CQJ recalculation complete');
+}
+
+/**
+ * Recalculate CQJ/CalcJ values for all wells after manual threshold input
+ * This version doesn't trigger strategy recalculation, just uses the manually set threshold
+ */
+function recalculateCQJValuesForManualThreshold() {
+    console.log('🔍 MANUAL-THRESHOLD - Recalculating CQJ/CalcJ values after manual threshold input');
+    
+    if (!window.currentAnalysisResults) {
+        console.warn('❌ MANUAL-THRESHOLD - No analysis results available');
+        return;
+    }
+    
+    // Get the results structure
+    let resultsObj = null;
+    if (window.currentAnalysisResults.individual_results && typeof window.currentAnalysisResults.individual_results === 'object') {
+        resultsObj = window.currentAnalysisResults.individual_results;
+    } else if (typeof window.currentAnalysisResults === 'object' && !Array.isArray(window.currentAnalysisResults)) {
+        resultsObj = window.currentAnalysisResults;
+    }
+    
+    if (!resultsObj) {
+        console.warn('❌ MANUAL-THRESHOLD - Could not find results object');
+        return;
+    }
+    
+    const currentChannel = window.currentFluorophore;
+    const currentScale = window.currentScaleMode || 'linear';
+    
+    if (!currentChannel || !window.stableChannelThresholds || !window.stableChannelThresholds[currentChannel]) {
+        console.warn('❌ MANUAL-THRESHOLD - Missing channel or threshold data', {
+            channel: currentChannel,
+            scale: currentScale,
+            thresholds: window.stableChannelThresholds
+        });
+        return;
+    }
+    
+    const threshold = window.stableChannelThresholds[currentChannel][currentScale];
+    console.log(`🔍 MANUAL-THRESHOLD - Using threshold ${threshold} for channel ${currentChannel} (${currentScale} scale)`);
+    
+    // Recalculate CQJ for all wells with this channel
+    Object.keys(resultsObj).forEach(wellKey => {
+        const well = resultsObj[wellKey];
+        if (well.fluorophore === currentChannel) {
+            const rfuData = well.rfu || well.raw_rfu;
+            const cyclesData = well.cycles || well.raw_cycles;
+            
+            let rfuArray = Array.isArray(rfuData) ? rfuData : (typeof rfuData === 'string' ? JSON.parse(rfuData) : []);
+            let cyclesArray = Array.isArray(cyclesData) ? cyclesData : (typeof cyclesData === 'string' ? JSON.parse(cyclesData) : []);
+            
+            // Ensure arrays are numbers
+            if (Array.isArray(rfuArray)) {
+                rfuArray = rfuArray.map(val => typeof val === 'string' ? parseFloat(val) : val);
+            }
+            if (Array.isArray(cyclesArray)) {
+                cyclesArray = cyclesArray.map(val => typeof val === 'string' ? parseFloat(val) : val);
+            }
+            
+            if (Array.isArray(rfuArray) && Array.isArray(cyclesArray) && rfuArray.length > 0) {
+                const oldCqjValue = well.cqj_value;
+                well.cqj_value = window.calculateThresholdCrossing(rfuArray, cyclesArray, threshold);
+                
+                // Update the CQJ object structure too
+                if (!well.cqj) well.cqj = {};
+                well.cqj[currentChannel] = well.cqj_value;
+                
+                console.log(`✅ MANUAL-THRESHOLD-CQJ - ${wellKey}: ${oldCqjValue} → ${well.cqj_value} (manual threshold: ${threshold})`);
+            }
+        }
+    });
+    
+    // Update the results table to show new CQJ values
+    if (typeof window.displayResultsInTable === 'function') {
+        window.displayResultsInTable(resultsObj);
+    }
+}
+
 // Export for use in script.js
 window.calculateCqj = calculateCqj;
 window.calculateCalcj = calculateCalcj;
 window.calculateThresholdCrossing = calculateThresholdCrossing;
+window.recalculateCQJValues = recalculateCQJValues;
+window.recalculateCQJValuesForManualThreshold = recalculateCQJValuesForManualThreshold;
