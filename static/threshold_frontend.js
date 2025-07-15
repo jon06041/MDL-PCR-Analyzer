@@ -225,6 +225,19 @@ function calculateLinearThreshold(channelWells, channel) {
     return median; // Return exact calculated value, no minimum
 }
 
+// --- Utility Functions ---
+function safeSetItem(storage, key, value) {
+    try {
+        storage.setItem(key, value);
+    } catch (e) {
+        console.warn(`🔍 STORAGE - Failed to save ${key}:`, e);
+    }
+}
+
+function getSelectedThresholdStrategy() {
+    return window.selectedThresholdStrategy || 'default';
+}
+
 // --- Threshold Storage Functions ---
 function setChannelThreshold(channel, scale, value) {
     // Use the new stable threshold system
@@ -379,7 +392,7 @@ onDragEnd: function(e) {
         setChannelThreshold(channel, currentScale, newY);
         // Optionally update UI input if present
         const thresholdInput = document.getElementById('thresholdInput');
-        if (thresholdInput && (currentFluorophore === channel || currentFluorophore === 'all')) {
+        if (thresholdInput && (window.currentFluorophore === channel || window.currentFluorophore === 'all')) {
             thresholdInput.value = newY.toFixed(2);
         }
         // Persist and update chart
