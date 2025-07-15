@@ -5679,8 +5679,8 @@ function combineMultiFluorophoreResultsSQL(allResults) {
                 combined.individual_results[newWellKey] = {
                     ...wellResult,
                     fluorophore: fluorophore,
-                    sample_name: sampleName,
-                    cq_value: cqValue,
+                    sample_name: wellResult.sample_name || wellResult.sample || 'Unknown',
+                    cq_value: wellResult.cq_value || wellResult.cq || wellResult.Cq_Value,
                     // Ensure threshold_value is explicitly preserved
                     threshold_value: wellResult.threshold_value
                 };
