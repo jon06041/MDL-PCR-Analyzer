@@ -1,6 +1,40 @@
 // threshold_frontend.js
 // All frontend threshold calculation, storage, and chart annotation logic
 
+
+// Add this combined initialization function
+
+/**
+ * Initialize threshold system after new analysis results are loaded
+ * Call this ONCE after displayAnalysisResults or displayMultiFluorophoreResults
+ */
+window.initializeThresholdSystem = function() {
+    console.log('🔍 THRESHOLD-INIT - Initializing complete threshold system');
+    
+    // 1. Extract control wells
+    if (window.extractChannelControlWells) {
+        window.extractChannelControlWells();
+    }
+    
+    // 2. Initialize channel thresholds
+    if (window.initializeChannelThresholds) {
+        window.initializeChannelThresholds();
+    }
+    
+    // 3. Update UI elements
+    if (window.updateThresholdInputForCurrentScale) {
+        window.updateThresholdInputForCurrentScale();
+    }
+    
+    // 4. Update chart thresholds if chart exists
+    if (window.amplificationChart && window.updateChartThresholds) {
+        window.updateChartThresholds();
+    }
+    
+    console.log('✅ THRESHOLD-INIT - Threshold system initialization complete');
+};
+
+
 // --- Global threshold storage ---
 if (!window.stableChannelThresholds) {
     window.stableChannelThresholds = {}; // { channel: { linear: value, log: value } }
@@ -321,6 +355,180 @@ onDragEnd: function(e) {
     
     console.log(`🔍 THRESHOLD - Updated thresholds for channels: ${Array.from(visibleChannels).join(', ')}`);
 }
+   
+
+// Custom dragging handler for threshold annotations (since plugin dragging is broken)
+function addThresholdDragging() {
+    if (!window.amplificationChart) {
+        console.log('🔍 THRESHOLD-DRAG - No chart available, skipping dragging setup');
+        return;
+    }
+    
+    const chart = window.amplificationChart;
+    const canvas = chart.canvas;
+    
+    // Add null check for canvas
+    if (!canvas) {
+        console.log('🔍 THRESHOLD-DRAG - No canvas available, skipping dragging setup');
+        return;
+    }
+    
+    let draggedChannel = null;
+    let dragStartY = null;
+    
+    // Define event handlers as named functions
+    function handleMouseDown(e) {
+        const pos = getMousePos(e);
+        const threshold = findNearestThreshold(pos);
+        
+        if (threshold) {
+            draggedChannel = threshold.channel;
+            dragStartY = pos.y;
+            canvas.style.cursor = 'ns-resize';
+            e.preventDefault();
+        }
+    }
+    
+    function handleMouseMove(e) {
+        const pos = getMousePos(e);
+        
+        if (draggedChannel) {
+            // Dragging
+            const yScale = chart.scales.y;
+            const newValue = yScale.getValueForPixel(pos.y);
+            
+            if (newValue > 0) {
+                // Update the annotation
+                const annotations = chart.options.plugins.annotation.annotations;
+                const annotationKey = `threshold_${draggedChannel}`;
+                
+                if (annotations[annotationKey]) {
+                    annotations[annotationKey].yMin = newValue;
+                    annotations[annotationKey].yMax = newValue;
+                    annotations[annotationKey].label.content = `${draggedChannel}: ${newValue.toFixed(2)}`;
+                }
+                
+                // Update stored threshold
+                const currentScale = window.currentScaleMode || 'linear';
+                setChannelThreshold(draggedChannel, currentScale, newValue);
+                
+                // Update input if this is the current channel
+                const thresholdInput = document.getElementById('thresholdInput');
+                if (thresholdInput && (window.currentFluorophore === draggedChannel || window.currentFluorophore === 'all')) {
+                    thresholdInput.value = newValue.toFixed(2);
+                }
+                
+                // Update chart without animation
+                chart.update('none');
+            }
+        } else {
+            // Hovering
+            const threshold = findNearestThreshold(pos);
+            canvas.style.cursor = threshold ? 'ns-resize' : 'default';
+        }
+    }
+    
+    function handleMouseUp(e) {
+        if (draggedChannel) {
+            console.log(`🔍 DRAG-END - ${draggedChannel} threshold updated`);
+            
+            // Mark as manual threshold
+            if (!window.manualThresholds) window.manualThresholds = {};
+            if (!window.manualThresholds[draggedChannel]) window.manualThresholds[draggedChannel] = {};
+            window.manualThresholds[draggedChannel][window.currentScaleMode] = true;
+            
+            // Update strategy to manual
+            const strategySelect = document.getElementById('thresholdStrategySelect');
+            if (strategySelect && strategySelect.value !== 'manual') {
+                strategySelect.value = 'manual';
+                window.selectedThresholdStrategy = 'manual';
+            }
+            
+            // Send to backend
+            if (window.sendManualThresholdToBackend) {
+                const currentScale = window.currentScaleMode || 'linear';
+                const annotations = chart.options.plugins.annotation.annotations;
+                const annotationKey = `threshold_${draggedChannel}`;
+                const newValue = annotations[annotationKey]?.yMin;
+                if (newValue) {
+                    window.sendManualThresholdToBackend(draggedChannel, currentScale, newValue);
+                }
+            }
+            
+            draggedChannel = null;
+            dragStartY = null;
+        }
+    }
+    
+    function handleMouseLeave(e) {
+        draggedChannel = null;
+        dragStartY = null;
+        canvas.style.cursor = 'default';
+    }
+    
+    // Helper functions
+    function getMousePos(e) {
+        const rect = canvas.getBoundingClientRect();
+        return {
+            x: (e.clientX - rect.left) * (canvas.width / rect.width),
+            y: (e.clientY - rect.top) * (canvas.height / rect.height)
+        };
+    }
+    
+    function isNearThreshold(mouseY, thresholdY, tolerance = 10) {
+        return Math.abs(mouseY - thresholdY) < tolerance;
+    }
+    
+    function findNearestThreshold(mousePos) {
+        const yScale = chart.scales.y;
+        const annotations = chart.options.plugins.annotation.annotations;
+        
+        for (const [key, annotation] of Object.entries(annotations)) {
+            if (key.startsWith('threshold_')) {
+                const channel = key.replace('threshold_', '');
+                const thresholdValue = annotation.yMin;
+                const thresholdY = yScale.getPixelForValue(thresholdValue);
+                
+                if (isNearThreshold(mousePos.y, thresholdY)) {
+                    return { channel, value: thresholdValue, pixelY: thresholdY };
+                }
+            }
+        }
+        return null;
+    }
+    
+    // Remove any existing listeners to prevent duplicates
+    canvas.removeEventListener('mousedown', handleMouseDown);
+    canvas.removeEventListener('mousemove', handleMouseMove);
+    canvas.removeEventListener('mouseup', handleMouseUp);
+    canvas.removeEventListener('mouseleave', handleMouseLeave);
+    
+    // Add event listeners
+    canvas.addEventListener('mousedown', handleMouseDown);
+    canvas.addEventListener('mousemove', handleMouseMove);
+    canvas.addEventListener('mouseup', handleMouseUp);
+    canvas.addEventListener('mouseleave', handleMouseLeave);
+    
+    console.log('✅ Custom threshold dragging enabled');
+}
+// Expose globally
+window.addThresholdDragging = addThresholdDragging;
+
+// Modify the existing updateAllChannelThresholds to call addThresholdDragging after updating
+const originalUpdateAllChannelThresholds = window.updateAllChannelThresholds;
+window.updateAllChannelThresholds = function() {
+    originalUpdateAllChannelThresholds.apply(this, arguments);
+    // Add dragging after a small delay to ensure chart is updated
+    setTimeout(addThresholdDragging, 100);
+};
+
+// Also call it after updateSingleChannelThreshold
+const originalUpdateSingleChannelThreshold = window.updateSingleChannelThreshold;
+window.updateSingleChannelThreshold = function() {
+    originalUpdateSingleChannelThreshold.apply(this, arguments);
+    setTimeout(addThresholdDragging, 100);
+};
+
 function updateSingleChannelThreshold(fluorophore) {
    console.log(`🔍 THRESHOLD - Updating threshold for single channel: ${fluorophore}`);
     
@@ -1266,7 +1474,69 @@ function applyThresholdStrategy(strategy) {
 /**
  * End Strategy Integration Functions
  */
+// Add this function to threshold_frontend.js
 
+/**
+ * Extract and categorize control wells by channel from analysis results
+ * This function is required by threshold_frontend.js for threshold calculations
+ */
+window.extractChannelControlWells = function() {
+    if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
+        console.log('🔍 CONTROL-WELLS - No analysis results available for control extraction');
+        return;
+    }
+    
+    window.channelControlWells = {};
+    const results = window.currentAnalysisResults.individual_results;
+    
+    // Group wells by channel (fluorophore)
+    Object.entries(results).forEach(([wellKey, well]) => {
+        if (!well || !well.fluorophore || well.fluorophore === 'Unknown') return;
+        
+        const channel = well.fluorophore;
+        const sampleName = well.sample_name || well.sample || '';
+        
+        // Initialize channel if not exists
+        if (!window.channelControlWells[channel]) {
+            window.channelControlWells[channel] = { 
+                NTC: [], 
+                POS: [],
+                H: [],
+                M: [],
+                L: [],
+                other: []
+            };
+        }
+        
+        // Categorize control wells based on sample name
+        const sampleLower = sampleName.toLowerCase();
+        
+        if (sampleLower.includes('ntc') || 
+            sampleLower.includes('neg') ||
+            sampleLower.includes('negative') ||
+            sampleLower.includes('blank')) {
+            window.channelControlWells[channel].NTC.push(well);
+        } else if (sampleLower.includes('pos') || sampleLower.includes('control')) {
+            // Further categorize positive controls
+            if (sampleLower.includes('h ') || sampleLower.match(/\bh\d/)) {
+                window.channelControlWells[channel].H.push(well);
+            } else if (sampleLower.includes('m ') || sampleLower.match(/\bm\d/)) {
+                window.channelControlWells[channel].M.push(well);
+            } else if (sampleLower.includes('l ') || sampleLower.match(/\bl\d/)) {
+                window.channelControlWells[channel].L.push(well);
+            } else {
+                window.channelControlWells[channel].POS.push(well);
+            }
+        }
+    });
+    
+    console.log('🔍 CONTROL-WELLS - Extracted control wells by channel:', window.channelControlWells);
+    
+    // Log summary for debugging
+    Object.entries(window.channelControlWells).forEach(([channel, controls]) => {
+        console.log(`🔍 CONTROL-WELLS - ${channel}: NTC=${controls.NTC.length}, POS=${controls.POS.length}, H=${controls.H.length}, M=${controls.M.length}, L=${controls.L.length}`);
+    });
+};
 // --- End Additional Functions ---
 
 window.setChannelThreshold = setChannelThreshold;

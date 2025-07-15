@@ -2118,37 +2118,22 @@ function onScaleToggle() {
         window.amplificationChart.update('none');
     }
     
-    // CRITICAL: Initialize thresholds for the new scale if they don't exist
-    if (window.currentAnalysisResults && window.stableChannelThresholds) {
-        const channels = new Set();
-        Object.values(window.currentAnalysisResults.individual_results || {}).forEach(well => {
-            if (well.fluorophore) channels.add(well.fluorophore);
-        });
-        
-        channels.forEach(channel => {
-            if (!window.stableChannelThresholds[channel]) {
-                window.stableChannelThresholds[channel] = {};
-            }
-            if (!window.stableChannelThresholds[channel][currentScaleMode]) {
-                const threshold = window.calculateStableChannelThreshold ? window.calculateStableChannelThreshold(channel, currentScaleMode) : null;
-                if (threshold !== null) {
-                    window.stableChannelThresholds[channel][currentScaleMode] = threshold;
-                    console.log(`🔍 SCALE-INIT - Initialized ${channel} ${currentScaleMode} threshold: ${threshold}`);
-                }
-            }
-        });
-    }
+    // ...existing code for threshold initialization...
     
-    // Update threshold strategy dropdown for new scale AFTER threshold initialization
+    // Update threshold strategy dropdown for new scale
     if (typeof window.populateThresholdStrategyDropdown === 'function') {
         window.populateThresholdStrategyDropdown();
     }
     
     // Update threshold input box for current scale
-    updateThresholdInputForCurrentScale();
+    if (window.updateThresholdInputForCurrentScale) {
+        window.updateThresholdInputForCurrentScale();
+    }
     
     // Update chart thresholds to ensure they're visible
-    if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
+    if (window.updateAllChannelThresholds) {
+        window.updateAllChannelThresholds();
+    }
     
     // Update UI (this will also sync the toggle button)
     updateSliderUI();
@@ -3721,7 +3706,13 @@ async function displayAnalysisResults(results) {
     if (analysisSection) {
         analysisSection.style.display = 'block';
     }
+     // Add this after setting window.currentAnalysisResults:
+    // Initialize channel thresholds for the new results
+    if (window.initializeChannelThresholds) {
+        window.initializeChannelThresholds();
+    }
     
+   
     // Handle different response structures
     const individualResults = results.individual_results || {};
     const cycleInfo = results.cycle_info || results.summary?.cycle_info;
@@ -3938,7 +3929,13 @@ async function displayMultiFluorophoreResults(results) {
     
     const analysisSection = document.getElementById('analysisSection');
     analysisSection.style.display = 'block';
+     // Add this after showing analysis section:
+    // Initialize channel thresholds for multi-fluorophore results
+    if (window.initializeChannelThresholds) {
+        window.initializeChannelThresholds();
+    }
     
+   
     // Calculate statistics separated by patient samples and controls
     const individualResults = results.individual_results;
     const fluorophoreStats = calculateFluorophoreStats(individualResults);
@@ -4233,27 +4230,38 @@ function populateFluorophoreSelector(individualResults) {
     });
     
     // Add event listener for fluorophore filtering
-    fluorophoreSelector.addEventListener('change', function() {
-        const selectedFluorophore = this.value;
-        window.currentFluorophore = selectedFluorophore; // <-- Add this line
-        filterWellsByFluorophore(selectedFluorophore);
-        
-        // Apply current table filter to the new fluorophore selection
-        // Don't reset the filter dropdown, just re-apply the current filter
-        filterTable(); // This will apply the current POS/NEG/REDO filter to the new fluorophore
-        
-        // Reset chart mode to 'all' and update display
-        currentChartMode = 'all';
-        updateChartDisplayMode();
-        
-        // Update button states to reflect 'all' mode
-        const buttons = document.querySelectorAll('.view-controls .control-btn');
-        buttons.forEach(btn => btn.classList.remove('active'));
-        const showAllBtn = document.getElementById('showAllBtn');
-        if (showAllBtn) {
-            showAllBtn.classList.add('active');
-        }
-    });
+fluorophoreSelector.addEventListener('change', function() {
+    const selectedFluorophore = this.value;
+    window.currentFluorophore = selectedFluorophore; // <-- Already there
+    
+    // Update threshold input for newly selected channel
+    if (window.updateThresholdInputForCurrentScale) {
+        window.updateThresholdInputForCurrentScale();
+    }
+    
+    // Update chart thresholds if chart exists
+    if (window.amplificationChart && window.updateChartThresholds) {
+        window.updateChartThresholds();
+    }
+    
+    filterWellsByFluorophore(selectedFluorophore);
+    
+    // Apply current table filter to the new fluorophore selection
+    // Don't reset the filter dropdown, just re-apply the current filter
+    filterTable(); // This will apply the current POS/NEG/REDO filter to the new fluorophore
+    
+    // Reset chart mode to 'all' and update display
+    currentChartMode = 'all';
+    updateChartDisplayMode();
+    
+    // Update button states to reflect 'all' mode
+    const buttons = document.querySelectorAll('.view-controls .control-btn');
+    buttons.forEach(btn => btn.classList.remove('active'));
+    const showAllBtn = document.getElementById('showAllBtn');
+    if (showAllBtn) {
+        showAllBtn.classList.add('active');
+    }
+});
 }
 
 /**
@@ -5039,12 +5047,19 @@ function updateChart(wellKey, cyclesData = null, rfuData = null, wellData = null
     );
     
     window.amplificationChart = new Chart(ctx, chartConfig);
-    if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
-    // enableDraggableThresholds(); // DISABLED - Will use test.html implementation
-    // Apply stable threshold system after chart creation
-    setTimeout(() => {
-        if (window.updateChartThresholds) window.updateChartThresholds();
-    }, 400);
+
+// Initialize thresholds after chart creation
+setTimeout(() => {
+    // Update all channel thresholds
+    if (window.updateAllChannelThresholds) {
+        window.updateAllChannelThresholds();
+    }
+    
+    // Enable custom dragging functionality
+    if (window.addThresholdDragging) {
+        window.addThresholdDragging();
+    }
+}, 100);
 }
 
 // Utility functions
@@ -7081,271 +7096,91 @@ function calculatePositiveRate(session) {
     console.log('🔍 HISTORY DEBUG - calculatePositiveRate called for:', session.filename);
     console.log('🔍 HISTORY DEBUG - Session has pathogen_breakdown:', !!session.pathogen_breakdown);
     console.log('🔍 HISTORY DEBUG - Session well_results length:', session.well_results?.length || 0);
-    
-    // Debug log specific session data for Cglab
-   /* if (session.filename && session.filename.includes('Cglab')) {
-        console.log('🔍 CGLAB HISTORY DEBUG - Session details:', {
-            id: session.id,
-            filename: session.filename,
-            total_wells: session.total_wells,
-            good_curves: session.good_curves,
-            success_rate: session.success_rate,
-            pathogen_breakdown: session.pathogen_breakdown
-        });
-    }*/
-    
+
     // Check if stored pathogen breakdown contains "Unknown" OR fluorophore names instead of pathogen targets
     const hasUnknown = session.pathogen_breakdown && session.pathogen_breakdown.includes('Unknown');
     const hasFluorophoreNames = session.pathogen_breakdown && 
         (session.pathogen_breakdown.includes('FAM:') || session.pathogen_breakdown.includes('HEX:') || 
          session.pathogen_breakdown.includes('Cy5:') || session.pathogen_breakdown.includes('Texas Red:'));
-    
+
     if (session.pathogen_breakdown && !hasUnknown && !hasFluorophoreNames) {
         console.log('🔍 HISTORY DEBUG - Using valid stored pathogen_breakdown:', session.pathogen_breakdown);
         return session.pathogen_breakdown;
     }
-    
+
     console.log('🔍 HISTORY DEBUG - Stored breakdown contains Unknown/fluorophore names or missing, recalculating...', 
         { hasUnknown, hasFluorophoreNames, breakdown: session.pathogen_breakdown });
-    
-    // Calculate pathogen-specific positive rates for sessions without stored breakdown
-    if (!session.well_results || session.well_results.length === 0) {
+
+    // Fallback: use individual_results if well_results is empty
+    let wells = session.well_results && session.well_results.length > 0
+        ? session.well_results
+        : (session.individual_results ? Object.values(session.individual_results) : []);
+    if (!wells || wells.length === 0) {
         return "0.0";
     }
-    
-    // Group wells by fluorophore/pathogen - PATIENT SAMPLES ONLY (exclude controls)
-    const fluorophoreGroups = {};
-    
-    // Extract test name for control detection
-    const testName = extractTestCode(session.filename) || 'Unknown';
-    
-    session.well_results.forEach(well => {
-        // Skip control samples - only count patient samples for positive rates
-        const sampleName = well.sample_name || '';
-        if (isControlSample(sampleName, testName)) {
-            return; // Skip controls
-        }
-        
-        let fluorophore = well.fluorophore;
-        
-        // Enhanced fluorophore detection for history display
-        if (!fluorophore || fluorophore === 'Unknown') {
-            // Try detecting from session filename first (most reliable for single-channel tests)
-            if (session.filename.includes('AcNgon')) fluorophore = 'HEX';
-            else if (session.filename.includes('AcCtrach')) fluorophore = 'FAM'; 
-            else if (session.filename.includes('AcTvag')) fluorophore = 'FAM';
-            else if (session.filename.includes('AcCalb')) fluorophore = 'HEX';
-            else if (session.filename.includes('AcMgen')) fluorophore = 'FAM';
-            else if (session.filename.includes('AcUpar')) fluorophore = 'FAM';
-            else if (session.filename.includes('AcUure')) fluorophore = 'FAM';
-            else if (session.filename.includes('_HEX')) fluorophore = 'HEX';
-            else if (session.filename.includes('_FAM')) fluorophore = 'FAM';
-            else if (session.filename.includes('_Cy5')) fluorophore = 'Cy5';
-            else if (session.filename.includes('_Texas Red')) fluorophore = 'Texas Red';
-        }
-        
-        // Still unknown? Set to Unknown but log it
-        if (!fluorophore) {
-            fluorophore = 'Unknown';
-            console.log('🔍 HISTORY DEBUG - Could not detect fluorophore for well in session:', session.filename);
-        }
-        
-        // Try to extract from fit_parameters if not directly available
-        if (fluorophore === 'Unknown' && well.fit_parameters) {
-            try {
-                const fitParams = typeof well.fit_parameters === 'string' ? 
-                    JSON.parse(well.fit_parameters) : well.fit_parameters;
-                if (fitParams.fluorophore && fitParams.fluorophore !== 'Unknown') {
-                    fluorophore = fitParams.fluorophore;
-                }
-            } catch (e) {
-                // Continue with fallback methods
-            }
-        }
-        
-        // Try to extract from well_id if still unknown (A1_Cy5 -> Cy5)
-        if (fluorophore === 'Unknown' && well.well_id && well.well_id.includes('_')) {
-            const parts = well.well_id.split('_');
-            if (parts.length > 1) {
-                const possibleFluorophore = parts[parts.length - 1];
-                if (['Cy5', 'FAM', 'HEX', 'Texas Red'].includes(possibleFluorophore)) {
-                    fluorophore = possibleFluorophore;
-                }
-            }
-        }
-        
-        // For single-channel sessions, try to extract fluorophore from session filename
-        if (fluorophore === 'Unknown' && session.filename) {
-            const detectedFluorophore = detectFluorophoreFromFilename(session.filename);
-            if (detectedFluorophore && detectedFluorophore !== 'Unknown') {
-                fluorophore = detectedFluorophore;
-            }
-        }
-        
-        // Fallback to extractFluorophoreFromWellId function if still unknown
-        if (fluorophore === 'Unknown') {
-            fluorophore = extractFluorophoreFromWellId(well.well_id) || 'Unknown';
-        }
-        
-        // Final fallback for single-channel tests based on filename
-        /*if (fluorophore === 'Unknown' && session.filename) {
-            if (session.filename.includes('AcNgon')) fluorophore = 'HEX';
-            else if (session.filename.includes('AcCtrach')) fluorophore = 'FAM'; 
-            else if (session.filename.includes('AcTvag')) fluorophore = 'FAM';
-            else if (session.filename.includes('AcCalb')) fluorophore = 'HEX';
-            else if (session.filename.includes('AcMgen')) fluorophore = 'FAM';
-            else if (session.filename.includes('AcUpar')) fluorophore = 'FAM';
-            else if (session.filename.includes('AcUure')) fluorophore = 'FAM';
-        }*/
 
-        if (!fluorophoreGroups[fluorophore]) {
-            fluorophoreGroups[fluorophore] = { total: 0, positive: 0 };
+    // Group wells by channel using PATHOGEN_LIBRARY for assignment
+    const testCode = extractTestCode(session.filename) || 'Unknown';
+    const testData = (typeof PATHOGEN_LIBRARY !== 'undefined' && PATHOGEN_LIBRARY[testCode]) ? PATHOGEN_LIBRARY[testCode] : null;
+    if (!testData) {
+        return "0.0";
+    }
+    const channels = Object.keys(testData).filter(c => c !== 'Unknown');
+    const channelGroups = {};
+    channels.forEach(channel => {
+        channelGroups[channel] = { total: 0, positive: 0, pathogen: testData[channel] || channel };
+    });
+
+    wells.forEach(well => {
+        // Only count patient samples
+        const sampleName = well.sample_name || '';
+        if (isControlSample(sampleName, testCode)) return;
+        let channel = null;
+        // 1. Try well.fluorophore
+        if (well.fluorophore && channelGroups[well.fluorophore]) {
+            channel = well.fluorophore;
         }
-        fluorophoreGroups[fluorophore].total++;
-        
+        // 2. Try extracting from well_id (e.g., "A1_Cy5" -> "Cy5")
+        if (!channel && well.well_id) {
+            const extracted = extractFluorophoreFromWellId(well.well_id);
+            if (extracted && channelGroups[extracted]) {
+                channel = extracted;
+            }
+        }
+        // 3. If only one channel exists, use it
+        if (!channel && channels.length === 1) {
+            channel = channels[0];
+        }
+        if (!channelGroups[channel]) return;
+        channelGroups[channel].total++;
         const amplitude = well.amplitude || 0;
         let hasAnomalies = false;
-        
         if (well.anomalies) {
             try {
-                const anomalies = typeof well.anomalies === 'string' ? 
-                    JSON.parse(well.anomalies) : well.anomalies;
-                hasAnomalies = Array.isArray(anomalies) && anomalies.length > 0 && 
-                              !(anomalies.length === 1 && anomalies[0] === 'None');
+                const anomalies = typeof well.anomalies === 'string' ? JSON.parse(well.anomalies) : well.anomalies;
+                hasAnomalies = Array.isArray(anomalies) && anomalies.length > 0 && !(anomalies.length === 1 && anomalies[0] === 'None');
             } catch (e) {
                 hasAnomalies = true;
             }
         }
-        
-        // POS criteria: good S-curve + amplitude > 500 + no anomalies
         const isGoodSCurve = well.is_good_scurve || false;
         if (isGoodSCurve && amplitude > 500 && !hasAnomalies) {
-            fluorophoreGroups[fluorophore].positive++;
+            channelGroups[channel].positive++;
         }
     });
-    
-    // Create pathogen-specific display with debugging
-    const pathogenRates = [];
-    const fluorophoreOrder = ['Cy5', 'FAM', 'HEX', 'Texas Red'];
-    
-    console.log('Positive rate calculation debug:', {
-        fluorophoreGroups,
-        sessionFilename: session.filename,
-        sessionId: session.id,
-        wellResultsCount: session.well_results ? session.well_results.length : 0,
-        firstWellSample: session.well_results && session.well_results.length > 0 ? {
-            well_id: session.well_results[0].well_id,
-            fluorophore: session.well_results[0].fluorophore,
-            amplitude: session.well_results[0].amplitude
-        } : null,
-        detectedFluorophores: Object.keys(fluorophoreGroups)
-    });
-    
-    // Sort fluorophores in standard order
-    const sortedFluorophores = Object.keys(fluorophoreGroups).sort((a, b) => {
-        const aIndex = fluorophoreOrder.indexOf(a);
-        const bIndex = fluorophoreOrder.indexOf(b);
-        if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
-        if (aIndex !== -1) return -1;
-        if (bIndex !== -1) return 1;
-        return a.localeCompare(b);
-    });
-    
-    sortedFluorophores.forEach(fluorophore => {
-        const group = fluorophoreGroups[fluorophore];
-        const rate = (group.positive / group.total * 100).toFixed(1);
-        
-        // Get pathogen target for display - extract test code from session filename
-        let pathogenTarget = fluorophore;
-        if (typeof getPathogenTarget === 'function') {
-            const testCode = extractTestCode(session.filename || '');
-            pathogenTarget = getPathogenTarget(testCode, fluorophore) || fluorophore;
-        }
-        
-        pathogenRates.push(`${pathogenTarget}: ${rate}%`);
-    });
-    
-    // For multi-fluorophore sessions with no fluorophore data, check if we have individual sessions
-    if (pathogenRates.length === 0 && session.well_results && session.well_results.length > 1000) {
-        // This appears to be a multi-fluorophore session with missing fluorophore data
-        // Try to extract from well_id patterns instead - PATIENT SAMPLES ONLY
-        const wellIdGroups = {};
-        session.well_results.forEach(well => {
-            // Skip control samples - only count patient samples for positive rates
-            const sampleName = well.sample_name || '';
-            if (isControlSample(sampleName, testName)) {
-                return; // Skip controls
-            }
-            
-            if (well.well_id && well.well_id.includes('_')) {
-                const parts = well.well_id.split('_');
-                if (parts.length > 1) {
-                    const possibleFluorophore = parts[parts.length - 1];
-                    if ([ 'FAM', 'HEX', 'Texas Red','Cy5'].includes(possibleFluorophore)) {
-                        if (!wellIdGroups[possibleFluorophore]) {
-                            wellIdGroups[possibleFluorophore] = { total: 0, positive: 0 };
-                        }
-                        wellIdGroups[possibleFluorophore].total++;
-                        
-                        const amplitude = well.amplitude || 0;
-                        let hasAnomalies = false;
-                        
-                        if (well.anomalies) {
-                            try {
-                                const anomalies = typeof well.anomalies === 'string' ? 
-                                    JSON.parse(well.anomalies) : well.anomalies;
-                                hasAnomalies = Array.isArray(anomalies) && anomalies.length > 0 && 
-                                              !(anomalies.length === 1 && anomalies[0] === 'None');
-                            } catch (e) {
-                                hasAnomalies = true;
-                            }
-                        }
-                        
-                        if (amplitude > 500 && !hasAnomalies) {
-                            wellIdGroups[possibleFluorophore].positive++;
-                        }
-                    }
-                }
-            }
-        });
-        
-        // Create rates from well_id extraction with proper pathogen mapping
-        const extractedRates = [];
-        const fluorophoreOrder = [ 'FAM', 'HEX', 'Texas Red', 'Cy5' ];
 
-        fluorophoreOrder.forEach(fluorophore => {
-            if (wellIdGroups[fluorophore]) {
-                const group = wellIdGroups[fluorophore];
-                const rate = (group.positive / group.total * 100).toFixed(1);
-                
-                // Extract test code from session filename for pathogen target mapping
-                let pathogenTarget = fluorophore;
-                if (typeof getPathogenTarget === 'function') {
-                    const testCode = extractTestCode(session.filename) || 'BVAB';
-                    pathogenTarget = getPathogenTarget(testCode, fluorophore) || fluorophore;
-                }
-                
-                extractedRates.push(`${pathogenTarget}: ${rate}%`);
-            }
-        });
-        
-        if (extractedRates.length > 0) {
-            return extractedRates.join(' | ');
-        }
-    }
-    
-    // For multi-fluorophore sessions, show all rates with separators
-    if (pathogenRates.length > 1) {
-        return pathogenRates.join(' | ');
-    } else if (pathogenRates.length === 1) {
-        return pathogenRates[0];
-    }
-    
-    return "0.0";
+    // Build display string from channelGroups
+    const rates = [];
+    channels.forEach(channel => {
+        const group = channelGroups[channel];
+        if (group.total === 0) return;
+        const rate = (group.positive / group.total * 100).toFixed(1);
+        rates.push(`${group.pathogen}: ${rate}%`);
+    });
+    return rates.length > 0 ? rates.join(' | ') : "0.0";
 }
 
 function extractFluorophoreFromWellId(wellId) {
-    // Extract fluorophore from well_id format like "A1_Cy5" -> "Cy5"
     if (!wellId || typeof wellId !== 'string') return null;
     const parts = wellId.split('_');
     return parts.length > 1 ? parts[1] : null;
@@ -10941,13 +10776,20 @@ function showAllCurves(selectedFluorophore) {
     chartConfig.options.plugins.legend.display = false;
     chartConfig.options.plugins.tooltip.enabled = false;
     
-    window.amplificationChart = new Chart(ctx, chartConfig);
-    if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
-    // enableDraggableThresholds(); // DISABLED - Will use test.html implementation
-    // Apply stable threshold system after chart creation
-    setTimeout(() => {
-        if (window.updateChartThresholds) window.updateChartThresholds();
-    }, 400);
+   window.amplificationChart = new Chart(ctx, chartConfig);
+
+// Initialize thresholds after chart creation
+setTimeout(() => {
+    // Update all channel thresholds
+    if (window.updateAllChannelThresholds) {
+        window.updateAllChannelThresholds();
+    }
+    
+    // Enable custom dragging functionality
+    if (window.addThresholdDragging) {
+        window.addThresholdDragging();
+    }
+}, 100);
 }
 
 function showGoodCurves(selectedFluorophore) {
@@ -11031,13 +10873,20 @@ function showGoodCurves(selectedFluorophore) {
     chartConfig.options.plugins.legend.display = datasets.length <= 10; // Show legend only for reasonable number of curves
     chartConfig.options.plugins.tooltip.enabled = datasets.length <= 20; // Disable tooltips for better performance
     
-    window.amplificationChart = new Chart(ctx, chartConfig);
-    if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
-    // enableDraggableThresholds(); // DISABLED - Will use test.html implementation
-    // Apply stable threshold system after chart creation
-    setTimeout(() => {
-        if (window.updateChartThresholds) window.updateChartThresholds();
-    }, 400);
+   window.amplificationChart = new Chart(ctx, chartConfig);
+
+// Initialize thresholds after chart creation
+setTimeout(() => {
+    // Update all channel thresholds
+    if (window.updateAllChannelThresholds) {
+        window.updateAllChannelThresholds();
+    }
+    
+    // Enable custom dragging functionality
+    if (window.addThresholdDragging) {
+        window.addThresholdDragging();
+    }
+}, 100);
 }
 
 function showResultsFiltered(selectedFluorophore, resultType) {
@@ -11199,13 +11048,20 @@ window.amplificationChart = new Chart(ctx, {
     chartConfig.options.plugins.tooltip.enabled = datasets.length <= 20;
     chartConfig.options.elements.point.radius = 0;
     
-    window.amplificationChart = new Chart(ctx, chartConfig);
-    window.updateAllChannelThresholds();
-    // enableDraggableThresholds(); // DISABLED - Will use test.html implementation
-    // Apply stable threshold system after chart creation
-    setTimeout(() => {
-        if (window.updateChartThresholds) window.updateChartThresholds();
-    }, 400);
+   window.amplificationChart = new Chart(ctx, chartConfig);
+
+// Initialize thresholds after chart creation
+setTimeout(() => {
+    // Update all channel thresholds
+    if (window.updateAllChannelThresholds) {
+        window.updateAllChannelThresholds();
+    }
+    
+    // Enable custom dragging functionality
+    if (window.addThresholdDragging) {
+        window.addThresholdDragging();
+    }
+}, 100);
 }
 
 function getFluorophoreColor(fluorophore) {
