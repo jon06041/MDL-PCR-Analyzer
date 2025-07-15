@@ -156,7 +156,7 @@ class WellResult(db.Model):
             raw_cycles=json.dumps(raw_data.get('cycles', [])),
             raw_rfu=json.dumps(raw_data.get('rfu', [])),
             cq_value=raw_data.get('cq'),
-            sample_name=raw_data.get('sampleName'),
+            sample_name=raw_data.get('sample_name'),
             curve_classification=json.dumps(analysis_result.get('curve_classification', {})),  # New field
             thresholds=json.dumps(analysis_result.get('thresholds', {})),  # Per-channel thresholds
             threshold_value=analysis_result.get('threshold_value'),  # Legacy single-channel
