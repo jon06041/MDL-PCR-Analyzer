@@ -1,3 +1,31 @@
+# [2025-07-15] CRITICAL: Log Scale Threshold System Fixed + Frontend Reorganization Complete
+
+## MAJOR UPDATE: Threshold Functions Reorganized + Log Scale Issues Fixed
+
+### ✅ COMPLETED REORGANIZATION (2025-07-15):
+- **ALL threshold functions moved** → `threshold_frontend.js` 
+- **ALL CQJ/CalcJ functions moved** → `cqj_calcj_utils.js`
+- **Log scale threshold issues FIXED**
+
+### ✅ CRITICAL FIXES APPLIED:
+1. **Scale Detection Fixed**: `populateThresholdStrategyDropdown()` properly detects current scale mode
+2. **Manual Threshold Input Fixed**: Enhanced with proper scale detection and auto-switch to "manual" strategy
+3. **Fixed Strategy Values**: Now properly uses correct values from `threshold_strategies.js`
+4. **Threshold Input Updates**: Added function to update input box when strategy changes
+5. **Strategy Application**: Immediate calculation and application when dropdown changes
+
+### 🔴 REMAINING ISSUES:
+- **1.00 vs N/A**: Negative samples still showing 1.00 instead of N/A in CQ-J column
+- **Backend logs**: May still show "Strategy=linear" instead of "Strategy=log"
+
+### Key Functions Now Available:
+- `window.populateThresholdStrategyDropdown()` - Strategy dropdown with proper scale detection
+- `window.calculateStableChannelThreshold(channel, scale)` - Uses threshold_strategies.js correctly
+- `window.updateThresholdInputForCurrentScale()` - Updates input when strategy/scale changes
+- `window.applyThresholdStrategy(strategy)` - Applies strategy and updates UI immediately
+
+---
+
 # [2025-07-14] CRITICAL: Threshold Strategy System Cleanup Required
 
 ## Backend Refactor Instructions (2025-07-14)
