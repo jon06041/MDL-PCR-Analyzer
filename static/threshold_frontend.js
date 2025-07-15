@@ -906,7 +906,7 @@ function attachAutoButtonHandler() {
                 }
             }
             
-            // Fallback: try to extract from chart datasets
+            // Try to extract from chart datasets
             if (!channel) {
                 const datasets = window.amplificationChart?.data?.datasets;
                 if (datasets && datasets.length > 0) {
@@ -1050,13 +1050,7 @@ async function sendManualThresholdToBackend(channel, scale, value) {
             console.warn(`⚠️ BACKEND-THRESHOLD - HTTP ${response.status}: ${response.statusText}`);
         }
     } catch (error) {
-        console.warn(`🔍 MANUAL-THRESHOLD-BACKEND - Backend update failed, using frontend fallback:`, error);
-        // Fallback to frontend recalculation
-        if (window.currentAnalysisResults) {
-            if (window.recalculateCQJValuesForManualThreshold) {
-                window.recalculateCQJValuesForManualThreshold();
-            }
-        }
+        console.error(`❌ BACKEND-THRESHOLD - Backend update failed:`, error);
     }
 }
 
@@ -1270,24 +1264,6 @@ function applyThresholdStrategy(strategy) {
 }
 
 /**
- * Apply strategy per channel fallback function
- */
-function applyStrategyPerChannelFallback(channel, strategy, scale) {
-    console.log(`🔍 STRATEGY-FALLBACK - Applying ${strategy} to ${channel} on ${scale} scale`);
-    
-    // Calculate threshold using strategy
-    const threshold = calculateStableChannelThreshold(channel, scale);
-    if (threshold !== null && threshold !== undefined) {
-        setChannelThreshold(channel, scale, threshold);
-        console.log(`🔍 STRATEGY-FALLBACK - Set ${channel} ${scale} threshold: ${threshold.toFixed(2)}`);
-        return threshold;
-    } else {
-        console.warn(`🔍 STRATEGY-FALLBACK - Failed to calculate threshold for ${channel} using ${strategy}`);
-        return null;
-    }
-}
-
-/**
  * End Strategy Integration Functions
  */
 
@@ -1314,7 +1290,6 @@ window.initializeManualThresholdControls = initializeManualThresholdControls;
 window.sendManualThresholdToBackend = sendManualThresholdToBackend;
 window.updateChartThreshold = updateChartThreshold;
 window.applyThresholdStrategy = applyThresholdStrategy;
-window.applyStrategyPerChannelFallback = applyStrategyPerChannelFallback;
 window.populateThresholdStrategyDropdown = populateThresholdStrategyDropdown;
 window.updateThresholdInputForCurrentScale = updateThresholdInputForCurrentScale;
 
