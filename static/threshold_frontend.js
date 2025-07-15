@@ -958,6 +958,16 @@ function createThresholdAnnotation(threshold, fluorophore, color = 'red', index 
     };
 }
 
+function getChannelColor(channel) {
+    const colors = {
+        'Cy5': '#ff6b6b',
+        'FAM': '#4ecdc4', 
+        'HEX': '#45b7d1',
+        'Texas Red': '#f9ca24'
+    };
+    return colors[channel] || '#333333';
+}
+
 function getFluorophoreColor(fluorophore) {
     const colors = {
         'Cy5': '#ff6b6b',
@@ -1271,11 +1281,12 @@ function populateThresholdStrategyDropdown() {
         window.selectedThresholdStrategy = e.target.value;
         console.log(`🔍 STRATEGY-CHANGE - Strategy changed to: ${e.target.value}`);
         
-        // Call the strategy change handler from script.js
-        if (typeof handleThresholdStrategyChange === 'function') {
-            handleThresholdStrategyChange();
+        // Apply the selected strategy directly
+        if (e.target.value !== 'manual') {
+            applyThresholdStrategy(e.target.value);
         } else {
-            console.warn('handleThresholdStrategyChange function not available');
+            // For manual strategy, just update the input box to current threshold
+            updateThresholdInputForCurrentScale();
         }
     });
     
