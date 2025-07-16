@@ -2911,17 +2911,21 @@ let wellSortMode = 'letter-number';
 
 function toggleWellSortMode() {
     wellSortMode = (wellSortMode === 'letter-number') ? 'number-letter' : 'letter-number';
+    console.log('🔄 SORT - Well sort mode changed to:', wellSortMode);
+    
     const btn = document.getElementById('toggleSortModeBtn');
     if (btn) {
         btn.textContent = (wellSortMode === 'letter-number') ? 'Sort: A1, A2...' : 'Sort: 1A, 1B...';
     }
-    // Get the current fluorophore selection
-    const fluorophoreSelector = document.getElementById('fluorophoreSelect');
-    const selectedFluorophore = fluorophoreSelector ? fluorophoreSelector.value : 'all';
+    
+    // Get the current fluorophore selection from state
+    const selectedFluorophore = window.appState.currentFluorophore || 'all';
+    
     // Repopulate the well dropdown in the new order and reset to All Wells
     if (typeof filterWellsByFluorophore === 'function') {
         filterWellsByFluorophore(selectedFluorophore);
     }
+    
     // Re-populate the table with the new sort mode
     if (currentAnalysisResults && currentAnalysisResults.individual_results && typeof populateResultsTable === 'function') {
         populateResultsTable(currentAnalysisResults.individual_results);
@@ -4535,16 +4539,22 @@ function filterWellsByFluorophore(selectedFluorophore) {
 
 function handleWellChange(event) {
     const selectedWell = event.target.value;
+    console.log('🔄 WELL - Well selector changed to:', selectedWell);
+    
+    // Update app state - this will coordinate all UI elements
+    updateAppState({
+        currentWellSelection: selectedWell
+    });
+    
     if (selectedWell && selectedWell !== 'ALL_WELLS') {
         showWellDetails(selectedWell);
     } else if (selectedWell === 'ALL_WELLS') {
         // Handle "All Wells" selection based on current chart mode
-        const fluorophoreSelector = document.getElementById('fluorophoreSelect');
-        const selectedFluorophore = fluorophoreSelector ? fluorophoreSelector.value : 'all';
+        const selectedFluorophore = window.appState.currentFluorophore || 'all';
         
-        if (currentChartMode === 'all') {
+        if (window.appState.currentChartMode === 'all') {
             showAllCurves(selectedFluorophore);
-        } else if (currentChartMode === 'good') {
+        } else if (window.appState.currentChartMode === 'good') {
             showGoodCurves(selectedFluorophore);
         }
     }
@@ -6149,10 +6159,21 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Status filter dropdown
+    // Status filter dropdown - using state management
     const filterStatus = document.getElementById('filterStatus');
     if (filterStatus) {
-        filterStatus.addEventListener('change', filterTable);
+        filterStatus.addEventListener('change', function() {
+            const selectedFilter = this.value;
+            console.log('🔄 FILTER - Status filter changed to:', selectedFilter);
+            
+            // Update app state - this will coordinate all UI elements
+            updateAppState({
+                currentFilter: selectedFilter
+            });
+            
+            // Filter table with new state
+            filterTable();
+        });
     }
     
     // Search wells input
