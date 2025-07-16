@@ -189,10 +189,17 @@ function updateAppState(newState) {
 function syncUIElements() {
     const state = window.appState;
     
-    // Sync fluorophore selector
+    // Sync fluorophore selectors - both chart and table selectors
     const fluorophoreSelect = document.getElementById('fluorophoreSelect');
     if (fluorophoreSelect && fluorophoreSelect.value !== state.currentFluorophore) {
         fluorophoreSelect.value = state.currentFluorophore;
+        console.log('🔄 SYNC - Updated chart fluorophore selector to:', state.currentFluorophore);
+    }
+    
+    const fluorophoreFilter = document.getElementById('fluorophoreFilter');
+    if (fluorophoreFilter && fluorophoreFilter.value !== state.currentFluorophore) {
+        fluorophoreFilter.value = state.currentFluorophore;
+        console.log('🔄 SYNC - Updated table fluorophore filter to:', state.currentFluorophore);
     }
     
     // Sync well selector
@@ -372,19 +379,36 @@ function updateDisplays() {
     }
     
     // Update table filter
-    if (window.currentAnalysisResults && typeof populateResultsTable === 'function') {
+    if (window.currentAnalysisResults && 
+        window.currentAnalysisResults.individual_results && 
+        typeof populateResultsTable === 'function') {
+        
         let filteredResults = window.currentAnalysisResults.individual_results;
         
-        // Filter by fluorophore
-        if (state.currentFluorophore !== 'all') {
-            filteredResults = Object.fromEntries(
-                Object.entries(filteredResults).filter(([key, well]) => 
-                    well.fluorophore === state.currentFluorophore
-                )
-            );
+        // Ensure filteredResults is a valid object before filtering
+        if (filteredResults && typeof filteredResults === 'object' && filteredResults !== null) {
+            // Filter by fluorophore
+            if (state.currentFluorophore !== 'all') {
+                try {
+                    filteredResults = Object.fromEntries(
+                        Object.entries(filteredResults).filter(([key, well]) => 
+                            well && well.fluorophore === state.currentFluorophore
+                        )
+                    );
+                } catch (error) {
+                    console.error('🔄 STATE - Error filtering results by fluorophore:', error);
+                    console.error('🔄 STATE - filteredResults type:', typeof filteredResults);
+                    console.error('🔄 STATE - filteredResults value:', filteredResults);
+                    return; // Exit early if filtering fails
+                }
+            }
+            
+            populateResultsTable(filteredResults);
+        } else {
+            console.warn('🔄 STATE - No valid individual_results available for results table');
         }
-        
-        populateResultsTable(filteredResults);
+    } else {
+        console.warn('🔄 STATE - Missing analysis results or populateResultsTable function');
     }
     
     // Update well dropdown
@@ -1244,8 +1268,8 @@ async function handleThresholdStrategyChange() {
         const resultsObj = window.currentAnalysisResults.individual_results || window.currentAnalysisResults;
         populateResultsTable(resultsObj);
 
-        // Apply any filter preservation after threshold update
-        setTimeout(preserveCurrentFilters, 200);
+        // Apply any filter preservation after threshold update - reduced delay for performance
+        setTimeout(preserveCurrentFilters, 50);
         
         return; // Exit - local calculation handled, and we've updated the UI.
     }
@@ -2424,21 +2448,60 @@ function onScaleToggle() {
     currentScaleMode = newScale;
     window.currentScaleMode = newScale;
     
-    // CRITICAL: Force immediate chart scale update
+    // CRITICAL: Force immediate chart scale update with proper logarithmic handling
     if (window.amplificationChart) {
         const newScaleConfig = getScaleConfiguration();
+        
+        // Ensure the chart options object exists
+        if (!window.amplificationChart.options.scales) {
+            window.amplificationChart.options.scales = {};
+        }
+        
+        // Apply the new scale configuration
         window.amplificationChart.options.scales.y = newScaleConfig;
         
-        // Force a complete chart update to ensure scale change takes effect
-        window.amplificationChart.update('resize');
-        
-        // Add a small delay and update again to ensure it takes
-        setTimeout(() => {
-            window.amplificationChart.update('none');
-            console.log(`🔍 TOGGLE - Secondary chart update completed for ${newScale} scale`);
-        }, 100);
-        
-        console.log(`🔍 TOGGLE - Forced chart scale update to ${newScale} mode`);
+        // CRITICAL: For logarithmic scale, force chart recreation to ensure proper rendering
+        if (newScale === 'log') {
+            // Store current chart data and options
+            const chartData = JSON.parse(JSON.stringify(window.amplificationChart.data));
+            const chartOptions = JSON.parse(JSON.stringify(window.amplificationChart.options));
+            
+            // Update scale configuration in options
+            chartOptions.scales.y = newScaleConfig;
+            
+            // Destroy and recreate chart for logarithmic scale
+            window.amplificationChart.destroy();
+            
+            // Recreate chart with logarithmic scale - with null checking
+            const chartCanvas = document.getElementById('amplificationChart');
+            if (chartCanvas) {
+                window.amplificationChart = new Chart(
+                    chartCanvas.getContext('2d'),
+                    {
+                        type: 'line',
+                        data: chartData,
+                        options: chartOptions
+                    }
+                );
+                
+                console.log(`🔍 TOGGLE - Recreated chart for ${newScale} scale (logarithmic)`);
+            } else {
+                console.error('🔍 TOGGLE - Chart canvas not found, cannot recreate chart');
+                return;
+            }
+            
+            // Re-add threshold lines after chart recreation
+            setTimeout(() => {
+                if (window.updateAllChannelThresholds) {
+                    window.updateAllChannelThresholds();
+                }
+            }, 50);
+            
+        } else {
+            // For linear scale, regular update should work
+            window.amplificationChart.update('resize');
+            console.log(`🔍 TOGGLE - Updated chart for ${newScale} scale (linear)`);
+        }
     }
     
     // Save preference to session storage
@@ -2708,19 +2771,24 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
                     const recoveryResponse = await fetch('/sessions');
                     if (recoveryResponse.ok) {
                         const sessions = await recoveryResponse.json();
-                        // Look for a recent session that matches our fluorophore
-                        const recentSession = sessions.find(s => 
-                            s.filename && s.filename.includes(fluorophore) && 
-                            s.created_at && new Date(s.created_at) > new Date(Date.now() - 300000) // Within 5 minutes
-                        );
-                        if (recentSession) {
-                            console.log(`✅ TIMEOUT-RECOVERY - Found recent ${fluorophore} session, attempting to load:`, recentSession.id);
-                            const sessionResponse = await fetch(`/sessions/${recentSession.id}`);
-                            if (sessionResponse.ok) {
-                                const sessionData = await sessionResponse.json();
-                                console.log(`🔄 TIMEOUT-RECOVERY - Successfully recovered ${fluorophore} data from database`);
-                                return sessionData.results;
+                        // Ensure sessions is an array before using .find()
+                        if (Array.isArray(sessions)) {
+                            // Look for a recent session that matches our fluorophore
+                            const recentSession = sessions.find(s => 
+                                s.filename && s.filename.includes(fluorophore) && 
+                                s.created_at && new Date(s.created_at) > new Date(Date.now() - 300000) // Within 5 minutes
+                            );
+                            if (recentSession) {
+                                console.log(`✅ TIMEOUT-RECOVERY - Found recent ${fluorophore} session, attempting to load:`, recentSession.id);
+                                const sessionResponse = await fetch(`/sessions/${recentSession.id}`);
+                                if (sessionResponse.ok) {
+                                    const sessionData = await sessionResponse.json();
+                                    console.log(`🔄 TIMEOUT-RECOVERY - Successfully recovered ${fluorophore} data from database`);
+                                    return sessionData.results;
+                                }
                             }
+                        } else {
+                            console.warn(`⚠️ TIMEOUT-RECOVERY - Sessions response is not an array:`, typeof sessions);
                         }
                     }
                 } catch (recoveryError) {
@@ -3180,7 +3248,10 @@ function emergencyReset() {
     const chartContainer = document.getElementById('amplificationChart');
     if (chartContainer) {
         const ctx = chartContainer.getContext('2d');
-        ctx.clearRect(0, 0, chartContainer.width, chartContainer.height);
+        if (ctx) {
+            ctx.clearRect(0, 0, chartContainer.width, chartContainer.height);
+        }
+    }
     }
     
     // Clear results table
@@ -4561,12 +4632,19 @@ function populateFluorophoreSelector(individualResults) {
     // Add event listener for fluorophore filtering - uses state management
 fluorophoreSelector.addEventListener('change', function() {
     const selectedFluorophore = this.value;
-    console.log('🔄 FLUOROPHORE - Selector changed to:', selectedFluorophore);
+    console.log('🔄 FLUOROPHORE-CHART - Chart selector changed to:', selectedFluorophore);
     
     // Update app state - this will coordinate all UI elements
     updateAppState({
         currentFluorophore: selectedFluorophore
     });
+    
+    // CRITICAL: Synchronize with table fluorophore filter
+    const tableFilter = document.getElementById('fluorophoreFilter');
+    if (tableFilter && tableFilter.value !== selectedFluorophore) {
+        tableFilter.value = selectedFluorophore;
+        console.log('🔄 SYNC - Updated table filter to match chart selector');
+    }
     
     // Update threshold input for new fluorophore
     setTimeout(() => {
@@ -5320,7 +5398,13 @@ function updateChart(wellKey, cyclesData = null, rfuData = null, wellData = null
         return;
     }
     
-    const ctx = document.getElementById('amplificationChart').getContext('2d');
+    // Get chart context with null checking
+    const chartCanvas = document.getElementById('amplificationChart');
+    if (!chartCanvas) {
+        console.error('Chart canvas not found - cannot create chart for well:', wellKey);
+        return;
+    }
+    const ctx = chartCanvas.getContext('2d');
     
     // Destroy existing chart
     if (window.amplificationChart) {
@@ -8227,12 +8311,19 @@ function addFluorophoreFilter(individualResults) {
         filterSelect.removeEventListener('change', filterTableByFluorophore);
         filterSelect.addEventListener('change', function() {
             const selectedFluorophore = this.value;
-            console.log('🔄 FLUOROPHORE-FILTER - Table fluorophore filter changed to:', selectedFluorophore);
+            console.log('🔄 FLUOROPHORE-TABLE - Table filter changed to:', selectedFluorophore);
             
             // Update app state - this will coordinate all UI elements
             updateAppState({
                 currentFluorophore: selectedFluorophore
             });
+            
+            // CRITICAL: Synchronize with chart fluorophore selector
+            const chartSelector = document.getElementById('fluorophoreSelect');
+            if (chartSelector && chartSelector.value !== selectedFluorophore) {
+                chartSelector.value = selectedFluorophore;
+                console.log('🔄 SYNC - Updated chart selector to match table filter');
+            }
             
             // Filter table with new state
             filterTable();
@@ -10948,16 +11039,29 @@ function updateChartDisplayMode() {
         console.error('No currentAnalysisResults in updateChartDisplayMode');
         return;
     }
+
+    // Try to get fluorophore from multiple sources for better compatibility
+    let selectedFluorophore = window.currentFluorophore || 'all';
     
+    // Try fluorophoreSelect first (main chart selector)
     const fluorophoreSelector = document.getElementById('fluorophoreSelect');
+    if (fluorophoreSelector && fluorophoreSelector.value) {
+        selectedFluorophore = fluorophoreSelector.value;
+    } else {
+        // Fallback to fluorophoreFilter (table filter)
+        const fluorophoreFilter = document.getElementById('fluorophoreFilter');
+        if (fluorophoreFilter && fluorophoreFilter.value) {
+            selectedFluorophore = fluorophoreFilter.value;
+        }
+    }
+    
     const wellSelector = document.getElementById('wellSelect');
     
-    if (!fluorophoreSelector || !wellSelector) {
-        console.error('Missing selectors in updateChartDisplayMode');
+    if (!wellSelector) {
+        console.error('Missing wellSelect in updateChartDisplayMode');
         return;
     }
     
-    const selectedFluorophore = fluorophoreSelector.value;
     const selectedWell = wellSelector.value;
     
     console.log('Chart mode:', currentChartMode, 'Fluorophore:', selectedFluorophore, 'Well:', selectedWell);
@@ -10975,6 +11079,33 @@ function updateChartDisplayMode() {
         case 'all':
             console.log('Calling showAllCurves for:', selectedFluorophore);
             showAllCurves(selectedFluorophore);
+            
+            // After showing curves, ensure thresholds are properly updated
+            setTimeout(() => {
+                if (window.updateAllChannelThresholds) {
+                    console.log('🔍 THRESHOLD - Updating thresholds after showAllCurves');
+                    
+                    // Update global visibleChannels for threshold system
+                    if (selectedFluorophore && selectedFluorophore !== 'all') {
+                        window.visibleChannels = new Set([selectedFluorophore]);
+                    } else {
+                        // For 'all', determine visible channels from current results
+                        window.visibleChannels = new Set();
+                        if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+                            Object.values(window.currentAnalysisResults.individual_results).forEach(well => {
+                                if (well && well.fluorophore && well.fluorophore !== 'Unknown') {
+                                    window.visibleChannels.add(well.fluorophore);
+                                }
+                            });
+                        }
+                    }
+                    
+                    window.updateAllChannelThresholds();
+                } else {
+                    console.warn('🔍 THRESHOLD - updateAllChannelThresholds not available');
+                }
+            }, 100);
+            
             // Clear curve details when showing all curves
             document.getElementById('curveDetails').innerHTML = '<p>Select a well to view individual curve details</p>';
             break;
@@ -11021,59 +11152,124 @@ function showSelectedCurve(wellKey) {
 }
 
 function showAllCurves(selectedFluorophore) {
-    if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
-        console.error('No analysis results available for showAllCurves');
+    console.log('🚀 PERFORMANCE - Starting showAllCurves for:', selectedFluorophore);
+    
+    // Enhanced validation with detailed error reporting
+    if (!window.currentAnalysisResults) {
+        console.error('❌ SHOWCURVES - No currentAnalysisResults available');
+        // Try to show error message in chart area
+        const chartContainer = document.getElementById('amplificationChart')?.parentElement;
+        if (chartContainer) {
+            chartContainer.innerHTML = '<div style="text-align: center; padding: 20px; color: #e74c3c;">No analysis results available. Please upload a CSV file first.</div>';
+        }
         return;
     }
     
-    console.log('Showing all curves for fluorophore:', selectedFluorophore);
+    if (!window.currentAnalysisResults.individual_results) {
+        console.error('❌ SHOWCURVES - No individual_results in currentAnalysisResults');
+        const chartContainer = document.getElementById('amplificationChart')?.parentElement;
+        if (chartContainer) {
+            chartContainer.innerHTML = '<div style="text-align: center; padding: 20px; color: #e74c3c;">No individual results found in analysis data.</div>';
+        }
+        return;
+    }
     
-    const ctx = document.getElementById('amplificationChart').getContext('2d');
+    if (typeof window.currentAnalysisResults.individual_results !== 'object') {
+        console.error('❌ SHOWCURVES - individual_results is not an object');
+        return;
+    }
+    
+    const resultsCount = Object.keys(window.currentAnalysisResults.individual_results).length;
+    if (resultsCount === 0) {
+        console.error('❌ SHOWCURVES - No wells found in individual_results');
+        return;
+    }
+    
+    console.log(`✅ SHOWCURVES - Proceeding with ${resultsCount} wells for fluorophore: ${selectedFluorophore}`);
+    
+    const ctx = document.getElementById('amplificationChart')?.getContext('2d');
+    if (!ctx) {
+        console.error('❌ SHOWCURVES - Cannot get chart context');
+        return;
+    }
     
     // Destroy existing chart safely
     safeDestroyChart();
     
     const datasets = [];
     const results = window.currentAnalysisResults.individual_results;
-    
+    let processedCount = 0;
+    let filteredCount = 0;
+
     Object.keys(results).forEach((wellKey, index) => {
         const wellData = results[wellKey];
         
-        // Filter by fluorophore if specified
+        // Enhanced well data validation
+        if (!wellData || typeof wellData !== 'object') {
+            console.warn(`⚠️ SHOWCURVES - Invalid well data for ${wellKey}`);
+            return;
+        }
+        
+        // Filter by fluorophore if specified (with null safety)
         if (selectedFluorophore !== 'all' && wellData.fluorophore !== selectedFluorophore) {
+            filteredCount++;
             return;
         }
         
         try {
-            const cycles = typeof wellData.raw_cycles === 'string' ? 
-                JSON.parse(wellData.raw_cycles) : wellData.raw_cycles;
-            const rfu = typeof wellData.raw_rfu === 'string' ? 
-                JSON.parse(wellData.raw_rfu) : wellData.raw_rfu;
+            // Enhanced data parsing with validation
+            let cycles, rfu;
             
-            if (cycles && rfu && cycles.length === rfu.length) {
-                const wellId = wellData.well_id || wellKey.split('_')[0];
-                const fluorophore = wellData.fluorophore || 'Unknown';
-                const isGood = wellData.is_good_scurve;
-                
-                datasets.push({
-                    label: `${wellId} (${fluorophore})`,
-                    data: cycles.map((cycle, i) => ({ x: cycle, y: rfu[i] })),
-                    borderColor: isGood ? getFluorophoreColor(fluorophore) : '#cccccc',
-                    backgroundColor: 'transparent',
-                    borderWidth: isGood ? 2 : 1,
-                    pointRadius: 0,
-                    tension: 0.1
-                });
+            if (wellData.raw_cycles) {
+                cycles = typeof wellData.raw_cycles === 'string' ? 
+                    JSON.parse(wellData.raw_cycles) : wellData.raw_cycles;
             }
+            
+            if (wellData.raw_rfu) {
+                rfu = typeof wellData.raw_rfu === 'string' ? 
+                    JSON.parse(wellData.raw_rfu) : wellData.raw_rfu;
+            }
+            
+            // Validate parsed data
+            if (!cycles || !rfu || !Array.isArray(cycles) || !Array.isArray(rfu)) {
+                console.warn(`⚠️ SHOWCURVES - Missing or invalid cycle/RFU data for ${wellKey}`);
+                return;
+            }
+            
+            if (cycles.length !== rfu.length || cycles.length === 0) {
+                console.warn(`⚠️ SHOWCURVES - Mismatched data lengths for ${wellKey}: cycles=${cycles.length}, rfu=${rfu.length}`);
+                return;
+            }
+            
+            const wellId = wellData.well_id || wellKey.split('_')[0];
+            const fluorophore = wellData.fluorophore || 'Unknown';
+            const isGood = wellData.is_good_scurve;
+            
+            datasets.push({
+                label: `${wellId} (${fluorophore})`,
+                data: cycles.map((cycle, i) => ({ x: cycle, y: rfu[i] })),
+                borderColor: isGood ? getFluorophoreColor(fluorophore) : '#cccccc',
+                backgroundColor: 'transparent',
+                borderWidth: isGood ? 2 : 1,
+                pointRadius: 0,
+                tension: 0.1
+            });
+            
+            processedCount++;
+            
         } catch (e) {
-            console.error(`Error parsing data for ${wellKey}:`, e);
+            console.error(`❌ SHOWCURVES - Error parsing data for ${wellKey}:`, e);
         }
     });
     
-    console.log(`Prepared ${datasets.length} datasets for showAllCurves`);
+    console.log(`📊 SHOWCURVES - Processed: ${processedCount}, Filtered: ${filteredCount}, Final datasets: ${datasets.length}`);
     
     if (datasets.length === 0) {
-        console.warn('No datasets found for showAllCurves');
+        console.warn('⚠️ SHOWCURVES - No valid datasets found');
+        const chartContainer = document.getElementById('amplificationChart')?.parentElement;
+        if (chartContainer) {
+            chartContainer.innerHTML = `<div style="text-align: center; padding: 20px; color: #f39c12;">No curves found for fluorophore: ${selectedFluorophore}. Try selecting a different fluorophore or check your data.</div>`;
+        }
         return;
     }
     
@@ -11146,7 +11342,13 @@ function showGoodCurves(selectedFluorophore) {
     
     console.log('Showing positive curves (amplitude > 500) for fluorophore:', selectedFluorophore);
     
-    const ctx = document.getElementById('amplificationChart').getContext('2d');
+    // Get chart context with null checking
+    const chartCanvas = document.getElementById('amplificationChart');
+    if (!chartCanvas) {
+        console.error('Chart canvas not found - cannot show good curves');
+        return;
+    }
+    const ctx = chartCanvas.getContext('2d');
     
     // Destroy existing chart safely
     safeDestroyChart();
@@ -11266,7 +11468,13 @@ function showResultsFiltered(selectedFluorophore, resultType) {
     
     console.log(`Showing ${resultType.toUpperCase()} curves for fluorophore:`, selectedFluorophore);
     
-    const ctx = document.getElementById('amplificationChart').getContext('2d');
+    // Get chart context with null checking
+    const chartCanvas = document.getElementById('amplificationChart');
+    if (!chartCanvas) {
+        console.error('Chart canvas not found - cannot show filtered results');
+        return;
+    }
+    const ctx = chartCanvas.getContext('2d');
     
     // Destroy existing chart safely
     safeDestroyChart();

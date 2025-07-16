@@ -530,15 +530,15 @@ window.addThresholdDragging = addThresholdDragging;
 const originalUpdateAllChannelThresholds = window.updateAllChannelThresholds;
 window.updateAllChannelThresholds = function() {
     originalUpdateAllChannelThresholds.apply(this, arguments);
-    // Add dragging after a small delay to ensure chart is updated
-    setTimeout(addThresholdDragging, 100);
+    // Add dragging after a small delay to ensure chart is updated - reduced for performance
+    setTimeout(addThresholdDragging, 50);
 };
 
 // Also call it after updateSingleChannelThreshold
 const originalUpdateSingleChannelThreshold = window.updateSingleChannelThreshold;
 window.updateSingleChannelThreshold = function() {
     originalUpdateSingleChannelThreshold.apply(this, arguments);
-    setTimeout(addThresholdDragging, 100);
+    setTimeout(addThresholdDragging, 50); // Reduced from 100ms for performance
 };
 
 function updateSingleChannelThreshold(fluorophore) {
@@ -1148,27 +1148,44 @@ function validateAndSetSingleChannel() {
     
     console.log(`🔍 CHANNEL-VALIDATION - Found ${channels.size} channels: ${Array.from(channels).join(', ')}`);
     
-    // If only one channel, automatically set it as current
+    // If only one channel, automatically set it as current and update both selectors
     if (channels.size === 1) {
         const singleChannel = Array.from(channels)[0];
         window.currentFluorophore = singleChannel;
         
-        // Update fluorophore selector if it exists
-        const fluorophoreSelector = document.getElementById('fluorophoreFilter');
-        if (fluorophoreSelector) {
+        // Update BOTH fluorophore selectors - chart and table
+        const chartSelector = document.getElementById('fluorophoreSelect');
+        if (chartSelector) {
             // Check if the single channel option exists
-            const hasOption = Array.from(fluorophoreSelector.options).some(opt => opt.value === singleChannel);
-            if (hasOption) {
-                fluorophoreSelector.value = singleChannel;
+            const hasChartOption = Array.from(chartSelector.options).some(opt => opt.value === singleChannel);
+            if (hasChartOption) {
+                chartSelector.value = singleChannel;
             } else {
                 // Add the option if it doesn't exist
                 const option = document.createElement('option');
                 option.value = singleChannel;
                 option.textContent = singleChannel;
-                fluorophoreSelector.appendChild(option);
-                fluorophoreSelector.value = singleChannel;
+                chartSelector.appendChild(option);
+                chartSelector.value = singleChannel;
             }
-            console.log(`🔍 CHANNEL-VALIDATION - Auto-selected single channel: ${singleChannel}`);
+            console.log(`🔍 CHANNEL-VALIDATION - Auto-selected single channel in chart selector: ${singleChannel}`);
+        }
+        
+        const tableFilter = document.getElementById('fluorophoreFilter');
+        if (tableFilter) {
+            // Check if the single channel option exists
+            const hasTableOption = Array.from(tableFilter.options).some(opt => opt.value === singleChannel);
+            if (hasTableOption) {
+                tableFilter.value = singleChannel;
+            } else {
+                // Add the option if it doesn't exist
+                const option = document.createElement('option');
+                option.value = singleChannel;
+                option.textContent = singleChannel;
+                tableFilter.appendChild(option);
+                tableFilter.value = singleChannel;
+            }
+            console.log(`🔍 CHANNEL-VALIDATION - Auto-selected single channel in table filter: ${singleChannel}`);
         }
         
         return singleChannel;
