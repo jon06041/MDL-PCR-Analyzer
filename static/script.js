@@ -1,6 +1,111 @@
 // qPCR Analysis Script - Main Interface Logic
 // Ensure global analysis results variable is initialized
 window.currentAnalysisResults = null;
+
+// ========================================
+// EXPORT BUTTON STATE MANAGEMENT
+// ========================================
+
+// Central function to update export button state
+function updateExportState(options = {}) {
+    const {
+        hasAnalysisResults = null,
+        isSessionLoaded = null,
+        hasIncompleteTests = null,
+        incompleteTestsInfo = []
+    } = options;
+    
+    const currentState = window.appState.exportState;
+    
+    // Update provided values
+    if (hasAnalysisResults !== null) currentState.hasAnalysisResults = hasAnalysisResults;
+    if (isSessionLoaded !== null) currentState.isSessionLoaded = isSessionLoaded;
+    if (hasIncompleteTests !== null) currentState.hasIncompleteTests = hasIncompleteTests;
+    
+    // Determine export state based on analysis results and session state
+    let isEnabled = false;
+    let disabledReason = '';
+    let buttonText = 'Export Results';
+    
+    // Check if we have analysis results loaded
+    const hasResults = currentState.hasAnalysisResults || 
+                      (window.currentAnalysisResults && 
+                       window.currentAnalysisResults.individual_results && 
+                       Object.keys(window.currentAnalysisResults.individual_results).length > 0);
+    
+    if (!hasResults) {
+        isEnabled = false;
+        disabledReason = 'Load an analysis session first to enable export';
+        buttonText = 'Export Disabled';
+    } else {
+        // We have results - check if it's a loaded session or fresh analysis
+        const isLoadedSession = currentState.isSessionLoaded || 
+                               !window.amplificationFiles || 
+                               Object.keys(window.amplificationFiles).length === 0;
+        
+        if (isLoadedSession) {
+            // Loaded session - always enable export
+            isEnabled = true;
+            disabledReason = '';
+            buttonText = 'Export Results';
+        } else {
+            // Fresh analysis - check for pattern validation
+            const currentPattern = typeof getCurrentFullPattern === 'function' ? getCurrentFullPattern() : null;
+            
+            if (!currentPattern) {
+                // No pattern means fresh analysis - allow export
+                isEnabled = true;
+                disabledReason = '';
+                buttonText = 'Export Results';
+            } else {
+                // Check if experiment is complete according to pathogen library
+                const testCode = typeof extractTestCode === 'function' ? extractTestCode(currentPattern) : null;
+                
+                if (!testCode || 
+                    typeof getRequiredChannels !== 'function' || 
+                    typeof PATHOGEN_LIBRARY === 'undefined') {
+                    // Cannot determine test requirements - allow export
+                    isEnabled = true;
+                    disabledReason = '';
+                    buttonText = 'Export Results';
+                } else {
+                    // Validate channel completeness
+                    if (currentState.hasIncompleteTests) {
+                        isEnabled = false;
+                        disabledReason = 'Complete all required pathogen channels before exporting results';
+                        buttonText = 'Export Disabled';
+                    } else {
+                        isEnabled = true;
+                        disabledReason = '';
+                        buttonText = 'Export Results';
+                    }
+                }
+            }
+        }
+    }
+    
+    // Update state
+    const newExportState = {
+        ...currentState,
+        isEnabled,
+        disabledReason,
+        buttonText,
+        hasAnalysisResults: hasResults
+    };
+    
+    console.log('🔄 EXPORT STATE - Updating:', {
+        hasResults,
+        isLoadedSession: currentState.isSessionLoaded,
+        hasIncompleteTests: currentState.hasIncompleteTests,
+        isEnabled,
+        buttonText
+    });
+    
+    // Update through central state management
+    updateAppState({ exportState: newExportState });
+}
+
+// ========================================
 // Uses threshold_strategies.js for threshold calculations
 // All threshold strategies should be defined in threshold_strategies.js
 
@@ -26,6 +131,14 @@ window.appState = {
     currentThresholdStrategy: 'linear_fixed',  // Current threshold strategy
     currentThresholdValue: null,      // Current manual threshold value
     isManualThresholdMode: false,     // Whether user is in manual threshold mode
+    exportState: {                    // Export button state management
+        isEnabled: false,             // Whether export is enabled
+        hasAnalysisResults: false,    // Whether we have analysis results to export
+        isSessionLoaded: false,       // Whether we have a loaded session
+        hasIncompleteTests: false,    // Whether there are incomplete tests
+        disabledReason: '',           // Reason why export is disabled
+        buttonText: 'Export Results'  // Current button text
+    },
     isUpdating: false
 };
 
@@ -158,6 +271,16 @@ function syncUIElements() {
             autoBtn.classList.add('active');
             autoBtn.textContent = 'Auto';
         }
+    }
+    
+    // Sync export button state
+    const exportBtn = document.getElementById('exportBtn');
+    if (exportBtn) {
+        exportBtn.disabled = !state.exportState.isEnabled;
+        exportBtn.style.opacity = state.exportState.isEnabled ? '1' : '0.5';
+        exportBtn.style.cursor = state.exportState.isEnabled ? 'pointer' : 'not-allowed';
+        exportBtn.title = state.exportState.isEnabled ? 'Export analysis results to CSV' : state.exportState.disabledReason;
+        exportBtn.textContent = state.exportState.buttonText;
     }
     
     console.log('🔄 STATE - UI elements synchronized');
@@ -939,78 +1062,7 @@ document.addEventListener('DOMContentLoaded', function() {
 // Remove any import/export statements for browser compatibility
 // All dependencies should be accessed via window, e.g., window.LINEAR_THRESHOLD_STRATEGIES, window.LOG_THRESHOLD_STRATEGIES
 
-/*function populateThresholdStrategyDropdown() {
-    const select = document.getElementById('thresholdStrategySelect');
-    if (!select) return;
-    
-    select.innerHTML = '';
-    
-    // Get current scale mode - FIXED: check currentScaleMode first since it's more current
-    const scale = currentScaleMode || window.currentScaleMode || 'linear';
-    
-    console.log(`🔍 DROPDOWN-DEBUG - Scale: ${scale}, currentScaleMode: ${currentScaleMode}, window.currentScaleMode: ${window.currentScaleMode}`);
-    console.log(`🔍 DROPDOWN-DEBUG - window.LOG_THRESHOLD_STRATEGIES: ${typeof window.LOG_THRESHOLD_STRATEGIES}, window.LINEAR_THRESHOLD_STRATEGIES: ${typeof window.LINEAR_THRESHOLD_STRATEGIES}`);
-    
-    // Use the appropriate strategies from threshold_strategies.js
-    const strategies = scale === 'log' ? window.LOG_THRESHOLD_STRATEGIES : window.LINEAR_THRESHOLD_STRATEGIES;
-    
-    if (!strategies || typeof strategies !== 'object') {
-        console.error('❌ STRATEGY-DROPDOWN - Threshold strategies not available', {
-            scale: scale,
-            strategies: strategies,
-            window_log: window.LOG_THRESHOLD_STRATEGIES,
-            window_linear: window.LINEAR_THRESHOLD_STRATEGIES
-        });
-        return;
-    }
-    
-    let firstKey = null;
-    let found = false;
-    
-    Object.keys(strategies).forEach((key, idx) => {
-        const strat = strategies[key];
-        const option = document.createElement('option');
-        option.value = key;
-        option.textContent = strat.name || key;
-        option.title = strat.description || '';
-        select.appendChild(option);
-        
-        if (idx === 0) firstKey = key;
-        if (window.selectedThresholdStrategy === key) found = true;
-    });
-    
-    // Add manual strategy option
-    const manualOption = document.createElement('option');
-    manualOption.value = 'manual';
-    manualOption.textContent = 'Manual (User-Defined)';
-    manualOption.title = 'Use manually entered threshold value';
-    select.appendChild(manualOption);
-    
-    // Check if manual is the current strategy
-    if (window.selectedThresholdStrategy === 'manual') found = true;
-    
-    // Set default strategy if current selection not available
-    if (!found && firstKey) {
-        window.selectedThresholdStrategy = firstKey;
-    }
-    
-    select.value = window.selectedThresholdStrategy || firstKey;
-    window.selectedThresholdStrategy = select.value;
-    
-    console.log(`✅ STRATEGY-DROPDOWN - Populated with ${Object.keys(strategies).length} ${scale} strategies, selected: ${select.value}`);
-    
-    // Trigger threshold recalculation ONLY if not manual strategy
-    if (select.value !== 'manual') {
-        handleThresholdStrategyChange();
-    } else {
-        // For manual strategy, just update the input box to current threshold
-        if (window.updateThresholdInput) {
-            window.updateThresholdInput();
-        } else {
-            window.updateThresholdInputForCurrentScale();
-        }
-    }
-}*/
+
 
 function getSelectedThresholdStrategy() {
     const select = document.getElementById('thresholdStrategySelect');
@@ -1849,231 +1901,6 @@ function extractChannelControlWells() {
 // All threshold-related functions like calculateStableChannelThreshold, 
 // initializeChannelThresholds, getCurrentChannelThreshold, etc. have been
 // moved to threshold_frontend.js for better organization and global access.
-
-/**
- * Update all chart threshold annotations when scale changes (multiplier only affects view)
- */
-/*function updateAllChannelThresholds() {
-    console.log('🔍 THRESHOLD - Updating all channel thresholds');
-    
-    // Extra strict guard: do not proceed if any part of the chart config is missing
-    if (!window.amplificationChart ||
-        typeof window.amplificationChart !== 'object' ||
-        !window.amplificationChart.options ||
-        typeof window.amplificationChart.options !== 'object' ||
-        !window.amplificationChart.options.plugins ||
-        typeof window.amplificationChart.options.plugins !== 'object' ||
-        !window.amplificationChart.options.plugins.annotation ||
-        typeof window.amplificationChart.options.plugins.annotation !== 'object' ||
-        !window.amplificationChart.options.plugins.annotation.annotations ||
-        typeof window.amplificationChart.options.plugins.annotation.annotations !== 'object') {
-        console.warn('🔍 THRESHOLD - Chart or annotation plugin not ready, skipping threshold update');
-        return;
-    }
-    
-    // Also guard: do not proceed if no valid analysis results
-    if (!window.currentAnalysisResults ||
-        !window.currentAnalysisResults.individual_results ||
-        typeof window.currentAnalysisResults.individual_results !== 'object' ||
-        Object.keys(window.currentAnalysisResults.individual_results).length === 0) {
-        console.warn('🔍 THRESHOLD - No valid analysis results found for this channel. Please check your input files.');
-        return;
-    }
-    
-    // Get current chart annotations
-    const annotations = window.amplificationChart.options.plugins.annotation.annotations;
-    
-    // Update threshold lines for all visible channels - IMPROVED DETECTION
-    const visibleChannels = new Set();
-    
-    // Method 1: Get channels from chart datasets (for currently displayed data)
-    if (window.amplificationChart.data && window.amplificationChart.data.datasets) {
-        window.amplificationChart.data.datasets.forEach(dataset => {
-            // Extract channel from dataset label
-            const match = dataset.label?.match(/\(([^)]+)\)/);
-            if (match && match[1] !== 'Unknown') {
-                visibleChannels.add(match[1]);
-                console.log(`🔍 THRESHOLD - Found channel from dataset: ${match[1]}`);
-            }
-        });
-    }
-    
-    // Method 2: Get channels from analysis results (for multichannel data)
-    if (window.currentAnalysisResults?.individual_results) {
-        Object.values(window.currentAnalysisResults.individual_results).forEach(well => {
-            if (well.fluorophore && well.fluorophore !== 'Unknown') {
-                visibleChannels.add(well.fluorophore);
-            }
-        });
-    }
-    
-    // Method 3: Get channels from stored channel thresholds
-    if (window.stableChannelThresholds) {
-        Object.keys(window.stableChannelThresholds).forEach(channel => {
-            visibleChannels.add(channel);
-        });
-    }
-    
-    // Method 4: If viewing "all curves", ensure all known fluorophores are included
-    const currentChannel = window.currentFluorophore;
-    if (currentChannel === 'all' || !currentChannel) {
-        const knownChannels = ['Cy5', 'FAM', 'HEX', 'Texas Red'];
-        knownChannels.forEach(channel => {
-            // Only add if we have threshold data for this channel
-            if (window.stableChannelThresholds && window.stableChannelThresholds[channel]) {
-                visibleChannels.add(channel);
-            }
-        });
-    }
-    
-    console.log(`🔍 THRESHOLD - Detected ${visibleChannels.size} channels: [${Array.from(visibleChannels).join(', ')}]`);
-    
-    // Clear old threshold annotations
-    Object.keys(annotations).forEach(key => {
-        if (key.startsWith('threshold_')) {
-            delete annotations[key];
-        }
-    });
-    
-    // Add new threshold annotations for visible channels
-    const currentScale = currentScaleMode;
-    Array.from(visibleChannels).forEach(channel => {
-        const threshold = getCurrentChannelThreshold(channel, currentScale);
-        if (threshold !== null && threshold !== undefined && !isNaN(threshold)) {
-            const annotationKey = `threshold_${channel}`;
-            annotations[annotationKey] = {
-                type: 'line',
-                yMin: threshold,
-                yMax: threshold,
-                borderColor: getChannelColor(channel),
-                borderWidth: 2,
-                borderDash: [5, 5],
-                label: {
-                    display: true,
-                    content: `${channel}: ${threshold.toFixed(2)}`,
-                    position: 'start',
-                    backgroundColor: 'rgba(255,255,255,0.8)',
-                    color: getChannelColor(channel),
-                    font: { size: 10, weight: 'bold' }
-                },
-                draggable: false,
-dragAxis: 'y',
-enter: function(ctx) {
-    ctx.chart.canvas.style.cursor = 'ns-resize';
-},
-leave: function(ctx) {
-    ctx.chart.canvas.style.cursor = '';
-},
-onDragEnd: function(e) {
-    // e: { chart, annotation, event }
-    const newY = e?.annotation?.yMin;
-    if (typeof newY === 'number' && !isNaN(newY)) {
-        if (window.setChannelThreshold) window.setChannelThreshold(channel, currentScale, newY);
-        // Optionally update UI input if present
-        const thresholdInput = document.getElementById('thresholdInput');
-        if (thresholdInput && (currentFluorophore === channel || currentFluorophore === 'all')) {
-            thresholdInput.value = newY.toFixed(2);
-        }
-        // Persist and update chart
-        window.updateAllChannelThresholds();
-        console.log(`🔍 DRAG-END - Threshold for ${channel} (${currentScale}) set to ${newY}`);
-    } else {
-        console.warn('🔍 DRAG-END - Invalid newY value:', newY);
-    }
-}
-            };
-            console.log(`🔍 THRESHOLD - Added threshold for ${channel}: ${threshold.toFixed(2)}`);
-        } else {
-            console.warn(`🔍 THRESHOLD - Invalid threshold for ${channel}: ${threshold}`);
-        }
-    });
-    
-    // Update chart
-    window.amplificationChart.update('none');
-    
-    console.log(`🔍 THRESHOLD - Updated thresholds for channels: ${Array.from(visibleChannels).join(', ')}`);
-}*/
-
-/*function updateSingleChannelThreshold(fluorophore) {
-    console.log(`🔍 THRESHOLD - Updating threshold for single channel: ${fluorophore}`);
-    
-    if (!window.amplificationChart) {
-        console.warn('🔍 THRESHOLD - No chart available');
-        return;
-    }
-    
-    // Ensure chart has annotation plugin
-    if (!window.amplificationChart.options.plugins) {
-        window.amplificationChart.options.plugins = {};
-    }
-    if (!window.amplificationChart.options.plugins.annotation) {
-        window.amplificationChart.options.plugins.annotation = { annotations: {} };
-    }
-    
-    // Get current chart annotations
-    const annotations = window.amplificationChart.options.plugins.annotation.annotations;
-    
-    // Clear old threshold annotations for this channel
-    Object.keys(annotations).forEach(key => {
-        if (key.startsWith(`threshold_${fluorophore}`)) {
-            delete annotations[key];
-        }
-    });
-    
-    // Add new threshold annotation for this specific channel
-    const currentScale = currentScaleMode;
-    const threshold = getCurrentChannelThreshold(fluorophore, currentScale);
-    
-    if (threshold !== null && threshold !== undefined && !isNaN(threshold)) {
-        const annotationKey = `threshold_${fluorophore}`;
-        annotations[annotationKey] = {
-            type: 'line',
-            yMin: threshold,
-            yMax: threshold,
-            borderColor: getChannelColor(fluorophore),
-            borderWidth: 2,
-            borderDash: [5, 5],
-            label: {
-                display: true,
-                content: `${fluorophore}: ${threshold.toFixed(2)}`,
-                position: 'start',
-                backgroundColor: 'rgba(255,255,255,0.8)',
-                color: getChannelColor(fluorophore),
-                font: { size: 10, weight: 'bold' }
-            },
-draggable: true,
-dragAxis: 'y',
-enter: function(ctx) {
-    ctx.chart.canvas.style.cursor = 'ns-resize';
-},
-leave: function(ctx) {
-    ctx.chart.canvas.style.cursor = '';
-},
-        onDragEnd: function(e) {
-            const newY = e?.annotation?.yMin;
-            if (typeof newY === 'number' && !isNaN(newY)) {
-                if (window.setChannelThreshold) window.setChannelThreshold(fluorophore, currentScaleMode, newY);
-                const thresholdInput = document.getElementById('thresholdInput');
-                if (thresholdInput && (currentFluorophore === fluorophore || currentFluorophore === 'all')) {
-                    thresholdInput.value = newY.toFixed(2);
-                }
-                if (window.updateSingleChannelThreshold) window.updateSingleChannelThreshold(fluorophore);
-                console.log(`🔍 DRAG-END - Threshold for ${fluorophore} (${currentScaleMode}) set to ${newY}`);
-            } else {
-                console.warn('🔍 DRAG-END - Invalid newY value:', newY);
-            }
-        }
-    };
-    console.log(`🔍 THRESHOLD - Added threshold for ${fluorophore}: ${threshold.toFixed(2)}`);
-} else {
-    console.warn(`🔍 THRESHOLD - Invalid threshold for ${fluorophore}: ${threshold}`);
-}
-    
-    // Update chart
-    window.amplificationChart.update('none');
-    
-    console.log(`🔍 THRESHOLD - Updated threshold for channel: ${fluorophore}`);
-}*/
 
 /**
  * Get a distinct color for each channel
@@ -3128,6 +2955,12 @@ function emergencyReset() {
     window.analysisResults = null;
     window.freshAnalysisMode = true;
     
+    // Update export state for cleared results
+    updateExportState({ 
+        hasAnalysisResults: false,
+        isSessionLoaded: false 
+    });
+    
     // Destroy any existing chart
     if (window.amplificationChart) {
         try {
@@ -3265,33 +3098,8 @@ function clearPreviousExperimentData() {
 /**
  * Clears the analysis summary section
  */
-/**function clearAnalysisSummary() {
-    const summaryElements = [
-        'experimentName',
-        //'experimentPattern', // Clear experiment pattern to prevent contamination
-        'totalWells', 
-        'positiveWells',
-        'positiveRate',
-        'cycleRange'
-    ];
-     
-    summaryElements.forEach(id => {
-        const element = document.getElementById(id);
-        if (element) {
-            element.textContent = '--';
-        }
-    });
-    
-    // Clear pathogen breakdown
-    const pathogenBreakdown = document.getElementById('pathogenBreakdown');
-    if (pathogenBreakdown) {
-        pathogenBreakdown.innerHTML = '';
-    }
-}
 
-/**
- * Reset filter buttons to default state
- */
+
 function resetFilterButtons() {
     const buttons = ['showAllBtn', 'showPosBtn', 'showNegBtn', 'showRedoBtn'];
     buttons.forEach(id => {
@@ -3774,6 +3582,15 @@ function updateFileInfoDisplay() {
 // Analysis functions
 async function performAnalysis() {
     console.log('🔒 [ANALYSIS START] Starting fresh analysis');
+    console.log('🧪 ANALYSIS DEBUG - performAnalysis function called!');
+    
+    // Debug: Check current data state
+    console.log('🧪 ANALYSIS DEBUG - Current state:', {
+        amplificationFilesCount: Object.keys(amplificationFiles).length,
+        amplificationFiles: Object.keys(amplificationFiles),
+        hasSamplesData: samplesData !== null,
+        samplesDataType: typeof samplesData
+    });
     
     // 🧹 CONTAMINATION FIX: Clear all previous analysis and threshold data before starting new analysis
     console.log('🧹 [PRE-ANALYSIS] Clearing previous data to prevent contamination');
@@ -3787,6 +3604,12 @@ async function performAnalysis() {
     currentAnalysisResults = null;
     window.currentAnalysisResults = null;
     analysisResults = null;
+    
+    // Update export state for cleared results
+    updateExportState({ 
+        hasAnalysisResults: false,
+        isSessionLoaded: false 
+    });
     
     // Destroy existing chart to prevent threshold contamination
     if (typeof safeDestroyChart === 'function') {
@@ -4012,6 +3835,13 @@ async function performAnalysis() {
 async function displayAnalysisResults(results) {
     // Ensure global is set before any UI/chart calls
     window.currentAnalysisResults = results;
+    
+    // Update export state for new analysis results
+    updateExportState({ 
+        hasAnalysisResults: !!(results && results.individual_results && Object.keys(results.individual_results).length > 0),
+        isSessionLoaded: false 
+    });
+    
     // Clear previous experiment data RIGHT BEFORE displaying new results
     clearPreviousExperimentData();
     
@@ -4084,7 +3914,7 @@ async function displayAnalysisResults(results) {
     displayControlValidationAlerts(controlIssues);
     
     // Display pathogen control grids for visual validation
-    const testCode = extractTestCodeFromExperimentPattern(experimentPattern);
+    const testCode = extractTestCode(experimentPattern);
     console.log('🔍 FRESH UPLOAD - Creating control grid for testCode:', testCode);
     console.log('🔍 FRESH UPLOAD - Experiment pattern:', experimentPattern);
     console.log('🔍 FRESH UPLOAD - Current analysis results available:', !!currentAnalysisResults);
@@ -4172,6 +4002,13 @@ async function displayAnalysisResults(results) {
 async function displayMultiFluorophoreResults(results) {
     // Ensure global is set before any UI/chart calls
     window.currentAnalysisResults = results;
+    
+    // Update export state for new analysis results
+    updateExportState({ 
+        hasAnalysisResults: !!(results && results.individual_results && Object.keys(results.individual_results).length > 0),
+        isSessionLoaded: false 
+    });
+    
     // Clear previous experiment data RIGHT BEFORE displaying new results
     clearPreviousExperimentData();
     
@@ -4318,7 +4155,7 @@ async function displayMultiFluorophoreResults(results) {
     populateResultsTable(results.individual_results);
     
     // Create control grids for multi-fluorophore analysis
-    const testCode = extractTestCodeFromExperimentPattern(experimentPattern);
+    const testCode = extractTestCode(experimentPattern);
     
     console.log('🔍 MULTI-FLUOROPHORE - Control grid check:', {
         testCode: testCode,
@@ -5766,6 +5603,13 @@ function setAnalysisResults(newResults, source = 'unknown') {
     
     currentAnalysisResults = newResults;
     window.currentAnalysisResults = newResults;
+    
+    // Update export state based on source and data
+    const isSessionLoaded = source.includes('history') || source.includes('session') || source.includes('load');
+    updateExportState({ 
+        hasAnalysisResults: !!(newResults && newResults.individual_results && Object.keys(newResults.individual_results).length > 0),
+        isSessionLoaded: isSessionLoaded
+    });
     return true;
 }
 
@@ -6254,10 +6098,33 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Analysis button
+    // Analysis button with enhanced debugging
     const analyzeBtn = document.getElementById('analyzeBtn');
     if (analyzeBtn) {
-        analyzeBtn.addEventListener('click', performAnalysis);
+        console.log('🧪 SETUP - Found analysis button, attaching event listener');
+        
+        // Remove any existing event listeners to prevent duplicates
+        analyzeBtn.removeEventListener('click', performAnalysis);
+        
+        // Add the event listener with debugging
+        analyzeBtn.addEventListener('click', function(e) {
+            console.log('🧪 CLICK - Analysis button clicked!', e);
+            console.log('🧪 CLICK - Button state:', {
+                disabled: analyzeBtn.disabled,
+                classList: Array.from(analyzeBtn.classList)
+            });
+            
+            // Prevent any potential default behavior
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // Call the analysis function
+            performAnalysis();
+        });
+        
+        console.log('🧪 SETUP - Analysis button event listener attached successfully');
+    } else {
+        console.error('🧪 SETUP - analyzeBtn element not found during setup!');
     }
     
     // Well selector
@@ -6268,10 +6135,18 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Export button
+    // Export button - integrated with state management
     const exportBtn = document.getElementById('exportBtn');
     if (exportBtn) {
-        exportBtn.addEventListener('click', exportResults);
+        exportBtn.addEventListener('click', function(e) {
+            // Check export state before allowing export
+            if (!window.appState.exportState.isEnabled) {
+                e.preventDefault();
+                alert(window.appState.exportState.disabledReason || 'Export is currently disabled');
+                return;
+            }
+            exportResults();
+        });
     }
     
     // Status filter dropdown
@@ -6637,150 +6512,11 @@ function updateTrendAnalysisButton(hasIncompleteTests, incompleteTestsInfo) {
 }
 
 function updateExportButton(hasIncompleteTests, incompleteTestsInfo) {
-    // Find export button by ID first, then fallback methods
-    const exportButton = document.getElementById('exportBtn') ||
-                         document.querySelector('[onclick="exportResults()"]') || 
-                         document.querySelector('button[onclick="exportResults()"]') ||
-                         Array.from(document.querySelectorAll('button')).find(btn => 
-                             btn.textContent.includes('Export') || btn.textContent.includes('CSV'));
-    
-    if (exportButton) {
-        // Check if we have analysis results loaded
-        const hasAnalysisResults = currentAnalysisResults && 
-                                   currentAnalysisResults.individual_results && 
-                                   Object.keys(currentAnalysisResults.individual_results).length > 0;
-        
-        if (!hasAnalysisResults) {
-            exportButton.disabled = true;
-            exportButton.style.opacity = '0.5';
-            exportButton.style.cursor = 'not-allowed';
-            exportButton.title = 'Load an analysis session first to enable export';
-            exportButton.textContent = 'Export Disabled';
-            return;
-        }
-        
-        // For loaded sessions (from history), always enable export with enhanced validation
-        const isLoadedSession = !amplificationFiles || Object.keys(amplificationFiles).length === 0;
-        
-        if (isLoadedSession) {
-            // This is a loaded session from history - always enable export
-            exportButton.disabled = false;
-            exportButton.style.opacity = '1';
-            exportButton.style.cursor = 'pointer';
-            exportButton.title = 'Export analysis results to CSV';
-            exportButton.textContent = 'Export Results';
-            console.log('Export ENABLED: Loaded session from history');
-            return;
-        }
-        
-        // For fresh analysis, perform channel validation
-        const currentPattern = getCurrentFullPattern();
-        if (!currentPattern) {
-            // No pattern means fresh analysis - allow export
-            exportButton.disabled = false;
-            exportButton.style.opacity = '1';
-            exportButton.style.cursor = 'pointer';
-            exportButton.title = 'Export current analysis results to CSV';
-            exportButton.textContent = 'Export Results';
-            console.log('Export enabled: No current pattern, fresh analysis');
-            return;
-        }
-        
-        // Check if THIS specific experiment is complete according to pathogen library
-        const testCode = extractTestCode(currentPattern);
-        
-        // Enhanced check for pathogen library availability
-        if (!testCode || typeof getRequiredChannels !== 'function' || typeof PATHOGEN_LIBRARY === 'undefined') {
-            console.log('Export enabled: Cannot determine test requirements', { 
-                testCode, 
-                getRequiredChannelsType: typeof getRequiredChannels,
-                pathogenLibraryType: typeof PATHOGEN_LIBRARY,
-                pathogenLibraryLoaded: typeof window.PATHOGEN_LIBRARY !== 'undefined'
-            });
-            
-            // Can't determine requirements - allow export
-            exportButton.disabled = false;
-            exportButton.style.opacity = '1';
-            exportButton.style.cursor = 'pointer';
-            exportButton.title = 'Export current analysis results to CSV';
-            exportButton.textContent = 'Export Results';
-            return;
-        }
-        
-        const requiredChannels = getRequiredChannels(testCode);
-        const availableChannels = new Set();
-        
-        // Extract fluorophores from current loaded results (multiple methods)
-        Object.keys(currentAnalysisResults.individual_results).forEach(wellKey => {
-            // Method 1: From well key suffix (A1_Cy5)
-            const fluorophore = wellKey.split('_').pop();
-            if (fluorophore && ['Cy5', 'FAM', 'HEX', 'Texas Red'].includes(fluorophore)) {
-                availableChannels.add(fluorophore);
-            }
-        });
-        
-        // Method 2: From result fluorophore field
-        Object.values(currentAnalysisResults.individual_results).forEach(result => {
-            if (result.fluorophore && ['Cy5', 'FAM', 'HEX', 'Texas Red'].includes(result.fluorophore)) {
-                availableChannels.add(result.fluorophore);
-            }
-        });
-        
-        // Method 3: From uploaded file names for fresh analysis
-        if (amplificationFiles) {
-            Object.keys(amplificationFiles).forEach(fluorophore => {
-                if (['Cy5', 'FAM', 'HEX', 'Texas Red'].includes(fluorophore)) {
-                    availableChannels.add(fluorophore);
-                }
-            });
-        }
-        
-        // Method 4: Enhanced filename detection for single-channel tests
-        if (availableChannels.size === 0 && currentAnalysisResults.filename) {
-            let detectedFluorophore = detectFluorophoreFromFilename(currentAnalysisResults.filename);
-            
-            // Enhanced detection for single-channel tests
-            if (!detectedFluorophore || detectedFluorophore === 'Unknown') {
-                if (currentAnalysisResults.filename.includes('AcNgon')) detectedFluorophore = 'HEX';
-                else if (currentAnalysisResults.filename.includes('AcCtrach')) detectedFluorophore = 'FAM';
-                else if (currentAnalysisResults.filename.includes('AcTvag')) detectedFluorophore = 'FAM';
-                else if (currentAnalysisResults.filename.includes('AcCalb')) detectedFluorophore = 'HEX';
-            }
-            
-            if (detectedFluorophore && detectedFluorophore !== 'Unknown') {
-                availableChannels.add(detectedFluorophore);
-                console.log(`Export validation: Detected fluorophore ${detectedFluorophore} from filename ${currentAnalysisResults.filename}`);
-            }
-        }
-        
-        const hasAllRequiredChannels = requiredChannels.every(channel => availableChannels.has(channel));
-        
-        console.log('Export validation (fresh analysis):', {
-            testCode,
-            currentPattern,
-            requiredChannels,
-            availableChannels: Array.from(availableChannels),
-            hasAllRequiredChannels,
-            filename: currentAnalysisResults.filename,
-            isLoadedSession
-        });
-        
-        // Enable export with appropriate messaging
-        exportButton.disabled = false;
-        exportButton.style.opacity = '1';
-        exportButton.style.cursor = 'pointer';
-        
-        if (hasAllRequiredChannels) {
-            exportButton.title = `Export complete ${testCode} analysis results to CSV`;
-            exportButton.textContent = 'Export Results';
-            console.log(`Export ENABLED: ${testCode} has all required channels ${requiredChannels.join(', ')}`);
-        } else {
-            const missingChannels = requiredChannels.filter(channel => !availableChannels.has(channel));
-            exportButton.title = `Export current ${testCode} analysis (Missing channels: ${missingChannels.join(', ')} for complete stats)`;
-            exportButton.textContent = 'Export Results';
-            console.log(`Export ENABLED: ${testCode} missing channels ${missingChannels.join(', ')} but allowing export of current data`);
-        }
-    }
+    console.log('🔄 EXPORT - Legacy updateExportButton called, routing to central state management');
+    updateExportState({
+        hasIncompleteTests,
+        incompleteTestsInfo
+    });
 }
 
 function checkCurrentExperimentComplete() {
@@ -10873,14 +10609,14 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Export button with channel validation
+    // Export button with channel validation - integrated with state management
     const exportBtn = document.getElementById('exportBtn');
     if (exportBtn) {
         exportBtn.addEventListener('click', function(e) {
-            // Check channel completeness before allowing export
-            if (exportBtn.disabled) {
+            // Check export state before allowing export
+            if (!window.appState.exportState.isEnabled) {
                 e.preventDefault();
-                alert('Export disabled: Please complete all required pathogen channels before exporting results.');
+                alert(window.appState.exportState.disabledReason || 'Export is currently disabled');
                 return;
             }
             exportResults();
@@ -11373,6 +11109,42 @@ function getFluorophoreColor(fluorophore) {
 
 // --- Threshold Calculation Functions ---
 // ...existing code...
+
+// ========================================
+// EXPORT STATE TESTING AND DEBUGGING
+// ========================================
+
+// Test function to verify export state integration (for development/debugging)
+function testExportStateIntegration() {
+    console.log('🧪 Testing Export State Integration');
+    
+    // Test 1: Initial state
+    console.log('Test 1 - Initial state:', window.appState.exportState);
+    
+    // Test 2: Update with no results
+    updateExportState({ hasAnalysisResults: false });
+    console.log('Test 2 - No results:', window.appState.exportState);
+    
+    // Test 3: Update with results but not loaded session
+    updateExportState({ hasAnalysisResults: true, isSessionLoaded: false });
+    console.log('Test 3 - Fresh analysis with results:', window.appState.exportState);
+    
+    // Test 4: Update with loaded session
+    updateExportState({ hasAnalysisResults: true, isSessionLoaded: true });
+    console.log('Test 4 - Loaded session:', window.appState.exportState);
+    
+    // Test 5: Update with incomplete tests
+    updateExportState({ hasAnalysisResults: true, isSessionLoaded: false, hasIncompleteTests: true });
+    console.log('Test 5 - Incomplete tests:', window.appState.exportState);
+    
+    console.log('🧪 Export State Integration Test Complete');
+    
+    // Return to safe state
+    updateExportState({ hasAnalysisResults: false, isSessionLoaded: false, hasIncompleteTests: false });
+}
+
+// Make test function available globally for debugging
+window.testExportStateIntegration = testExportStateIntegration;
 
 
 // Legacy per-well threshold function removed - using channel-based thresholds instead
@@ -12063,9 +11835,10 @@ document.addEventListener('DOMContentLoaded', function() {
         console.error('🔍 SAMPLES-INPUT - samplesInput element not found!');
     }
     
-    if (analyzeBtn) {
-        analyzeBtn.addEventListener('click', performAnalysis);
-    }
+    // Analysis button event listener (removing duplicate - already handled above)
+    // if (analyzeBtn) {
+    //     analyzeBtn.addEventListener('click', performAnalysis);
+    // }
     
     // Drag and drop functionality
     const fileUpload = document.getElementById('fileUpload');
@@ -12165,318 +11938,22 @@ async function displaySessionResults(session) {
         );
         
         const sessionDataArray = await Promise.all(sessionPromises);
-        console.log('Loaded individual session data for combination:', sessionDataArray.length, 'sessions');
-        
-        // Debug: log each session's data and detect fluorophores
-        const sessionFluorophoreMap = new Map();
-        sessionDataArray.forEach((sessionData, index) => {
-            const sessionFilename = sessionData.session?.filename || '';
-            const detectedFluorophore = detectFluorophoreFromFilename(sessionFilename);
-            sessionFluorophoreMap.set(index, detectedFluorophore);
-            
-            console.log(`Session ${index + 1}:`, {
-                sessionName: sessionFilename,
-                detectedFluorophore: detectedFluorophore,
-                wellCount: sessionData.wells?.length || 0,
-                firstWellId: sessionData.wells?.[0]?.well_id,
-                sampleWellIds: sessionData.wells?.slice(0, 3).map(w => w.well_id)
-            });
-        });
-        
-        // Combine all wells from all sessions with proper fluorophore mapping
-        const allWells = [];
-        let totalWells = 0;
-        let totalPositive = 0;
-        
-        sessionDataArray.forEach((sessionData, sessionIndex) => {
-            if (sessionData.wells) {
-                // Get fluorophore from pre-computed map for reliability
-                const sessionFluorophore = sessionFluorophoreMap.get(sessionIndex) || 'Unknown';
-                
-                console.log(`Adding ${sessionData.wells.length} wells from session ${sessionIndex + 1} (${sessionFluorophore})`);
-                
-                // Add fluorophore information to each well from this session
-                sessionData.wells.forEach(well => {
-                    well.session_fluorophore = sessionFluorophore; // Add session-level fluorophore
-                    allWells.push(well);
-                    totalWells++;
-                    
-                    // Count positive wells
-                    const isGoodSCurve = well.is_good_scurve || false;
-                    if (isGoodSCurve && well.amplitude > 500) {
-                        totalPositive++;
-                    }
-                });
-            }
-        });
-        
-        console.log('Total wells combined:', allWells.length, 'Expected:', sessionDataArray.length * 384);
-        
-        // Transform combined session to analysisResults format
-        const transformedResults = {
-            total_wells: totalWells,
-            good_curves: allWells.filter(well => {
-                const isGoodSCurve = well.is_good_scurve || false;
-                return isGoodSCurve && well.amplitude > 500;
-            }).map(well => 
-                well.well_id.includes('_') ? well.well_id : `${well.well_id}_${well.fluorophore}`
-            ),
-            success_rate: totalWells > 0 ? (totalPositive / totalWells) * 100 : 0,
-            filename: session.filename,
-            individual_results: {}
-        };
-        
-        // Transform all well results from all sessions
-        allWells.forEach((well, index) => {
-            // Production-safe fluorophore detection with comprehensive fallbacks
-            let fluorophore = 'Unknown';
-            
-            try {
-                // Method 1: Use session-level fluorophore from filename (most reliable)
-                if (well.session_fluorophore && well.session_fluorophore !== 'Unknown' && 
-                    ['Cy5', 'FAM', 'HEX', 'Texas Red'].includes(well.session_fluorophore)) {
-                    fluorophore = well.session_fluorophore;
-                }
-                // Method 2: Try well.fluorophore field
-                else if (well.fluorophore && well.fluorophore !== 'Unknown' &&
-                        ['Cy5', 'FAM', 'HEX', 'Texas Red'].includes(well.fluorophore)) {
-                    fluorophore = well.fluorophore;
-                }
-                // Method 3: Extract from well_id if it has fluorophore suffix
-                else if (well.well_id && well.well_id.includes('_')) {
-                    const parts = well.well_id.split('_');
-                    if (parts.length > 1 && ['Cy5', 'FAM', 'HEX', 'Texas Red'].includes(parts[1])) {
-                        fluorophore = parts[1];
-                    }
-                }
-                // Method 4: Try fit_parameters with production-safe parsing
-                else if (well.fit_parameters) {
-                    try {
-                        let fitParams = well.fit_parameters;
-                        if (typeof fitParams === 'string') {
-                            fitParams = JSON.parse(fitParams);
-                        }
-                        if (fitParams && fitParams.fluorophore && 
-                            ['Cy5', 'FAM', 'HEX', 'Texas Red'].includes(fitParams.fluorophore)) {
-                            fluorophore = fitParams.fluorophore;
-                        }
-                    } catch (parseError) {
-                        // Silently continue with Unknown for production stability
-                    }
-                }
-                
-                // Production fallback: Use index-based fluorophore assignment as last resort
-                if (fluorophore === 'Unknown' && sessionDataArray.length === 3) {
-                    const sessionIndex = Math.floor(index / 384); // Assuming 384 wells per session
-                    const sessionFluorphoreOrder = ['HEX', 'FAM', 'Cy5']; // Common order
-                    if (sessionIndex >= 0 && sessionIndex < sessionFluorphoreOrder.length) {
-                        fluorophore = sessionFluorphoreOrder[sessionIndex];
-                    }
-                }
-            } catch (error) {
-                // Production error handling - log but don't crash
-                console.warn('Fluorophore detection error for well', well.well_id, ':', error);
-                fluorophore = 'Unknown';
-            }
-            
-            const baseWellId = well.well_id.includes('_') ? well.well_id.split('_')[0] : well.well_id;
-            
-            // Create unique well key with fluorophore suffix
-            const wellKey = `${baseWellId}_${fluorophore}`;
-            
-            // Debug well key generation for first few wells
-            if (index < 5) {
-                console.log(`Well ${index}: original=${well.well_id}, session_fluorophore=${well.session_fluorophore}, detected=${fluorophore}, key=${wellKey}`);
-            }
-            
-// Defensive: ensure curve_classification is always present
-// [COPILOT EDIT: fallback logic for curve_classification updated]
-let curve_classification = 'N/A';
-if (well.curve_classification !== undefined) {
-    curve_classification = well.curve_classification;
-} else if (well.classification !== undefined) {
-    // Fallback: if legacy field exists
-    curve_classification = well.classification;
-}
-// [COPILOT EDIT END]
-transformedResults.individual_results[wellKey] = {
-    curve_classification: curve_classification,
-    well_id: baseWellId,
-    fluorophore: fluorophore,
-                is_good_scurve: well.is_good_scurve || false,
-                r2_score: well.r2_score,
-                rmse: well.rmse,
-                amplitude: well.amplitude,
-                steepness: well.steepness,
-                midpoint: well.midpoint,
-                baseline: well.baseline,
-                data_points: well.data_points,
-                cycle_range: well.cycle_range,
-                sample: well.sample_name,
-                sample_name: well.sample_name,
-                cq_value: well.cq_value,
-                anomalies: (() => {
-                    try {
-                        if (Array.isArray(well.anomalies)) {
-                            return well.anomalies;
-                        }
-                        const anomaliesStr = well.anomalies || '[]';
-                        return JSON.parse(anomaliesStr);
-                    } catch (e) {
-                        return [];
-                    }
-                })(),
-                fitted_curve: (() => {
-                    try {
-                        if (Array.isArray(well.fitted_curve)) {
-                            return well.fitted_curve;
-                        }
-                        return JSON.parse(well.fitted_curve || '[]');
-                    } catch (e) {
-                        return [];
-                    }
-                })(),
-                raw_cycles: (() => {
-                    try {
-                        if (Array.isArray(well.raw_cycles)) {
-                            return well.raw_cycles;
-                        }
-                        return JSON.parse(well.raw_cycles || '[]');
-                    } catch (e) {
-                        return [];
-                    }
-                })(),
-                raw_rfu: (() => {
-                    try {
-                        if (Array.isArray(well.raw_rfu)) {
-                            return well.raw_rfu;
-                        }
-                        return JSON.parse(well.raw_rfu || '[]');
-                    } catch (e) {
-                        return [];
-                    }
-                })(),
-                fit_parameters: (() => {
-                    try {
-                        if (typeof well.fit_parameters === 'object') {
-                            return well.fit_parameters;
-                        }
-                        return JSON.parse(well.fit_parameters || '{}');
-                    } catch (e) {
-                        return {};
-                    }
-                })(),
-                parameter_errors: (() => {
-                    try {
-                        if (typeof well.parameter_errors === 'object') {
-                            return well.parameter_errors;
-                        }
-                        return JSON.parse(well.parameter_errors || '{}');
-                    } catch (e) {
-                        return {};
-                    }
-                })()
-            };
-        });
-        
-        // Set global analysis results
-        analysisResults = transformedResults;
-        // 🛡️ DISPLAY ONLY: Show combined session without contaminating current analysis state
-        
-        displayHistorySession(transformedResults, 'combined-session-load');
-        
-        console.log('Combined session transformed - total wells:', totalWells, 'individual results:', Object.keys(transformedResults.individual_results).length);
-        console.log('Sample well keys:', Object.keys(transformedResults.individual_results).slice(0, 10));
-        
-        // Display using multi-fluorophore layout
-        displayMultiFluorophoreResults(transformedResults);
-        
-        // Force save experiment statistics for trend analysis when loading session
-        if (transformedResults && transformedResults.individual_results) {
-            const fluorophores = new Set();
-            Object.keys(transformedResults.individual_results).forEach(wellKey => {
-                const fluorophore = wellKey.split('_').pop();
-                if (fluorophore && fluorophore !== 'Unknown') {
-                    fluorophores.add(fluorophore);
-                }
-            });
-            
-            const experimentPattern = extractBasePattern(session.filename);
-            const fluorophoreArray = Array.from(fluorophores);
-            console.log('Saving statistics for loaded session:', experimentPattern, 'with fluorophores:', fluorophoreArray);
-            
-            // Save statistics for all sessions to ensure they appear in trend analysis
-            if (fluorophoreArray.length > 0) {
-                await saveExperimentStatistics(experimentPattern, transformedResults, fluorophoreArray);
-            }
-        }
-        
-        // Initialize filters to default state after loading results
-        setTimeout(() => {
-            initializeFilters();
-            // Update export button validation after loading session from history
-            updateExportButton(false, []);
-            
-            // Update pathogen breakdown with completion tag
-            setTimeout(() => {
-                const breakdownDiv = document.getElementById('fluorophoreBreakdown');
-                if (breakdownDiv) {
-                    const currentPattern = getCurrentFullPattern();
-                    const testCode = extractTestCode(currentPattern);
-                    
-                    // Get fluorophores from loaded session
-                    const fluorophores = [];
-                    if (currentAnalysisResults && currentAnalysisResults.individual_results) {
-                        fluorophores.push(...Object.keys(currentAnalysisResults.individual_results));
-                    }
-                    
-                    const validation = validateChannelCompleteness(testCode, fluorophores);
-                    if (validation.isComplete) {
-                        // Add completion tag to Analysis Summary
-                        const existingTag = breakdownDiv.querySelector('.pathogen-complete-tag');
-                        if (!existingTag) {
-                            const completionTag = document.createElement('div');
-                            completionTag.className = 'pathogen-complete-tag';
-                            completionTag.style.cssText = 'color: #27ae60; font-weight: bold; margin: 10px 0;';
-                            completionTag.innerHTML = '✓ All pathogen channels complete';
-                            
-                            const h4 = breakdownDiv.querySelector('h4');
-                            if (h4) {
-                                h4.insertAdjacentElement('afterend', completionTag);
-                            }
-                        }
-                    }
-                }
-            }, 200);
-        }, 100);
-        
-        // Show analysis section
-        const analysisSection = document.getElementById('analysisSection');
-        if (analysisSection) {
-            analysisSection.style.display = 'block';
-        }
-        
-        // Match curve details size to analysis summary after loading
-        setTimeout(() => {
-            matchCurveDetailsSize();
-        }, 100);
-        
-        // Scroll to analysis section
-        document.getElementById('analysisSection').scrollIntoView({ behavior: 'smooth' });
-        
-        // Trigger control validation for loaded session - DISABLED to prevent duplicate tabs
-        // The control validation system already handles pathogen grids
-        console.log('🔍 Combined BVAB session loaded - pathogen grids handled by control validation system');
-        
-        console.log('Combined session loaded successfully:', session.filename, 'with', Object.keys(transformedResults.individual_results).length, 'wells');
+        console.log("Loaded individual session data for combination:", sessionDataArray);        
+        // Process combined session data
+        processCombinedSessionData(sessionDataArray);
         
     } catch (error) {
-        console.error('Error loading combined session:', error);
-        alert('Error loading combined session: ' + error.message);
+        console.error("Error loading combined session:", error);
+        showErrorMessage("Failed to load combined session data");
     }
 }
 
-// Handle combined session deletion
+function processCombinedSessionData(sessionDataArray) {
+    console.log("Processing combined session data...");
+    // Implementation for processing combined session data
+}
+
+// Delete session functions
 async function deleteSessionGroup(sessionId, event) {
     console.log('deleteSessionGroup called with sessionId:', sessionId, 'type:', typeof sessionId);
     
@@ -12626,493 +12103,7 @@ async function deleteAllSessions() {
     }
 }
 
-// Extract control sets from individual results using specific coordinates
-function extractControlSets(individualResults, testName) {
-    console.log('🔍 EXTRACTING CONTROL SETS - Starting for test:', testName);
-    console.log('🔍 Available wells:', Object.keys(individualResults).length);
-    
-    // Use your actual control coordinates directly
-    const controlCoordinates = ['G10', 'K19', 'A15', 'M5'];
-    const controlSets = {
-        1: { H: [], M: [], L: [], NTC: [] },
-        2: { H: [], M: [], L: [], NTC: [] },
-        3: { H: [], M: [], L: [], NTC: [] },
-        4: { H: [], M: [], L: [], NTC: [] }
-    };
-    
-    // Look for data at the specific control coordinates
-    controlCoordinates.forEach((coord, index) => {
-        const setNumber = index + 1;
-        console.log(`🔍 CHECKING COORDINATE ${coord} for Set ${setNumber}`);
-        
-        // Ensure coord is valid
-        if (!coord || typeof coord !== 'string') {
-            console.warn(`🔍 INVALID COORDINATE: ${coord}`);
-            return;
-        }
-        
-        // Check all fluorophores for this coordinate
-        ['Cy5', 'FAM', 'HEX'].forEach(fluorophore => {
-            const wellKey = `${coord}_${fluorophore}`;
-            const result = individualResults[wellKey];
-            
-            if (result) {
-                console.log(`🔍 FOUND DATA at ${wellKey}:`, {
-                    sample: result.sample_name || result.sample,
-                    amplitude: result.amplitude,
-                    fluorophore: result.fluorophore || fluorophore
-                });
-                
-                // For now, assign as High control to show the coordinate system works
-                controlSets[setNumber].H.push({
-                    wellId: wellKey,
-                    sample_name: result.sample_name || result.sample || `Control-${coord}`,
-                    fluorophore: result.fluorophore || fluorophore,
-                    coordinate: coord || 'Unknown', // Ensure coordinate is never null
-                    amplitude: result.amplitude || 0,
-                    isValid: (result.amplitude || 0) > 500
-                });
-            }
-        });
-    });
-    
-    console.log('🔍 CONTROL SETS CREATED:', Object.keys(controlSets).map(setNum => {
-        const set = controlSets[setNum];
-        return `Set ${setNum}: H=${set.H.length}, M=${set.M.length}, L=${set.L.length}, NTC=${set.NTC.length}`;
-    }));
-    
-    return controlSets;
-}
-
-// Extract well coordinate from well key (e.g., "A1_Cy5" -> "A1")
-function extractWellCoordinate(wellKey) {
-    return wellKey.split('_')[0];
-}
-
-// Extract control type from sample name (e.g., "AcBVAB-H-1" -> "H")
-function extractControlType(sampleName) {
-    const controlMatch = sampleName.match(/[HML]-\d+$|NTC-\d+$/);
-    if (controlMatch) {
-        return controlMatch[0].split('-')[0];
-    }
-    return null;
-}
-
-function extractTestCodeFromExperimentPattern(experimentPattern) {
-    if (!experimentPattern) return null;
-    
-    console.log('🔍 Extracting test code from experiment pattern:', experimentPattern);
-    
-    // Extract test code from experiment pattern
-    if (experimentPattern.includes('BVAB') || experimentPattern.includes('AcBVAB')) return 'BVAB';
-    if (experimentPattern.includes('BVPanelPCR3') || experimentPattern.includes('AcBVPanelPCR3')) return 'BVPanelPCR3';
-    if (experimentPattern.includes('Cglab') || experimentPattern.includes('AcCglab')) return 'Cglab';
-    if (experimentPattern.includes('Ngon') || experimentPattern.includes('AcNgon')) return 'Ngon';
-    if (experimentPattern.includes('Ctrach') || experimentPattern.includes('AcCtrach')) return 'Ctrach';
-    if (experimentPattern.includes('Tvag') || experimentPattern.includes('AcTvag')) return 'Tvag';
-    if (experimentPattern.includes('Mgen') || experimentPattern.includes('AcMgen')) return 'Mgen';
-    if (experimentPattern.includes('Upar') || experimentPattern.includes('AcUpar')) return 'Upar';
-    if (experimentPattern.includes('Uure') || experimentPattern.includes('AcUure')) return 'Uure';
-    
-    return null;
-}
-
-// Pathogen control grid creation functions
-
-function extractTestCodeFromSession(sessionFilename) {
-    if (!sessionFilename) return null;
-    
-    console.log('🔍 Extracting test code from session filename:', sessionFilename);
-    
-    // Extract test code from session filename (handle both individual channels and multi-fluorophore)
-    if (sessionFilename.includes('BVAB') || sessionFilename.includes('AcBVAB')) return 'BVAB';
-    if (sessionFilename.includes('BVPanelPCR3') || sessionFilename.includes('AcBVPanelPCR3')) return 'BVPanelPCR3';
-    if (sessionFilename.includes('Cglab') || sessionFilename.includes('AcCglab')) return 'Cglab';
-    if (sessionFilename.includes('Ngon') || sessionFilename.includes('AcNgon')) return 'Ngon';
-    if (sessionFilename.includes('Ctrach') || sessionFilename.includes('AcCtrach')) return 'Ctrach';
-    if (sessionFilename.includes('Tvag') || sessionFilename.includes('AcTvag')) return 'Tvag';
-    if (sessionFilename.includes('Mgen') || sessionFilename.includes('AcMgen')) return 'Mgen';
-    if (sessionFilename.includes('Upar') || sessionFilename.includes('AcUpar')) return 'Upar';
-    if (sessionFilename.includes('Uure') || sessionFilename.includes('AcUure')) return 'Uure';
-    
-    return null;
-}
-
-
-/* TEST 1: COMMENTED OUT - createIndividualPathogenGrid (HTML string version)
-function createIndividualPathogenGrid(pathogenName, controlSets, gridIndex) {
-    const setCount = Object.keys(controlSets).length;
-    
-    // Create grid HTML with proper 5-column layout (Control + Set 1,2,3,4)
-    let gridHtml = `
-        <div class="pathogen-control-grid">
-            <h5>${pathogenName}</h5>
-            <div class="pathogen-grid">
-                <div class="pathogen-grid-corner">Control</div>
-                <div class="pathogen-set-header">Set 1</div>
-                <div class="pathogen-set-header">Set 2</div>
-                <div class="pathogen-set-header">Set 3</div>
-                <div class="pathogen-set-header">Set 4</div>
-                
-                <div class="pathogen-type-label">H</div>
-                <div class="pathogen-control-cell" id="pathogen${gridIndex}H1">-</div>
-                <div class="pathogen-control-cell" id="pathogen${gridIndex}H2">-</div>
-                <div class="pathogen-control-cell" id="pathogen${gridIndex}H3">-</div>
-                <div class="pathogen-control-cell" id="pathogen${gridIndex}H4">-</div>
-                
-                <div class="pathogen-type-label">M</div>
-                <div class="pathogen-control-cell" id="pathogen${gridIndex}M1">-</div>
-                <div class="pathogen-control-cell" id="pathogen${gridIndex}M2">-</div>
-                <div class="pathogen-control-cell" id="pathogen${gridIndex}M3">-</div>
-                <div class="pathogen-control-cell" id="pathogen${gridIndex}M4">-</div>
-                
-                <div class="pathogen-type-label">L</div>
-                <div class="pathogen-control-cell" id="pathogen${gridIndex}L1">-</div>
-                <div class="pathogen-control-cell" id="pathogen${gridIndex}L2">-</div>
-                <div class="pathogen-control-cell" id="pathogen${gridIndex}L3">-</div>
-                <div class="pathogen-control-cell" id="pathogen${gridIndex}L4">-</div>
-                
-                <div class="pathogen-type-label ntc-label">NTC</div>
-                <div class="pathogen-control-cell" id="pathogen${gridIndex}NTC1">-</div>
-                <div class="pathogen-control-cell" id="pathogen${gridIndex}NTC2">-</div>
-                <div class="pathogen-control-cell" id="pathogen${gridIndex}NTC3">-</div>
-                <div class="pathogen-control-cell" id="pathogen${gridIndex}NTC4">-</div>
-            </div>
-        </div>
-    `;
-    
-    return gridHtml;
-}
-
-function populatePathogenGrids(controlSets, pathogenTargets) {
-    console.log('🔍 PATHOGEN GRIDS - Populating grids with control data');
-    
-    pathogenTargets.forEach((pathogen, pathogenIndex) => {
-        const gridIndex = pathogenIndex + 1;
-        
-        // Extract fluorophore from pathogen name (e.g., "BVAB1 (HEX)" -> "HEX")
-        const fluorophoreMatch = pathogen.match(/\(([^)]+)\)/);
-        const targetFluorophore = fluorophoreMatch ? fluorophoreMatch[1] : null;
-        
-        console.log(`🔍 PATHOGEN GRIDS - Processing ${pathogen}, target fluorophore: ${targetFluorophore}`);
-        
-        // Populate each control set
-        Object.keys(controlSets).forEach(setNumber => {
-            const controlSet = controlSets[setNumber];
-            
-            ['H', 'M', 'L', 'NTC'].forEach(controlType => {
-                const controls = controlSet[controlType] || [];
-                
-                // Find control for this fluorophore
-                const targetControl = controls.find(control => {
-                    const wellFluorophore = control.wellId.split('_')[1];
-                    return wellFluorophore === targetFluorophore;
-                });
-                
-                if (targetControl) {
-                    const cellId = `pathogen${gridIndex}${controlType}${setNumber}`;
-                    const cellElement = document.getElementById(cellId);
-                    
-                    if (cellElement) {
-                        // Set result and styling
-                        cellElement.textContent = targetControl.result;
-                        cellElement.className = 'pathogen-control-cell';
-                        
-                        if (targetControl.result === 'POS') {
-                            cellElement.classList.add('valid');
-                        } else if (targetControl.result === 'NEG') {
-                            cellElement.classList.add('invalid');
-                        } else {
-                            cellElement.classList.add('pending');
-                        }
-                        
-                        // Add tooltip
-                        cellElement.title = `${targetControl.sampleName} - ${targetControl.result} (Amp: ${targetControl.amplitude})`;
-                    }
-                }
-            });
-        });
-    });
-}
-END TEST 1 COMMENT */
-
-function getPathogenTargets(testName) {
-    // Map test names to their pathogen targets
-    const pathogenMap = {
-        'BVAB': ['BVAB1 (HEX)', 'BVAB2 (FAM)', 'BVAB3 (Cy5)'],
-        'BVPanelPCR3': ['BVAB1 (HEX)', 'BVAB2 (FAM)', 'BVAB3 (Cy5)', 'Prevotella bivia (Texas Red)'],
-        'Ngon': ['Neisseria gonhorrea (HEX)'],
-        'Cglab': ['Candida glabrata (FAM)'],
-        'Ctrach': ['Chlamydia trachomatis (FAM)'],
-        'Tvag': ['Trichomonas vaginalis (FAM)'],
-        'Mgen': ['Mycoplasma genitalium (FAM)'],
-        'Upar': ['Ureaplasma parvum (FAM)'],
-        'Uure': ['Ureaplasma urealyticum (FAM)']
-    };
-    
-    return pathogenMap[testName] || [];
-}
-
-/* TEST 2: COMMENTED OUT - createIndividualPathogenGridDOM (DOM manipulation version)
-function createIndividualPathogenGridDOM(pathogenName, controlSets, gridIndex) {
-    console.log(`🔍 PATHOGEN GRID - Creating DOM grid for ${pathogenName}`);
-    
-    // Create pathogen grid container
-    const pathogenGridDiv = document.createElement('div');
-    pathogenGridDiv.className = 'pathogen-control-grid';
-    pathogenGridDiv.id = `pathogen-grid-${gridIndex}`;
-    
-    // Add pathogen title
-    const title = document.createElement('h5');
-    title.textContent = `${pathogenName} Controls`;
-    title.className = 'pathogen-grid-title';
-    pathogenGridDiv.appendChild(title);
-    
-    // Create 5x5 grid (header row + 4 control types × header col + 4 sets)
-    const gridDiv = document.createElement('div');
-    gridDiv.className = 'pathogen-grid';
-    gridDiv.style.display = 'grid';
-    gridDiv.style.gridTemplateColumns = '80px repeat(4, 1fr)';
-    gridDiv.style.gap = '8px';
-    
-    // Add corner cell
-    const cornerCell = document.createElement('div');
-    cornerCell.className = 'pathogen-grid-corner';
-    cornerCell.textContent = 'Control';
-    gridDiv.appendChild(cornerCell);
-    
-    // Add set headers (Set 1, Set 2, Set 3, Set 4)
-    for (let set = 1; set <= 4; set++) {
-        const setHeader = document.createElement('div');
-        setHeader.className = 'pathogen-set-header';
-        setHeader.textContent = `Set ${set}`;
-        gridDiv.appendChild(setHeader);
-    }
-    
-    // Add control type rows (H, M, L, NTC)
-    const controlTypes = ['H', 'M', 'L', 'NTC'];
-    controlTypes.forEach(type => {
-        // Add type label
-        const typeLabel = document.createElement('div');
-        typeLabel.className = 'pathogen-type-label';
-        if (type === 'NTC') {
-            typeLabel.className += ' ntc-label';
-        }
-        typeLabel.textContent = type;
-        gridDiv.appendChild(typeLabel);
-        
-        // Add cells for each set
-        for (let set = 1; set <= 4; set++) {
-            const cell = document.createElement('div');
-            cell.className = 'pathogen-control-cell';
-            cell.id = `pathogen-${pathogenName}-${type}${set}`;
-            
-            // Get control validation data for this pathogen/type/set
-            const controlData = getControlValidationForPathogen(pathogenName, type, set);
-            
-            if (controlData) {
-                const { symbol, className, coordinate, details } = controlData;
-                cell.textContent = symbol;
-                cell.className += ` ${className}`;
-                cell.title = `${pathogenName} Set ${set} ${type} Control\nCoordinate: ${coordinate}\n${details}`;
-                
-                // Add coordinate display
-                const coordSpan = document.createElement('span');
-                coordSpan.className = 'control-coordinate';
-                coordSpan.textContent = coordinate;
-                cell.appendChild(document.createElement('br'));
-                cell.appendChild(coordSpan);
-                
-                console.log(`🔍 PATHOGEN GRID - ${pathogenName} ${type}${set}: ${symbol} at ${coordinate}`);
-            } else {
-                cell.textContent = '-';
-                cell.className += ' missing';
-                cell.title = `${pathogenName} Set ${set} ${type} Control: No data found`;
-            }
-            
-            gridDiv.appendChild(cell);
-        }
-    });
-    
-    pathogenGridDiv.appendChild(gridDiv);
-    return pathogenGridDiv;
-}
-
-function getControlValidationForPathogen(pathogenName, controlType, setNumber) {
-    // Get the current control validation issues from the existing system
-    if (!window.currentAnalysisResults) {
-        console.log('🔍 PATHOGEN GRID - No current analysis results available');
-        return null;
-    }
-    
-    // Run the existing control validation to get issues
-    // Handle both fresh analysis (individual_results object) and loaded sessions (array structure)
-    let individualResults;
-    if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
-        // Fresh analysis results (object with .individual_results)
-        individualResults = window.currentAnalysisResults.individual_results;
-    } else if (Array.isArray(window.currentAnalysisResults)) {
-        // Legacy: array of wells (should not occur, but fallback)
-        individualResults = {};
-        window.currentAnalysisResults.forEach(result => {
-            if (result.well_id) {
-                individualResults[result.well_id] = result;
-            }
-        });
-    } else if (window.currentAnalysisResults && typeof window.currentAnalysisResults === 'object') {
-        // Fresh upload: object keyed by well_id (no .individual_results)
-        // This is the case for fresh uploads, so treat as well dict
-        individualResults = window.currentAnalysisResults;
-    } else {
-        console.log('🔍 PATHOGEN GRID - Invalid currentAnalysisResults format');
-        return null;
-    }
-    
-    const controlIssues = validateControls(individualResults);
-    
-    // Map pathogen names to their fluorophores
-    const pathogenToFluorophore = {
-        'BVAB1': 'HEX',
-        'BVAB2': 'FAM', 
-        'BVAB3': 'Cy5',
-        'Bifidobacterium breve': 'Cy5',
-        'Gardnerella vaginalis': 'FAM',
-        'Lactobacillus acidophilus': 'HEX',
-        'Prevotella bivia': 'Texas Red',
-        'Neisseria gonhorrea': 'HEX',
-        'Candida glabrata': 'FAM'
-    };
-    
-    const targetFluorophore = pathogenToFluorophore[pathogenName];
-    if (!targetFluorophore) {
-        console.log(`🔍 PATHOGEN GRID - No fluorophore mapping for pathogen: ${pathogenName}`);
-        return null;
-    }
-    
-    // Known control coordinate sets from your data
-    const controlCoordinateSets = {
-        1: { H: 'G10', M: 'G11', L: 'G12', NTC: 'G13' },
-        2: { H: 'K19', M: 'K20', L: 'K21', NTC: 'K22' },
-        3: { H: 'A15', M: 'A16', L: 'A17', NTC: 'A18' },
-        4: { H: 'M5', M: 'M6', L: 'M7', NTC: 'M8' }
-    };
-    
-    const expectedCoordinate = controlCoordinateSets[setNumber] && controlCoordinateSets[setNumber][controlType];
-    if (!expectedCoordinate) {
-        return null;
-    }
-    
-    // Look for validation issues for this specific coordinate and fluorophore
-    const wellKey = `${expectedCoordinate}_${targetFluorophore}`;
-    const matchingIssue = controlIssues.find(issue => 
-        issue.wellKey === wellKey || 
-        (issue.wellKey.startsWith(expectedCoordinate) && issue.fluorophore === targetFluorophore)
-    );
-    
-    if (matchingIssue) {
-        // Found a control validation issue
-        const symbol = matchingIssue.expected === matchingIssue.actual ? '✓' : '✗';
-        const className = matchingIssue.expected === matchingIssue.actual ? 'valid' : 'invalid';
-        const details = `Expected: ${matchingIssue.expected} | Actual: ${matchingIssue.actual} | Amplitude: ${matchingIssue.amplitude}`;
-        
-        return {
-            symbol,
-            className,
-            coordinate: expectedCoordinate,
-            details
-        };
-    }
-    // Robustly convert currentAnalysisResults to array for searching
-    const wellsArray = Array.isArray(window.currentAnalysisResults)
-        ? window.currentAnalysisResults
-        : window.currentAnalysisResults && typeof window.currentAnalysisResults === 'object'
-            ? (window.currentAnalysisResults.individual_results
-                ? Object.values(window.currentAnalysisResults.individual_results)
-                : Object.values(window.currentAnalysisResults))
-            : [];
-    // Check if we have a well at this coordinate with this fluorophore
-    const wellData = wellsArray.find(well => 
-        well.well_id === wellKey || 
-        (well.well_id && well.well_id.startsWith(expectedCoordinate) && well.well_id.includes(targetFluorophore))
-    );
-    
-    if (wellData) {
-        const amplitude = wellData.amplitude || 0;
-        const anomalies = wellData.anomalies || 'None';
-        const r2Score = wellData.r2_score || 0;
-        const isGoodCurve = wellData.is_good_scurve || false;
-        
-        let expected, actual, isValid;
-        let additionalInfo = '';
-        
-        if (controlType === 'NTC') {
-            expected = 'NEG';
-            // Enhanced NTC validation
-            if (amplitude >= 500) {
-                actual = 'POS';
-                isValid = false;
-                additionalInfo = 'Strong contamination detected';
-            } else if (amplitude >= 400) {
-                actual = 'REDO';
-                isValid = false;
-                additionalInfo = 'Weak contamination detected';
-            } else if (isGoodCurve && amplitude > 200) {
-                actual = 'REDO';
-                isValid = false;
-                additionalInfo = 'Good curve with elevated baseline';
-            } else {
-                actual = 'NEG';
-                isValid = true;
-            }
-        } else {
-            expected = 'POS';
-            // Enhanced positive control validation
-            if (amplitude >= 500) {
-                if (!isGoodCurve && r2Score < 0.95) {
-                    actual = 'REDO';
-                    isValid = false;
-                    additionalInfo = `Poor curve quality (R²: ${r2Score.toFixed(3)})`;
-                } else if (anomalies !== 'None' && anomalies !== '') {
-                    actual = 'REDO';
-                    isValid = false;
-                    additionalInfo = `Curve anomalies: ${anomalies}`;
-                } else {
-                    actual = 'POS';
-                    isValid = true;
-                }
-            } else if (amplitude >= 400) {
-                actual = 'REDO';
-                isValid = false;
-                additionalInfo = 'Weak amplification';
-            } else {
-                actual = 'NEG';
-                isValid = false;
-                additionalInfo = 'No amplification detected';
-            }
-        }
-        
-        const symbol = isValid ? '✓' : '✗';
-        const className = isValid ? 'valid' : 'invalid';
-        const details = `Expected: ${expected} | Actual: ${actual} | Amplitude: ${amplitude.toFixed(1)}${additionalInfo ? ' | ' + additionalInfo : ''}`;
-        
-        return {
-            symbol,
-            className,
-            coordinate: expectedCoordinate,
-            details
-        };
-    }
-    
-    // No data found for this control
-    return {
-        symbol: '-',
-        className: 'missing',
-        coordinate: expectedCoordinate,
-        details: 'No control data found'
-    };
-}
-END TEST 2 COMMENT */
-
+// Pathogen control grids function
 function createPathogenControlGrids(controlsByChannel, testName) {
     console.log('🔍 PATHOGEN GRIDS - Creating grids for test:', testName);
     console.log('🔍 PATHOGEN GRIDS - Received controls by channel:', Object.keys(controlsByChannel));
@@ -13148,3 +12139,14 @@ function showPathogenGrid(tabIndex) {
     if (activeButton) activeButton.classList.add('active');
     if (activeContent) activeContent.classList.add('active');
 }
+
+// Global function availability for external modules
+window.handleThresholdStrategyChange = handleThresholdStrategyChange;
+window.updateAppState = updateAppState;
+window.syncUIElements = syncUIElements;
+
+// Make deleteAllSessions globally available
+window.deleteAllSessions = deleteAllSessions;
+window.deleteSessionGroup = deleteSessionGroup;
+window.createPathogenControlGrids = createPathogenControlGrids;
+window.showPathogenGrid = showPathogenGrid;
