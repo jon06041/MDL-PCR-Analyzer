@@ -246,46 +246,55 @@ function updateAllChannelThresholds() {
     const annotations = window.amplificationChart.options.plugins.annotation.annotations;
     
     // Update threshold lines for all visible channels - IMPROVED DETECTION
-    const visibleChannels = new Set();
+    // Use global visibleChannels if available, otherwise detect from current context
+    let visibleChannels = window.visibleChannels || new Set();
     
-    // Method 1: Get channels from chart datasets (for currently displayed data)
-    if (window.amplificationChart.data && window.amplificationChart.data.datasets) {
-        window.amplificationChart.data.datasets.forEach(dataset => {
-            // Extract channel from dataset label
-            const match = dataset.label?.match(/\(([^)]+)\)/);
-            if (match && match[1] !== 'Unknown') {
-                visibleChannels.add(match[1]);
-                console.log(`🔍 THRESHOLD - Found channel from dataset: ${match[1]}`);
-            }
-        });
-    }
-    
-    // Method 2: Get channels from analysis results (for multichannel data)
-    if (window.currentAnalysisResults?.individual_results) {
-        Object.values(window.currentAnalysisResults.individual_results).forEach(well => {
-            if (well.fluorophore && well.fluorophore !== 'Unknown') {
-                visibleChannels.add(well.fluorophore);
-            }
-        });
-    }
-    
-    // Method 3: Get channels from stored channel thresholds
-    if (window.stableChannelThresholds) {
-        Object.keys(window.stableChannelThresholds).forEach(channel => {
-            visibleChannels.add(channel);
-        });
-    }
-    
-    // Method 4: If viewing "all curves", ensure all known fluorophores are included
-    const currentChannel = window.currentFluorophore;
-    if (currentChannel === 'all' || !currentChannel) {
-        const knownChannels = ['Cy5', 'FAM', 'HEX', 'Texas Red'];
-        knownChannels.forEach(channel => {
-            // Only add if we have threshold data for this channel
-            if (window.stableChannelThresholds && window.stableChannelThresholds[channel]) {
+    // If no global visibleChannels set, detect from current context
+    if (visibleChannels.size === 0) {
+        console.log('🔍 THRESHOLD - No global visibleChannels found, detecting from context...');
+        
+        // Method 1: Get channels from chart datasets (for currently displayed data)
+        if (window.amplificationChart.data && window.amplificationChart.data.datasets) {
+            window.amplificationChart.data.datasets.forEach(dataset => {
+                // Extract channel from dataset label
+                const match = dataset.label?.match(/\(([^)]+)\)/);
+                if (match && match[1] !== 'Unknown') {
+                    visibleChannels.add(match[1]);
+                    console.log(`🔍 THRESHOLD - Found channel from dataset: ${match[1]}`);
+                }
+            });
+        }
+        
+        // Method 2: Get channels from analysis results (for multichannel data)
+        if (window.currentAnalysisResults?.individual_results) {
+            Object.values(window.currentAnalysisResults.individual_results).forEach(well => {
+                if (well.fluorophore && well.fluorophore !== 'Unknown') {
+                    visibleChannels.add(well.fluorophore);
+                }
+            });
+        }
+        
+        // Method 3: Get channels from stored channel thresholds
+        if (window.stableChannelThresholds) {
+            Object.keys(window.stableChannelThresholds).forEach(channel => {
                 visibleChannels.add(channel);
-            }
-        });
+            });
+        }
+        
+        // Method 4: If viewing "all curves", ensure all known fluorophores are included
+        const currentChannel = window.currentFluorophore;
+        if (currentChannel === 'all' || !currentChannel) {
+            const knownChannels = ['Cy5', 'FAM', 'HEX', 'Texas Red'];
+            knownChannels.forEach(channel => {
+                // Only add if we have threshold data for this channel
+                if (window.stableChannelThresholds && window.stableChannelThresholds[channel]) {
+                    visibleChannels.add(channel);
+                }
+            });
+        }
+        
+        // Update global visibleChannels for future use
+        window.visibleChannels = visibleChannels;
     }
     
     console.log(`🔍 THRESHOLD - Detected ${visibleChannels.size} channels: [${Array.from(visibleChannels).join(', ')}]`);
