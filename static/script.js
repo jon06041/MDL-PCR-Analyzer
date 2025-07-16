@@ -151,9 +151,11 @@ function updateDisplays() {
     if (state.currentChartMode === 'all') {
         showAllCurves(state.currentFluorophore);
     } else if (state.currentChartMode === 'pos') {
-        showPosCurves(state.currentFluorophore);
+        showGoodCurves(state.currentFluorophore);
     } else if (state.currentChartMode === 'neg') {
-        showNegCurves(state.currentFluorophore);
+        showResultsFiltered(state.currentFluorophore, 'neg');
+    } else if (state.currentChartMode === 'redo') {
+        showResultsFiltered(state.currentFluorophore, 'redo');
     }
     
     // Update table filter
@@ -2959,7 +2961,8 @@ function emergencyReset() {
     currentChart = null;
     amplificationFiles = {};
     currentFilterMode = 'all';
-    currentFluorophore = 'all';
+    // Reset fluorophore filter via state management
+    updateAppState({ currentFluorophore: 'all' });
     currentAnalysisResults = null;
     currentChartMode = 'all';
     
@@ -3220,9 +3223,9 @@ function initializeFilters() {
         filterTable();
     }
     
-    // Also reset current filter mode
+    // Also reset current filter mode via state management
     currentFilterMode = 'all';
-    currentFluorophore = 'all';
+    updateAppState({ currentFluorophore: 'all' });
 }
 
 // Utility function to wait for pathogen library to load
@@ -10786,8 +10789,8 @@ function updateChartDisplayMode() {
             document.getElementById('curveDetails').innerHTML = '<p>Select a well to view individual curve details</p>';
             break;
         case 'pos':
-            console.log('Calling showResultsFiltered for POS:', selectedFluorophore);
-            showResultsFiltered(selectedFluorophore, 'pos');
+            console.log('Calling showGoodCurves for POS:', selectedFluorophore);
+            showGoodCurves(selectedFluorophore);
             showFilteredCurveDetails(selectedFluorophore, 'pos');
             break;
         case 'neg':
