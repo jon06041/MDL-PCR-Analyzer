@@ -1,43 +1,11 @@
 """
 CQJ/CalcJ calculation utilities for qPCR analysis
+Utility functions to calculate CQ-J and Calc-J for a well given its data and a threshold.
+Assumes well['raw_rfu'] (list of RFU values) and well['raw_cycles'] (list of cycle numbers).
 """
 
 from typing import List, Optional
 import numpy as np
-
-def calculate_cqj(rfu: List[float], cycles: List[float], threshold: float) -> Optional[float]:
-    """
-    Calculate the cycle at which RFU crosses the threshold (linear interpolation).
-    Skips first 5 cycles for baseline noise reduction.
-    """
-    start_cycle = 5
-    for i in range(start_cycle, len(rfu)):
-        if rfu[i] >= threshold:
-            if i == start_cycle:
-                return cycles[i]
-            prev_rfu = rfu[i - 1]
-            prev_cycle = cycles[i - 1]
-            if rfu[i] == prev_rfu:
-                return cycles[i]
-            # Linear interpolation
-            interpolated_cq = prev_cycle + (threshold - prev_rfu) * (cycles[i] - prev_cycle) / (rfu[i] - prev_rfu)
-            return interpolated_cq
-    return None
-
-def calculate_calcj(amplitude: float, threshold: float) -> Optional[float]:
-    """
-    Example CalcJ calculation: amplitude / threshold
-    """
-    if threshold <= 0:
-        return None
-    return amplitude / threshold
-
-# Add more CQJ/CalcJ related utilities as needed
-# cqj_calcj_utils.py
-"""
-Utility functions to calculate CQ-J and Calc-J for a well given its data and a threshold.
-Assumes well['raw_rfu'] (list of RFU values) and well['raw_cycles'] (list of cycle numbers).
-"""
 
 def calculate_cqj(well, threshold):
     """
@@ -50,12 +18,21 @@ def calculate_cqj(well, threshold):
     if not raw_rfu or not raw_cycles or len(raw_rfu) != len(raw_cycles):
         return None
     
+    # Get well identification info for better debugging
+    well_id = well.get('well_id', 'unknown')
+    sample_name = well.get('sample_name', 'unknown')
+    coordinate = well.get('coordinate', 'unknown')
+    fluorophore = well.get('fluorophore', 'unknown')
+    
+    # Create a more informative well identifier
+    well_info = f"{coordinate}({sample_name})[{fluorophore}]" if coordinate != 'unknown' else f"{well_id}({sample_name})[{fluorophore}]"
+    
     # Skip first 5 cycles to avoid baseline noise - threshold crossings before cycle 5 are ignored
     start_index = 5
     
     # Ensure we have enough data points after skipping early cycles
     if len(raw_rfu) <= start_index:
-        print(f"[CQJ-DEBUG] Well {well.get('well_id', 'unknown')}: Insufficient data after skipping first 5 cycles")
+        print(f"[CQJ-DEBUG] Well {well_info}: Insufficient data after skipping first 5 cycles")
         return None
     
     for i in range(start_index, len(raw_rfu)):
@@ -64,7 +41,7 @@ def calculate_cqj(well, threshold):
             if i == start_index:
                 # If cycle 5 (first valid cycle) already exceeds threshold, 
                 # this is likely baseline noise or pre-amplification artifact - return None
-                print(f"[CQJ-DEBUG] Well {well.get('well_id', 'unknown')}: Cycle 5 already above threshold ({raw_rfu[i]} >= {threshold}), ignoring as baseline noise")
+                print(f"[CQJ-DEBUG] Well {well_info}: Cycle 5 already above threshold ({raw_rfu[i]} >= {threshold}), ignoring as baseline noise")
                 return None
             x0 = raw_cycles[i - 1]
             x1 = raw_cycles[i]
@@ -73,10 +50,10 @@ def calculate_cqj(well, threshold):
             if y1 == y0:
                 return x1  # avoid div by zero
             interpolated = x0 + (threshold - y0) * (x1 - x0) / (y1 - y0)
-            print(f"[CQJ-DEBUG] Well {well.get('well_id', 'unknown')}: CQJ={interpolated:.2f} (threshold crossing between cycles {x0}-{x1})")
+            print(f"[CQJ-DEBUG] Well {well_info}: CQJ={interpolated:.2f} (threshold crossing between cycles {x0}-{x1})")
             return interpolated
     
-    print(f"[CQJ-DEBUG] Well {well.get('well_id', 'unknown')}: No threshold crossing found (max RFU: {max(raw_rfu) if raw_rfu else 'N/A'})")
+    print(f"[CQJ-DEBUG] Well {well_info}: No threshold crossing found (max RFU: {max(raw_rfu) if raw_rfu else 'N/A'})")
     return None  # never crossed
 
 def calculate_calcj(well, threshold):

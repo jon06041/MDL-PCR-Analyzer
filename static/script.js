@@ -2697,7 +2697,7 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
         try {
             // Add timeout controller for large requests
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+            const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minute timeout for large datasets
             
             console.log(`🔍 SINGLE-CHANNEL - Making fetch request for ${fluorophore}`, {
                 url: '/analyze',
@@ -2762,7 +2762,7 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
         } catch (fetchError) {
             // Network or other failure - log and return empty
             if (fetchError.name === 'AbortError') {
-                console.error(`⏰ SINGLE-CHANNEL - Request timeout for ${fluorophore} (60 seconds)`);
+                console.error(`⏰ SINGLE-CHANNEL - Request timeout for ${fluorophore} (3 minutes)`);
                 console.error(`💡 TIMEOUT-TIP - Backend may still be processing. Check backend logs for completion.`);
                 
                 // Try to recover from timeout by checking if data was saved to database
@@ -3251,7 +3251,6 @@ function emergencyReset() {
         if (ctx) {
             ctx.clearRect(0, 0, chartContainer.width, chartContainer.height);
         }
-    }
     }
     
     // Clear results table
