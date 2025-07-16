@@ -301,6 +301,9 @@ function updateAllChannelThresholds() {
     const currentScale = window.currentScaleMode;
     Array.from(visibleChannels).forEach(channel => {
         const threshold = getCurrentChannelThreshold(channel, currentScale);
+        
+        console.log(`🔍 THRESHOLD-ANNOTATION - Processing ${channel}: threshold=${threshold}, scale=${currentScale}`);
+        
         if (threshold !== null && threshold !== undefined && !isNaN(threshold)) {
             const annotationKey = `threshold_${channel}`;
             annotations[annotationKey] = {
@@ -344,9 +347,9 @@ onDragEnd: function(e) {
     }
 }
             };
-            console.log(`🔍 THRESHOLD - Added threshold for ${channel}: ${threshold.toFixed(2)}`);
+            console.log(`✅ THRESHOLD-ANNOTATION - Added threshold annotation for ${channel}: ${threshold.toFixed(2)}`);
         } else {
-            console.warn(`🔍 THRESHOLD - Invalid threshold for ${channel}: ${threshold}`);
+            console.warn(`⚠️ THRESHOLD-ANNOTATION - Invalid threshold for ${channel}: ${threshold} (type: ${typeof threshold})`);
         }
     });
     
@@ -643,19 +646,21 @@ function calculateStableChannelThreshold(channel, scale) {
 
 // HANDLE FIXED STRATEGIES DIRECTLY
 if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
+    console.log(`🔍 THRESHOLD-FIXED - Starting fixed strategy calculation for ${channel}[${scale}] using strategy: ${strategy}`);
+    
     // Get pathogen from experiment pattern instead of well data
     let pathogen = null;
     
     // First try to get from experiment pattern if available
     if (window.currentExperimentPattern) {
-        pathogen = extractTestCode(window.currentExperimentPattern);
+        pathogen = window.extractTestCode ? window.extractTestCode(window.currentExperimentPattern) : extractTestCode(window.currentExperimentPattern);
         console.log(`🔍 THRESHOLD-FIXED - Extracted pathogen "${pathogen}" from experiment pattern: ${window.currentExperimentPattern}`);
     }
     
     // If not found, try to extract from filename in analysis results
     if (!pathogen && window.currentAnalysisResults && window.currentAnalysisResults.metadata && window.currentAnalysisResults.metadata.filename) {
         const filename = window.currentAnalysisResults.metadata.filename;
-        pathogen = extractTestCode(filename);
+        pathogen = window.extractTestCode ? window.extractTestCode(filename) : extractTestCode(filename);
         console.log(`🔍 THRESHOLD-FIXED - Extracted pathogen "${pathogen}" from filename: ${filename}`);
     }
     
@@ -666,16 +671,35 @@ if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
         for (const wellKey of wellKeys) {
             const well = resultsToCheck[wellKey];
             if (well && well.experiment_pattern) {
-                pathogen = extractTestCode(well.experiment_pattern);
+                pathogen = window.extractTestCode ? window.extractTestCode(well.experiment_pattern) : extractTestCode(well.experiment_pattern);
                 console.log(`🔍 THRESHOLD-FIXED - Extracted pathogen "${pathogen}" from well experiment_pattern: ${well.experiment_pattern}`);
                 break;
             }
         }
     }
     
+    // Debug: Check availability of required components
+    console.log(`🔍 THRESHOLD-FIXED-DEBUG - Components check:`, {
+        pathogen: pathogen,
+        PATHOGEN_FIXED_THRESHOLDS_available: !!window.PATHOGEN_FIXED_THRESHOLDS,
+        extractTestCode_available: typeof extractTestCode,
+        extractTestCode_function: typeof window.extractTestCode,
+        channel: channel,
+        scale: scale,
+        strategy: strategy,
+        currentExperimentPattern: window.currentExperimentPattern,
+        analysisResults_filename: window.currentAnalysisResults?.metadata?.filename
+    });
+    
     // NO FALLBACK - if we can't find the pathogen, we can't use fixed thresholds
     if (!pathogen) {
         console.error(`❌ THRESHOLD-FIXED - Could not extract pathogen from experiment pattern. Cannot use fixed threshold.`);
+        console.error(`❌ THRESHOLD-FIXED - Debug info:`, {
+            currentExperimentPattern: window.currentExperimentPattern,
+            analysisResultsExists: !!window.currentAnalysisResults,
+            metadataExists: !!(window.currentAnalysisResults?.metadata),
+            filename: window.currentAnalysisResults?.metadata?.filename
+        });
         return null;
     }
     
@@ -689,14 +713,27 @@ if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
         // Debug log to help troubleshooting
         console.log(`🔍 THRESHOLD-DEBUG - Fixed values for ${pathogen}:`, 
             fixedValues[channel] ? fixedValues[channel] : 'No entry for this channel');
+        console.log(`🔍 THRESHOLD-DEBUG - Available channels for pathogen ${pathogen}:`, Object.keys(fixedValues));
+        console.log(`🔍 THRESHOLD-DEBUG - Requested: channel=${channel}, scale=${scaleKey}`);
         
         // Access structure is pathogen->channel->scale (not pathogen->scale->channel)
         if (fixedValues[channel] && fixedValues[channel][scaleKey] !== undefined) {
             const fixedValue = fixedValues[channel][scaleKey];
             console.log(`✅ THRESHOLD-FIXED - ${channel}[${scale}]: ${fixedValue} (pathogen: ${pathogen})`);
+            
+            // Immediately store the calculated value
+            if (!window.stableChannelThresholds[channel]) {
+                window.stableChannelThresholds[channel] = {};
+            }
+            window.stableChannelThresholds[channel][scale] = fixedValue;
+            console.log(`✅ THRESHOLD-FIXED - Stored threshold value in stableChannelThresholds`);
+            
             return fixedValue;
         } else {
-            console.warn(`⚠️ THRESHOLD-FIXED - No fixed value for ${channel}[${scale}] in pathogen ${pathogen}`);
+            console.warn(`⚠️ THRESHOLD-FIXED - No fixed value for ${channel}[${scaleKey}] in pathogen ${pathogen}`);
+            if (fixedValues[channel]) {
+                console.warn(`⚠️ THRESHOLD-FIXED - Available scales for ${channel}:`, Object.keys(fixedValues[channel]));
+            }
         }
     } else {
         console.warn(`⚠️ THRESHOLD-FIXED - No fixed thresholds found for pathogen ${pathogen}`);
@@ -1142,22 +1179,29 @@ function getCurrentChannelThreshold(channel, scale = null) {
     if (!window.stableChannelThresholds) window.stableChannelThresholds = {};
     if (!scale) scale = window.currentScaleMode;
     
+    console.log(`🔍 GET-THRESHOLD - Getting threshold for ${channel}[${scale}]`);
+    
     // Load from storage if not in memory
     if (!window.stableChannelThresholds[channel] && sessionStorage.getItem('stableChannelThresholds')) {
         try {
             window.stableChannelThresholds = JSON.parse(sessionStorage.getItem('stableChannelThresholds'));
+            console.log(`🔍 GET-THRESHOLD - Loaded thresholds from storage for ${channel}`);
         } catch (e) {
             console.warn('🔍 THRESHOLD - Error loading thresholds from storage:', e);
         }
     }
     
     if (!window.stableChannelThresholds[channel] || !window.stableChannelThresholds[channel][scale]) {
+        console.log(`🔍 GET-THRESHOLD - No cached threshold found for ${channel}[${scale}], calculating...`);
         const baseThreshold = window.calculateStableChannelThreshold ? window.calculateStableChannelThreshold(channel, scale) : null;
         if (!window.stableChannelThresholds[channel]) window.stableChannelThresholds[channel] = {};
         window.stableChannelThresholds[channel][scale] = baseThreshold;
+        console.log(`🔍 GET-THRESHOLD - Calculated and stored threshold for ${channel}[${scale}]: ${baseThreshold}`);
     }
     
     const baseThreshold = window.stableChannelThresholds[channel][scale];
+    
+    console.log(`🔍 GET-THRESHOLD - Returning threshold for ${channel}[${scale}]: ${baseThreshold}`);
     
     // Return the base threshold WITHOUT any multiplier
     // The scale multiplier only affects chart view, not threshold values
@@ -1424,12 +1468,28 @@ async function sendManualThresholdToBackend(channel, scale, value) {
                 // Update the global results with preserved data
                 window.currentAnalysisResults.individual_results = preservedResults;
                 
+                // CRITICAL: Reset filter to 'all' and sync UI when threshold calculations change
+                if (window.appState) {
+                    window.appState.currentFilter = 'all';
+                    window.appState.currentChartMode = 'all';
+                }
+                
                 // Update results table with preserved data
                 if (typeof populateResultsTable === 'function') {
                     populateResultsTable(preservedResults);
                 }
                 
-                console.log(`✅ BACKEND-THRESHOLD - Updated ${Object.keys(result.updated_results).length} wells with new CQJ/CalcJ values`);
+                // CRITICAL: Apply current filter state after table update
+                if (typeof filterTable === 'function') {
+                    filterTable();
+                }
+                
+                // CRITICAL: Sync filter dropdown to match reset state
+                if (typeof syncUIElements === 'function') {
+                    syncUIElements();
+                }
+                
+                console.log(`✅ BACKEND-THRESHOLD - Updated ${Object.keys(result.updated_results).length} wells with new CQJ/CalcJ values and reset filter to 'all'`);
                 
                 // Trigger chart update to reflect new calculations
                 if (typeof updateChartForNewData === 'function') {
@@ -1595,18 +1655,36 @@ function populateThresholdStrategyDropdown() {
     
     console.log(`✅ STRATEGY-DROPDOWN - Populated with ${Object.keys(strategies).length} ${scale} strategies, selected: ${select.value}`);
     
-    // Add event listener for strategy changes
+    // IMPORTANT: Remove ALL existing event listeners to prevent conflicts
     select.removeEventListener('change', handleThresholdStrategyChange);
-    select.addEventListener('change', function(e) {
-        window.selectedThresholdStrategy = e.target.value;
-        console.log(`🔍 STRATEGY-CHANGE - Strategy changed to: ${e.target.value}`);
+    const newSelect = select.cloneNode(true);
+    select.parentNode.replaceChild(newSelect, select);
+    
+    // Add single consolidated event listener
+    newSelect.addEventListener('change', function(e) {
+        const newStrategy = e.target.value;
+        window.selectedThresholdStrategy = newStrategy;
+        console.log(`🔍 STRATEGY-CHANGE - Strategy changed to: ${newStrategy}`);
+        
+        // Update app state through centralized state management
+        if (typeof updateAppState === 'function') {
+            updateAppState({
+                currentThresholdStrategy: newStrategy,
+                isManualThresholdMode: newStrategy === 'manual'
+            });
+        }
         
         // Apply the selected strategy directly
-        if (e.target.value !== 'manual') {
-            applyThresholdStrategy(e.target.value);
+        if (newStrategy !== 'manual') {
+            applyThresholdStrategy(newStrategy);
         } else {
             // For manual strategy, just update the input box to current threshold
             updateThresholdInputForCurrentScale();
+        }
+        
+        // Also trigger the main threshold strategy change handler for backend sync
+        if (typeof handleThresholdStrategyChange === 'function') {
+            handleThresholdStrategyChange();
         }
     });
     

@@ -123,12 +123,13 @@ window.appState = {
     currentChartMode: 'all',          // 'all', 'pos', 'neg', 'redo' - controls both chart and table view
     currentWellSelection: 'ALL_WELLS',
     currentFilter: 'all',             // Table filter: 'all', 'POS', 'NEG', 'REDO'
+    currentSearchTerm: '',            // Table search term
     currentSort: 'wellId',            // Table sort: 'wellId', 'sample', 'fluorophore', 'cq', 'results'
     sortDirection: 'asc',             // Sort direction: 'asc' or 'desc'
     currentSortOrder: 'default',      // Legacy sort order
     thresholds: {},
     manualThresholds: {},
-    currentThresholdStrategy: 'linear_fixed',  // Current threshold strategy
+    currentThresholdStrategy: 'default',     // Current threshold strategy (start with default)
     currentThresholdValue: null,      // Current manual threshold value
     isManualThresholdMode: false,     // Whether user is in manual threshold mode
     exportState: {                    // Export button state management
@@ -235,6 +236,15 @@ function syncUIElements() {
         tableFilter.value = state.currentFilter;
     }
     
+    // Sync search input if it exists
+    const searchWells = document.getElementById('searchWells');
+    if (searchWells && searchWells.value !== state.currentSearchTerm) {
+        // Only update if the input doesn't have focus (to avoid interrupting user typing)
+        if (document.activeElement !== searchWells) {
+            searchWells.value = state.currentSearchTerm;
+        }
+    }
+    
     // Sync sort controls if they exist
     const sortSelect = document.getElementById('sortSelect');
     if (sortSelect && sortSelect.value !== state.currentSort) {
@@ -247,9 +257,9 @@ function syncUIElements() {
         sortDirectionBtn.dataset.direction = state.sortDirection;
     }
     
-    // Sync threshold controls
+    // Sync threshold controls - only if dropdown has options
     const thresholdStrategySelect = document.getElementById('thresholdStrategySelect');
-    if (thresholdStrategySelect && thresholdStrategySelect.value !== state.currentThresholdStrategy) {
+    if (thresholdStrategySelect && thresholdStrategySelect.options.length > 0 && thresholdStrategySelect.value !== state.currentThresholdStrategy) {
         thresholdStrategySelect.value = state.currentThresholdStrategy;
     }
     
@@ -271,6 +281,13 @@ function syncUIElements() {
             autoBtn.classList.add('active');
             autoBtn.textContent = 'Auto';
         }
+    }
+    
+    // Sync filter status dropdown
+    const filterStatus = document.getElementById('filterStatus');
+    if (filterStatus && filterStatus.value !== state.currentFilter) {
+        filterStatus.value = state.currentFilter;
+        console.log('🔄 STATE - Synced filterStatus dropdown to:', state.currentFilter);
     }
     
     // Sync export button state
@@ -1275,7 +1292,7 @@ async function handleThresholdStrategyChange() {
     // After recalculation, update threshold input box to match new value for current channel/scale - IMPROVED
     const updateThresholdInput = () => {
         const thresholdInput = document.getElementById('thresholdInput');
-        let channel = window.currentFluorophore;
+        let channel = window.appState.currentFluorophore;
         if (!channel || channel === 'all') {
             // Try to extract from chart datasets
             const datasets = window.amplificationChart?.data?.datasets;
@@ -1804,9 +1821,34 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Call the threshold dropdown function from threshold_frontend.js
+    // Call the threshold dropdown function from threshold_frontend.js - with safety checks
+    console.log('🔍 INIT - Checking threshold dropdown dependencies...');
+    console.log('🔍 INIT - populateThresholdStrategyDropdown available:', typeof window.populateThresholdStrategyDropdown);
+    console.log('🔍 INIT - LINEAR_THRESHOLD_STRATEGIES available:', typeof window.LINEAR_THRESHOLD_STRATEGIES);
+    console.log('🔍 INIT - LOG_THRESHOLD_STRATEGIES available:', typeof window.LOG_THRESHOLD_STRATEGIES);
+    
     if (typeof window.populateThresholdStrategyDropdown === 'function') {
-        window.populateThresholdStrategyDropdown();
+        // Delay the call to ensure all dependencies are loaded
+        setTimeout(() => {
+            console.log('🔍 INIT - Calling populateThresholdStrategyDropdown...');
+            try {
+                window.populateThresholdStrategyDropdown();
+                console.log('✅ INIT - Threshold dropdown populated successfully');
+            } catch (error) {
+                console.error('❌ INIT - Error populating threshold dropdown:', error);
+                // Fallback: manually add a default option if the dropdown is empty
+                const select = document.getElementById('thresholdStrategySelect');
+                if (select && select.options.length === 0) {
+                    const defaultOption = document.createElement('option');
+                    defaultOption.value = 'default';
+                    defaultOption.textContent = 'Default Strategy';
+                    select.appendChild(defaultOption);
+                    console.log('✅ INIT - Added fallback default option to threshold dropdown');
+                }
+            }
+        }, 100);
+    } else {
+        console.error('❌ INIT - populateThresholdStrategyDropdown function not available');
     }
     // Default to show all wells on load if analysis section is visible
     setTimeout(function() {
@@ -1924,19 +1966,20 @@ function getChannelColor(channel) {
   document.addEventListener('DOMContentLoaded', function() {
     // --- Main UI Event Listeners ---
 
-    // 1. Threshold Strategy Dropdown
-    const strategySelect = document.getElementById('thresholdStrategySelect');
-    if (strategySelect) {
-        // When the strategy changes, trigger the full recalculation process.
-        strategySelect.addEventListener('change', handleThresholdStrategyChange);
-    }
+    // 1. Threshold Strategy Dropdown - Now handled in threshold_frontend.js
+    // const strategySelect = document.getElementById('thresholdStrategySelect');
+    // Event listener is now added in threshold_frontend.js to prevent conflicts
 
-    // 2. Scale Toggle Button (Linear/Log)
+    // 2. Scale Toggle Button (Linear/Log) - Remove old listeners first
     const scaleToggleButton = document.getElementById('scaleToggle');
     if (scaleToggleButton) {
-        // When the scale changes, call onScaleToggle to update the chart and UI elements.
-        // onScaleToggle will then call populateThresholdStrategyDropdown to refresh the list.
-        scaleToggleButton.addEventListener('click', onScaleToggle);
+        // Remove all existing event listeners by cloning the element
+        const newToggleButton = scaleToggleButton.cloneNode(true);
+        scaleToggleButton.parentNode.replaceChild(newToggleButton, scaleToggleButton);
+        
+        // Add single event listener
+        newToggleButton.addEventListener('click', onScaleToggle);
+        console.log('🔍 EVENT - Scale toggle listener added (old listeners removed)');
     }
 
     // 3. Manual Threshold Input - handled in main DOMContentLoaded above
@@ -2277,13 +2320,27 @@ function onPresetClick(e) {
 }
 
 function onScaleToggle() {
-    const newScale = (currentScaleMode === 'linear') ? 'log' : 'linear';
+    const newScale = (window.appState.currentScaleMode === 'linear') ? 'log' : 'linear';
+    
+    console.log(`🔍 TOGGLE - Switching from ${window.appState.currentScaleMode} to ${newScale} scale`);
     
     // Use state management for scale changes
     updateAppState({ currentScaleMode: newScale });
     
     // Save preference to session storage
     safeSetItem(sessionStorage, 'qpcr_chart_scale', newScale);
+    
+    // CRITICAL: Repopulate threshold strategy dropdown for new scale
+    if (typeof populateThresholdStrategyDropdown === 'function') {
+        console.log(`🔍 TOGGLE - Repopulating threshold strategies for ${newScale} scale`);
+        populateThresholdStrategyDropdown();
+    }
+    
+    // CRITICAL: Update threshold input for new scale
+    if (typeof updateThresholdInputForCurrentScale === 'function') {
+        console.log(`🔍 TOGGLE - Updating threshold input for ${newScale} scale`);
+        updateThresholdInputForCurrentScale();
+    }
     
     console.log(`🔍 TOGGLE - Switched to ${newScale} scale via state management`);
 }
@@ -2301,7 +2358,8 @@ document.addEventListener('DOMContentLoaded', function() {
             btn.addEventListener('click', onPresetClick);
         });
     }
-    if (scaleToggleBtn) scaleToggleBtn.addEventListener('click', onScaleToggle);
+    // Remove duplicate scale toggle listener - this is handled in the main DOMContentLoaded above
+    // if (scaleToggleBtn) scaleToggleBtn.addEventListener('click', onScaleToggle);
     updateSliderUI();
     
     // Initialize baseline flattening controls
@@ -4840,6 +4898,12 @@ function populateResultsTable(individualResults) {
                 tableBody.appendChild(errorRow);
             }
         });
+        
+        // CRITICAL: Apply current filter state after populating table
+        console.log('🔄 TABLE-DEBUG - Applying current filter state after table population');
+        if (typeof filterTable === 'function') {
+            filterTable();
+        }
     
 
     } catch (mainError) {
@@ -5922,10 +5986,12 @@ function clearCachedData() {
     window.freshAnalysisMode = true;
     console.log('🛡️ [ISOLATION] Fresh analysis mode activated - blocking contamination');
     
-    // Reset filter states to prevent persistence on refresh
-    currentFilterMode = 'all';
-    currentFluorophore = 'all';
-    currentChartMode = 'all';
+    // Reset filter states to prevent persistence on refresh - use centralized state
+    updateAppState({
+        currentFilter: 'all',
+        currentFluorophore: 'all',
+        currentChartMode: 'all'
+    });
     
     if (currentChart) {
         currentChart.destroy();
@@ -6176,10 +6242,21 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Search wells input
+    // Search wells input - using state management
     const searchWells = document.getElementById('searchWells');
     if (searchWells) {
-        searchWells.addEventListener('input', filterTable);
+        searchWells.addEventListener('input', function() {
+            const searchTerm = this.value;
+            console.log('🔄 SEARCH - Search term changed to:', searchTerm);
+            
+            // Update app state - this will coordinate all UI elements
+            updateAppState({
+                currentSearchTerm: searchTerm
+            });
+            
+            // Filter table with new state
+            filterTable();
+        });
     }
     
     // Delete all button is now handled inline in the history display
@@ -7776,15 +7853,14 @@ transformedResults.individual_results[wellKey] = {
         if (sessionFluorophores.length === 1 && sessionFluorophores[0] !== 'Unknown') {
             // Single fluorophore session - auto-select it
             autoSelectedFluorophore = sessionFluorophores[0];
-            currentFluorophore = autoSelectedFluorophore;
-        } else {
-            // Multi-fluorophore or unknown - reset to all
-            currentFluorophore = 'all';
         }
         
-        // Reset other filter states
-        currentFilterMode = 'all';
-        currentChartMode = 'all';
+        // Update state with auto-detected fluorophore and reset filters
+        updateAppState({
+            currentFluorophore: autoSelectedFluorophore,
+            currentFilter: 'all',
+            currentChartMode: 'all'
+        });
         
         // Trigger control validation directly for individual sessions
         // This ensures control grids appear for both single-channel and multi-channel tests
@@ -8011,9 +8087,20 @@ function addFluorophoreFilter(individualResults) {
             filterSelect.appendChild(option);
         });
         
-        // Add event listener
+        // Add event listener using state management
         filterSelect.removeEventListener('change', filterTableByFluorophore);
-        filterSelect.addEventListener('change', filterTableByFluorophore);
+        filterSelect.addEventListener('change', function() {
+            const selectedFluorophore = this.value;
+            console.log('🔄 FLUOROPHORE-FILTER - Table fluorophore filter changed to:', selectedFluorophore);
+            
+            // Update app state - this will coordinate all UI elements
+            updateAppState({
+                currentFluorophore: selectedFluorophore
+            });
+            
+            // Filter table with new state
+            filterTable();
+        });
     }
 }
 
@@ -10500,12 +10587,17 @@ function displayFluorophoreBreakdown(fluorophoreStats, patientSamples, controls)
 }
 
 function filterTable() {
-    const searchTerm = document.getElementById('searchWells') ? 
-        document.getElementById('searchWells').value.toLowerCase() : '';
-    const statusFilter = document.getElementById('filterStatus') ? 
-        document.getElementById('filterStatus').value : 'all';
-    const fluorophoreFilter = document.getElementById('fluorophoreFilter') ? 
-        document.getElementById('fluorophoreFilter').value : 'all';
+    // Use centralized state instead of reading from DOM elements
+    const state = window.appState;
+    const searchTerm = (state.currentSearchTerm || '').toLowerCase();
+    const statusFilter = state.currentFilter || 'all';
+    const fluorophoreFilter = state.currentFluorophore || 'all';
+    
+    console.log('🔄 FILTER - Filtering table with state:', {
+        searchTerm,
+        statusFilter, 
+        fluorophoreFilter
+    });
     
     const tableRows = document.querySelectorAll('#resultsTableBody tr');
     let visibleCount = 0;
@@ -11312,8 +11404,8 @@ function initializeChartToggle() {
         console.log(`🔍 INIT - Loaded scale multiplier from session: ${currentScaleMultiplier}`);
     }
     
-    // Toggle button event listener (use the existing onScaleToggle function)
-    toggleBtn.addEventListener('click', onScaleToggle);
+    // Toggle button event listener removed - handled in main DOMContentLoaded section
+    // toggleBtn.addEventListener('click', onScaleToggle);
     
     // Initialize the UI to match the current scale mode
     updateSliderUI();

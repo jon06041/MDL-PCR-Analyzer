@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Threshold Test</title>
+    <style>
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+        .green { color: green; }
+        .red { color: red; }
+        .button { padding: 10px; margin: 5px; background: #007cba; color: white; border: none; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>Threshold Functionality Test</h1>
+    
+    <div class="test-section">
+        <h2>1. Script Loading Test</h2>
+        <div id="status">Loading...</div>
+    </div>
+    
+    <div class="test-section">
+        <h2>2. UI Controls Test</h2>
+        <label>Threshold Strategy:</label>
+        <select id="thresholdStrategySelect">
+            <option value="">Loading...</option>
+        </select>
+        <br><br>
+        
+        <label>Scale Toggle:</label>
+        <button id="toggleScaleBtn" class="button">Linear Scale</button>
+        <br><br>
+        
+        <label>Threshold Input:</label>
+        <input type="number" id="thresholdInput" value="100" step="0.01">
+        <br><br>
+        
+        <div id="ui-status">UI controls loaded</div>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const status = document.getElementById('status');
+            const uiStatus = document.getElementById('ui-status');
+            
+            // Test if threshold scripts are loaded
+            const tests = [
+                ['populateThresholdStrategyDropdown', typeof window.populateThresholdStrategyDropdown],
+                ['LINEAR_THRESHOLD_STRATEGIES', typeof window.LINEAR_THRESHOLD_STRATEGIES], 
+                ['LOG_THRESHOLD_STRATEGIES', typeof window.LOG_THRESHOLD_STRATEGIES],
+                ['calculateThreshold', typeof window.calculateThreshold]
+            ];
+            
+            let html = '<h3>Test Results:</h3><ul>';
+            tests.forEach(([name, result]) => {
+                const color = result === 'function' || result === 'object' ? 'green' : 'red';
+                html += `<li style="color: ${color}">${name}: ${result}</li>`;
+            });
+            html += '</ul>';
+            
+            status.innerHTML = html;
+            
+            // Test UI initialization
+            setTimeout(() => {
+                if (typeof window.populateThresholdStrategyDropdown === 'function') {
+                    try {
+                        window.populateThresholdStrategyDropdown();
+                        uiStatus.innerHTML = '<span class="green">✅ Threshold dropdown populated successfully</span>';
+                    } catch (error) {
+                        uiStatus.innerHTML = '<span class="red">❌ Error populating dropdown: ' + error.message + '</span>';
+                    }
+                }
+            }, 500);
+        });
+    </script>
+    
+    <!-- Load the same scripts as main app -->
+    <script src="/static/threshold_strategies.js"></script>
+    <script src="/static/threshold_frontend.js"></script>
+</body>
+</html>
