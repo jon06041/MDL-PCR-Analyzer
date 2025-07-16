@@ -156,6 +156,8 @@ def recalculate_session_cqj_calcj(session_id, channel, scale, threshold_value, e
                 # Parse well data
                 well_data = {
                     'well_id': well.well_id,
+                    'sample_name': well.sample_name,  # Add sample_name for debugging
+                    'coordinate': well.coordinate,    # Add coordinate for debugging  
                     'fluorophore': well.fluorophore,
                     'amplitude': well.amplitude,
                     'baseline': well.baseline,

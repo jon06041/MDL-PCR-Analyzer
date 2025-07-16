@@ -508,6 +508,10 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
         # --- Per-channel CQJ/CalcJ integration (dict, robust) ---
         # Prepare well dict for CQJ/CalcJ utils
         well_for_cqj = {
+            'well_id': well_id,
+            'sample_name': data.get('sample_name') or data.get('sample') or samples_data.get(well_id, {}).get('sample_name', 'unknown'),
+            'coordinate': data.get('coordinate', 'unknown'),
+            'fluorophore': channel_name,
             'raw_cycles': analysis.get('raw_cycles'),
             'raw_rfu': analysis.get('raw_rfu'),
             'amplitude': analysis.get('amplitude')

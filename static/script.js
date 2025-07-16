@@ -150,6 +150,13 @@ function updateAppState(newState) {
         return;
     }
     
+    // Skip expensive UI operations during multichannel processing
+    if (window.appState.isProcessingMultichannel) {
+        console.log('🔄 STATE - Multichannel processing mode: lightweight update only');
+        Object.assign(window.appState, newState);
+        return;
+    }
+    
     window.appState.isUpdating = true;
     console.log('🔄 STATE - Updating application state:', newState);
     
@@ -2697,7 +2704,10 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
         try {
             // Add timeout controller for large requests
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minute timeout for large datasets
+            // Increase timeout for multichannel processing
+            const isMultichannel = Object.keys(amplificationFiles).length > 1;
+            const timeoutMs = isMultichannel ? 600000 : 180000; // 10 min vs 3 min for complex datasets
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
             
             console.log(`🔍 SINGLE-CHANNEL - Making fetch request for ${fluorophore}`, {
                 url: '/analyze',
@@ -2762,7 +2772,9 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
         } catch (fetchError) {
             // Network or other failure - log and return empty
             if (fetchError.name === 'AbortError') {
-                console.error(`⏰ SINGLE-CHANNEL - Request timeout for ${fluorophore} (3 minutes)`);
+                const isMultichannel = Object.keys(amplificationFiles).length > 1;
+                const timeoutMinutes = isMultichannel ? 10 : 3;
+                console.error(`⏰ SINGLE-CHANNEL - Request timeout for ${fluorophore} (${timeoutMinutes} minutes)`);
                 console.error(`💡 TIMEOUT-TIP - Backend may still be processing. Check backend logs for completion.`);
                 
                 // Try to recover from timeout by checking if data was saved to database

@@ -20,7 +20,8 @@ def calculate_cqj(well, threshold):
     
     # Get well identification info for better debugging
     well_id = well.get('well_id', 'unknown')
-    sample_name = well.get('sample_name', 'unknown')
+    # Try multiple fields for sample name
+    sample_name = well.get('sample_name') or well.get('sample') or well.get('Sample Name') or 'unknown'
     coordinate = well.get('coordinate', 'unknown')
     fluorophore = well.get('fluorophore', 'unknown')
     

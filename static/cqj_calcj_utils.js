@@ -120,7 +120,9 @@ function recalculateCQJValues() {
             
             if (oldCqj !== newCqj) {
                 updateCount++;
-                console.log(`✅ CQJ-UPDATE - ${wellKey} (${channel}): ${oldCqj?.toFixed(2) || 'null'} → ${newCqj?.toFixed(2) || 'null'}`);
+                // Get sample name for better debugging
+                const sampleName = well.sample_name || well.sample || well['Sample Name'] || 'unknown';
+                console.log(`✅ CQJ-UPDATE - ${wellKey} (${sampleName}, ${channel}): ${oldCqj?.toFixed(2) || 'null'} → ${newCqj?.toFixed(2) || 'null'}`);
             }
         }
     });
