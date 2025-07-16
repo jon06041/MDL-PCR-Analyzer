@@ -316,9 +316,24 @@ function updateDisplays() {
         window.amplificationChart.options.scales.y = newScaleConfig;
         window.amplificationChart.update('none');
         
-        // Update threshold strategy dropdown for new scale
+        // Update threshold strategy dropdown for new scale (preserving current selection)
         if (typeof window.populateThresholdStrategyDropdown === 'function') {
+            const currentStrategy = window.selectedThresholdStrategy || getSelectedThresholdStrategy();
             window.populateThresholdStrategyDropdown();
+            // Restore the selected strategy after repopulation
+            if (currentStrategy) {
+                const dropdown = document.getElementById('threshold-strategy-select');
+                if (dropdown && dropdown.options) {
+                    for (let i = 0; i < dropdown.options.length; i++) {
+                        if (dropdown.options[i].value === currentStrategy) {
+                            dropdown.value = currentStrategy;
+                            window.selectedThresholdStrategy = currentStrategy;
+                            console.log(`🔄 SCALE-TOGGLE - Preserved threshold strategy: ${currentStrategy}`);
+                            break;
+                        }
+                    }
+                }
+            }
         }
         
         // Update baseline flattening visibility (only show on linear)
@@ -2323,6 +2338,19 @@ function onScaleToggle() {
     const newScale = (window.appState.currentScaleMode === 'linear') ? 'log' : 'linear';
     
     console.log(`🔍 TOGGLE - Switching from ${window.appState.currentScaleMode} to ${newScale} scale`);
+    
+    // CRITICAL: Update button CSS immediately
+    const toggleBtn = document.getElementById('toggleScaleBtn');
+    if (toggleBtn) {
+        if (newScale === 'log') {
+            toggleBtn.classList.add('log-scale');
+            toggleBtn.textContent = 'Log Scale';
+        } else {
+            toggleBtn.classList.remove('log-scale');
+            toggleBtn.textContent = 'Linear Scale';
+        }
+        console.log(`🔍 TOGGLE - Updated button CSS for ${newScale} scale`);
+    }
     
     // Use state management for scale changes
     updateAppState({ currentScaleMode: newScale });

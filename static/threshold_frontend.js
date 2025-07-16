@@ -1453,15 +1453,25 @@ async function sendManualThresholdToBackend(channel, scale, value) {
                 // Only update CQJ and CalcJ fields from backend response
                 Object.entries(result.updated_results).forEach(([wellKey, updates]) => {
                     if (preservedResults[wellKey]) {
-                        // Only update threshold-related fields
-                        if (updates.cqj !== undefined) preservedResults[wellKey].cqj = updates.cqj;
-                        if (updates.calcj !== undefined) preservedResults[wellKey].calcj = updates.calcj;
-                        if (updates.CQJ !== undefined) preservedResults[wellKey].CQJ = updates.CQJ;
-                        if (updates.CalcJ !== undefined) preservedResults[wellKey].CalcJ = updates.CalcJ;
-                        if (updates['CQ-J'] !== undefined) preservedResults[wellKey]['CQ-J'] = updates['CQ-J'];
-                        if (updates['Calc-J'] !== undefined) preservedResults[wellKey]['Calc-J'] = updates['Calc-J'];
+                        const fluorophore = preservedResults[wellKey].fluorophore;
                         
-                        console.log(`🔍 BACKEND-THRESHOLD - Updated well ${wellKey} CQJ values only`);
+                        // Map backend field names to frontend field names
+                        if (updates.cqj_value !== undefined) {
+                            preservedResults[wellKey].cqj_value = updates.cqj_value;
+                            preservedResults[wellKey].cqj = preservedResults[wellKey].cqj || {};
+                            preservedResults[wellKey].cqj[fluorophore] = updates.cqj_value;
+                            preservedResults[wellKey].CQJ = updates.cqj_value;
+                            preservedResults[wellKey]['CQ-J'] = updates.cqj_value;
+                        }
+                        if (updates.calcj_value !== undefined) {
+                            preservedResults[wellKey].calcj_value = updates.calcj_value;
+                            preservedResults[wellKey].calcj = preservedResults[wellKey].calcj || {};
+                            preservedResults[wellKey].calcj[fluorophore] = updates.calcj_value;
+                            preservedResults[wellKey].CalcJ = updates.calcj_value;
+                            preservedResults[wellKey]['Calc-J'] = updates.calcj_value;
+                        }
+                        
+                        console.log(`🔍 BACKEND-THRESHOLD - Updated well ${wellKey}: CQJ=${updates.cqj_value}, CalcJ=${updates.calcj_value} for fluorophore ${fluorophore}`);
                     }
                 });
                 
@@ -1490,6 +1500,19 @@ async function sendManualThresholdToBackend(channel, scale, value) {
                 }
                 
                 console.log(`✅ BACKEND-THRESHOLD - Updated ${Object.keys(result.updated_results).length} wells with new CQJ/CalcJ values and reset filter to 'all'`);
+                
+                // Force refresh the table display to show updated values
+                setTimeout(() => {
+                    if (typeof populateResultsTable === 'function') {
+                        console.log(`🔄 BACKEND-THRESHOLD - Force refreshing table with updated CQJ values`);
+                        populateResultsTable(window.currentAnalysisResults.individual_results);
+                        
+                        // Apply any existing filters after table refresh
+                        if (typeof filterTable === 'function') {
+                            filterTable();
+                        }
+                    }
+                }, 100);
                 
                 // Trigger chart update to reflect new calculations
                 if (typeof updateChartForNewData === 'function') {
@@ -1647,7 +1670,10 @@ function populateThresholdStrategyDropdown() {
     
     // Set default strategy if current selection not available
     if (!found && firstKey) {
+        console.log(`🔄 STRATEGY-DROPDOWN - Current strategy "${window.selectedThresholdStrategy}" not found, setting to default: ${firstKey}`);
         window.selectedThresholdStrategy = firstKey;
+    } else if (found) {
+        console.log(`✅ STRATEGY-DROPDOWN - Current strategy "${window.selectedThresholdStrategy}" is valid, preserving it`);
     }
     
     select.value = window.selectedThresholdStrategy || firstKey;
