@@ -625,6 +625,14 @@ function calculateStableChannelThreshold(channel, scale) {
     const strategy = getSelectedThresholdStrategy() || 'default';
     console.log(`🔍 THRESHOLD - Using strategy: ${strategy} for ${channel} on ${scale} scale`);
     
+    // Debug: Check if this is a fixed strategy
+    if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
+        console.log(`🔍 THRESHOLD-FIXED-DEBUG - Attempting fixed threshold strategy: ${strategy}`);
+        console.log(`🔍 THRESHOLD-FIXED-DEBUG - Channel: ${channel}, Scale: ${scale}`);
+        console.log(`🔍 THRESHOLD-FIXED-DEBUG - Current experiment pattern:`, window.currentExperimentPattern);
+        console.log(`🔍 THRESHOLD-FIXED-DEBUG - extractTestCode function available:`, typeof window.extractTestCode);
+    }
+    
     // HANDLE MANUAL STRATEGY FIRST
     if (strategy === 'manual') {
         // For manual strategy, return the currently stored threshold value
@@ -1682,9 +1690,12 @@ function populateThresholdStrategyDropdown() {
     console.log(`✅ STRATEGY-DROPDOWN - Populated with ${Object.keys(strategies).length} ${scale} strategies, selected: ${select.value}`);
     
     // IMPORTANT: Remove ALL existing event listeners to prevent conflicts
-    select.removeEventListener('change', handleThresholdStrategyChange);
     const newSelect = select.cloneNode(true);
     select.parentNode.replaceChild(newSelect, select);
+    
+    // CRITICAL: Set the value on the NEW element after replacement
+    newSelect.value = window.selectedThresholdStrategy || firstKey;
+    window.selectedThresholdStrategy = newSelect.value;
     
     // Add single consolidated event listener
     newSelect.addEventListener('change', function(e) {
@@ -1714,10 +1725,10 @@ function populateThresholdStrategyDropdown() {
         }
     });
     
-    // Trigger threshold recalculation ONLY if not manual strategy
-    if (select.value !== 'manual') {
+    // Trigger threshold recalculation ONLY if not manual strategy - use NEW element
+    if (newSelect.value !== 'manual') {
         // Apply strategy and update threshold input
-        applyThresholdStrategy(select.value);
+        applyThresholdStrategy(newSelect.value);
     } else {
         // For manual strategy, just update the input box to current threshold
         updateThresholdInputForCurrentScale();
