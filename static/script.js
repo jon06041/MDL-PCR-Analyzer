@@ -7,6 +7,174 @@ window.currentAnalysisResults = null;
 // CQJ/CALCJ FUNCTIONS MOVED TO cqj_calcj_utils.js
 // Function calculateThresholdCrossing moved to cqj_calcj_utils.js
 
+// ========================================
+// CENTRALIZED STATE MANAGEMENT SYSTEM
+// ========================================
+
+// Global application state - single source of truth
+window.appState = {
+    currentFluorophore: 'all',
+    currentScaleMode: 'linear',
+    currentChartMode: 'all',          // 'all', 'pos', 'neg', 'redo' - controls both chart and table view
+    currentWellSelection: 'ALL_WELLS',
+    currentFilter: 'all',             // Table filter: 'all', 'POS', 'NEG', 'REDO'
+    currentSort: 'wellId',            // Table sort: 'wellId', 'sample', 'fluorophore', 'cq', 'results'
+    sortDirection: 'asc',             // Sort direction: 'asc' or 'desc'
+    currentSortOrder: 'default',      // Legacy sort order
+    thresholds: {},
+    manualThresholds: {},
+    isUpdating: false
+};
+
+// State update function that coordinates all UI elements
+function updateAppState(newState) {
+    if (window.appState.isUpdating) {
+        console.log('🔄 STATE - Update already in progress, skipping');
+        return;
+    }
+    
+    window.appState.isUpdating = true;
+    console.log('🔄 STATE - Updating application state:', newState);
+    
+    // Update state
+    Object.assign(window.appState, newState);
+    
+    // Sync global variables for backward compatibility
+    window.currentFluorophore = window.appState.currentFluorophore;
+    window.currentScaleMode = window.appState.currentScaleMode;
+    currentScaleMode = window.appState.currentScaleMode;
+    
+    // Update all UI elements to match new state
+    syncUIElements();
+    
+    // Update chart and table
+    updateDisplays();
+    
+    // Update thresholds
+    setTimeout(() => {
+        if (window.updateAllChannelThresholds) {
+            window.updateAllChannelThresholds();
+        }
+        window.appState.isUpdating = false;
+    }, 100);
+}
+
+// Sync all UI elements to current state
+function syncUIElements() {
+    const state = window.appState;
+    
+    // Sync fluorophore selector
+    const fluorophoreSelect = document.getElementById('fluorophoreSelect');
+    if (fluorophoreSelect && fluorophoreSelect.value !== state.currentFluorophore) {
+        fluorophoreSelect.value = state.currentFluorophore;
+    }
+    
+    // Sync well selector
+    const wellSelect = document.getElementById('wellSelect');
+    if (wellSelect && wellSelect.value !== state.currentWellSelection) {
+        wellSelect.value = state.currentWellSelection;
+    }
+    
+    // Sync scale toggle
+    const toggleBtn = document.getElementById('toggleScaleBtn');
+    if (toggleBtn) {
+        if (state.currentScaleMode === 'log') {
+            toggleBtn.classList.add('log-scale');
+            toggleBtn.textContent = 'Log Scale';
+        } else {
+            toggleBtn.classList.remove('log-scale');
+            toggleBtn.textContent = 'Linear Scale';
+        }
+    }
+    
+    // Sync view buttons (POS/NEG/ALL/REDO controls)
+    const buttons = document.querySelectorAll('.view-controls .control-btn');
+    buttons.forEach(btn => btn.classList.remove('active'));
+    
+    // Map chart modes to button IDs
+    const buttonMapping = {
+        'all': 'showAllBtn',
+        'pos': 'showPosBtn', 
+        'neg': 'showNegBtn',
+        'redo': 'showRedoBtn'
+    };
+    
+    const activeBtn = document.getElementById(buttonMapping[state.currentChartMode]);
+    if (activeBtn) {
+        activeBtn.classList.add('active');
+    }
+    
+    // Sync table filter dropdown if it exists
+    const tableFilter = document.getElementById('tableFilter');
+    if (tableFilter && tableFilter.value !== state.currentFilter) {
+        tableFilter.value = state.currentFilter;
+    }
+    
+    // Sync sort controls if they exist
+    const sortSelect = document.getElementById('sortSelect');
+    if (sortSelect && sortSelect.value !== state.currentSort) {
+        sortSelect.value = state.currentSort;
+    }
+    
+    const sortDirectionBtn = document.getElementById('sortDirection');
+    if (sortDirectionBtn) {
+        sortDirectionBtn.textContent = state.sortDirection === 'asc' ? '↑' : '↓';
+        sortDirectionBtn.dataset.direction = state.sortDirection;
+    }
+    
+    console.log('🔄 STATE - UI elements synchronized');
+}
+
+// Update chart and table displays
+function updateDisplays() {
+    const state = window.appState;
+    
+    // Update chart based on current state
+    if (state.currentChartMode === 'all') {
+        showAllCurves(state.currentFluorophore);
+    } else if (state.currentChartMode === 'pos') {
+        showPosCurves(state.currentFluorophore);
+    } else if (state.currentChartMode === 'neg') {
+        showNegCurves(state.currentFluorophore);
+    }
+    
+    // Update table filter
+    if (window.currentAnalysisResults && typeof populateResultsTable === 'function') {
+        let filteredResults = window.currentAnalysisResults.individual_results;
+        
+        // Filter by fluorophore
+        if (state.currentFluorophore !== 'all') {
+            filteredResults = Object.fromEntries(
+                Object.entries(filteredResults).filter(([key, well]) => 
+                    well.fluorophore === state.currentFluorophore
+                )
+            );
+        }
+        
+        populateResultsTable(filteredResults);
+    }
+    
+    // Update well dropdown
+    if (typeof filterWellsByFluorophore === 'function') {
+        filterWellsByFluorophore(state.currentFluorophore);
+    }
+    
+    console.log('🔄 STATE - Displays updated');
+}
+
+// Initialize state management
+function initializeStateManagement() {
+    // Load saved state from session storage
+    const savedScale = sessionStorage.getItem('chartScale');
+    if (savedScale) {
+        window.appState.currentScaleMode = savedScale;
+        window.currentScaleMode = savedScale;
+        currentScaleMode = savedScale;
+    }
+    
+    console.log('🔄 STATE - State management initialized');
+}
+
 // Debug: Check if CQJ/CalcJ functions are available
 document.addEventListener('DOMContentLoaded', function() {
     console.log('[CQJ-DEBUG] Checking function availability:', {
@@ -2876,7 +3044,8 @@ let analysisResults = null;
 let currentChart = null;
 let amplificationFiles = {}; // Store multiple fluorophore files
 let currentFilterMode = 'all'; // Track current filter mode (all, pos, neg, redo)
-let currentFluorophore = 'all'; // Track current fluorophore filter
+// Global variables - DEPRECATING THESE IN FAVOR OF window.appState
+// let currentFluorophore = 'all'; // Track current fluorophore filter - MOVED TO window.appState
 let currentAnalysisResults = null; // Current analysis results
 let currentChartMode = 'all'; // Track current chart display mode
 
@@ -3706,13 +3875,7 @@ async function displayAnalysisResults(results) {
     if (analysisSection) {
         analysisSection.style.display = 'block';
     }
-     // Add this after setting window.currentAnalysisResults:
-    // Initialize channel thresholds for the new results
-    if (window.initializeChannelThresholds) {
-        window.initializeChannelThresholds();
-    }
     
-   
     // Handle different response structures
     const individualResults = results.individual_results || {};
     const cycleInfo = results.cycle_info || results.summary?.cycle_info;
@@ -3929,13 +4092,7 @@ async function displayMultiFluorophoreResults(results) {
     
     const analysisSection = document.getElementById('analysisSection');
     analysisSection.style.display = 'block';
-     // Add this after showing analysis section:
-    // Initialize channel thresholds for multi-fluorophore results
-    if (window.initializeChannelThresholds) {
-        window.initializeChannelThresholds();
-    }
     
-   
     // Calculate statistics separated by patient samples and controls
     const individualResults = results.individual_results;
     const fluorophoreStats = calculateFluorophoreStats(individualResults);
@@ -4229,26 +4386,15 @@ function populateFluorophoreSelector(individualResults) {
         fluorophoreSelector.appendChild(option);
     });
     
-    // Add event listener for fluorophore filtering
+    // Add event listener for fluorophore filtering - uses state management
 fluorophoreSelector.addEventListener('change', function() {
     const selectedFluorophore = this.value;
-    window.currentFluorophore = selectedFluorophore; // <-- Already there
+    console.log('🔄 FLUOROPHORE - Selector changed to:', selectedFluorophore);
     
-    // Update threshold input for newly selected channel
-    if (window.updateThresholdInputForCurrentScale) {
-        window.updateThresholdInputForCurrentScale();
-    }
-    
-    // Update chart thresholds if chart exists
-    if (window.amplificationChart && window.updateChartThresholds) {
-        window.updateChartThresholds();
-    }
-    
-    filterWellsByFluorophore(selectedFluorophore);
-    
-    // Apply current table filter to the new fluorophore selection
-    // Don't reset the filter dropdown, just re-apply the current filter
-    filterTable(); // This will apply the current POS/NEG/REDO filter to the new fluorophore
+    // Update app state - this will coordinate all UI elements
+    updateAppState({
+        currentFluorophore: selectedFluorophore
+    });
     
     // Reset chart mode to 'all' and update display
     currentChartMode = 'all';
@@ -4794,8 +4940,10 @@ function showFilteredCurveDetails(fluorophore, filterMode) {
         return;
     }
     
-    // Set the current fluorophore for filtering
-    currentFluorophore = fluorophore;
+    // Set the current fluorophore for filtering via state management
+    updateAppState({
+        currentFluorophore: fluorophore
+    });
     
     // Generate filtered samples HTML
     const filteredSamplesHtml = generateFilteredSamplesHtml(filterMode);

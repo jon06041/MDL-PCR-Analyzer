@@ -639,25 +639,44 @@ function calculateStableChannelThreshold(channel, scale) {
     
     // Replace the FIXED STRATEGIES section in calculateStableChannelThreshold:
 
+// Replace the FIXED STRATEGIES section in calculateStableChannelThreshold (starting around line 640):
+
 // HANDLE FIXED STRATEGIES DIRECTLY
 if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
-    // Get pathogen from current analysis results
+    // Get pathogen from experiment pattern instead of well data
     let pathogen = null;
-    if (window.currentAnalysisResults) {
+    
+    // First try to get from experiment pattern if available
+    if (window.currentExperimentPattern) {
+        pathogen = extractTestCode(window.currentExperimentPattern);
+        console.log(`🔍 THRESHOLD-FIXED - Extracted pathogen "${pathogen}" from experiment pattern: ${window.currentExperimentPattern}`);
+    }
+    
+    // If not found, try to extract from filename in analysis results
+    if (!pathogen && window.currentAnalysisResults && window.currentAnalysisResults.metadata && window.currentAnalysisResults.metadata.filename) {
+        const filename = window.currentAnalysisResults.metadata.filename;
+        pathogen = extractTestCode(filename);
+        console.log(`🔍 THRESHOLD-FIXED - Extracted pathogen "${pathogen}" from filename: ${filename}`);
+    }
+    
+    // If still not found, try to get from the first well's experiment_pattern if available
+    if (!pathogen && window.currentAnalysisResults) {
         const resultsToCheck = window.currentAnalysisResults.individual_results || window.currentAnalysisResults;
         const wellKeys = Object.keys(resultsToCheck);
         for (const wellKey of wellKeys) {
             const well = resultsToCheck[wellKey];
-            if (well && well.fluorophore === channel && well.test_code) {
-                pathogen = well.test_code;
+            if (well && well.experiment_pattern) {
+                pathogen = extractTestCode(well.experiment_pattern);
+                console.log(`🔍 THRESHOLD-FIXED - Extracted pathogen "${pathogen}" from well experiment_pattern: ${well.experiment_pattern}`);
                 break;
             }
         }
     }
     
-    // Default pathogen if none found
+    // NO FALLBACK - if we can't find the pathogen, we can't use fixed thresholds
     if (!pathogen) {
-        pathogen = 'BVPanelPCR1';
+        console.error(`❌ THRESHOLD-FIXED - Could not extract pathogen from experiment pattern. Cannot use fixed threshold.`);
+        return null;
     }
     
     console.log(`🔍 THRESHOLD-FIXED - Using pathogen: ${pathogen} for ${strategy} strategy`);
@@ -686,6 +705,8 @@ if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
     // Return null if no fixed value found
     return null;
 }
+
+
     
     // HANDLE CALCULATED STRATEGIES (all other strategies)
     // Calculate baseline statistics from control wells
@@ -710,20 +731,33 @@ if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
         baseline_std = Math.sqrt(variance);
     }
     
+    // Also fix the pathogen detection in the CALCULATED STRATEGIES section (around line 710):
+// Replace this section:
     // Get pathogen information
     let pathogen = null;
-    if (window.currentAnalysisResults) {
+    
+    // Extract pathogen from experiment pattern for calculated strategies too
+    if (window.currentExperimentPattern) {
+        pathogen = extractTestCode(window.currentExperimentPattern);
+    } else if (window.currentAnalysisResults && window.currentAnalysisResults.metadata && window.currentAnalysisResults.metadata.filename) {
+        pathogen = extractTestCode(window.currentAnalysisResults.metadata.filename);
+    } else if (window.currentAnalysisResults) {
         const resultsToCheck = window.currentAnalysisResults.individual_results || window.currentAnalysisResults;
         const wellKeys = Object.keys(resultsToCheck);
         for (const wellKey of wellKeys) {
             const well = resultsToCheck[wellKey];
-            if (well && well.fluorophore === channel && well.test_code) {
-                pathogen = well.test_code;
+            if (well && well.experiment_pattern) {
+                pathogen = extractTestCode(well.experiment_pattern);
                 break;
             }
         }
     }
-    if (!pathogen) pathogen = 'BVPanelPCR1';
+    
+    // NO FALLBACK - use null if no pathogen found
+    if (!pathogen) {
+        console.warn(`⚠️ THRESHOLD-CALC - No pathogen found for calculated threshold`);
+        pathogen = null; // Don't use BVPanelPCR1 as fallback
+    }
     
     // Get L and B parameters for log strategies that need them
     let L = 0, B = baseline;
@@ -1039,7 +1073,70 @@ function initializeChannelThresholds() {
         if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
     }, 200);
 }
+// Add this function to handle single-channel validation
+function validateAndSetSingleChannel() {
+    // Get all unique channels from current results
+    const channels = new Set();
+    if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+        Object.values(window.currentAnalysisResults.individual_results).forEach(well => {
+            if (well && well.fluorophore && well.fluorophore !== 'Unknown') {
+                channels.add(well.fluorophore);
+            }
+        });
+    }
+    
+    console.log(`🔍 CHANNEL-VALIDATION - Found ${channels.size} channels: ${Array.from(channels).join(', ')}`);
+    
+    // If only one channel, automatically set it as current
+    if (channels.size === 1) {
+        const singleChannel = Array.from(channels)[0];
+        window.currentFluorophore = singleChannel;
+        
+        // Update fluorophore selector if it exists
+        const fluorophoreSelector = document.getElementById('fluorophoreFilter');
+        if (fluorophoreSelector) {
+            // Check if the single channel option exists
+            const hasOption = Array.from(fluorophoreSelector.options).some(opt => opt.value === singleChannel);
+            if (hasOption) {
+                fluorophoreSelector.value = singleChannel;
+            } else {
+                // Add the option if it doesn't exist
+                const option = document.createElement('option');
+                option.value = singleChannel;
+                option.textContent = singleChannel;
+                fluorophoreSelector.appendChild(option);
+                fluorophoreSelector.value = singleChannel;
+            }
+            console.log(`🔍 CHANNEL-VALIDATION - Auto-selected single channel: ${singleChannel}`);
+        }
+        
+        return singleChannel;
+    }
+    
+    // If multiple channels but "all" is selected, prompt user to select one for manual threshold
+    if (channels.size > 1 && window.currentFluorophore === 'all') {
+        console.log(`🔍 CHANNEL-VALIDATION - Multiple channels available, user should select one for manual threshold`);
+    }
+    
+    return window.currentFluorophore;
+}
 
+// Call this function when initializing thresholds
+window.validateAndSetSingleChannel = validateAndSetSingleChannel;
+
+// Modify initializeThresholdSystem to include channel validation
+const originalInitializeThresholdSystem = window.initializeThresholdSystem;
+window.initializeThresholdSystem = function() {
+    console.log('🔍 THRESHOLD-INIT - Initializing complete threshold system');
+    
+    // Validate and set single channel first
+    validateAndSetSingleChannel();
+    
+    // Continue with original initialization
+    if (originalInitializeThresholdSystem) {
+        originalInitializeThresholdSystem.apply(this, arguments);
+    }
+};
 function getCurrentChannelThreshold(channel, scale = null) {
     // Ensure global threshold object is always initialized
     if (!window.stableChannelThresholds) window.stableChannelThresholds = {};
@@ -1204,45 +1301,57 @@ function initializeManualThresholdControls() {
     
     if (thresholdInput) {
         // Function to handle manual threshold changes
-        function handleManualThresholdChange() {
-            const channel = window.currentFluorophore;
-            // DYNAMIC ONLY: Get current scale from window.currentScaleMode (set by toggleScale)
-            const scale = window.currentScaleMode;
-            const value = parseFloat(thresholdInput.value);
-            
-            console.log(`🔍 MANUAL-THRESHOLD-DEBUG - Channel: ${channel}, Scale: ${scale}, Value: ${value}`);
-            
-            if (channel && !isNaN(value) && value > 0) {
-                console.log(`🔍 MANUAL-THRESHOLD-INPUT - Setting ${channel} ${scale} threshold to ${value}`);
-                
-                // Mark this threshold as manually set to prevent override
-                if (!window.manualThresholds) window.manualThresholds = {};
-                if (!window.manualThresholds[channel]) window.manualThresholds[channel] = {};
-                window.manualThresholds[channel][scale] = true;
-                
-                setChannelThreshold(channel, scale, value);
-                
-                // Update chart threshold lines
-                if (window.updateAllChannelThresholds) {
-                    window.updateAllChannelThresholds();
-                }
-                
-                // Send manual threshold to backend for proper CQJ recalculation
-                sendManualThresholdToBackend(channel, scale, value);
-                
-                console.log(`🔍 MANUAL-THRESHOLD-SET - ${channel} ${scale} threshold set to ${value}`);
-                
-                // Force strategy to manual when user manually sets threshold
-                const strategySelect = document.getElementById('thresholdStrategySelect');
-                if (strategySelect && strategySelect.value !== 'manual') {
-                    strategySelect.value = 'manual';
-                    window.selectedThresholdStrategy = 'manual';
-                    console.log(`🔍 MANUAL-THRESHOLD - Switched strategy to manual`);
-                }
-            } else {
-                console.warn(`🔍 MANUAL-THRESHOLD-INVALID - Invalid input: channel=${channel}, scale=${scale}, value=${value}`);
-            }
+      // Inside initializeManualThresholdControls function
+function handleManualThresholdChange() {
+    let channel = window.currentFluorophore;
+    
+    // Validate channel selection
+    if (!channel || channel === 'all') {
+        // Try to auto-select if single channel
+        channel = validateAndSetSingleChannel();
+        
+        if (!channel || channel === 'all') {
+            alert('Please select a specific channel to set manual threshold. Manual thresholds cannot be applied to "all" channels.');
+            return;
         }
+    }
+    
+    const scale = window.currentScaleMode;
+    const value = parseFloat(thresholdInput.value);
+    
+    console.log(`🔍 MANUAL-THRESHOLD-DEBUG - Channel: ${channel}, Scale: ${scale}, Value: ${value}`);
+    
+    if (channel && !isNaN(value) && value > 0) {
+        console.log(`🔍 MANUAL-THRESHOLD-INPUT - Setting ${channel} ${scale} threshold to ${value}`);
+        
+        // Mark this threshold as manually set to prevent override
+        if (!window.manualThresholds) window.manualThresholds = {};
+        if (!window.manualThresholds[channel]) window.manualThresholds[channel] = {};
+        window.manualThresholds[channel][scale] = true;
+        
+        setChannelThreshold(channel, scale, value);
+        
+        // Update chart threshold lines
+        if (window.updateAllChannelThresholds) {
+            window.updateAllChannelThresholds();
+        }
+        
+        // Send manual threshold to backend for proper CQJ recalculation
+        sendManualThresholdToBackend(channel, scale, value);
+        
+        console.log(`🔍 MANUAL-THRESHOLD-SET - ${channel} ${scale} threshold set to ${value}`);
+        
+        // Force strategy to manual when user manually sets threshold
+        const strategySelect = document.getElementById('thresholdStrategySelect');
+        if (strategySelect && strategySelect.value !== 'manual') {
+            strategySelect.value = 'manual';
+            window.selectedThresholdStrategy = 'manual';
+            console.log(`🔍 MANUAL-THRESHOLD - Switched strategy to manual`);
+        }
+    } else {
+        console.warn(`🔍 MANUAL-THRESHOLD-INVALID - Invalid input: channel=${channel}, scale=${scale}, value=${value}`);
+    }
+}
         
         // Add multiple event listeners for better responsiveness
         thresholdInput.addEventListener('input', handleManualThresholdChange);
@@ -1268,6 +1377,8 @@ function initializeManualThresholdControls() {
 /**
  * Send manual threshold to backend for CQJ recalculation
  */
+// Replace the sendManualThresholdToBackend function (around line 1385):
+
 async function sendManualThresholdToBackend(channel, scale, value) {
     try {
         const payload = {
@@ -1292,19 +1403,42 @@ async function sendManualThresholdToBackend(channel, scale, value) {
             console.log(`🔍 BACKEND-THRESHOLD - Backend response:`, result);
             
             if (result.success && result.updated_results) {
-                // Update frontend with backend-calculated CQJ values
-                Object.assign(window.currentAnalysisResults.individual_results, result.updated_results);
+                // CRITICAL: Create a deep copy of current results to preserve all data
+                const preservedResults = JSON.parse(JSON.stringify(window.currentAnalysisResults.individual_results));
                 
-                // Update results table if available
+                // Only update CQJ and CalcJ fields from backend response
+                Object.entries(result.updated_results).forEach(([wellKey, updates]) => {
+                    if (preservedResults[wellKey]) {
+                        // Only update threshold-related fields
+                        if (updates.cqj !== undefined) preservedResults[wellKey].cqj = updates.cqj;
+                        if (updates.calcj !== undefined) preservedResults[wellKey].calcj = updates.calcj;
+                        if (updates.CQJ !== undefined) preservedResults[wellKey].CQJ = updates.CQJ;
+                        if (updates.CalcJ !== undefined) preservedResults[wellKey].CalcJ = updates.CalcJ;
+                        if (updates['CQ-J'] !== undefined) preservedResults[wellKey]['CQ-J'] = updates['CQ-J'];
+                        if (updates['Calc-J'] !== undefined) preservedResults[wellKey]['Calc-J'] = updates['Calc-J'];
+                        
+                        console.log(`🔍 BACKEND-THRESHOLD - Updated well ${wellKey} CQJ values only`);
+                    }
+                });
+                
+                // Update the global results with preserved data
+                window.currentAnalysisResults.individual_results = preservedResults;
+                
+                // Update results table with preserved data
                 if (typeof populateResultsTable === 'function') {
-                    populateResultsTable(window.currentAnalysisResults.individual_results);
+                    populateResultsTable(preservedResults);
                 }
                 
-                console.log(`✅ BACKEND-THRESHOLD - Updated ${result.recalculated_wells || 0} wells with new CQJ/CalcJ values`);
+                console.log(`✅ BACKEND-THRESHOLD - Updated ${Object.keys(result.updated_results).length} wells with new CQJ/CalcJ values`);
                 
                 // Trigger chart update to reflect new calculations
                 if (typeof updateChartForNewData === 'function') {
                     updateChartForNewData();
+                }
+                
+                // Also trigger CQJ value updates in the UI
+                if (typeof updateCQJDisplayValues === 'function') {
+                    updateCQJDisplayValues();
                 }
                 
                 return result;
@@ -1381,6 +1515,8 @@ function updateChartThreshold(value) {
 /**
  * Populate threshold strategy dropdown based on current scale mode
  */
+// Replace the populateThresholdStrategyDropdown function (around line 1500):
+
 function populateThresholdStrategyDropdown() {
     const select = document.getElementById('thresholdStrategySelect');
     if (!select) {
@@ -1390,8 +1526,21 @@ function populateThresholdStrategyDropdown() {
     
     select.innerHTML = '';
     
-    // DYNAMIC ONLY: Get current scale mode from window.currentScaleMode (set by toggleScale)
-    const scale = window.currentScaleMode;
+    // CRITICAL FIX: Get scale from multiple sources to ensure correct value
+    let scale = window.currentScaleMode;
+    
+    // If currentScaleMode is not set, try to get from sessionStorage
+    if (!scale) {
+        scale = sessionStorage.getItem('chartScale') || 'linear';
+        window.currentScaleMode = scale; // Update global
+    }
+    
+    // Also check the toggle button state as a fallback
+    const toggleBtn = document.getElementById('toggleScaleBtn');
+    if (toggleBtn && !scale) {
+        scale = toggleBtn.classList.contains('log-scale') ? 'log' : 'linear';
+        window.currentScaleMode = scale; // Update global
+    }
     
     console.log(`🔍 DROPDOWN-DEBUG - Scale: ${scale}, window.currentScaleMode: ${window.currentScaleMode}`);
     console.log(`🔍 DROPDOWN-DEBUG - window.LOG_THRESHOLD_STRATEGIES: ${typeof window.LOG_THRESHOLD_STRATEGIES}, window.LINEAR_THRESHOLD_STRATEGIES: ${typeof window.LINEAR_THRESHOLD_STRATEGIES}`);
@@ -1408,6 +1557,8 @@ function populateThresholdStrategyDropdown() {
         });
         return;
     }
+    
+   
     
     let firstKey = null;
     let found = false;
