@@ -2420,6 +2420,27 @@ function onScaleToggle() {
     // Use state management for scale changes
     updateAppState({ currentScaleMode: newScale });
     
+    // CRITICAL: Also update the global currentScaleMode immediately for getScaleConfiguration()
+    currentScaleMode = newScale;
+    window.currentScaleMode = newScale;
+    
+    // CRITICAL: Force immediate chart scale update
+    if (window.amplificationChart) {
+        const newScaleConfig = getScaleConfiguration();
+        window.amplificationChart.options.scales.y = newScaleConfig;
+        
+        // Force a complete chart update to ensure scale change takes effect
+        window.amplificationChart.update('resize');
+        
+        // Add a small delay and update again to ensure it takes
+        setTimeout(() => {
+            window.amplificationChart.update('none');
+            console.log(`🔍 TOGGLE - Secondary chart update completed for ${newScale} scale`);
+        }, 100);
+        
+        console.log(`🔍 TOGGLE - Forced chart scale update to ${newScale} mode`);
+    }
+    
     // Save preference to session storage
     safeSetItem(sessionStorage, 'qpcr_chart_scale', newScale);
     
@@ -2436,6 +2457,12 @@ function onScaleToggle() {
     if (typeof updateThresholdInputForCurrentScale === 'function') {
         console.log(`🔍 TOGGLE - Updating threshold input for ${newScale} scale`);
         updateThresholdInputForCurrentScale();
+    }
+    
+    // CRITICAL: Update all threshold lines for new scale
+    if (window.updateAllChannelThresholds) {
+        console.log(`🔍 TOGGLE - Updating all threshold lines for ${newScale} scale`);
+        window.updateAllChannelThresholds();
     }
     
     console.log(`🔍 TOGGLE - Switched to ${newScale} scale via state management`);
@@ -11550,6 +11577,9 @@ function createChartConfiguration(chartType, datasets, title, annotation = null)
 }
 
 function getScaleConfiguration() {
+    // Use window.currentScaleMode for reliable access
+    const scaleMode = window.currentScaleMode || currentScaleMode || 'linear';
+    
     const baseConfig = {
         title: { 
             display: true, 
@@ -11559,7 +11589,9 @@ function getScaleConfiguration() {
         grid: { color: 'rgba(0,0,0,0.1)' }
     };
     
-    if (currentScaleMode === 'log') {
+    console.log(`🔍 SCALE-CONFIG - Generating ${scaleMode} scale configuration`);
+    
+    if (scaleMode === 'log') {
         return {
             ...baseConfig,
             type: 'logarithmic',
