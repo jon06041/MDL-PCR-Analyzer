@@ -129,6 +129,24 @@ function syncUIElements() {
 function updateDisplays() {
     const state = window.appState;
     
+    // Handle scale changes - update chart scale configuration
+    if (window.amplificationChart && state.currentScaleMode !== currentScaleMode) {
+        currentScaleMode = state.currentScaleMode;
+        window.currentScaleMode = currentScaleMode;
+        
+        const newScaleConfig = getScaleConfiguration();
+        window.amplificationChart.options.scales.y = newScaleConfig;
+        window.amplificationChart.update('none');
+        
+        // Update threshold strategy dropdown for new scale
+        if (typeof window.populateThresholdStrategyDropdown === 'function') {
+            window.populateThresholdStrategyDropdown();
+        }
+        
+        // Update baseline flattening visibility (only show on linear)
+        updateBaselineFlatteningVisibility();
+    }
+    
     // Update chart based on current state
     if (state.currentChartMode === 'all') {
         showAllCurves(state.currentFluorophore);
@@ -2273,43 +2291,15 @@ function onPresetClick(e) {
 }
 
 function onScaleToggle() {
-    currentScaleMode = (currentScaleMode === 'linear') ? 'log' : 'linear';
-    window.currentScaleMode = currentScaleMode;  // Ensure window variable is synced
+    const newScale = (currentScaleMode === 'linear') ? 'log' : 'linear';
+    
+    // Use state management for scale changes
+    updateAppState({ currentScaleMode: newScale });
     
     // Save preference to session storage
-    safeSetItem(sessionStorage, 'qpcr_chart_scale', currentScaleMode);
+    safeSetItem(sessionStorage, 'qpcr_chart_scale', newScale);
     
-    // Update chart with new scale
-    if (window.amplificationChart) {
-        const newScaleConfig = getScaleConfiguration();
-        window.amplificationChart.options.scales.y = newScaleConfig;
-        window.amplificationChart.update('none');
-    }
-    
-    // ...existing code for threshold initialization...
-    
-    // Update threshold strategy dropdown for new scale
-    if (typeof window.populateThresholdStrategyDropdown === 'function') {
-        window.populateThresholdStrategyDropdown();
-    }
-    
-    // Update threshold input box for current scale
-    if (window.updateThresholdInputForCurrentScale) {
-        window.updateThresholdInputForCurrentScale();
-    }
-    
-    // Update chart thresholds to ensure they're visible
-    if (window.updateAllChannelThresholds) {
-        window.updateAllChannelThresholds();
-    }
-    
-    // Update UI (this will also sync the toggle button)
-    updateSliderUI();
-    
-    // Update baseline flattening visibility (only show on linear)
-    updateBaselineFlatteningVisibility();
-    
-    console.log(`🔍 TOGGLE - Switched to ${currentScaleMode} scale`);
+    console.log(`🔍 TOGGLE - Switched to ${newScale} scale via state management`);
 }
 
 // THRESHOLD FUNCTIONS MOVED TO threshold_frontend.js
@@ -10685,9 +10675,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (showAllBtn) {
         showAllBtn.addEventListener('click', function() {
             console.log('Show All Wells button clicked');
-            currentChartMode = 'all';
-            updateChartDisplayMode();
-            updateActiveButton(this);
+            updateAppState({ currentChartMode: 'all' });
             // Clear any filtered curve details when switching to all wells mode
             document.getElementById('curveDetails').innerHTML = '<p>Select a well to view individual curve details</p>';
         });
@@ -10698,9 +10686,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (showPosBtn) {
         showPosBtn.addEventListener('click', function() {
             console.log('POS Results button clicked');
-            currentChartMode = 'pos';
-            updateChartDisplayMode();
-            updateActiveButton(this);
+            updateAppState({ currentChartMode: 'pos' });
         });
     }
     
@@ -10709,9 +10695,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (showNegBtn) {
         showNegBtn.addEventListener('click', function() {
             console.log('NEG Results button clicked');
-            currentChartMode = 'neg';
-            updateChartDisplayMode();
-            updateActiveButton(this);
+            updateAppState({ currentChartMode: 'neg' });
         });
     }
     
@@ -10720,9 +10704,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (showRedoBtn) {
         showRedoBtn.addEventListener('click', function() {
             console.log('REDO Results button clicked');
-            currentChartMode = 'redo';
-            updateChartDisplayMode();
-            updateActiveButton(this);
+            updateAppState({ currentChartMode: 'redo' });
         });
     }
     
