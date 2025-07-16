@@ -23,6 +23,9 @@ window.appState = {
     currentSortOrder: 'default',      // Legacy sort order
     thresholds: {},
     manualThresholds: {},
+    currentThresholdStrategy: 'linear_fixed',  // Current threshold strategy
+    currentThresholdValue: null,      // Current manual threshold value
+    isManualThresholdMode: false,     // Whether user is in manual threshold mode
     isUpdating: false
 };
 
@@ -55,6 +58,15 @@ function updateAppState(newState) {
         if (window.updateAllChannelThresholds) {
             window.updateAllChannelThresholds();
         }
+        
+        // Update threshold strategy dropdown if threshold strategy changed
+        if (window.populateThresholdStrategyDropdown && window.appState.currentThresholdStrategy) {
+            window.populateThresholdStrategyDropdown();
+        }
+        
+        // Update threshold input for current fluorophore/scale
+        updateThresholdInputFromState();
+        
         window.appState.isUpdating = false;
     }, 100);
 }
@@ -122,6 +134,32 @@ function syncUIElements() {
         sortDirectionBtn.dataset.direction = state.sortDirection;
     }
     
+    // Sync threshold controls
+    const thresholdStrategySelect = document.getElementById('thresholdStrategySelect');
+    if (thresholdStrategySelect && thresholdStrategySelect.value !== state.currentThresholdStrategy) {
+        thresholdStrategySelect.value = state.currentThresholdStrategy;
+    }
+    
+    const thresholdInput = document.getElementById('thresholdInput');
+    if (thresholdInput && state.currentThresholdValue !== null) {
+        // Only update if the input doesn't have focus (to avoid interrupting user typing)
+        if (document.activeElement !== thresholdInput) {
+            thresholdInput.value = state.currentThresholdValue.toFixed(2);
+        }
+    }
+    
+    // Sync auto button state
+    const autoBtn = document.getElementById('autoThresholdBtn');
+    if (autoBtn) {
+        if (state.isManualThresholdMode) {
+            autoBtn.classList.remove('active');
+            autoBtn.textContent = 'Auto';
+        } else {
+            autoBtn.classList.add('active');
+            autoBtn.textContent = 'Auto';
+        }
+    }
+    
     console.log('🔄 STATE - UI elements synchronized');
 }
 
@@ -182,6 +220,45 @@ function updateDisplays() {
     console.log('🔄 STATE - Displays updated');
 }
 
+// Update threshold input from current state
+function updateThresholdInputFromState() {
+    const state = window.appState;
+    const thresholdInput = document.getElementById('thresholdInput');
+    
+    if (!thresholdInput) return;
+    
+    let channel = state.currentFluorophore;
+    if (!channel || channel === 'all') {
+        // Default to first available channel
+        if (window.stableChannelThresholds) {
+            const channels = Object.keys(window.stableChannelThresholds);
+            channel = channels.length > 0 ? channels[0] : 'FAM';
+        } else {
+            channel = 'FAM';
+        }
+    }
+    
+    // Get current threshold value for this channel/scale
+    if (window.stableChannelThresholds && 
+        window.stableChannelThresholds[channel] && 
+        window.stableChannelThresholds[channel][state.currentScaleMode] !== undefined) {
+        
+        const thresholdValue = window.stableChannelThresholds[channel][state.currentScaleMode];
+        
+        // Update state and input (only if input doesn't have focus)
+        if (document.activeElement !== thresholdInput) {
+            updateAppState({
+                currentThresholdValue: thresholdValue,
+                isManualThresholdMode: window.manualThresholds && 
+                                      window.manualThresholds[channel] && 
+                                      window.manualThresholds[channel][state.currentScaleMode]
+            });
+        }
+    }
+    
+    console.log('🔄 STATE - Threshold input updated from state');
+}
+
 // Initialize state management
 function initializeStateManagement() {
     // Load saved state from session storage
@@ -192,7 +269,87 @@ function initializeStateManagement() {
         currentScaleMode = savedScale;
     }
     
+    // Initialize threshold event handlers
+    initializeThresholdStateHandlers();
+    
     console.log('🔄 STATE - State management initialized');
+}
+
+// Initialize threshold control event handlers for state management
+function initializeThresholdStateHandlers() {
+    // Threshold strategy dropdown
+    const thresholdStrategySelect = document.getElementById('thresholdStrategySelect');
+    if (thresholdStrategySelect) {
+        thresholdStrategySelect.addEventListener('change', function() {
+            const newStrategy = this.value;
+            console.log('🔄 STATE - Threshold strategy changed:', newStrategy);
+            
+            updateAppState({
+                currentThresholdStrategy: newStrategy,
+                isManualThresholdMode: newStrategy === 'manual'
+            });
+            
+            // Trigger threshold recalculation
+            if (typeof handleThresholdStrategyChange === 'function') {
+                handleThresholdStrategyChange();
+            }
+        });
+    }
+    
+    // Manual threshold input
+    const thresholdInput = document.getElementById('thresholdInput');
+    if (thresholdInput) {
+        // Handle input changes
+        thresholdInput.addEventListener('input', function() {
+            const value = parseFloat(this.value);
+            if (!isNaN(value) && value > 0) {
+                updateAppState({
+                    currentThresholdValue: value,
+                    isManualThresholdMode: true,
+                    currentThresholdStrategy: 'manual'
+                });
+            }
+        });
+        
+        // Handle when user finishes entering value
+        thresholdInput.addEventListener('change', function() {
+            const value = parseFloat(this.value);
+            if (!isNaN(value) && value > 0) {
+                // Apply manual threshold
+                if (typeof applyManualThreshold === 'function') {
+                    applyManualThreshold(value);
+                } else if (window.setChannelThreshold) {
+                    const channel = window.appState.currentFluorophore !== 'all' ? 
+                                   window.appState.currentFluorophore : 'FAM';
+                    window.setChannelThreshold(channel, window.appState.currentScaleMode, value);
+                }
+                
+                console.log('🔄 STATE - Manual threshold applied:', value);
+            }
+        });
+    }
+    
+    // Auto threshold button
+    const autoBtn = document.getElementById('autoThresholdBtn');
+    if (autoBtn) {
+        autoBtn.addEventListener('click', function() {
+            console.log('🔄 STATE - Auto threshold button clicked');
+            
+            updateAppState({
+                isManualThresholdMode: false,
+                currentThresholdStrategy: window.appState.currentScaleMode === 'log' ? 'log_fixed' : 'linear_fixed'
+            });
+            
+            // Restore auto threshold
+            if (typeof restoreAutoThreshold === 'function') {
+                restoreAutoThreshold();
+            } else if (typeof handleThresholdStrategyChange === 'function') {
+                handleThresholdStrategyChange();
+            }
+        });
+    }
+    
+    console.log('🔄 STATE - Threshold state handlers initialized');
 }
 
 // Debug: Check if CQJ/CalcJ functions are available
@@ -4388,6 +4545,11 @@ fluorophoreSelector.addEventListener('change', function() {
     updateAppState({
         currentFluorophore: selectedFluorophore
     });
+    
+    // Update threshold input for new fluorophore
+    setTimeout(() => {
+        updateThresholdInputFromState();
+    }, 50);
     
     // Reset chart mode to 'all' and update display
     currentChartMode = 'all';
