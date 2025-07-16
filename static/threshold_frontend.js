@@ -659,10 +659,17 @@ if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
     // Get pathogen from experiment pattern instead of well data
     let pathogen = null;
     
-    // First try to get from experiment pattern if available
-    if (window.currentExperimentPattern) {
+    // First try to get from getCurrentFullPattern function if available
+    if (typeof window.getCurrentFullPattern === 'function') {
+        const fullPattern = window.getCurrentFullPattern();
+        pathogen = window.extractTestCode ? window.extractTestCode(fullPattern) : extractTestCode(fullPattern);
+        console.log(`🔍 THRESHOLD-FIXED - Extracted pathogen "${pathogen}" from getCurrentFullPattern: ${fullPattern}`);
+    }
+    
+    // Fallback: try to get from window.currentExperimentPattern if available  
+    if (!pathogen && window.currentExperimentPattern) {
         pathogen = window.extractTestCode ? window.extractTestCode(window.currentExperimentPattern) : extractTestCode(window.currentExperimentPattern);
-        console.log(`🔍 THRESHOLD-FIXED - Extracted pathogen "${pathogen}" from experiment pattern: ${window.currentExperimentPattern}`);
+        console.log(`🔍 THRESHOLD-FIXED - Extracted pathogen "${pathogen}" from window.currentExperimentPattern: ${window.currentExperimentPattern}`);
     }
     
     // If not found, try to extract from filename in analysis results
