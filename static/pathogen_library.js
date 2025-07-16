@@ -541,4 +541,9 @@ function getTestCompletionStatus(sessions) {
 // Export for use in main script
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { PATHOGEN_LIBRARY, getPathogenTarget, extractTestCode };
+} else {
+    // Make functions available globally in browser
+    window.extractTestCode = extractTestCode;
+    window.getPathogenTarget = getPathogenTarget;
+    window.getRequiredChannels = getRequiredChannels;
 }

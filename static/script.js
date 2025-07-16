@@ -312,6 +312,23 @@ function updateDisplays() {
         currentScaleMode = state.currentScaleMode;
         window.currentScaleMode = currentScaleMode;
         
+        // CRITICAL: Update scale toggle button CSS immediately
+        const toggleBtn = document.getElementById('scaleToggle');
+        if (toggleBtn) {
+            toggleBtn.setAttribute('data-scale', currentScaleMode);
+            const options = toggleBtn.querySelectorAll('.toggle-option');
+            if (options.length >= 2) {
+                if (currentScaleMode === 'log') {
+                    options[0].classList.remove('active'); // Linear
+                    options[1].classList.add('active');    // Log
+                } else {
+                    options[0].classList.add('active');    // Linear
+                    options[1].classList.remove('active'); // Log
+                }
+            }
+            console.log(`🔄 SCALE-CSS - Updated button CSS for ${currentScaleMode} scale`);
+        }
+        
         const newScaleConfig = getScaleConfiguration();
         window.amplificationChart.options.scales.y = newScaleConfig;
         window.amplificationChart.update('none');
@@ -322,7 +339,7 @@ function updateDisplays() {
             window.populateThresholdStrategyDropdown();
             // Restore the selected strategy after repopulation
             if (currentStrategy) {
-                const dropdown = document.getElementById('threshold-strategy-select');
+                const dropdown = document.getElementById('thresholdStrategySelect');
                 if (dropdown && dropdown.options) {
                     for (let i = 0; i < dropdown.options.length; i++) {
                         if (dropdown.options[i].value === currentStrategy) {
@@ -2339,15 +2356,22 @@ function onScaleToggle() {
     
     console.log(`🔍 TOGGLE - Switching from ${window.appState.currentScaleMode} to ${newScale} scale`);
     
-    // CRITICAL: Update button CSS immediately
-    const toggleBtn = document.getElementById('toggleScaleBtn');
+    // CRITICAL: Update button CSS immediately using correct ID
+    const toggleBtn = document.getElementById('scaleToggle');
     if (toggleBtn) {
-        if (newScale === 'log') {
-            toggleBtn.classList.add('log-scale');
-            toggleBtn.textContent = 'Log Scale';
-        } else {
-            toggleBtn.classList.remove('log-scale');
-            toggleBtn.textContent = 'Linear Scale';
+        // Update data attribute
+        toggleBtn.setAttribute('data-scale', newScale);
+        
+        // Update toggle option classes
+        const options = toggleBtn.querySelectorAll('.toggle-option');
+        if (options.length >= 2) {
+            if (newScale === 'log') {
+                options[0].classList.remove('active'); // Linear
+                options[1].classList.add('active');    // Log
+            } else {
+                options[0].classList.add('active');    // Linear
+                options[1].classList.remove('active'); // Log
+            }
         }
         console.log(`🔍 TOGGLE - Updated button CSS for ${newScale} scale`);
     }
