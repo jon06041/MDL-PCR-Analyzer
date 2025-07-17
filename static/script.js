@@ -7206,10 +7206,33 @@ function createCombinedSession(experimentPattern, sessions) {
             totalPositive += sessionPositive;
         }
         
-        // Extract fluorophore from filename
-        const fluorophore = detectFluorophoreFromFilename(session.filename);
-        console.log(`Detecting fluorophore from filename: ${session.filename}`);
-        console.log(`Found fluorophore: ${fluorophore}`);
+        // Extract fluorophore - prioritize well data over filename for multichannel sessions
+        let fluorophore = 'Unknown';
+        
+        // First, try to get fluorophore from well results (most reliable)
+        if (session.well_results && session.well_results.length > 0) {
+            const wellFluorophores = [...new Set(session.well_results.map(well => well.fluorophore).filter(f => f && f !== 'Unknown'))];
+            if (wellFluorophores.length === 1) {
+                fluorophore = wellFluorophores[0];
+                console.log(`Found fluorophore from well data: ${fluorophore}`);
+            } else if (wellFluorophores.length > 1) {
+                // This is a multichannel session, add all fluorophores found
+                wellFluorophores.forEach(f => {
+                    if (!fluorophores.includes(f)) {
+                        fluorophores.push(f);
+                    }
+                });
+                console.log(`Found multiple fluorophores from well data: ${wellFluorophores.join(', ')}`);
+                return; // Skip the single fluorophore logic below for multichannel
+            }
+        }
+        
+        // Fallback: detect from filename if well data doesn't contain fluorophore info
+        if (fluorophore === 'Unknown') {
+            fluorophore = detectFluorophoreFromFilename(session.filename);
+            console.log(`Detecting fluorophore from filename: ${session.filename}`);
+            console.log(`Found fluorophore: ${fluorophore}`);
+        }
         
         // Only include sessions with detectable fluorophores
         if (fluorophore && fluorophore !== 'Unknown' && !fluorophores.includes(fluorophore)) {
