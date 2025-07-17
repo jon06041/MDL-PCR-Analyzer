@@ -397,8 +397,9 @@ function updateDisplays() {
         populateResultsTable(filteredResults);
     }
     
-    // Update well dropdown
-    if (typeof filterWellsByFluorophore === 'function') {
+    // Update well dropdown only if analysis data is available
+    if (typeof filterWellsByFluorophore === 'function' && 
+        (window.currentAnalysisResults?.individual_results || currentAnalysisResults?.individual_results)) {
         filterWellsByFluorophore(state.currentFluorophore);
     }
     
@@ -4666,10 +4667,24 @@ function synchronizeAllFilterStates() {
 }
 
 function filterWellsByFluorophore(selectedFluorophore) {
-    if (!currentAnalysisResults || !currentAnalysisResults.individual_results) {
-        console.warn('🔍 FILTER-WELLS - No analysis results or individual_results available');
+    // More defensive checking with better diagnostics
+    const hasCurrentAnalysisResults = currentAnalysisResults && currentAnalysisResults.individual_results;
+    const hasWindowAnalysisResults = window.currentAnalysisResults && window.currentAnalysisResults.individual_results;
+    
+    if (!hasCurrentAnalysisResults && !hasWindowAnalysisResults) {
+        console.log('🔍 FILTER-WELLS - No analysis results available, skipping well filtering');
+        
+        // Clear well selector if no data available
+        const wellSelector = document.getElementById('wellSelect');
+        if (wellSelector) {
+            wellSelector.innerHTML = '<option value="">No data available</option>';
+        }
         return;
     }
+    
+    // Use window version if local version is not available (common during history display)
+    const analysisResults = hasCurrentAnalysisResults ? currentAnalysisResults : window.currentAnalysisResults;
+    console.log('🔍 FILTER-WELLS - Using analysis results:', hasCurrentAnalysisResults ? 'currentAnalysisResults' : 'window.currentAnalysisResults');
     
     const wellSelector = document.getElementById('wellSelect');
     if (!wellSelector) return;
@@ -4683,7 +4698,7 @@ function filterWellsByFluorophore(selectedFluorophore) {
     wellSelector.appendChild(allOption);
     
     // Filter results by fluorophore
-    const filteredResults = Object.entries(currentAnalysisResults.individual_results).filter(([wellKey, result]) => {
+    const filteredResults = Object.entries(analysisResults.individual_results).filter(([wellKey, result]) => {
         if (selectedFluorophore === 'all') return true;
         return (result.fluorophore || 'Unknown') === selectedFluorophore;
     });
@@ -5836,8 +5851,9 @@ function displayHistorySession(sessionResults, source = 'history-display') {
     const originalCurrentAnalysisResults = currentAnalysisResults;
     const originalWindowAnalysisResults = window.currentAnalysisResults;
     
-    // Temporarily set for display and threshold calculation
+    // Set session results for display and threshold calculation
     currentAnalysisResults = sessionResults;
+    window.currentAnalysisResults = sessionResults;
     
     // 🆕 THRESHOLD FIX: Recalculate thresholds for historical data
     console.log(`📖 [HISTORY DISPLAY] Recalculating thresholds for historical data`);
@@ -5845,18 +5861,26 @@ function displayHistorySession(sessionResults, source = 'history-display') {
         if (window.initializeChannelThresholds) window.initializeChannelThresholds();
     }
     
-    // Display the results using the existing display function
-    if (sessionResults.fluorophore_count && sessionResults.fluorophore_count > 1) {
-        displayMultiFluorophoreResults(sessionResults);
-    } else {
-        displayAnalysisResults(sessionResults);
+    try {
+        // Display the results using the existing display function
+        if (sessionResults.fluorophore_count && sessionResults.fluorophore_count > 1) {
+            displayMultiFluorophoreResults(sessionResults);
+        } else {
+            displayAnalysisResults(sessionResults);
+        }
+    } catch (error) {
+        console.error('📖 [HISTORY DISPLAY] Error during display:', error);
+    } finally {
+        // Restore the original state after display is complete
+        // Use setTimeout to ensure all async operations complete
+        setTimeout(() => {
+            currentAnalysisResults = originalCurrentAnalysisResults;
+            window.currentAnalysisResults = originalWindowAnalysisResults;
+            console.log(`📖 [HISTORY DISPLAY] Original analysis state restored after display completion`);
+        }, 100);
     }
     
-    // Immediately restore the original state to prevent contamination
-    currentAnalysisResults = originalCurrentAnalysisResults;
-    window.currentAnalysisResults = originalWindowAnalysisResults;
-    
-    console.log(`📖 [HISTORY DISPLAY] Completed history display with proper thresholds, original analysis state restored`);
+    console.log(`📖 [HISTORY DISPLAY] Completed history display with proper thresholds`);
 }
 
 
@@ -7996,9 +8020,6 @@ transformedResults.individual_results[wellKey] = {
         // Set global analysis results for chart functionality
         analysisResults = transformedResults;
         
-        // 🛡️ DISPLAY ONLY: Show history without contaminating current analysis state
-        displayHistorySession(transformedResults, 'session-details-load');
-        
         // Store session data globally for pathogen target extraction
         window.currentSessionData = sessionData;
         
@@ -8010,6 +8031,9 @@ transformedResults.individual_results[wellKey] = {
             // Single fluorophore session - auto-select it
             autoSelectedFluorophore = sessionFluorophores[0];
         }
+        
+        // Set analysis results for proper display (permanent for history loading)
+        setAnalysisResults(transformedResults, 'history-session-load');
         
         // Update state with auto-detected fluorophore and reset filters
         updateAppState({
@@ -8092,9 +8116,17 @@ function loadLocalSessionDetails(sessionIndex) {
         }
         const session = history[sessionIndex];
         analysisResults = session.results;
-        // 🛡️ DISPLAY ONLY: Show history without contaminating current analysis state
         
-        displayHistorySession(session.results, 'local-history-session');
+        // Set analysis results for proper display (permanent for history loading)
+        setAnalysisResults(session.results, 'local-history-session');
+        
+        // Display the results properly
+        if (session.results.fluorophore_count && session.results.fluorophore_count > 1) {
+            displayMultiFluorophoreResults(session.results);
+        } else {
+            displayAnalysisResults(session.results);
+        }
+        
         // Patch: set hasAnyLoadedSession = true and force UI to loaded state
         if (typeof window.hasAnyLoadedSession !== 'undefined') {
             window.hasAnyLoadedSession = true;
