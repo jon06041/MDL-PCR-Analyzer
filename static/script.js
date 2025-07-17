@@ -11534,12 +11534,12 @@ window.amplificationChart = new Chart(ctx, {
 
 function getFluorophoreColor(fluorophore) {
     const colors = {
-        'Cy5': '#ff4444',    // Red
-        'FAM': '#44ff44',    // Green  
-        'HEX': '#4444ff',    // Blue
-        'Texas Red': '#ff8800', // Orange
-        'ROX': '#ff44ff',    // Magenta
-        'Unknown': '#888888' // Gray
+        'FAM': '#0066cc',      // Blue
+        'HEX': '#00cc66',      // Green  
+        'Texas Red': '#cc0000', // Red
+        'Cy5': '#8800cc',      // Purple
+        'ROX': '#ff44ff',      // Magenta (unchanged)
+        'Unknown': '#888888'   // Gray
     };
     return colors[fluorophore] || colors['Unknown'];
 }
@@ -11613,10 +11613,10 @@ function getVisibleFluorophores() {
 
 function getFluorophoreColor(fluorophore) {
     const colors = {
-        'Cy5': '#ff6b6b',
-        'FAM': '#4ecdc4', 
-        'HEX': '#45b7d1',
-        'Texas Red': '#f9ca24'
+        'FAM': '#0066cc',      // Blue
+        'HEX': '#00cc66',      // Green
+        'Texas Red': '#cc0000', // Red
+        'Cy5': '#8800cc'       // Purple
     };
     return colors[fluorophore] || '#333333';
 }

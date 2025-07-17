@@ -1298,20 +1298,20 @@ function createThresholdAnnotation(threshold, fluorophore, color = 'red', index 
 
 function getChannelColor(channel) {
     const colors = {
-        'Cy5': '#ff6b6b',
-        'FAM': '#4ecdc4', 
-        'HEX': '#45b7d1',
-        'Texas Red': '#f9ca24'
+        'FAM': '#0066cc',      // Blue
+        'HEX': '#00cc66',      // Green
+        'Texas Red': '#cc0000', // Red
+        'Cy5': '#8800cc'       // Purple
     };
     return colors[channel] || '#333333';
 }
 
 function getFluorophoreColor(fluorophore) {
     const colors = {
-        'Cy5': '#ff6b6b',
-        'FAM': '#4ecdc4', 
-        'HEX': '#45b7d1',
-        'Texas Red': '#f9ca24'
+        'FAM': '#0066cc',      // Blue
+        'HEX': '#00cc66',      // Green
+        'Texas Red': '#cc0000', // Red
+        'Cy5': '#8800cc'       // Purple
     };
     return colors[fluorophore] || '#333333';
 }
