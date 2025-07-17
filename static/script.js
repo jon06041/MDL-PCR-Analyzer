@@ -8410,10 +8410,22 @@ function filterTableByFluorophore() {
 
 // Export Results Function for Multi-Fluorophore Data
 function exportResults() {
-    if (!analysisResults) {
+    // Check multiple sources for analysis results - more robust for loaded sessions
+    const activeResults = analysisResults || currentAnalysisResults || window.currentAnalysisResults;
+    if (!activeResults || !activeResults.individual_results) {
+        console.error('🔍 EXPORT-ERROR - No analysis results to export. Checked sources:', {
+            analysisResults: !!analysisResults,
+            currentAnalysisResults: !!currentAnalysisResults,
+            windowCurrentAnalysisResults: !!window.currentAnalysisResults
+        });
         alert('No analysis results to export');
         return;
     }
+    
+    console.log('🔍 EXPORT-DEBUG - Exporting results from:', {
+        source: analysisResults ? 'analysisResults' : (currentAnalysisResults ? 'currentAnalysisResults' : 'window.currentAnalysisResults'),
+        wellCount: Object.keys(activeResults.individual_results).length
+    });
     
     const csvContent = generateResultsCSV();
     
@@ -8432,15 +8444,33 @@ function exportResults() {
 // Generate CSV with Multi-Fluorophore Support
 function generateResultsCSV() {
     const headers = [
-        'Well', 'Sample_Name', 'Fluorophore', 'Cq_Value', 'Status', 'R2_Score', 'RMSE', 
-        'Amplitude', 'Steepness', 'Midpoint', 'Baseline', 'Data_Points', 'Cycle_Range', 'Anomalies'
+        'Well', 'Sample_Name', 'Fluorophore', 'Results', 'Curve_Class', 'Status', 'R2', 'RMSE', 
+        'Amp', 'Steep', 'Mid', 'Base', 'Cq', 'CQ-J', 'Calc-J', 'Anom'
     ];
     
     let csvContent = headers.join(',') + '\n';
     
+    // Use the same data source logic as exportResults function - check multiple sources
+    const activeResults = analysisResults || currentAnalysisResults || window.currentAnalysisResults;
+    if (!activeResults || !activeResults.individual_results) {
+        console.error('🔍 EXPORT-ERROR - No analysis results available for export. Checked sources:', {
+            analysisResults: !!analysisResults,
+            currentAnalysisResults: !!currentAnalysisResults,
+            windowCurrentAnalysisResults: !!window.currentAnalysisResults
+        });
+        return csvContent; // Return just headers if no data
+    }
+    
+    console.log('🔍 EXPORT-DEBUG - Using results from:', {
+        source: analysisResults ? 'analysisResults' : (currentAnalysisResults ? 'currentAnalysisResults' : 'window.currentAnalysisResults'),
+        wellCount: Object.keys(activeResults.individual_results).length,
+        hasData: !!activeResults.individual_results,
+        firstFewWells: Object.keys(activeResults.individual_results).slice(0, 3)
+    });
+    
     // Sort wells to group by fluorophore priority, then by well number/letter
     const fluorophoreOrder = ['FAM', 'HEX', 'Texas Red', 'Cy5'];
-    const sortedEntries = Object.entries(analysisResults.individual_results).sort((a, b) => {
+    const sortedEntries = Object.entries(activeResults.individual_results).sort((a, b) => {
         const [wellKeyA, resultA] = a;
         const [wellKeyB, resultB] = b;
         
@@ -8454,11 +8484,6 @@ function generateResultsCSV() {
             
             // Use priority order if both fluorophores are in the list
             if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
-            if (aIndex !== -1) return -1; // Known fluorophore comes first
-            if (bIndex !== -1) return 1;  // Known fluorophore comes first
-            
-            // If neither in priority list, sort alphabetically
-            return fluorA.localeCompare(fluorB);
         }
         
         // Sort wells by column first, then row (e.g., A1, B1, C1, ... P1, A2, B2, C2, ... P2)
@@ -8502,6 +8527,68 @@ function generateResultsCSV() {
         const cqValue = result.cq_value !== null && result.cq_value !== undefined ? 
             result.cq_value.toFixed(2) : 'N/A';
         
+        // Generate Results column (POS/NEG/REDO) - same logic as in table
+        let resultsText = '';
+        try {
+            const r2Score = result.r2_score || 0;
+            const steepness = result.steepness || 0;
+            const amplitude = result.amplitude || 0;
+            
+            // Get anomalies data
+            let hasAnomalies = false;
+            if (result.anomalies) {
+                try {
+                    const anomalies = typeof result.anomalies === 'string' ? 
+                        JSON.parse(result.anomalies) : result.anomalies;
+                    hasAnomalies = Array.isArray(anomalies) && anomalies.length > 0 && 
+                                  !(anomalies.length === 1 && anomalies[0] === 'None');
+                } catch (e) {
+                    hasAnomalies = true;
+                }
+            }
+            
+            // Apply enhanced criteria: POS requires good S-curve + amplitude > 500 + no anomalies
+            const cqVal = result.cq_value;
+            if (amplitude < 400 || !result.is_good_scurve || isNaN(Number(cqVal))) {
+                resultsText = 'NEG';
+            } else if (result.is_good_scurve && amplitude > 500 && !hasAnomalies) {
+                resultsText = 'POS';
+            } else {
+                resultsText = 'REDO';
+            }
+        } catch (e) {
+            resultsText = 'REDO';
+        }
+        
+        // Generate Curve Class column
+        let curveClassText = '';
+        if (typeof result.curve_classification === 'object' && result.curve_classification.classification) {
+            curveClassText = result.curve_classification.classification.replace('_', ' ');
+        } else if (typeof result.curve_classification === 'string') {
+            curveClassText = result.curve_classification;
+        } else {
+            curveClassText = '-';
+        }
+        
+        // Generate CQ-J column
+        let cqjText = 'N/A';
+        if (result.cqj && typeof result.cqj === 'object' && result.fluorophore &&
+            result.cqj[result.fluorophore] !== undefined && result.cqj[result.fluorophore] !== null &&
+            !isNaN(result.cqj[result.fluorophore])) {
+            cqjText = Number(result.cqj[result.fluorophore]).toFixed(2);
+        }
+        
+        // Generate Calc-J column
+        let calcjText = 'N/A';
+        if (result.calcj && typeof result.calcj === 'object' && result.fluorophore &&
+            result.calcj[result.fluorophore] !== undefined && result.calcj[result.fluorophore] !== null &&
+            !isNaN(result.calcj[result.fluorophore])) {
+            const calcjValue = Number(result.calcj[result.fluorophore]);
+            if (calcjValue > 0) {
+                calcjText = `10^${calcjValue.toFixed(2)}`;
+            }
+        }
+        
         // Handle anomalies data
         let anomaliesText = 'None';
         if (result.anomalies) {
@@ -8519,16 +8606,18 @@ function generateResultsCSV() {
             wellId,
             `"${sampleName}"`, // Quote sample names to handle commas
             fluorophore,
-            cqValue,
-            result.is_good_scurve ? 'Good' : 'Poor',
+            resultsText,
+            `"${curveClassText}"`,
+            result.is_good_scurve ? 'Good S-Curve' : 'Poor Fit',
             result.r2_score ? result.r2_score.toFixed(4) : 'N/A',
             result.rmse ? result.rmse.toFixed(2) : 'N/A',
-            result.amplitude ? result.amplitude.toFixed(2) : 'N/A',
-            result.steepness ? result.steepness.toFixed(4) : 'N/A',
-            result.midpoint ? result.midpoint.toFixed(2) : 'N/A',
-            result.baseline ? result.baseline.toFixed(2) : 'N/A',
-            result.data_points || 'N/A',
-            result.cycle_range ? result.cycle_range.toFixed(1) : 'N/A',
+            result.amplitude ? result.amplitude.toFixed(1) : 'N/A',
+            result.steepness ? result.steepness.toFixed(3) : 'N/A',
+            result.midpoint ? result.midpoint.toFixed(1) : 'N/A',
+            result.baseline ? result.baseline.toFixed(1) : 'N/A',
+            cqValue,
+            cqjText,
+            calcjText,
             `"${anomaliesText}"` // Quote anomalies to handle semicolons
         ];
         
@@ -12644,6 +12733,9 @@ function processCombinedSessionData(sessionDataArray) {
     
     // Set the combined results as current analysis results
     setAnalysisResults(combinedResults, 'combined-session-load');
+    
+    // CRITICAL: Also set analysisResults for export functionality
+    analysisResults = combinedResults;
     
     // IMMEDIATE: Initialize thresholds as soon as combined analysis results are available
     if (window.initializeChannelThresholds) {
