@@ -1129,10 +1129,8 @@ function initializeChannelThresholds() {
         window.updateSliderUI();
     }
     
-    // Update chart annotations with new thresholds
-    setTimeout(() => {
-        if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
-    }, 200);
+    // Chart thresholds will be updated via animation onComplete callback
+    console.log('🔍 THRESHOLD-INIT - Channel thresholds initialized, chart updates will follow via animation callback');
 }
 // Add this function to handle single-channel validation
 function validateAndSetSingleChannel() {

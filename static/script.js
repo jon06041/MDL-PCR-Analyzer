@@ -2,6 +2,9 @@
 // Ensure global analysis results variable is initialized
 window.currentAnalysisResults = null;
 
+// Global flag to prevent threshold conflicts during chart updates
+window.chartUpdating = false;
+
 // ========================================
 // EXPORT BUTTON STATE MANAGEMENT
 // ========================================
@@ -5436,20 +5439,15 @@ function updateChart(wellKey, cyclesData = null, rfuData = null, wellData = null
         `qPCR Amplification Curve - ${wellId} (${fluorophore})`
     );
     
-    window.amplificationChart = new Chart(ctx, chartConfig);
-
-// Initialize thresholds after chart creation
-setTimeout(() => {
-    // Update all channel thresholds
-    if (window.updateAllChannelThresholds) {
-        window.updateAllChannelThresholds();
-    }
+    // Set flag to prevent threshold conflicts during chart creation
+    window.chartUpdating = true;
     
-    // Enable custom dragging functionality
-    if (window.addThresholdDragging) {
-        window.addThresholdDragging();
-    }
-}, 100);
+    window.amplificationChart = new Chart(ctx, chartConfig);
+    
+    // Clear flag after a short delay to allow animation to start
+    setTimeout(() => {
+        window.chartUpdating = false;
+    }, 100);
 }
 
 // Utility functions
@@ -11220,26 +11218,18 @@ function showAllCurves(selectedFluorophore) {
     chartConfig.options.plugins.legend.display = false;
     chartConfig.options.plugins.tooltip.enabled = false;
     
-   window.amplificationChart = new Chart(ctx, chartConfig);
-
-// Initialize thresholds after chart creation with proper completion handling
-setTimeout(() => {
-    console.log(`🔍 MULTICHANNEL - Initializing thresholds for ${selectedFluorophore} (${datasets.length} datasets)`);
+    // Set flag to prevent threshold conflicts during chart creation
+    window.chartUpdating = true;
     
-    // First ensure channel thresholds are calculated
-    if (typeof window.initializeChannelThresholds === 'function') {
-        window.initializeChannelThresholds();
-    }
+    window.amplificationChart = new Chart(ctx, chartConfig);
     
-    // Update all channel thresholds for multichannel display
-    if (window.updateAllChannelThresholds) {
-        window.updateAllChannelThresholds();
-    }
+    // Clear flag after a short delay to allow animation to start
+    setTimeout(() => {
+        window.chartUpdating = false;
+    }, 100);
     
-    // Enable custom dragging functionality
-    if (window.addThresholdDragging) {
-        window.addThresholdDragging();
-    }
+    // Chart thresholds will be initialized via animation onComplete callback
+    console.log(`🔍 MULTICHANNEL - Chart created for ${selectedFluorophore} (${datasets.length} datasets), thresholds will follow via animation callback`);
     
     // Update visible channels set for threshold tracking
     if (selectedFluorophore === 'all') {
@@ -11256,7 +11246,6 @@ setTimeout(() => {
     }
     
     console.log(`🔍 MULTICHANNEL - Chart setup complete for channels: ${Array.from(window.visibleChannels || []).join(', ')}`);
-}, 200); // Increased delay for better reliability
 }
 
 function showGoodCurves(selectedFluorophore) {
@@ -11340,26 +11329,18 @@ function showGoodCurves(selectedFluorophore) {
     chartConfig.options.plugins.legend.display = datasets.length <= 10; // Show legend only for reasonable number of curves
     chartConfig.options.plugins.tooltip.enabled = datasets.length <= 20; // Disable tooltips for better performance
     
-   window.amplificationChart = new Chart(ctx, chartConfig);
-
-// Initialize thresholds after chart creation with proper completion handling
-setTimeout(() => {
-    console.log(`🔍 MULTICHANNEL-GOOD - Initializing thresholds for ${selectedFluorophore} (${datasets.length} good datasets)`);
+    // Set flag to prevent threshold conflicts during chart creation
+    window.chartUpdating = true;
     
-    // First ensure channel thresholds are calculated
-    if (typeof window.initializeChannelThresholds === 'function') {
-        window.initializeChannelThresholds();
-    }
+    window.amplificationChart = new Chart(ctx, chartConfig);
     
-    // Update all channel thresholds for multichannel display
-    if (window.updateAllChannelThresholds) {
-        window.updateAllChannelThresholds();
-    }
+    // Clear flag after a short delay to allow animation to start
+    setTimeout(() => {
+        window.chartUpdating = false;
+    }, 100);
     
-    // Enable custom dragging functionality
-    if (window.addThresholdDragging) {
-        window.addThresholdDragging();
-    }
+    // Chart thresholds will be initialized via animation onComplete callback
+    console.log(`🔍 MULTICHANNEL-GOOD - Chart created for ${selectedFluorophore} (${datasets.length} good datasets), thresholds will follow via animation callback`);
     
     // Update visible channels set for threshold tracking
     if (selectedFluorophore === 'all') {
@@ -11376,7 +11357,6 @@ setTimeout(() => {
     }
     
     console.log(`🔍 MULTICHANNEL-GOOD - Chart setup complete for channels: ${Array.from(window.visibleChannels || []).join(', ')}`);
-}, 200); // Increased delay for better reliability
 }
 
 function showResultsFiltered(selectedFluorophore, resultType) {
@@ -11538,20 +11518,18 @@ window.amplificationChart = new Chart(ctx, {
     chartConfig.options.plugins.tooltip.enabled = datasets.length <= 20;
     chartConfig.options.elements.point.radius = 0;
     
-   window.amplificationChart = new Chart(ctx, chartConfig);
-
-// Initialize thresholds after chart creation
-setTimeout(() => {
-    // Update all channel thresholds
-    if (window.updateAllChannelThresholds) {
-        window.updateAllChannelThresholds();
-    }
+    // Set flag to prevent threshold conflicts during chart creation
+    window.chartUpdating = true;
     
-    // Enable custom dragging functionality
-    if (window.addThresholdDragging) {
-        window.addThresholdDragging();
-    }
-}, 100);
+    window.amplificationChart = new Chart(ctx, chartConfig);
+    
+    // Clear flag after a short delay to allow animation to start
+    setTimeout(() => {
+        window.chartUpdating = false;
+    }, 100);
+    
+    // Chart thresholds will be initialized via animation onComplete callback
+    console.log(`🔍 FILTERED-CHART - Chart created for ${resultType.toUpperCase()} results, thresholds will follow via animation callback`);
 }
 
 function getFluorophoreColor(fluorophore) {
@@ -11654,6 +11632,33 @@ function createChartConfiguration(chartType, datasets, title, annotation = null)
             responsive: true,
             maintainAspectRatio: false,
             aspectRatio: 1.8,
+            animation: {
+                onComplete: function(animation) {
+                    // Initialize thresholds after chart animation is complete
+                    // This ensures all datasets and scales are fully rendered
+                    console.log('🔍 THRESHOLD-TIMING - Chart animation complete, initializing thresholds');
+                    
+                    // Small delay to ensure chart is fully stable
+                    setTimeout(() => {
+                        if (window.amplificationChart && 
+                            window.amplificationChart.data.datasets.length > 0 &&
+                            window.amplificationChart.scales.y) {
+                            
+                            // Check if we're in the middle of chart updates to avoid conflicts
+                            if (!window.chartUpdating) {
+                                if (window.updateChartThresholds) {
+                                    window.updateChartThresholds();
+                                }
+                                
+                                // Enable custom dragging functionality if available
+                                if (window.addThresholdDragging) {
+                                    window.addThresholdDragging();
+                                }
+                            }
+                        }
+                    }, 50);
+                }
+            },
             plugins: {
                 title: {
                     display: true,
