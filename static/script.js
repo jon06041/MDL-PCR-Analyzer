@@ -360,20 +360,30 @@ function updateDisplays() {
         updateBaselineFlatteningVisibility();
     }
     
-    // Update chart based on current state
-    if (state.currentChartMode === 'all') {
-        showAllCurves(state.currentFluorophore);
-    } else if (state.currentChartMode === 'pos') {
-        showGoodCurves(state.currentFluorophore);
-    } else if (state.currentChartMode === 'neg') {
-        showResultsFiltered(state.currentFluorophore, 'neg');
-    } else if (state.currentChartMode === 'redo') {
-        showResultsFiltered(state.currentFluorophore, 'redo');
+    // Update chart based on current state - only if analysis results are available
+    if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+        if (state.currentChartMode === 'all') {
+            showAllCurves(state.currentFluorophore);
+        } else if (state.currentChartMode === 'pos') {
+            showGoodCurves(state.currentFluorophore);
+        } else if (state.currentChartMode === 'neg') {
+            showResultsFiltered(state.currentFluorophore, 'neg');
+        } else if (state.currentChartMode === 'redo') {
+            showResultsFiltered(state.currentFluorophore, 'redo');
+        }
+    } else {
+        console.log('🔄 CHART-LOADING - Analysis results not ready, skipping chart update');
     }
     
     // Update table filter
     if (window.currentAnalysisResults && typeof populateResultsTable === 'function') {
         let filteredResults = window.currentAnalysisResults.individual_results;
+        
+        // Safety check for filteredResults
+        if (!filteredResults) {
+            console.warn('[DIAG] No individual_results available in currentAnalysisResults');
+            return;
+        }
         
         // Filter by fluorophore
         if (state.currentFluorophore !== 'all') {
@@ -11022,7 +11032,7 @@ function showSelectedCurve(wellKey) {
 
 function showAllCurves(selectedFluorophore) {
     if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
-        console.error('No analysis results available for showAllCurves');
+        console.warn('[CHART-LOADING] Analysis results not yet available for showAllCurves, skipping chart update');
         return;
     }
     
@@ -11140,7 +11150,7 @@ setTimeout(() => {
 
 function showGoodCurves(selectedFluorophore) {
     if (!currentAnalysisResults || !currentAnalysisResults.individual_results) {
-        console.error('No analysis results available for showGoodCurves');
+        console.warn('[CHART-LOADING] Analysis results not yet available for showGoodCurves, skipping chart update');
         return;
     }
     
@@ -11260,7 +11270,7 @@ setTimeout(() => {
 
 function showResultsFiltered(selectedFluorophore, resultType) {
     if (!currentAnalysisResults || !currentAnalysisResults.individual_results) {
-        console.error('No analysis results available for showResultsFiltered');
+        console.warn(`[CHART-LOADING] Analysis results not yet available for showResultsFiltered (${resultType}), skipping chart update`);
         return;
     }
     
