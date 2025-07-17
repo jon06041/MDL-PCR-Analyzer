@@ -8465,23 +8465,33 @@ function generateResultsCSV() {
         const wellA = resultA.well_id || wellKeyA.split('_')[0];
         const wellB = resultB.well_id || wellKeyB.split('_')[0];
         
-        // Extract letter and number parts (e.g., "A1" -> letter="A", number=1)
-        const matchA = wellA.match(/^([A-Z])(\d+)$/);
-        const matchB = wellB.match(/^([A-Z])(\d+)$/);
+        // Extract letter and number parts (handle both A1 and A01 formats)
+        const matchA = wellA.match(/^([A-Z]+)(\d+)$/);
+        const matchB = wellB.match(/^([A-Z]+)(\d+)$/);
         
         if (matchA && matchB) {
             const [, letterA, numberA] = matchA;
             const [, letterB, numberB] = matchB;
             
-            // Sort by column (number) first
-            const numCompare = parseInt(numberA) - parseInt(numberB);
+            // Sort by column (number) first - convert to integer for proper numerical sorting
+            const numA = parseInt(numberA, 10);
+            const numB = parseInt(numberB, 10);
+            const numCompare = numA - numB;
             if (numCompare !== 0) return numCompare;
             
             // If columns are equal, sort by row (letter)
             return letterA.localeCompare(letterB);
         }
         
-        // Fallback to alphabetical if pattern doesn't match
+        // Fallback: try to extract just numbers for comparison if regex fails
+        const numOnlyA = wellA.match(/\d+/);
+        const numOnlyB = wellB.match(/\d+/);
+        if (numOnlyA && numOnlyB) {
+            const numCompare = parseInt(numOnlyA[0], 10) - parseInt(numOnlyB[0], 10);
+            if (numCompare !== 0) return numCompare;
+        }
+        
+        // Final fallback to alphabetical if pattern doesn't match
         return wellA.localeCompare(wellB);
     });
     
