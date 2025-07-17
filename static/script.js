@@ -12358,7 +12358,202 @@ async function displaySessionResults(session) {
 
 function processCombinedSessionData(sessionDataArray) {
     console.log("Processing combined session data...");
-    // Implementation for processing combined session data
+    
+    if (!sessionDataArray || sessionDataArray.length === 0) {
+        console.error('No session data provided to processCombinedSessionData');
+        return;
+    }
+    
+    // Combine all well results from all sessions
+    const combinedIndividualResults = {};
+    let totalWells = 0;
+    let goodCurves = 0;
+    const allFluorophores = new Set();
+    
+    sessionDataArray.forEach((sessionData, sessionIndex) => {
+        if (!sessionData.session || !sessionData.wells) {
+            console.warn(`Session ${sessionIndex} has missing data:`, sessionData);
+            return;
+        }
+        
+        const session = sessionData.session;
+        const wells = sessionData.wells;
+        
+        console.log(`Processing session ${session.id}: ${wells.length} wells`);
+        
+        wells.forEach((well, wellIndex) => {
+            totalWells++;
+            
+            // Enhanced fluorophore detection for combined sessions
+            let fluorophore = 'Unknown';
+            let baseWellId = well.well_id;
+            
+            // Method 1: Extract from well_id if it contains fluorophore suffix (A1_Cy5)
+            if (well.well_id.includes('_')) {
+                const parts = well.well_id.split('_');
+                baseWellId = parts[0];
+                const possibleFluorophore = parts[1];
+                if (['Cy5', 'FAM', 'HEX', 'Texas Red'].includes(possibleFluorophore)) {
+                    fluorophore = possibleFluorophore;
+                }
+            }
+            
+            // Method 2: Try to get from well.fluorophore field
+            if (fluorophore === 'Unknown' && well.fluorophore && well.fluorophore !== 'Unknown') {
+                fluorophore = well.fluorophore;
+            }
+            
+            // Method 3: Extract from session filename pattern
+            if (fluorophore === 'Unknown') {
+                fluorophore = detectFluorophoreFromFilename(session.filename);
+            }
+            
+            // Track all fluorophores found
+            if (fluorophore !== 'Unknown') {
+                allFluorophores.add(fluorophore);
+            }
+            
+            // Count good curves
+            if (well.is_good_scurve) {
+                goodCurves++;
+            }
+            
+            const wellKey = well.well_id; // Use the full well_id as stored in database
+            
+            // Debug first few wells from each session
+            if (wellIndex < 2) {
+                console.log(`Combined session well ${well.well_id} from session ${session.id}:`, {
+                    fluorophore: fluorophore,
+                    baseWellId: baseWellId,
+                    amplitude: well.amplitude,
+                    is_good_scurve: well.is_good_scurve,
+                    sample_name: well.sample_name
+                });
+            }
+            
+            // Transform well data into expected format
+            combinedIndividualResults[wellKey] = {
+                curve_classification: well.curve_classification || 'N/A',
+                well_id: baseWellId,
+                fluorophore: fluorophore,
+                is_good_scurve: well.is_good_scurve,
+                // Ensure numeric values are properly converted from database strings
+                r2_score: parseFloat(well.r2_score) || 0,
+                rmse: parseFloat(well.rmse) || 0,
+                amplitude: parseFloat(well.amplitude) || 0,
+                steepness: parseFloat(well.steepness) || 0,
+                midpoint: parseFloat(well.midpoint) || 0,
+                baseline: parseFloat(well.baseline) || 0,
+                data_points: parseInt(well.data_points) || 0,
+                cycle_range: well.cycle_range,
+                sample: well.sample_name,
+                sample_name: well.sample_name,
+                cq_value: well.cq_value ? parseFloat(well.cq_value) : null,
+                
+                // Parse complex fields
+                anomalies: (() => {
+                    try {
+                        if (Array.isArray(well.anomalies)) {
+                            return well.anomalies;
+                        }
+                        const anomaliesStr = well.anomalies || '[]';
+                        return JSON.parse(anomaliesStr);
+                    } catch (e) {
+                        console.warn('Failed to parse anomalies for well', well.well_id, ':', e);
+                        return [];
+                    }
+                })(),
+                fitted_curve: Array.isArray(well.fitted_curve) ? 
+                    well.fitted_curve.map(val => parseFloat(val) || 0) : (() => {
+                    try {
+                        const parsed = JSON.parse(well.fitted_curve || '[]');
+                        return Array.isArray(parsed) ? parsed.map(val => parseFloat(val) || 0) : [];
+                    } catch (e) {
+                        return [];
+                    }
+                })(),
+                raw_cycles: (() => {
+                    if (Array.isArray(well.raw_cycles)) {
+                        return well.raw_cycles.map(val => parseFloat(val) || 0);
+                    }
+                    try {
+                        const parsed = JSON.parse(well.raw_cycles || '[]');
+                        return Array.isArray(parsed) ? parsed.map(val => parseFloat(val) || 0) : [];
+                    } catch (e) {
+                        console.warn('Failed to parse raw_cycles for well', well.well_id, ':', well.raw_cycles);
+                        return [];
+                    }
+                })(),
+                raw_rfu: (() => {
+                    if (Array.isArray(well.raw_rfu)) {
+                        return well.raw_rfu.map(val => parseFloat(val) || 0);
+                    }
+                    try {
+                        const parsed = JSON.parse(well.raw_rfu || '[]');
+                        return Array.isArray(parsed) ? parsed.map(val => parseFloat(val) || 0) : [];
+                    } catch (e) {
+                        console.warn('Failed to parse raw_rfu for well', well.well_id, ':', well.raw_rfu);
+                        return [];
+                    }
+                })(),
+                fit_parameters: typeof well.fit_parameters === 'object' ? well.fit_parameters : (() => {
+                    try {
+                        return JSON.parse(well.fit_parameters || '{}');
+                    } catch (e) {
+                        return {};
+                    }
+                })(),
+                parameter_errors: typeof well.parameter_errors === 'object' ? well.parameter_errors : (() => {
+                    try {
+                        return JSON.parse(well.parameter_errors || '{}');
+                    } catch (e) {
+                        return {};
+                    }
+                })(),
+                threshold_value: well.threshold_value ? parseFloat(well.threshold_value) : null
+            };
+        });
+    });
+    
+    // Calculate success rate
+    const successRate = totalWells > 0 ? (goodCurves / totalWells) * 100 : 0;
+    
+    // Create combined results structure
+    const combinedResults = {
+        total_wells: totalWells,
+        good_curves: Array.from({length: goodCurves}, (_, i) => `Well_${i+1}`), // Placeholder good curves array
+        success_rate: successRate,
+        individual_results: combinedIndividualResults,
+        fluorophore_count: allFluorophores.size,
+        cycle_info: sessionDataArray.length > 0 ? {
+            min: Math.min(...sessionDataArray.map(s => s.session.cycle_min).filter(c => c)),
+            max: Math.max(...sessionDataArray.map(s => s.session.cycle_max).filter(c => c)),
+            count: sessionDataArray[0].session.cycle_count
+        } : null
+    };
+    
+    console.log('Combined session processing complete:', {
+        totalWells: totalWells,
+        goodCurves: goodCurves,
+        successRate: successRate.toFixed(1) + '%',
+        fluorophores: Array.from(allFluorophores),
+        wellsCount: Object.keys(combinedIndividualResults).length
+    });
+    
+    // Set the combined results as current analysis results
+    setAnalysisResults(combinedResults, 'combined-session-load');
+    
+    // Display the combined results
+    if (combinedResults.fluorophore_count > 1) {
+        displayMultiFluorophoreResults(combinedResults);
+    } else {
+        displayAnalysisResults(combinedResults);
+    }
+    
+    // Store session data globally for pathogen target extraction
+    window.currentSessionData = sessionDataArray;
+    
+    console.log('Combined session display completed successfully');
 }
 
 // Delete session functions
