@@ -3033,18 +3033,10 @@ async function markChannelFailed(experimentPattern, fluorophore, errorMessage) {
 
 /**
  * Get current experiment pattern for tracking
+ * This function has been moved to line 8838 with comprehensive session loading support
+ * Keeping this comment for reference - actual function is later in file
  */
-function getCurrentFullPattern() {
-    // Extract pattern from first uploaded file
-    const firstFile = Object.values(amplificationFiles)[0];
-    if (!firstFile || !firstFile.fileName) {
-        return `Unknown_${Date.now()}`;
-    }
-    
-    // Remove extension and create pattern
-    const baseName = firstFile.fileName.replace(/\.(csv|txt)$/i, '');
-    return baseName;
-}
+// getCurrentFullPattern() function moved to comprehensive version later in file
 
 // ========================================
 // END MULTICHANNEL SEQUENTIAL PROCESSING
@@ -3481,6 +3473,17 @@ function extractBasePattern(filename) {
             if (/^[A-Za-z][A-Za-z0-9]*_\d+_CFX\d+$/.test(part)) {
                 return part;
             }
+        }
+    }
+    
+    // Handle Multi-Fluorophore_ prefix format (session loading)
+    if (filename.includes('Multi-Fluorophore_')) {
+        // Extract pattern after "Multi-Fluorophore_"
+        // "Multi-Fluorophore_AcBVAB_2578825_CFX367393" -> "AcBVAB_2578825_CFX367393"
+        const pattern = filename.replace('Multi-Fluorophore_', '');
+        // Validate the extracted pattern
+        if (/^[A-Za-z][A-Za-z0-9]*_\d+_CFX\d+/.test(pattern)) {
+            return pattern;
         }
     }
     
@@ -5847,6 +5850,12 @@ function setAnalysisResults(newResults, source = 'unknown') {
     // Normalize data when loading from external sources (database, history)
     if (source.includes('history') || source.includes('session') || source.includes('load')) {
         newResults = normalizeAnalysisData(newResults);
+        
+        // Preserve filename for pattern extraction during session loading
+        if (newResults && newResults.filename) {
+            window.currentSessionFilename = newResults.filename;
+            console.log(`🔄 [SETTING] Preserved session filename for pattern extraction: ${newResults.filename}`);
+        }
     }
     
     currentAnalysisResults = newResults;
@@ -8836,7 +8845,7 @@ function extractTestCodeFromResults(results) {
 
 // Helper function to get full experiment pattern
 function getCurrentFullPattern() {
-    // Try to get full pattern from current amplification files
+    // Try to get full pattern from current amplification files (fresh uploads)
     if (amplificationFiles && Object.keys(amplificationFiles).length > 0) {
         const firstFile = Object.values(amplificationFiles)[0];
         if (firstFile && firstFile.fileName) {
@@ -8849,9 +8858,14 @@ function getCurrentFullPattern() {
         return extractBasePattern(samplesData.fileName);
     }
     
-    // Try to get pattern from current analysis results (for history loading)
-    if (analysisResults && analysisResults.filename) {
-        return extractBasePattern(analysisResults.filename);
+    // Try to get pattern from current analysis results (session loading)
+    if (currentAnalysisResults && currentAnalysisResults.filename) {
+        return extractBasePattern(currentAnalysisResults.filename);
+    }
+    
+    // Try to get pattern from window analysis results (session loading)
+    if (window.currentAnalysisResults && window.currentAnalysisResults.filename) {
+        return extractBasePattern(window.currentAnalysisResults.filename);
     }
     
     // Try to get pattern from loaded session data

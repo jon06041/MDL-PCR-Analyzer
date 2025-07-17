@@ -538,12 +538,54 @@ function getTestCompletionStatus(sessions) {
     return testStatus;
 }
 
+/**
+ * Get pathogen display name from test code
+ * @param {string} testCode - Test code (e.g., "BVPanelPCR1", "Lacto", "Ctrach")
+ * @returns {string} Human-readable pathogen name
+ */
+function getPathogenName(testCode) {
+    if (!testCode) return 'Unknown Pathogen';
+    
+    // Direct mapping for common test codes
+    const pathogenNames = {
+        'BVPanelPCR1': 'BV Panel PCR 1',
+        'BVPanelPCR2': 'BV Panel PCR 2', 
+        'BVPanelPCR3': 'BV Panel PCR 3',
+        'Lacto': 'Lactobacillus Species',
+        'Calb': 'Candida albicans',
+        'Ctrach': 'Chlamydia trachomatis',
+        'Ngon': 'Neisseria gonorrhoeae',
+        'Tvag': 'Trichomonas vaginalis',
+        'Cglab': 'Candida glabrata',
+        'Cpara': 'Candida parapsilosis',
+        'Ctrop': 'Candida tropicalis',
+        'Gvag': 'Gardnerella vaginalis',
+        'BVAB2': 'BVAB-2',
+        'CHVIC': 'CHVIC',
+        'AtopVag': 'Atopobium vaginae',
+        'Megasphaera': 'Megasphaera Type 1',
+        'Ckru': 'Candida krusei',
+        'GBS': 'Group B Streptococcus',
+        'Saureus': 'Staphylococcus aureus',
+        'Mgen': 'Mycoplasma genitalium',
+        'Upar': 'Ureaplasma parvum',
+        'Uure': 'Ureaplasma urealyticum',
+        'Efaecalis': 'Enterococcus faecalis',
+        'NOV': 'NOV',
+        'FLUA': 'Influenza A',
+        'FLUB': 'Influenza B'
+    };
+    
+    return pathogenNames[testCode] || testCode;
+}
+
 // Export for use in main script
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { PATHOGEN_LIBRARY, getPathogenTarget, extractTestCode };
+    module.exports = { PATHOGEN_LIBRARY, getPathogenTarget, extractTestCode, getPathogenName };
 } else {
     // Make functions available globally in browser
     window.extractTestCode = extractTestCode;
     window.getPathogenTarget = getPathogenTarget;
     window.getRequiredChannels = getRequiredChannels;
+    window.getPathogenName = getPathogenName;
 }
