@@ -4032,6 +4032,20 @@ async function displayAnalysisResults(results) {
     // Ensure global is set before any UI/chart calls
     window.currentAnalysisResults = results;
     
+    // IMMEDIATE: Initialize thresholds as soon as analysis results are available
+    if (window.initializeChannelThresholds) {
+        console.log('🔍 THRESHOLD-INIT - Initializing thresholds immediately after setting analysis results');
+        window.initializeChannelThresholds();
+        
+        // Also immediately update threshold UI elements
+        setTimeout(() => {
+            if (window.updateAllChannelThresholds) {
+                console.log('🔍 THRESHOLD-INIT - Updating threshold UI elements');
+                window.updateAllChannelThresholds();
+            }
+        }, 50);
+    }
+    
     // Update export state for new analysis results
     updateExportState({ 
         hasAnalysisResults: !!(results && results.individual_results && Object.keys(results.individual_results).length > 0),
@@ -4198,6 +4212,20 @@ async function displayAnalysisResults(results) {
 async function displayMultiFluorophoreResults(results) {
     // Ensure global is set before any UI/chart calls
     window.currentAnalysisResults = results;
+    
+    // IMMEDIATE: Initialize thresholds as soon as analysis results are available
+    if (window.initializeChannelThresholds) {
+        console.log('🔍 THRESHOLD-INIT - Initializing thresholds immediately after setting analysis results');
+        window.initializeChannelThresholds();
+        
+        // Also immediately update threshold UI elements
+        setTimeout(() => {
+            if (window.updateAllChannelThresholds) {
+                console.log('🔍 THRESHOLD-INIT - Updating threshold UI elements');
+                window.updateAllChannelThresholds();
+            }
+        }, 50);
+    }
     
     // Update export state for new analysis results
     updateExportState({ 
@@ -8035,6 +8063,20 @@ transformedResults.individual_results[wellKey] = {
         // Set analysis results for proper display (permanent for history loading)
         setAnalysisResults(transformedResults, 'history-session-load');
         
+        // IMMEDIATE: Initialize thresholds as soon as individual session results are available
+        if (window.initializeChannelThresholds) {
+            console.log('🔍 THRESHOLD-INIT - Initializing thresholds immediately after setting individual session results');
+            window.initializeChannelThresholds();
+            
+            // Also immediately update threshold UI elements for history loading
+            setTimeout(() => {
+                if (window.updateAllChannelThresholds) {
+                    console.log('🔍 THRESHOLD-INIT - Updating threshold UI elements for individual session');
+                    window.updateAllChannelThresholds();
+                }
+            }, 50);
+        }
+        
         // Update state with auto-detected fluorophore and reset filters
         updateAppState({
             currentFluorophore: autoSelectedFluorophore,
@@ -8119,6 +8161,20 @@ function loadLocalSessionDetails(sessionIndex) {
         
         // Set analysis results for proper display (permanent for history loading)
         setAnalysisResults(session.results, 'local-history-session');
+        
+        // IMMEDIATE: Initialize thresholds as soon as local session results are available
+        if (window.initializeChannelThresholds) {
+            console.log('🔍 THRESHOLD-INIT - Initializing thresholds immediately after setting local session results');
+            window.initializeChannelThresholds();
+            
+            // Also immediately update threshold UI elements for local history loading
+            setTimeout(() => {
+                if (window.updateAllChannelThresholds) {
+                    console.log('🔍 THRESHOLD-INIT - Updating threshold UI elements for local session');
+                    window.updateAllChannelThresholds();
+                }
+            }, 50);
+        }
         
         // Display the results properly
         if (session.results.fluorophore_count && session.results.fluorophore_count > 1) {
@@ -12542,6 +12598,20 @@ function processCombinedSessionData(sessionDataArray) {
     
     // Set the combined results as current analysis results
     setAnalysisResults(combinedResults, 'combined-session-load');
+    
+    // IMMEDIATE: Initialize thresholds as soon as combined analysis results are available
+    if (window.initializeChannelThresholds) {
+        console.log('🔍 THRESHOLD-INIT - Initializing thresholds immediately after setting combined session results');
+        window.initializeChannelThresholds();
+        
+        // Also immediately update threshold UI elements for history loading
+        setTimeout(() => {
+            if (window.updateAllChannelThresholds) {
+                console.log('🔍 THRESHOLD-INIT - Updating threshold UI elements for combined session');
+                window.updateAllChannelThresholds();
+            }
+        }, 50);
+    }
     
     // Display the combined results
     if (combinedResults.fluorophore_count > 1) {
