@@ -4567,7 +4567,7 @@ function populateFluorophoreSelector(individualResults) {
     
     // Get unique fluorophores
     const fluorophores = [...new Set(Object.values(individualResults).map(result => result.fluorophore || 'Unknown'))];
-    const fluorophoreOrder = ['Cy5', 'FAM', 'HEX', 'Texas Red'];
+    const fluorophoreOrder = ['FAM', 'HEX', 'Texas Red', 'Cy5'];
     
     // Sort fluorophores
     fluorophores.sort((a, b) => {
@@ -8438,20 +8438,51 @@ function generateResultsCSV() {
     
     let csvContent = headers.join(',') + '\n';
     
-    // Sort wells to group by fluorophore for better CSV organization
+    // Sort wells to group by fluorophore priority, then by well number/letter
+    const fluorophoreOrder = ['FAM', 'HEX', 'Texas Red', 'Cy5'];
     const sortedEntries = Object.entries(analysisResults.individual_results).sort((a, b) => {
         const [wellKeyA, resultA] = a;
         const [wellKeyB, resultB] = b;
         
-        // Sort by fluorophore first, then by well
+        // Sort by fluorophore priority first, then by well
         const fluorA = resultA.fluorophore || 'Unknown';
         const fluorB = resultB.fluorophore || 'Unknown';
         
         if (fluorA !== fluorB) {
+            const aIndex = fluorophoreOrder.indexOf(fluorA);
+            const bIndex = fluorophoreOrder.indexOf(fluorB);
+            
+            // Use priority order if both fluorophores are in the list
+            if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
+            if (aIndex !== -1) return -1; // Known fluorophore comes first
+            if (bIndex !== -1) return 1;  // Known fluorophore comes first
+            
+            // If neither in priority list, sort alphabetically
             return fluorA.localeCompare(fluorB);
         }
         
-        return wellKeyA.localeCompare(wellKeyB);
+        // Sort wells by column first, then row (e.g., A1, B1, C1, ... P1, A2, B2, C2, ... P2)
+        const wellA = resultA.well_id || wellKeyA.split('_')[0];
+        const wellB = resultB.well_id || wellKeyB.split('_')[0];
+        
+        // Extract letter and number parts (e.g., "A1" -> letter="A", number=1)
+        const matchA = wellA.match(/^([A-Z])(\d+)$/);
+        const matchB = wellB.match(/^([A-Z])(\d+)$/);
+        
+        if (matchA && matchB) {
+            const [, letterA, numberA] = matchA;
+            const [, letterB, numberB] = matchB;
+            
+            // Sort by column (number) first
+            const numCompare = parseInt(numberA) - parseInt(numberB);
+            if (numCompare !== 0) return numCompare;
+            
+            // If columns are equal, sort by row (letter)
+            return letterA.localeCompare(letterB);
+        }
+        
+        // Fallback to alphabetical if pattern doesn't match
+        return wellA.localeCompare(wellB);
     });
     
     sortedEntries.forEach(([wellKey, result]) => {
