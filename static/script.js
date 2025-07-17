@@ -1615,8 +1615,8 @@ async function handleThresholdStrategyChange() {
 function preserveCurrentFilters() {
     console.log(`🔍 FILTER-PRESERVE - Maintaining current filter state after threshold strategy change`);
     
-    // Force "Show All Curves" view in chart but preserve table filters
-    if (typeof showAllCurves === 'function') showAllCurves('all');
+    // FIXED: Don't recreate chart unnecessarily - just ensure Show All button is active
+    // The chart should already be showing all curves, and thresholds are updated separately
     const showAllBtn = document.getElementById('showAllBtn');
     if (showAllBtn) showAllBtn.classList.add('active');
     

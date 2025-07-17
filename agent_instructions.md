@@ -227,6 +227,7 @@ function waitForChartReadyState(callback, maxAttempts = 20) {
 - ✅ Identified proper solution approaches above
 - ✅ **IMPLEMENTED**: Option 1 (Animation onComplete) - Chart.js animation callback with safety guards
 - ✅ **FIXED**: JavaScript syntax errors resolved (orphaned setTimeout blocks removed)
+- ✅ **FIXED**: Double chart initialization on threshold strategy changes (removed unnecessary showAllCurves call)
 - 🚧 Ready for testing in both fresh analysis and session loading scenarios
 
 ### Implementation Priority
