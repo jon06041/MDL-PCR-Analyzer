@@ -7231,6 +7231,31 @@ function createCombinedSession(experimentPattern, sessions) {
         new Date(b.upload_timestamp) - new Date(a.upload_timestamp)
     );
     
+    // PATHOGEN FIX: Extract proper experiment pattern from session filenames when pattern is "Unknown Pattern"
+    let actualExperimentPattern = experimentPattern;
+    if (experimentPattern === 'Unknown Pattern') {
+        // Try to extract from any session filename that has a proper pattern
+        for (const session of sessions) {
+            const extractedPattern = extractBasePattern(session.filename);
+            if (extractedPattern && extractedPattern !== 'Unknown Pattern') {
+                actualExperimentPattern = extractedPattern;
+                console.log(`🔧 PATHOGEN FIX - Recovered experiment pattern from ${session.filename}: ${actualExperimentPattern}`);
+                break;
+            }
+        }
+        
+        // If still unknown, try harder extraction from session filename
+        if (actualExperimentPattern === 'Unknown Pattern' && sessions.length > 0) {
+            const firstSession = sessions[0];
+            // Look for pattern like "AcBVPanelPCR3_2576724_CFX366953" in any part of filename
+            const patternMatch = firstSession.filename.match(/([A-Za-z]+[A-Za-z0-9]*_\d+_CFX\d+)/);
+            if (patternMatch) {
+                actualExperimentPattern = patternMatch[1];
+                console.log(`🔧 PATHOGEN FIX - Extracted pattern via regex from ${firstSession.filename}: ${actualExperimentPattern}`);
+            }
+        }
+    }
+    
     // Combine all well results from all sessions
     const allWellResults = [];
     const fluorophores = [];
@@ -7304,8 +7329,8 @@ function createCombinedSession(experimentPattern, sessions) {
     
     // Create combined session object
     return {
-        id: `combined_${experimentPattern}`,
-        filename: experimentPattern,
+        id: `combined_${actualExperimentPattern}`,
+        filename: actualExperimentPattern,  // Use recovered experiment pattern
         upload_timestamp: sortedSessions[0].upload_timestamp,
         total_wells: allWellResults.length,
         good_curves: totalPositive,
@@ -7422,8 +7447,23 @@ function calculatePathogenBreakdownFromSessions(sessions) {
         
         const rate = total > 0 ? (positive / total * 100).toFixed(1) : '0.0';
         
-        // Get correct test code and pathogen target
-        const actualTestCode = extractTestCode(session.filename) || 'BVAB';
+        // Get correct test code and pathogen target - Enhanced for combined sessions
+        let actualTestCode = extractTestCode(session.filename);
+        
+        // For combined sessions, try to extract from base pattern if filename extraction fails
+        if (!actualTestCode || actualTestCode === 'Unknown') {
+            // Check if this is part of a combined session by looking at the experiment pattern
+            const basePattern = extractBasePattern(session.filename);
+            actualTestCode = extractTestCode(basePattern);
+            console.log(`🔍 COMBINED HISTORY DEBUG - Extracted from base pattern: ${basePattern} -> ${actualTestCode}`);
+        }
+        
+        // Skip session entirely if no valid test code can be determined
+        if (!actualTestCode || actualTestCode === 'Unknown') {
+            console.log(`🚨 CRITICAL ERROR - Cannot determine test code for session ${session.filename}. Skipping to prevent wrong pathogen mapping.`);
+            return;
+        }
+        
         const pathogenTarget = getPathogenTarget(actualTestCode, fluorophore) || fluorophore;
         console.log(`🔍 HISTORY DEBUG - Session ${session.filename}: testCode=${actualTestCode}, fluorophore=${fluorophore}, target=${pathogenTarget}`);
         
@@ -9528,7 +9568,13 @@ function displayControlValidationAlerts(controlIssues) {
                     <div class="issue-details">
                         <strong>${issue.sampleName}</strong> (${issue.wellKey}, ${(() => {
                             const currentPattern = getCurrentFullPattern();
-                            const testCode = currentPattern ? extractTestCode(currentPattern) : 'BVAB';
+                            const testCode = currentPattern ? extractTestCode(currentPattern) : null;
+                            
+                            // Skip pathogen target mapping if no valid test code
+                            if (!testCode || testCode === 'Unknown') {
+                                console.log(`🚨 Control validation - Cannot determine test code for pattern: ${currentPattern}`);
+                                return issue.fluorophore || 'Unknown';
+                            }
                             
                             // Enhanced fluorophore detection for control validation display
                             let fluorophore = issue.fluorophore;
@@ -12723,6 +12769,30 @@ function processCombinedSessionData(sessionDataArray) {
     // Calculate success rate
     const successRate = totalWells > 0 ? (goodCurves / totalWells) * 100 : 0;
     
+    // CRITICAL FIX: Extract experiment pattern from session data for pathogen mapping
+    let experimentPattern = 'Unknown Pattern';
+    for (const sessionData of sessionDataArray) {
+        if (sessionData.session && sessionData.session.filename) {
+            const extractedPattern = extractBasePattern(sessionData.session.filename);
+            if (extractedPattern && extractedPattern !== 'Unknown Pattern') {
+                experimentPattern = extractedPattern;
+                console.log(`🔧 COMBINED SESSION FIX - Extracted experiment pattern: ${experimentPattern} from ${sessionData.session.filename}`);
+                break;
+            }
+        }
+    }
+    
+    // Set global session filename for getCurrentFullPattern()
+    window.currentSessionFilename = experimentPattern;
+    
+    // Debug cycle info from sessions
+    console.log('🔧 CYCLE DEBUG - Session cycle info:', sessionDataArray.map(s => ({
+        filename: s.session.filename,
+        cycle_min: s.session.cycle_min,
+        cycle_max: s.session.cycle_max,
+        cycle_count: s.session.cycle_count
+    })));
+    
     // Create combined results structure
     const combinedResults = {
         total_wells: totalWells,
@@ -12730,10 +12800,17 @@ function processCombinedSessionData(sessionDataArray) {
         success_rate: successRate,
         individual_results: combinedIndividualResults,
         fluorophore_count: allFluorophores.size,
+        filename: experimentPattern,  // CRITICAL: Set filename for getCurrentFullPattern()
         cycle_info: sessionDataArray.length > 0 ? {
-            min: Math.min(...sessionDataArray.map(s => s.session.cycle_min).filter(c => c)),
-            max: Math.max(...sessionDataArray.map(s => s.session.cycle_max).filter(c => c)),
-            count: sessionDataArray[0].session.cycle_count
+            min: (() => {
+                const validMins = sessionDataArray.map(s => s.session.cycle_min).filter(c => c != null && !isNaN(c));
+                return validMins.length > 0 ? Math.min(...validMins) : 1;
+            })(),
+            max: (() => {
+                const validMaxs = sessionDataArray.map(s => s.session.cycle_max).filter(c => c != null && !isNaN(c));
+                return validMaxs.length > 0 ? Math.max(...validMaxs) : 33;
+            })(),
+            count: sessionDataArray[0].session.cycle_count || 33
         } : null
     };
     

@@ -294,19 +294,19 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             session.cycle_count = cycle_count
             session.cycle_min = cycle_min
             session.cycle_max = cycle_max
-            session.pathogen_breakdown = pathogen_breakdown_display
+            session.pathogen_breakdown = str(pathogen_breakdown_display) if pathogen_breakdown_display else ""
             session.upload_timestamp = datetime.utcnow()
         else:
             # Create new session
             session = AnalysisSession()
-            session.filename = experiment_name
+            session.filename = str(experiment_name)
             session.total_wells = total_wells
             session.good_curves = positive_wells
             session.success_rate = success_rate
             session.cycle_count = cycle_count
             session.cycle_min = cycle_min
             session.cycle_max = cycle_max
-            session.pathogen_breakdown = pathogen_breakdown_display
+            session.pathogen_breakdown = str(pathogen_breakdown_display) if pathogen_breakdown_display else ""
             session.upload_timestamp = datetime.utcnow()
             db.session.add(session)
         
@@ -377,7 +377,7 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             try:
                 well_result = WellResult()
                 well_result.session_id = session.id
-                well_result.well_id = well_key
+                well_result.well_id = str(well_key)
                 well_result.is_good_scurve = bool(well_data.get('is_good_scurve', False))
                 well_result.r2_score = float(well_data.get('r2_score', 0)) if well_data.get('r2_score') is not None else None
                 well_result.rmse = float(well_data.get('rmse', 0)) if well_data.get('rmse') is not None else None
@@ -396,7 +396,8 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                 well_result.raw_cycles = safe_json_dumps(well_data.get('raw_cycles'), [])
                 well_result.raw_rfu = safe_json_dumps(well_data.get('raw_rfu'), [])
                 well_result.sample_name = str(well_data.get('sample_name', '')) if well_data.get('sample_name') else None
-                well_result.cq_value = float(well_data.get('cq_value')) if well_data.get('cq_value') is not None else None
+                cq_value_raw = well_data.get('cq_value')
+                well_result.cq_value = float(cq_value_raw) if cq_value_raw is not None and cq_value_raw != '' else None
                 
                 # Set fluorophore if present - prioritize function parameter over well data
                 well_fluorophore = well_data.get('fluorophore', '')
@@ -1092,19 +1093,19 @@ def save_combined_session():
             session.cycle_count = cycle_count
             session.cycle_min = cycle_min
             session.cycle_max = cycle_max
-            session.pathogen_breakdown = pathogen_breakdown_display
+            session.pathogen_breakdown = str(pathogen_breakdown_display) if pathogen_breakdown_display else ""
             session.upload_timestamp = datetime.utcnow()
         else:
             # Create new analysis session
             session = AnalysisSession()
-            session.filename = display_name
+            session.filename = str(display_name)
             session.total_wells = total_wells
             session.good_curves = positive_wells
             session.success_rate = success_rate
             session.cycle_count = cycle_count
             session.cycle_min = cycle_min
             session.cycle_max = cycle_max
-            session.pathogen_breakdown = pathogen_breakdown_display
+            session.pathogen_breakdown = str(pathogen_breakdown_display) if pathogen_breakdown_display else ""
             
             db.session.add(session)
         
@@ -1120,7 +1121,7 @@ def save_combined_session():
                     continue
                 well_result = WellResult()
                 well_result.session_id = session.id
-                well_result.well_id = well_key
+                well_result.well_id = str(well_key)
                 well_result.is_good_scurve = bool(well_data.get('is_good_scurve', False))
                 well_result.r2_score = float(well_data.get('r2_score', 0)) if well_data.get('r2_score') is not None else None
                 well_result.rmse = float(well_data.get('rmse', 0)) if well_data.get('rmse') is not None else None
@@ -1220,14 +1221,14 @@ def delete_all_sessions():
             print("[DEBUG] Deleting all well results first...")
             if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
                 result = db.session.execute(sql_text('DELETE FROM well_results'))
-                num_wells_deleted = result.rowcount
+                num_wells_deleted = result.rowcount if hasattr(result, 'rowcount') else 0 # type: ignore
             else:
                 num_wells_deleted = WellResult.query.delete()
             print(f"[DEBUG] Deleted {num_wells_deleted} well results")
             print("[DEBUG] Deleting all sessions...")
             if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
                 result = db.session.execute(sql_text('DELETE FROM analysis_sessions'))
-                num_sessions_deleted = result.rowcount
+                num_sessions_deleted = result.rowcount if hasattr(result, 'rowcount') else 0
             else:
                 num_sessions_deleted = AnalysisSession.query.delete()
             print(f"[DEBUG] Deleted {num_sessions_deleted} sessions")
@@ -1270,14 +1271,14 @@ def delete_session(session_id):
             print(f"[DEBUG] Deleting {well_count} well results for session {session_id}...")
             if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
                 result = db.session.execute(sql_text('DELETE FROM well_results WHERE session_id = :session_id'), {'session_id': session_id})
-                num_wells_deleted = result.rowcount
+                num_wells_deleted = result.rowcount if hasattr(result, 'rowcount') else 0
             else:
                 num_wells_deleted = WellResult.query.filter_by(session_id=session_id).delete()
             print(f"[DEBUG] Actually deleted {num_wells_deleted} well results")
             print(f"[DEBUG] Deleting session {session_id}...")
             if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
                 result = db.session.execute(sql_text('DELETE FROM analysis_sessions WHERE id = :session_id'), {'session_id': session_id})
-                sessions_deleted = result.rowcount
+                sessions_deleted = result.rowcount if hasattr(result, 'rowcount') else 0
             else:
                 db.session.delete(session)
                 sessions_deleted = 1
@@ -1349,7 +1350,7 @@ def force_delete_session(session_id):
                     sql_text('DELETE FROM well_results WHERE session_id = :session_id'),
                     {'session_id': session_id}
                 )
-                wells_deleted = result.rowcount
+                wells_deleted = result.rowcount if hasattr(result, 'rowcount') else 0
                 print(f"[FORCE DELETE] Raw SQL deleted {wells_deleted} wells")
                 db.session.commit()
             except Exception as sql_error:
@@ -1461,7 +1462,6 @@ def health_check():
     """Health check endpoint for Railway deployment"""
     try:
         # Basic app health check
-        import os
         port = os.environ.get('PORT', '5000')
         environment = os.environ.get('FLASK_ENV', 'development')
         
@@ -1476,7 +1476,8 @@ def health_check():
         # Test database connection if possible
         try:
             with app.app_context():
-                db.session.execute('SELECT 1')
+                from sqlalchemy import text as sql_text
+                db.session.execute(sql_text('SELECT 1'))
             response_data['database'] = 'connected'
         except Exception as db_error:
             # Don't fail health check due to database issues
