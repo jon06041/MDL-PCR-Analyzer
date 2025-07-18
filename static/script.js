@@ -1168,7 +1168,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 
 
-function getSelectedThresholdStrategy() {
+/*function getSelectedThresholdStrategy() {
     const select = document.getElementById('thresholdStrategySelect');
     if (select && select.value) {
         window.selectedThresholdStrategy = select.value;
@@ -1177,7 +1177,7 @@ function getSelectedThresholdStrategy() {
     }
     console.warn(`🔍 STRATEGY-DEBUG - No strategy selected, returning null`);
     return null;
-}
+}*/
 
 // THRESHOLD STRATEGY DROPDOWN FUNCTIONS MOVED TO threshold_frontend.js
 // All threshold strategy dropdown functionality is now handled in threshold_frontend.js

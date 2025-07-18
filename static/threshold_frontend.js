@@ -176,7 +176,18 @@ function safeSetItem(storage, key, value) {
 }
 
 function getSelectedThresholdStrategy() {
-    return window.selectedThresholdStrategy || 'default';
+    // First try to get from DOM element (most current)
+    const select = document.getElementById('thresholdStrategySelect');
+    if (select && select.value) {
+        window.selectedThresholdStrategy = select.value;
+        console.log(`🔍 STRATEGY-UPDATE - Selected strategy from dropdown: "${select.value}"`);
+        return select.value;
+    }
+    
+    // Fallback to global variable
+    const fallback = window.selectedThresholdStrategy || 'default';
+    console.log(`🔍 STRATEGY-FALLBACK - Using fallback strategy: "${fallback}"`);
+    return fallback;
 }
 
 // --- Threshold Storage Functions ---
@@ -858,6 +869,47 @@ if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
             B: B,
             fixed_value: null  // Will be set by calculateThreshold if needed
         };
+        
+        // FOR DERIVATIVE STRATEGIES: Add curve data (rfu and cycles arrays)
+        if (strategy === 'log_max_derivative' || strategy === 'log_second_derivative_max' || strategy === 'linear_max_slope') {
+            console.log(`🔍 DERIVATIVE-STRATEGY - Preparing curve data for strategy: ${strategy}`);
+            
+            // Find a representative well for this channel with full curve data
+            if (window.currentAnalysisResults) {
+                const resultsToCheck = window.currentAnalysisResults.individual_results || window.currentAnalysisResults;
+                const channelWells = Object.values(resultsToCheck).filter(well => 
+                    well != null && well.fluorophore === channel && well.raw_rfu && well.cycles
+                );
+                
+                if (channelWells.length > 0) {
+                    // Use the first well with complete data
+                    const representativeWell = channelWells[0];
+                    let rfu = representativeWell.raw_rfu;
+                    let cycles = representativeWell.cycles;
+                    
+                    // Parse if they're strings
+                    if (typeof rfu === 'string') {
+                        try { rfu = JSON.parse(rfu); } catch(e) { rfu = null; }
+                    }
+                    if (typeof cycles === 'string') {
+                        try { cycles = JSON.parse(cycles); } catch(e) { cycles = null; }
+                    }
+                    
+                    if (Array.isArray(rfu) && Array.isArray(cycles) && rfu.length === cycles.length && rfu.length > 5) {
+                        params.rfu = rfu;
+                        params.cycles = cycles;
+                        params.curve = rfu; // Alias for compatibility
+                        console.log(`🔍 DERIVATIVE-STRATEGY - Added curve data: ${rfu.length} points for ${channel}`);
+                    } else {
+                        console.warn(`⚠️ DERIVATIVE-STRATEGY - Invalid curve data for ${channel}. RFU length: ${rfu?.length}, Cycles length: ${cycles?.length}`);
+                        return null; // Can't calculate derivative without proper curve data
+                    }
+                } else {
+                    console.warn(`⚠️ DERIVATIVE-STRATEGY - No wells with curve data found for channel: ${channel}`);
+                    return null; // Can't calculate derivative without curve data
+                }
+            }
+        }
         
         try {
             const threshold = window.calculateThreshold(strategy, params, scale);
