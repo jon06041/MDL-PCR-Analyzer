@@ -4,12 +4,36 @@
 
 // Add this combined initialization function
 
+// Debounce utility to prevent rapid-fire function calls
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
 /**
  * Initialize threshold system after new analysis results are loaded
  * Call this ONCE after displayAnalysisResults or displayMultiFluorophoreResults
  */
 window.initializeThresholdSystem = function() {
     console.log('🔍 THRESHOLD-INIT - Initializing complete threshold system');
+    
+    // Add loading state guard to prevent multiple concurrent initializations
+    if (window.appState && window.appState.uiState && window.appState.uiState.isThresholdLoading) {
+        console.log('🔍 THRESHOLD-INIT - Already initializing, skipping duplicate request');
+        return;
+    }
+    
+    // Set loading flag
+    if (window.appState && window.appState.uiState) {
+        window.appState.uiState.isThresholdLoading = true;
+    }
     
     // 1. Extract control wells
     if (window.extractChannelControlWells) {
@@ -31,8 +55,16 @@ window.initializeThresholdSystem = function() {
         window.updateChartThresholds();
     }
     
+    // Clear loading flag
+    if (window.appState && window.appState.uiState) {
+        window.appState.uiState.isThresholdLoading = false;
+    }
+    
     console.log('✅ THRESHOLD-INIT - Threshold system initialization complete');
 };
+
+// Create debounced version for use in rapid-fire scenarios
+window.initializeThresholdSystemDebounced = debounce(window.initializeThresholdSystem, 300);
 
 
 // --- Global threshold storage ---
@@ -191,11 +223,17 @@ function getSelectedThresholdStrategy() {
 function initializeThresholdStrategyDropdown() {
     const select = document.getElementById('thresholdStrategySelect');
     if (select) {
-        // Remove any existing listeners
-        select.removeEventListener('change', handleThresholdStrategyDropdownChange);
+        // Remove any existing listeners to prevent duplicates
+        if (select._thresholdStrategyHandler) {
+            select.removeEventListener('change', select._thresholdStrategyHandler);
+            delete select._thresholdStrategyHandler;
+        }
+        
+        // Create and store the handler
+        select._thresholdStrategyHandler = handleThresholdStrategyDropdownChange;
         
         // Add new listener
-        select.addEventListener('change', handleThresholdStrategyDropdownChange);
+        select.addEventListener('change', select._thresholdStrategyHandler);
         
         console.log(`🔍 STRATEGY-INIT - Added change listener to threshold strategy dropdown`);
     } else {
@@ -548,10 +586,21 @@ function addThresholdDragging() {
     }
     
     // Remove any existing listeners to prevent duplicates
-    canvas.removeEventListener('mousedown', handleMouseDown);
-    canvas.removeEventListener('mousemove', handleMouseMove);
-    canvas.removeEventListener('mouseup', handleMouseUp);
-    canvas.removeEventListener('mouseleave', handleMouseLeave);
+    if (canvas._thresholdDragHandlers) {
+        canvas.removeEventListener('mousedown', canvas._thresholdDragHandlers.mousedown);
+        canvas.removeEventListener('mousemove', canvas._thresholdDragHandlers.mousemove);
+        canvas.removeEventListener('mouseup', canvas._thresholdDragHandlers.mouseup);
+        canvas.removeEventListener('mouseleave', canvas._thresholdDragHandlers.mouseleave);
+        delete canvas._thresholdDragHandlers;
+    }
+    
+    // Store handlers for future cleanup
+    canvas._thresholdDragHandlers = {
+        mousedown: handleMouseDown,
+        mousemove: handleMouseMove,
+        mouseup: handleMouseUp,
+        mouseleave: handleMouseLeave
+    };
     
     // Add event listeners
     canvas.addEventListener('mousedown', handleMouseDown);
@@ -1091,6 +1140,12 @@ function updateThresholdInputForCurrentScale() {
 
 function updateChartThresholds() {
     console.log('🔍 CHART-THRESHOLD - Updating chart thresholds');
+    
+    // Add loading state guard to prevent multiple concurrent updates
+    if (window.appState && window.appState.uiState && window.appState.uiState.isChartLoading) {
+        console.log('🔍 CHART-THRESHOLD - Chart is loading, skipping threshold update');
+        return;
+    }
     
     if (!window.amplificationChart) {
         console.warn('🔍 CHART-THRESHOLD - No chart available');
