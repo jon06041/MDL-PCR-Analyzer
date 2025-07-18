@@ -10,10 +10,56 @@
 ✅ **Chart Animation Timing**: Fixed threshold initialization timing using Chart.js animation callbacks  
 
 ### Current Focus Areas
-🚧 **Timing Issues**: Chart and threshold loading synchronization problems  
-🚧 **Multiple Loading**: Preventing duplicate chart/threshold initialization  
-🚧 **UI Coordination**: Ensuring proper fluorophore/channel coordination in multichannel mode  
-🚧 **State Persistence**: Maintaining consistent state across scale changes and data loads  
+🚧 **Chart Creation Unification**: Unified chart creation system architecture designed - **IMPLEMENTATION DEFERRED**  
+🚧 **CSMS Chart Integration**: Chart state management integration with unified creation system planned  
+🚧 **Race Condition Prevention**: Multiple chart creation functions identified - unification needed  
+🚧 **Multichannel Coordination**: Ensuring proper chart coordination across multiple fluorophore channels  
+
+### Immediate Next Steps (When Resuming Work)
+1. **Complete createUnifiedChart() Implementation**: Fill in missing logic for dataset creation and chart configuration
+2. **Replace Chart Creation Functions**: Update all 5 existing chart creation functions to use unified system
+3. **Update Function Calls**: Modify all callers (displayMultiFluorophoreResults, showResultsFiltered, etc.) to use unified API
+4. **CSMS Integration**: Ensure chart state is properly managed through Central State Management System
+5. **Testing**: Verify all chart creation scenarios work with unified function and prevent race conditions  
+
+### Latest Progress (Current Session)
+✅ **Export Button CSV Issue**: Fixed duplicate CSV generation by removing duplicate event handlers  
+✅ **CalcJ Scientific Notation**: Implemented scientific notation formatting for calcj values  
+✅ **Chart Color Enhancement**: Made chart curve colors 25% lighter for better visibility  
+✅ **Root Cause Identified**: Found multiple chart creation functions causing initialization conflicts  
+🚧 **Unified Chart Creation**: Implemented createUnifiedChart function architecture - **IMPLEMENTATION DEFERRED**  
+🚧 **Function Replacement**: Chart creation unification work paused - to be completed when switching computers  
+🚧 **CSMS Chart Integration**: Chart state management integration with unified creation system planned  
+
+### Chart Creation Unification (WORK IN PROGRESS - DEFERRED)
+**Status**: Architecture designed, implementation started but not completed  
+**Current State**: `createUnifiedChart()` function shell implemented with helper functions  
+**Next Steps**: Complete implementation and replace all existing chart creation functions  
+
+#### Implementation Plan:
+1. **Complete createUnifiedChart() function** - Fill in missing logic for dataset creation
+2. **Replace existing chart functions** - Update 5 chart creation functions to use unified system
+3. **Update function calls** - Modify all callers to use unified chart creation API
+4. **CSMS Integration** - Ensure chart state is properly managed through Central State Management System
+5. **Testing** - Verify all chart creation scenarios work with unified function
+
+#### Functions to Replace:
+- Line ~5477: Individual well chart creation
+- Line ~11435: Multi-fluorophore display (`showMultichannelResults`)
+- Line ~11546: Positive curves display (`showGoodCurves`) 
+- Line ~11664: Filtered results display (`showResultsFiltered`)
+- Line ~11735: Empty chart creation function
+
+#### CSMS Chart State Structure:
+```javascript
+chartState: {
+    currentChartType: 'single',   // Current chart type (single/multi)
+    selectedFluorophore: 'all',   // Currently selected fluorophore for chart
+    filterType: 'all',            // Current filter type (all/good/pos/neg/redo)
+    isChartUpdating: false,       // Flag to prevent chart conflicts
+    visibleChannels: new Set()    // Set of visible channels for threshold tracking
+}
+```  
 
 ## Central State Management System (CSMS)
 
@@ -41,9 +87,39 @@ window.appState = {
         stableChannelThresholds: {},  // Calculated thresholds per channel/scale
         manualThresholds: {},         // Manual threshold override flags
         selectedStrategy: 'default'   // Current threshold strategy
+    },
+    chartState: {
+        currentChartType: 'single',   // Current chart type (single/multi)
+        selectedFluorophore: 'all',   // Currently selected fluorophore for chart
+        filterType: 'all',            // Current filter type (all/good/pos/neg/redo)
+        isChartUpdating: false,       // Flag to prevent chart conflicts
+        visibleChannels: new Set()    // Set of visible channels for threshold tracking
     }
 }
 ```
+
+### Chart Creation Integration
+The unified chart creation system is now integrated into CSMS:
+
+#### `createUnifiedChart(chartType, selectedFluorophore, filterType)` - **IMPLEMENTATION DEFERRED**
+- **Purpose**: Single function to handle all chart creation scenarios
+- **Status**: Architecture designed, shell implemented with helper functions, **IMPLEMENTATION INCOMPLETE**
+- **Integration**: Will update `window.appState.chartState` with current chart parameters
+- **Prevents**: Multiple chart creation functions overwriting `window.amplificationChart`
+- **Handles**: All chart types (single well, multi-well, filtered views)
+
+#### Chart Creation Functions Being Replaced:
+1. `createAmplificationChart()` - Single well charts (line ~5477)
+2. `showMultichannelResults()` - Multi-fluorophore display (line ~11435)
+3. `showGoodCurves()` - Positive amplitude curves (line ~11546)
+4. `showResultsFiltered()` - Filtered result views (line ~11664)
+5. Empty chart creation function (line ~11735)
+
+#### CSMS Chart State Management:
+- **State Tracking**: All chart parameters stored in `window.appState.chartState`
+- **Conflict Prevention**: Single chart creation function prevents race conditions
+- **Coordination**: Chart state coordinates with fluorophore selectors and filters
+- **Threshold Integration**: Chart state works with threshold system for proper initialization
 
 ### Key Functions
 
@@ -62,7 +138,7 @@ Maintained for backward compatibility - routes calls to the new state management
 
 ### UI Synchronization
 
-The export button UI is automatically synchronized through the `syncUIElements()` function in the central state system:
+The CSMS automatically synchronizes UI elements through the `syncUIElements()` function:
 
 ```javascript
 // Sync export button state
@@ -74,6 +150,39 @@ if (exportBtn) {
     exportBtn.title = state.exportState.isEnabled ? 'Export analysis results to CSV' : state.exportState.disabledReason;
     exportBtn.textContent = state.exportState.buttonText;
 }
+
+// Sync chart state elements
+const wellSelector = document.getElementById('wellSelect');
+const fluorophoreSelector = document.getElementById('fluorophoreSelect');
+if (wellSelector && fluorophoreSelector) {
+    // Coordinate fluorophore selection with chart state
+    if (state.chartState.selectedFluorophore !== fluorophoreSelector.value) {
+        fluorophoreSelector.value = state.chartState.selectedFluorophore;
+    }
+}
+```
+
+### Chart State Update Triggers
+
+Chart state is automatically updated when:
+
+1. **Chart Creation**: When `createUnifiedChart()` is called
+2. **Fluorophore Selection**: When fluorophore dropdown changes
+3. **Filter Changes**: When view filters (all/good/pos/neg/redo) change
+4. **Well Selection**: When individual well is selected
+5. **Threshold Updates**: When threshold system requires chart refresh
+
+### Unified Chart Creation Flow
+
+```javascript
+// Instead of multiple chart creation functions:
+// OLD: createAmplificationChart(), showMultichannelResults(), showGoodCurves(), etc.
+
+// NEW: Single unified function integrated with CSMS
+createUnifiedChart('multi', 'FAM', 'good');
+// Updates window.appState.chartState automatically
+// Prevents multiple chart instances
+// Coordinates with threshold system
 ```
 
 ### State Update Triggers
