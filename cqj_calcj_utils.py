@@ -5,7 +5,7 @@ CQJ/CalcJ calculation utilities for qPCR analysis
 from typing import List, Optional
 import numpy as np
 
-def calculate_cqj(rfu: List[float], cycles: List[float], threshold: float) -> Optional[float]:
+def calculate_cqj_simple(rfu: List[float], cycles: List[float], threshold: float) -> Optional[float]:
     """
     Calculate the cycle at which RFU crosses the threshold (linear interpolation).
     Skips first 5 cycles for baseline noise reduction.
@@ -24,7 +24,7 @@ def calculate_cqj(rfu: List[float], cycles: List[float], threshold: float) -> Op
             return interpolated_cq
     return None
 
-def calculate_calcj(amplitude: float, threshold: float) -> Optional[float]:
+def calculate_calcj_simple(amplitude: float, threshold: float) -> Optional[float]:
     """
     Example CalcJ calculation: amplitude / threshold
     """
@@ -55,7 +55,8 @@ def calculate_cqj(well, threshold):
     
     # Ensure we have enough data points after skipping early cycles
     if len(raw_rfu) <= start_index:
-        print(f"[CQJ-DEBUG] Well {well.get('well_id', 'unknown')}: Insufficient data after skipping first 5 cycles")
+        well_id = well.get('well_id', 'UNKNOWN')
+        print(f"[CQJ-DEBUG] Well {well_id}: Insufficient data after skipping first 5 cycles")
         return None
     
     for i in range(start_index, len(raw_rfu)):
@@ -64,7 +65,8 @@ def calculate_cqj(well, threshold):
             if i == start_index:
                 # If cycle 5 (first valid cycle) already exceeds threshold, 
                 # this is likely baseline noise or pre-amplification artifact - return None
-                print(f"[CQJ-DEBUG] Well {well.get('well_id', 'unknown')}: Cycle 5 already above threshold ({raw_rfu[i]} >= {threshold}), ignoring as baseline noise")
+                well_id = well.get('well_id', 'UNKNOWN')
+                print(f"[CQJ-DEBUG] Well {well_id}: Cycle 5 already above threshold ({raw_rfu[i]} >= {threshold}), ignoring as baseline noise")
                 return None
             x0 = raw_cycles[i - 1]
             x1 = raw_cycles[i]
@@ -73,26 +75,35 @@ def calculate_cqj(well, threshold):
             if y1 == y0:
                 return x1  # avoid div by zero
             interpolated = x0 + (threshold - y0) * (x1 - x0) / (y1 - y0)
-            print(f"[CQJ-DEBUG] Well {well.get('well_id', 'unknown')}: CQJ={interpolated:.2f} (threshold crossing between cycles {x0}-{x1})")
+            well_id = well.get('well_id', 'UNKNOWN')
+            print(f"[CQJ-DEBUG] Well {well_id}: CQJ={interpolated:.2f} (threshold crossing between cycles {x0}-{x1})")
             return interpolated
     
-    print(f"[CQJ-DEBUG] Well {well.get('well_id', 'unknown')}: No threshold crossing found (max RFU: {max(raw_rfu) if raw_rfu else 'N/A'})")
+    well_id = well.get('well_id', 'UNKNOWN')
+    print(f"[CQJ-DEBUG] Well {well_id}: No threshold crossing found (max RFU: {max(raw_rfu) if raw_rfu else 'N/A'})")
     return None  # never crossed
 
 def calculate_calcj(well, threshold):
     """
     Example: Calc-J = amplitude / threshold (replace with real formula if needed)
     """
+    well_id = well.get('well_id', 'UNKNOWN')
     amplitude = well.get('amplitude')
     if amplitude is None or not threshold:
+        print(f"[CALCJ-DEBUG] Well {well_id}: Missing amplitude ({amplitude}) or threshold ({threshold})")
         return None
-    return amplitude / threshold
+    result = amplitude / threshold
+    print(f"[CALCJ-DEBUG] Well {well_id}: CalcJ = {amplitude} / {threshold} = {result}")
+    return result
 
 def calculate_cqj_calcj_for_well(well_data, strategy, threshold):
     """
     Calculate both CQJ and CalcJ for a well with the given threshold strategy.
     Returns a dict with cqj_value and calcj_value.
     """
+    well_id = well_data.get('well_id', 'UNKNOWN')
+    print(f"[CQJ-CALCJ-DEBUG] Starting calculation for well_id: '{well_id}' with threshold: {threshold}")
+    
     result = {
         'cqj_value': None,
         'calcj_value': None,
@@ -113,8 +124,9 @@ def calculate_cqj_calcj_for_well(well_data, strategy, threshold):
         result['cqj'] = {strategy: cqj_value} if cqj_value is not None else {strategy: None}
         result['calcj'] = {strategy: calcj_value} if calcj_value is not None else {strategy: None}
         
+        print(f"[CQJ-CALCJ-DEBUG] Final result for {well_id}: CQJ={cqj_value}, CalcJ={calcj_value}")
         return result
         
     except Exception as e:
-        print(f"[CQJ-CALCJ-ERROR] Error calculating for well {well_data.get('well_id', 'unknown')}: {e}")
+        print(f"[CQJ-CALCJ-ERROR] Error calculating for well {well_data.get('well_id', 'UNKNOWN')}: {e}")
         return result

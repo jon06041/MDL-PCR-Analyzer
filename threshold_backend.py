@@ -14,6 +14,103 @@ import traceback
 def create_threshold_routes(app):
     """Create threshold-related routes for the Flask app"""
     
+    @app.route('/debug/well-data/<int:session_id>', methods=['GET'])
+    def debug_well_data(session_id):
+        """Debug endpoint to inspect well data structure"""
+        try:
+            session = AnalysisSession.query.get(session_id)
+            if not session:
+                return jsonify({'error': f'Session {session_id} not found'}), 404
+            
+            wells = WellResult.query.filter_by(session_id=session_id).limit(5).all()  # Only first 5 wells
+            debug_info = []
+            
+            for well in wells:
+                well_data = {
+                    'well_id': well.well_id,
+                    'fluorophore': well.fluorophore,
+                    'amplitude': well.amplitude,
+                    'baseline': well.baseline,
+                    'raw_rfu': json.loads(well.raw_rfu) if well.raw_rfu else [],
+                    'raw_cycles': json.loads(well.raw_cycles) if well.raw_cycles else []
+                }
+                
+                debug_info.append({
+                    'db_well_id': well.well_id,
+                    'well_id_type': type(well.well_id).__name__,
+                    'well_id_value': repr(well.well_id),
+                    'well_data_keys': list(well_data.keys()),
+                    'well_data_well_id': well_data.get('well_id'),
+                    'well_data_well_id_type': type(well_data.get('well_id')).__name__,
+                    'fluorophore': well.fluorophore,
+                    'sample_name': well.sample_name,
+                    'has_raw_rfu': bool(well.raw_rfu),
+                    'has_raw_cycles': bool(well.raw_cycles),
+                    'raw_rfu_length': len(json.loads(well.raw_rfu)) if well.raw_rfu else 0,
+                    'raw_cycles_length': len(json.loads(well.raw_cycles)) if well.raw_cycles else 0
+                })
+            
+            return jsonify({
+                'success': True,
+                'session_id': session_id,
+                'wells_count': len(wells),
+                'debug_info': debug_info
+            })
+            
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    
+    @app.route('/debug/test-cqj/<int:session_id>/<string:well_id>', methods=['GET'])
+    def debug_test_cqj(session_id, well_id):
+        """Debug endpoint to test CQJ calculation for a specific well"""
+        try:
+            well = WellResult.query.filter_by(session_id=session_id, well_id=well_id).first()
+            if not well:
+                return jsonify({'error': f'Well {well_id} not found in session {session_id}'}), 404
+            
+            # Create well_data exactly as done in threshold update
+            well_data = {
+                'well_id': well.well_id,
+                'fluorophore': well.fluorophore,
+                'amplitude': well.amplitude,
+                'baseline': well.baseline,
+                'raw_rfu': json.loads(well.raw_rfu) if well.raw_rfu else [],
+                'raw_cycles': json.loads(well.raw_cycles) if well.raw_cycles else []
+            }
+            
+            # Test with a sample threshold
+            test_threshold = 1000.0
+            
+            # Calculate CQJ directly
+            from cqj_calcj_utils import calculate_cqj, calculate_calcj
+            cqj_result = calculate_cqj(well_data, test_threshold)
+            calcj_result = calculate_calcj(well_data, test_threshold)
+            
+            return jsonify({
+                'success': True,
+                'well_id': well_id,
+                'well_data_structure': {
+                    'keys': list(well_data.keys()),
+                    'well_id': well_data.get('well_id'),
+                    'well_id_type': type(well_data.get('well_id')).__name__,
+                    'well_id_repr': repr(well_data.get('well_id')),
+                    'fluorophore': well_data.get('fluorophore'),
+                    'amplitude': well_data.get('amplitude'),
+                    'raw_rfu_length': len(well_data.get('raw_rfu', [])),
+                    'raw_cycles_length': len(well_data.get('raw_cycles', []))
+                },
+                'test_threshold': test_threshold,
+                'cqj_result': cqj_result,
+                'calcj_result': calcj_result
+            })
+            
+        except Exception as e:
+            import traceback
+            return jsonify({
+                'error': str(e),
+                'traceback': traceback.format_exc()
+            }), 500
+    
     @app.route('/threshold/update', methods=['POST'])
     def update_threshold_strategy():
         """Handle threshold strategy updates from frontend"""
@@ -150,6 +247,10 @@ def recalculate_session_cqj_calcj(session_id, channel, scale, threshold_value, e
         
         print(f"[RECALC-CQJ] Found {len(wells)} wells in session")
         
+        # Debug: Show all wells in session
+        for well in wells:
+            print(f"[RECALC-CQJ] Available well: {well.well_id}, fluorophore: {well.fluorophore}")
+        
         # Process each well
         for well in wells:
             try:
@@ -165,12 +266,15 @@ def recalculate_session_cqj_calcj(session_id, channel, scale, threshold_value, e
                 
                 # Only recalculate for wells matching the channel
                 if well_data['fluorophore'] != channel:
+                    print(f"[RECALC-CQJ] Skipping well {well.well_id}: fluorophore '{well_data['fluorophore']}' != channel '{channel}'")
                     continue
                 
                 print(f"[RECALC-CQJ] Processing well {well.well_id} for channel {channel}")
                 
                 # Calculate new CQJ/CalcJ values
                 recalc_result = calculate_cqj_calcj_for_well(well_data, 'manual', threshold_value)
+                
+                print(f"[RECALC-CQJ] Calculation result for {well.well_id}: {recalc_result}")
                 
                 if recalc_result:
                     # Update well in database

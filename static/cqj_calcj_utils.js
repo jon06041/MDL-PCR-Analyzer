@@ -159,6 +159,99 @@ window.calculateThresholdCrossing = calculateThresholdCrossing;
 window.recalculateCQJValues = recalculateCQJValues;
 window.calculateCalcj = calculateCalcj;
 
+// Debug function to inspect well data structure on backend
+window.debugWellData = async function(sessionId = null) {
+    try {
+        // Try to get session ID from current analysis if not provided
+        if (!sessionId && window.currentAnalysisResults && window.currentAnalysisResults.session_id) {
+            sessionId = window.currentAnalysisResults.session_id;
+        }
+        
+        if (!sessionId) {
+            console.error('❌ DEBUG - No session ID provided or available');
+            return;
+        }
+        
+        console.log(`🔍 DEBUG - Fetching well data for session ${sessionId}`);
+        
+        const response = await fetch(`/debug/well-data/${sessionId}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            console.log('✅ DEBUG - Well data structure:', data);
+            
+            // Display key information
+            console.log(`📊 DEBUG - Session ${sessionId}: ${data.wells_count} wells`);
+            data.debug_info.forEach((wellInfo, index) => {
+                console.log(`🔍 DEBUG - Well ${index + 1}:`, {
+                    'DB well_id': wellInfo.db_well_id,
+                    'well_id type': wellInfo.well_id_type,
+                    'well_id value': wellInfo.well_id_value,
+                    'fluorophore': wellInfo.fluorophore,
+                    'sample_name': wellInfo.sample_name,
+                    'has data': wellInfo.has_raw_rfu && wellInfo.has_raw_cycles,
+                    'data length': `${wellInfo.raw_rfu_length}/${wellInfo.raw_cycles_length}`
+                });
+            });
+            
+            return data;
+        } else {
+            console.error('❌ DEBUG - Failed to fetch well data:', data.error);
+            return data;
+        }
+    } catch (error) {
+        console.error('❌ DEBUG - Error fetching well data:', error);
+        return { error: error.message };
+    }
+};
+
+// Debug function to test CQJ calculation for a specific well
+window.debugTestCQJ = async function(wellId, sessionId = null) {
+    try {
+        // Try to get session ID from current analysis if not provided
+        if (!sessionId && window.currentAnalysisResults && window.currentAnalysisResults.session_id) {
+            sessionId = window.currentAnalysisResults.session_id;
+        }
+        
+        if (!sessionId) {
+            console.error('❌ DEBUG - No session ID provided or available');
+            return;
+        }
+        
+        if (!wellId) {
+            console.error('❌ DEBUG - No well ID provided');
+            return;
+        }
+        
+        console.log(`🔍 DEBUG - Testing CQJ calculation for well ${wellId} in session ${sessionId}`);
+        
+        const response = await fetch(`/debug/test-cqj/${sessionId}/${wellId}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            console.log('✅ DEBUG - CQJ test results:', data);
+            
+            console.log(`🔍 DEBUG - Well ${wellId}:`, {
+                'Well data structure': data.well_data_structure,
+                'Test threshold': data.test_threshold,
+                'CQJ result': data.cqj_result,
+                'CalcJ result': data.calcj_result
+            });
+            
+            return data;
+        } else {
+            console.error('❌ DEBUG - Failed to test CQJ:', data.error);
+            if (data.traceback) {
+                console.error('❌ DEBUG - Traceback:', data.traceback);
+            }
+            return data;
+        }
+    } catch (error) {
+        console.error('❌ DEBUG - Error testing CQJ:', error);
+        return { error: error.message };
+    }
+};
+
 // Alias for backward compatibility
 window.calculateCqj = function(well, threshold) {
     // Convert well object to arrays and call calculateThresholdCrossing

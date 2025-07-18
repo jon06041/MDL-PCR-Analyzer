@@ -1,3 +1,22 @@
+# [2025-07-18] CRITICAL: Application Restart Command
+
+## 🚀 RESTART THE APPLICATION
+To restart the Flask application, use:
+```bash
+bash run_on_5000.sh
+```
+This script handles proper app restart and runs on port 5000.
+
+## 🔍 DEBUGGING TOOLS
+For debugging threshold/CQJ issues, use these browser console commands:
+- `debugWellData()` - Inspect well data structure on backend
+- `debugTestCQJ('A1_FAM')` - Test CQJ calculation for specific well
+- `window.currentAnalysisResults` - View current frontend data
+- `window.stableChannelThresholds` - View current threshold values
+- `recalculateCQJValues()` - Force recalculation of all CQJ values
+
+---
+
 # [2025-07-15] CRITICAL: Log Scale Threshold System Fixed + Frontend Reorganization Complete
 
 ## MAJOR UPDATE: Threshold Functions Reorganized + Log Scale Issues Fixed
