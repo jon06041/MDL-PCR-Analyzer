@@ -2032,6 +2032,31 @@ function extractChannelControlWells() {
 // moved to threshold_frontend.js for better organization and global access.
 
 /**
+ * Lighten a hex color by a percentage
+ * @param {string} hex - The hex color (e.g., '#ff0000')
+ * @param {number} percent - The percentage to lighten (0-100)
+ * @returns {string} - The lightened hex color
+ */
+function lightenColor(hex, percent) {
+    // Remove the hash if present
+    const cleanHex = hex.replace('#', '');
+    
+    // Parse the hex color
+    const r = parseInt(cleanHex.substring(0, 2), 16);
+    const g = parseInt(cleanHex.substring(2, 4), 16);
+    const b = parseInt(cleanHex.substring(4, 6), 16);
+    
+    // Lighten each component
+    const newR = Math.min(255, Math.floor(r + (255 - r) * (percent / 100)));
+    const newG = Math.min(255, Math.floor(g + (255 - g) * (percent / 100)));
+    const newB = Math.min(255, Math.floor(b + (255 - b) * (percent / 100)));
+    
+    // Convert back to hex
+    const toHex = (n) => n.toString(16).padStart(2, '0');
+    return `#${toHex(newR)}${toHex(newG)}${toHex(newB)}`;
+}
+
+/**
  * Get a distinct color for each channel
  */
 function getChannelColor(channel) {
@@ -2042,7 +2067,8 @@ function getChannelColor(channel) {
         'Texas Red': '#9b59b6', // Purple
         'ROX': '#34495e'     // Dark gray
     };
-    return colorMap[channel] || '#3498db'; // Default blue
+    const baseColor = colorMap[channel] || '#3498db'; // Default blue
+    return lightenColor(baseColor, 25); // Make 25% lighter
 }
 
 // ...existing code...
@@ -4555,6 +4581,174 @@ function initializeChartDisplay() {
 
 // Global variable to store current results for filtering (already declared at top)
 
+// Unified chart creation function to prevent multiple chart initialization conflicts
+function createUnifiedChart(chartType, selectedFluorophore = 'all', filterType = 'all') {
+    if (!currentAnalysisResults || !currentAnalysisResults.individual_results) {
+        console.warn(`[CHART-LOADING] Analysis results not yet available for ${chartType}, skipping chart update`);
+        return;
+    }
+    
+    console.log(`Creating unified chart: ${chartType} for fluorophore: ${selectedFluorophore} with filter: ${filterType}`);
+    
+    const ctx = document.getElementById('amplificationChart').getContext('2d');
+    
+    // Destroy existing chart safely
+    safeDestroyChart();
+    
+    const datasets = [];
+    const results = currentAnalysisResults.individual_results;
+    
+    Object.keys(results).forEach((wellKey, index) => {
+        const wellData = results[wellKey];
+        
+        // Apply filtering based on filterType
+        if (!shouldIncludeWell(wellData, filterType)) {
+            return;
+        }
+        
+        // Filter by fluorophore if specified
+        if (selectedFluorophore !== 'all' && wellData.fluorophore !== selectedFluorophore) {
+            return;
+        }
+        
+        try {
+            const cycles = typeof wellData.raw_cycles === 'string' ? 
+                JSON.parse(wellData.raw_cycles) : wellData.raw_cycles;
+            const rfu = typeof wellData.raw_rfu === 'string' ? 
+                JSON.parse(wellData.raw_rfu) : wellData.raw_rfu;
+            
+            if (cycles && rfu && cycles.length === rfu.length) {
+                const wellId = wellData.well_id || wellKey.split('_')[0];
+                const fluorophore = wellData.fluorophore || 'Unknown';
+                
+                // Create dataset with appropriate styling
+                const dataset = createDatasetForWell(wellId, fluorophore, cycles, rfu, index, chartType);
+                datasets.push(dataset);
+            }
+        } catch (error) {
+            console.warn(`Error processing well ${wellKey}:`, error);
+        }
+    });
+    
+    if (datasets.length === 0) {
+        console.warn(`No data available for ${chartType} chart with filter ${filterType}`);
+        return;
+    }
+    
+    // Create chart configuration
+    const chartConfig = createChartConfiguration(
+        chartType === 'single' ? 'scatter' : 'line',
+        datasets,
+        getChartTitle(chartType, selectedFluorophore, filterType)
+    );
+    
+    // Configure chart options based on type
+    configureChartOptions(chartConfig, chartType, datasets.length);
+    
+    // Set flag to prevent threshold conflicts during chart creation
+    window.chartUpdating = true;
+    
+    window.amplificationChart = new Chart(ctx, chartConfig);
+    
+    // Clear flag after a short delay to allow animation to start
+    setTimeout(() => {
+        window.chartUpdating = false;
+    }, 100);
+    
+    // Update visible channels set for threshold tracking
+    updateVisibleChannels(selectedFluorophore, datasets);
+    
+    console.log(`🔍 UNIFIED-CHART - Chart created for ${selectedFluorophore} (${datasets.length} datasets), thresholds will follow via animation callback`);
+}
+
+// Helper function to determine if a well should be included based on filter type
+function shouldIncludeWell(wellData, filterType) {
+    const amplitude = wellData.amplitude || 0;
+    const isGoodSCurve = wellData.is_good_scurve || false;
+    
+    switch (filterType) {
+        case 'all':
+            return true;
+        case 'good':
+            return amplitude > 500;
+        case 'pos':
+            return isGoodSCurve && amplitude > 500;
+        case 'neg':
+            return isGoodSCurve && amplitude <= 500;
+        case 'redo':
+            return !isGoodSCurve;
+        default:
+            return true;
+    }
+}
+
+// Helper function to create dataset for a well
+function createDatasetForWell(wellId, fluorophore, cycles, rfu, index, chartType) {
+    const color = getFluorophoreColor(fluorophore);
+    const lightColor = lightenColor(color, 0.25);
+    
+    return {
+        label: `${wellId} (${fluorophore})`,
+        data: cycles.map((cycle, i) => ({ x: cycle, y: rfu[i] })),
+        borderColor: lightColor,
+        backgroundColor: 'transparent',
+        borderWidth: chartType === 'single' ? 2 : 1,
+        pointRadius: chartType === 'single' ? 1 : 0,
+        showLine: true,
+        tension: 0.4
+    };
+}
+
+// Helper function to get chart title
+function getChartTitle(chartType, selectedFluorophore, filterType) {
+    const fluorophoreText = selectedFluorophore === 'all' ? 'All Fluorophores' : selectedFluorophore;
+    
+    switch (chartType) {
+        case 'single':
+            return `qPCR Amplification Curve - ${fluorophoreText}`;
+        case 'multi':
+            const filterText = filterType === 'all' ? 'All Curves' : 
+                              filterType === 'good' ? 'Positive Curves' :
+                              filterType === 'pos' ? 'POS Curves' :
+                              filterType === 'neg' ? 'NEG Curves' :
+                              filterType === 'redo' ? 'REDO Curves' : 'Filtered Curves';
+            return `${filterText} - ${fluorophoreText}`;
+        default:
+            return `qPCR Amplification Chart - ${fluorophoreText}`;
+    }
+}
+
+// Helper function to configure chart options based on type
+function configureChartOptions(chartConfig, chartType, datasetCount) {
+    if (chartType === 'multi') {
+        // For multi-curve charts, adjust legend and tooltip based on dataset count
+        chartConfig.options.plugins.legend.display = datasetCount <= 10;
+        chartConfig.options.plugins.tooltip.enabled = datasetCount <= 20;
+    } else {
+        // For single curves, show legend and tooltips
+        chartConfig.options.plugins.legend.display = true;
+        chartConfig.options.plugins.tooltip.enabled = true;
+    }
+}
+
+// Helper function to update visible channels for threshold tracking
+function updateVisibleChannels(selectedFluorophore, datasets) {
+    if (selectedFluorophore === 'all') {
+        // Extract all fluorophores from datasets
+        window.visibleChannels = new Set();
+        datasets.forEach(dataset => {
+            const match = dataset.label.match(/\(([^)]+)\)/);
+            if (match && match[1] !== 'Unknown') {
+                window.visibleChannels.add(match[1]);
+            }
+        });
+    } else {
+        window.visibleChannels = new Set([selectedFluorophore]);
+    }
+    
+    console.log(`🔍 UNIFIED-CHART - Chart setup complete for channels: ${Array.from(window.visibleChannels || []).join(', ')}`);
+}
+
 function populateFluorophoreSelector(individualResults) {
     const fluorophoreSelector = document.getElementById('fluorophoreSelect');
     if (!fluorophoreSelector) return;
@@ -5030,7 +5224,10 @@ function populateResultsTable(individualResults) {
         if (calcjDisplay !== null && calcjDisplay !== undefined && !isNaN(Number(calcjDisplay))) {
             // Only show scientific notation if value is > 0
             if (Number(calcjDisplay) > 0) {
-                calcjCell = '10' + '<sup>' + Number(calcjDisplay).toFixed(2) + '</sup>';
+                // Convert 10^x to scientific notation (e.g., 10^4.25 = 1.78e+4)
+                const calcjValue = Number(calcjDisplay);
+                const scientificValue = Math.pow(10, calcjValue);
+                calcjCell = scientificValue.toExponential(2); // e.g., "1.78e+4"
             } else {
                 calcjCell = 'N/A';
             }
@@ -8634,7 +8831,9 @@ function generateResultsCSV() {
             !isNaN(result.calcj[result.fluorophore])) {
             const calcjValue = Number(result.calcj[result.fluorophore]);
             if (calcjValue > 0) {
-                calcjText = `10^${calcjValue.toFixed(2)}`;
+                // Convert 10^x to scientific notation (e.g., 10^4.25 = 1.78e+4)
+                const scientificValue = Math.pow(10, calcjValue);
+                calcjText = scientificValue.toExponential(2); // e.g., "1.78e+4"
             }
         }
         
@@ -11211,18 +11410,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // Export button with channel validation - integrated with state management
-    const exportBtn = document.getElementById('exportBtn');
-    if (exportBtn) {
-        exportBtn.addEventListener('click', function(e) {
-            // Check export state before allowing export
-            if (!window.appState.exportState.isEnabled) {
-                e.preventDefault();
-                alert(window.appState.exportState.disabledReason || 'Export is currently disabled');
-                return;
-            }
-            exportResults();
-        });
-    }
+    // NOTE: Export button handler is already set up in main DOMContentLoaded listener above
+    // Removing duplicate to prevent double-firing and creating 2 CSV files
     
     // Trend Analysis button
     const trendAnalysisBtn = document.getElementById('trendAnalysisBtn');
@@ -11330,396 +11519,18 @@ function showSelectedCurve(wellKey) {
 }
 
 function showAllCurves(selectedFluorophore) {
-    if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
-        console.warn('[CHART-LOADING] Analysis results not yet available for showAllCurves, skipping chart update');
-        return;
-    }
-    
-    console.log('Showing all curves for fluorophore:', selectedFluorophore);
-    
-    const ctx = document.getElementById('amplificationChart').getContext('2d');
-    
-    // Destroy existing chart safely
-    safeDestroyChart();
-    
-    const datasets = [];
-    const results = window.currentAnalysisResults.individual_results;
-    
-    Object.keys(results).forEach((wellKey, index) => {
-        const wellData = results[wellKey];
-        
-        // Filter by fluorophore if specified
-        if (selectedFluorophore !== 'all' && wellData.fluorophore !== selectedFluorophore) {
-            return;
-        }
-        
-        try {
-            const cycles = typeof wellData.raw_cycles === 'string' ? 
-                JSON.parse(wellData.raw_cycles) : wellData.raw_cycles;
-            const rfu = typeof wellData.raw_rfu === 'string' ? 
-                JSON.parse(wellData.raw_rfu) : wellData.raw_rfu;
-            
-            if (cycles && rfu && cycles.length === rfu.length) {
-                const wellId = wellData.well_id || wellKey.split('_')[0];
-                const fluorophore = wellData.fluorophore || 'Unknown';
-                const isGood = wellData.is_good_scurve;
-                
-                datasets.push({
-                    label: `${wellId} (${fluorophore})`,
-                    data: cycles.map((cycle, i) => ({ x: cycle, y: rfu[i] })),
-                    borderColor: isGood ? getFluorophoreColor(fluorophore) : '#cccccc',
-                    backgroundColor: 'transparent',
-                    borderWidth: isGood ? 2 : 1,
-                    pointRadius: 0,
-                    tension: 0.1
-                });
-            }
-        } catch (e) {
-            console.error(`Error parsing data for ${wellKey}:`, e);
-        }
-    });
-    
-    console.log(`Prepared ${datasets.length} datasets for showAllCurves`);
-    
-    if (datasets.length === 0) {
-        console.warn('No datasets found for showAllCurves');
-        return;
-    }
-    
-    // Debug: Check first dataset structure
-    if (datasets.length > 0) {
-        console.log('First dataset sample:', {
-            label: datasets[0].label,
-            dataLength: datasets[0].data.length,
-            firstPoint: datasets[0].data[0],
-            lastPoint: datasets[0].data[datasets[0].data.length - 1]
-        });
-    }
-    
-    // Create chart with stable threshold system
-    
-    const chartConfig = createChartConfiguration(
-        'line', 
-        datasets, 
-        `All Curves - ${selectedFluorophore === 'all' ? 'All Fluorophores' : selectedFluorophore}`
-    );
-    
-    // Override some options for multi-curve display
-    chartConfig.options.plugins.legend.display = false;
-    chartConfig.options.plugins.tooltip.enabled = false;
-    
-    // Set flag to prevent threshold conflicts during chart creation
-    window.chartUpdating = true;
-    
-    window.amplificationChart = new Chart(ctx, chartConfig);
-    
-    // Clear flag after a short delay to allow animation to start
-    setTimeout(() => {
-        window.chartUpdating = false;
-    }, 100);
-    
-    // Chart thresholds will be initialized via animation onComplete callback
-    console.log(`🔍 MULTICHANNEL - Chart created for ${selectedFluorophore} (${datasets.length} datasets), thresholds will follow via animation callback`);
-    
-    // Update visible channels set for threshold tracking
-    if (selectedFluorophore === 'all') {
-        // Extract all fluorophores from datasets
-        window.visibleChannels = new Set();
-        datasets.forEach(dataset => {
-            const match = dataset.label.match(/\(([^)]+)\)/);
-            if (match && match[1] !== 'Unknown') {
-                window.visibleChannels.add(match[1]);
-            }
-        });
-    } else {
-        window.visibleChannels = new Set([selectedFluorophore]);
-    }
-    
-    console.log(`🔍 MULTICHANNEL - Chart setup complete for channels: ${Array.from(window.visibleChannels || []).join(', ')}`);
+    // Use unified chart creation function
+    createUnifiedChart('multi', selectedFluorophore, 'all');
 }
 
 function showGoodCurves(selectedFluorophore) {
-    if (!currentAnalysisResults || !currentAnalysisResults.individual_results) {
-        console.warn('[CHART-LOADING] Analysis results not yet available for showGoodCurves, skipping chart update');
-        return;
-    }
-    
-    console.log('Showing positive curves (amplitude > 500) for fluorophore:', selectedFluorophore);
-    
-    const ctx = document.getElementById('amplificationChart').getContext('2d');
-    
-    // Destroy existing chart safely
-    safeDestroyChart();
-    
-    const datasets = [];
-    const results = currentAnalysisResults.individual_results;
-    
-    Object.keys(results).forEach((wellKey, index) => {
-        const wellData = results[wellKey];
-        
-        // Only show positive curves (amplitude > 500, same as POS in Results column)
-        const amplitude = wellData.amplitude || 0;
-        if (amplitude <= 500) return;
-        
-        // Filter by fluorophore if specified
-        if (selectedFluorophore !== 'all' && wellData.fluorophore !== selectedFluorophore) {
-            return;
-        }
-        
-        try {
-            const cycles = typeof wellData.raw_cycles === 'string' ? 
-                JSON.parse(wellData.raw_cycles) : wellData.raw_cycles;
-            const rfu = typeof wellData.raw_rfu === 'string' ? 
-                JSON.parse(wellData.raw_rfu) : wellData.raw_rfu;
-            
-            if (cycles && rfu && cycles.length === rfu.length) {
-                const wellId = wellData.well_id || wellKey.split('_')[0];
-                const fluorophore = wellData.fluorophore || 'Unknown';
-                
-                datasets.push({
-                    label: `${wellId} (${fluorophore})`,
-                    data: cycles.map((cycle, i) => ({ x: cycle, y: rfu[i] })),
-                    borderColor: getFluorophoreColor(fluorophore),
-                    backgroundColor: 'transparent',
-                    borderWidth: 2,
-                    pointRadius: 0,
-                    tension: 0.1
-                });
-            }
-        } catch (e) {
-            console.error(`Error parsing data for ${wellKey}:`, e);
-        }
-    });
-    
-    console.log(`Prepared ${datasets.length} datasets for showGoodCurves`);
-    
-    if (datasets.length === 0) {
-        console.warn('No good curves found for showGoodCurves');
-        return;
-    }
-    
-    // Debug: Check first dataset structure
-    if (datasets.length > 0) {
-        console.log('First good curve dataset sample:', {
-            label: datasets[0].label,
-            dataLength: datasets[0].data.length,
-            firstPoint: datasets[0].data[0],
-            lastPoint: datasets[0].data[datasets[0].data.length - 1]
-        });
-    }
-    
-    // Create chart with stable threshold system
-    const chartConfig = createChartConfiguration(
-        'line', 
-        datasets, 
-        `Positive Results Only - ${selectedFluorophore === 'all' ? 'All Fluorophores' : selectedFluorophore}`
-    );
-    
-    // Override some options for good curves display
-    chartConfig.options.plugins.legend.display = datasets.length <= 10; // Show legend only for reasonable number of curves
-    chartConfig.options.plugins.tooltip.enabled = datasets.length <= 20; // Disable tooltips for better performance
-    
-    // Set flag to prevent threshold conflicts during chart creation
-    window.chartUpdating = true;
-    
-    window.amplificationChart = new Chart(ctx, chartConfig);
-    
-    // Clear flag after a short delay to allow animation to start
-    setTimeout(() => {
-        window.chartUpdating = false;
-    }, 100);
-    
-    // Chart thresholds will be initialized via animation onComplete callback
-    console.log(`🔍 MULTICHANNEL-GOOD - Chart created for ${selectedFluorophore} (${datasets.length} good datasets), thresholds will follow via animation callback`);
-    
-    // Update visible channels set for threshold tracking
-    if (selectedFluorophore === 'all') {
-        // Extract all fluorophores from datasets
-        window.visibleChannels = new Set();
-        datasets.forEach(dataset => {
-            const match = dataset.label.match(/\(([^)]+)\)/);
-            if (match && match[1] !== 'Unknown') {
-                window.visibleChannels.add(match[1]);
-            }
-        });
-    } else {
-        window.visibleChannels = new Set([selectedFluorophore]);
-    }
-    
-    console.log(`🔍 MULTICHANNEL-GOOD - Chart setup complete for channels: ${Array.from(window.visibleChannels || []).join(', ')}`);
+    // Use unified chart creation function
+    createUnifiedChart('multi', selectedFluorophore, 'good');
 }
 
 function showResultsFiltered(selectedFluorophore, resultType) {
-    if (!currentAnalysisResults || !currentAnalysisResults.individual_results) {
-        console.warn(`[CHART-LOADING] Analysis results not yet available for showResultsFiltered (${resultType}), skipping chart update`);
-        return;
-    }
-    
-    console.log(`Showing ${resultType.toUpperCase()} curves for fluorophore:`, selectedFluorophore);
-    
-    const ctx = document.getElementById('amplificationChart').getContext('2d');
-    
-    // Destroy existing chart safely
-    safeDestroyChart();
-    
-    const datasets = [];
-    const results = currentAnalysisResults.individual_results;
-    
-    Object.keys(results).forEach((wellKey, index) => {
-        const wellData = results[wellKey];
-        
-        // Filter by amplitude thresholds based on result type
-        const amplitude = wellData.amplitude || 0;
-        let shouldInclude = false;
-        
-        const isGoodSCurve = wellData.is_good_scurve || false;
-        switch (resultType) {
-            case 'pos':
-                shouldInclude = isGoodSCurve && amplitude > 500;
-                break;
-            case 'neg':
-                shouldInclude = amplitude < 400 || !isGoodSCurve || isNaN(Number(wellData.cq_value));
-                break;
-            case 'redo':
-                shouldInclude = amplitude >= 400 && amplitude <= 500;
-                break;
-        }
-        
-        if (!shouldInclude) return;
-        
-        // Filter by fluorophore if specified
-        if (selectedFluorophore !== 'all' && wellData.fluorophore !== selectedFluorophore) {
-            return;
-        }
-        
-        try {
-            const cycles = typeof wellData.raw_cycles === 'string' ? 
-                JSON.parse(wellData.raw_cycles) : wellData.raw_cycles;
-            const rfu = typeof wellData.raw_rfu === 'string' ? 
-                JSON.parse(wellData.raw_rfu) : wellData.raw_rfu;
-            
-            if (cycles && rfu && cycles.length === rfu.length) {
-                const wellId = wellData.well_id || wellKey.split('_')[0];
-                const fluorophore = wellData.fluorophore || 'Unknown';
-                
-                // Use result-specific colors
-                let borderColor;
-                switch (resultType) {
-                    case 'pos':
-                        borderColor = '#e74c3c'; // Red for POS
-                        break;
-                    case 'neg':
-                        borderColor = '#27ae60'; // Green for NEG
-                        break;
-                    case 'redo':
-                        borderColor = '#f39c12'; // Yellow for REDO
-                        break;
-                    default:
-                        borderColor = getFluorophoreColor(fluorophore);
-                }
-                
-                datasets.push({
-                    label: `${wellId} (${fluorophore})`,
-                    data: cycles.map((cycle, i) => ({ x: cycle, y: rfu[i] })),
-                    borderColor: borderColor,
-                    backgroundColor: 'transparent',
-                    borderWidth: 2,
-                    pointRadius: 0,
-                    tension: 0.1
-                });
-            }
-        } catch (e) {
-            console.error(`Error parsing data for ${wellKey}:`, e);
-        }
-    });
-    
-    console.log(`Prepared ${datasets.length} datasets for ${resultType.toUpperCase()} results`);
-    
-    // Handle case when no results found - show empty chart with message
-    if (datasets.length === 0) {
-        console.warn(`No ${resultType.toUpperCase()} curves found`);
-        
-        // Create empty chart with informative message
-window.amplificationChart = new Chart(ctx, {
-    type: 'line',
-    data: { datasets: [] },
-    options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: {
-                        display: true,
-                        text: `No ${resultType.toUpperCase()} Results Found - ${selectedFluorophore === 'all' ? 'All Fluorophores' : selectedFluorophore}`,
-                        font: { size: 16, weight: 'bold' }
-                    },
-                    legend: { display: false }
-                },
-                scales: {
-                    x: {
-                        type: 'linear',
-                        title: { display: true, text: 'Cycle Number', font: { size: 14 } },
-                        grid: { color: 'rgba(0,0,0,0.1)' },
-                        min: 0,
-                        max: 45
-                    },
-                    y: {
-                        type: 'linear',
-                        title: { display: true, text: 'RFU', font: { size: 14 } },
-                        grid: { color: 'rgba(0,0,0,0.1)' },
-                        min: 0,
-                        max: 1000
-                    }
-                },
-                layout: {
-                    padding: 20
-                }
-            },
-            plugins: [{
-                id: 'noDataMessage',
-                afterDraw: function(chart) {
-                    if (chart.data.datasets.length === 0) {
-                        const ctx = chart.ctx;
-                        const width = chart.width;
-                        const height = chart.height;
-                        
-                        ctx.save();
-                        ctx.textAlign = 'center';
-                        ctx.textBaseline = 'middle';
-                        ctx.font = '18px Arial';
-                        ctx.fillStyle = '#666';
-                        ctx.fillText(`No ${resultType.toUpperCase()} results found for ${selectedFluorophore === 'all' ? 'all fluorophores' : selectedFluorophore}`, width / 2, height / 2);
-                        ctx.restore();
-                    }
-                }
-            }]
-        });
-        return;
-    }
-    
-    // Create chart with stable threshold system
-    const chartConfig = createChartConfiguration(
-        'line', 
-        datasets, 
-        `${resultType.toUpperCase()} Results Only - ${selectedFluorophore === 'all' ? 'All Fluorophores' : selectedFluorophore}`
-    );
-    
-    // Override some options for filtered display
-    chartConfig.options.plugins.legend.display = datasets.length <= 10;
-    chartConfig.options.plugins.tooltip.enabled = datasets.length <= 20;
-    chartConfig.options.elements.point.radius = 0;
-    
-    // Set flag to prevent threshold conflicts during chart creation
-    window.chartUpdating = true;
-    
-    window.amplificationChart = new Chart(ctx, chartConfig);
-    
-    // Clear flag after a short delay to allow animation to start
-    setTimeout(() => {
-        window.chartUpdating = false;
-    }, 100);
-    
-    // Chart thresholds will be initialized via animation onComplete callback
-    console.log(`🔍 FILTERED-CHART - Chart created for ${resultType.toUpperCase()} results, thresholds will follow via animation callback`);
+    // Use unified chart creation function
+    createUnifiedChart('multi', selectedFluorophore, resultType);
 }
 
 function getFluorophoreColor(fluorophore) {
@@ -11731,7 +11542,8 @@ function getFluorophoreColor(fluorophore) {
         'ROX': '#ff44ff',      // Magenta (unchanged)
         'Unknown': '#888888'   // Gray
     };
-    return colors[fluorophore] || colors['Unknown'];
+    const baseColor = colors[fluorophore] || colors['Unknown'];
+    return lightenColor(baseColor, 25); // Make 25% lighter
 }
 
 // --- Threshold Calculation Functions ---
@@ -11808,7 +11620,8 @@ function getFluorophoreColor(fluorophore) {
         'Texas Red': '#cc0000', // Red
         'Cy5': '#8800cc'       // Purple
     };
-    return colors[fluorophore] || '#333333';
+    const baseColor = colors[fluorophore] || '#333333';
+    return lightenColor(baseColor, 25); // Make 25% lighter
 }
 
 // --- Chart Configuration Functions ---
