@@ -144,7 +144,107 @@ function recalculateCQJValues() {
 }
 
 /**
- * Calculate CalcJ value (if needed - currently just a placeholder)
+ * Calculate CalcJ using H/M/L control-based standard curve
+ */
+function calculateCalcjWithControls(well, threshold, allWellResults, testCode, channel) {
+    // Check if we have concentration controls for this test/channel
+    if (typeof CONCENTRATION_CONTROLS === 'undefined') {
+        console.log('[CALCJ-DEBUG] CONCENTRATION_CONTROLS not available, using basic method');
+        return { calcj_value: calculateCalcj(well, threshold), method: 'basic' };
+    }
+    
+    const concValues = CONCENTRATION_CONTROLS[testCode]?.[channel];
+    if (!concValues) {
+        console.log(`[CALCJ-DEBUG] No concentration controls found for ${testCode}/${channel}, using basic method`);
+        return { calcj_value: calculateCalcj(well, threshold), method: 'basic' };
+    }
+    
+    // Find H/M/L control wells and collect their CQJ values
+    const controlCqj = { H: [], M: [], L: [] };
+    
+    if (allWellResults && typeof allWellResults === 'object') {
+        Object.keys(allWellResults).forEach(wellKey => {
+            const wellData = allWellResults[wellKey];
+            if (!wellKey || !wellData) return;
+            
+            // Check if this is a control well (H_, M_, L_ patterns)
+            let controlType = null;
+            const upperKey = wellKey.toUpperCase();
+            if (wellKey.startsWith('H_') || wellKey.includes('_H_') || upperKey.startsWith('HIGH')) {
+                controlType = 'H';
+            } else if (wellKey.startsWith('M_') || wellKey.includes('_M_') || upperKey.startsWith('MEDIUM')) {
+                controlType = 'M';
+            } else if (wellKey.startsWith('L_') || wellKey.includes('_L_') || upperKey.startsWith('LOW')) {
+                controlType = 'L';
+            }
+            
+            if (controlType && wellData.cqj_value !== null && wellData.cqj_value !== undefined) {
+                controlCqj[controlType].push(wellData.cqj_value);
+            }
+        });
+    }
+    
+    // Calculate average CQJ for each control level
+    const avgControlCqj = {};
+    Object.keys(controlCqj).forEach(controlType => {
+        const cqjList = controlCqj[controlType];
+        if (cqjList.length > 0) {
+            avgControlCqj[controlType] = cqjList.reduce((sum, val) => sum + val, 0) / cqjList.length;
+            console.log(`[CALCJ-DEBUG] ${controlType} control average CQJ: ${avgControlCqj[controlType].toFixed(2)} (n=${cqjList.length})`);
+        }
+    });
+    
+    // Check if we have enough controls for standard curve
+    if (Object.keys(avgControlCqj).length < 2) {
+        console.log(`[CALCJ-DEBUG] Insufficient controls found (${Object.keys(avgControlCqj).length}), using basic method`);
+        return { calcj_value: calculateCalcj(well, threshold), method: 'basic' };
+    }
+    
+    // Get CQJ for current well
+    const currentCqj = well.cqj_value;
+    if (currentCqj === null || currentCqj === undefined) {
+        console.log('[CALCJ-DEBUG] No CQJ value, cannot calculate CalcJ');
+        return { calcj_value: null, method: 'control_based_failed' };
+    }
+    
+    // Check for early crossing (crossing before lowest control)
+    const controlCqjValues = Object.values(avgControlCqj);
+    if (controlCqjValues.length > 0) {
+        const minControlCqj = Math.min(...controlCqjValues);
+        if (currentCqj < minControlCqj) {
+            console.log(`[CALCJ-DEBUG] Early crossing detected (CQJ ${currentCqj.toFixed(2)} < min control ${minControlCqj.toFixed(2)})`);
+            return { calcj_value: 'N/A', method: 'early_crossing' };
+        }
+    }
+    
+    // Use H and L controls for standard curve (most reliable)
+    const hCq = avgControlCqj.H;
+    const lCq = avgControlCqj.L;
+    const hVal = concValues.H;
+    const lVal = concValues.L;
+    
+    try {
+        if (hCq !== undefined && lCq !== undefined && hVal && lVal) {
+            // Log-linear interpolation (standard curve)
+            const slope = (Math.log10(hVal) - Math.log10(lVal)) / (lCq - hCq);
+            const intercept = Math.log10(hVal) - slope * hCq;
+            const logConc = slope * currentCqj + intercept;
+            const calcjResult = Math.pow(10, logConc);
+            
+            console.log(`[CALCJ-DEBUG] Control-based CalcJ = ${calcjResult.toExponential(2)} (CQJ: ${currentCqj.toFixed(2)})`);
+            return { calcj_value: calcjResult, method: 'control_based' };
+        } else {
+            console.log('[CALCJ-DEBUG] Missing H/L controls, using basic method');
+            return { calcj_value: calculateCalcj(well, threshold), method: 'basic' };
+        }
+    } catch (error) {
+        console.log(`[CALCJ-DEBUG] Error in control-based calculation: ${error.message}, using basic method`);
+        return { calcj_value: calculateCalcj(well, threshold), method: 'basic' };
+    }
+}
+
+/**
+ * Calculate CalcJ value (basic method - currently amplitude/threshold)
  */
 function calculateCalcj(well, threshold) {
     // Implement your CalcJ formula here if needed
@@ -163,6 +263,7 @@ function calculateCalcj(well, threshold) {
 window.calculateThresholdCrossing = calculateThresholdCrossing;
 window.recalculateCQJValues = recalculateCQJValues;
 window.calculateCalcj = calculateCalcj;
+window.calculateCalcjWithControls = calculateCalcjWithControls;
 
 // Debug function to inspect well data structure on backend
 window.debugWellData = async function(sessionId = null) {

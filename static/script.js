@@ -1540,18 +1540,27 @@ async function handleThresholdStrategyChange() {
                 well.cqj_value = null;
             }
             
-            // Calculate CalcJ using the correct test code and threshold
+            // Calculate CalcJ using H/M/L control-based method or fallback to basic
             if (well.calcj && channel in well.calcj) {
                 well.calcj_value = typeof well.calcj[channel] === 'string' ? parseFloat(well.calcj[channel]) : well.calcj[channel];
+            } else if (typeof window.calculateCalcjWithControls === 'function' && testCode && channel) {
+                // Try control-based calculation first
+                const numericThreshold = typeof threshold === 'string' ? parseFloat(threshold) : threshold;
+                const calcjResult = window.calculateCalcjWithControls(well, numericThreshold, resultsObj, testCode, channel);
+                well.calcj_value = calcjResult.calcj_value;
+                well.calcj_method = calcjResult.method; // Track which method was used
+                // console.log(`✅ CALCJ-CALC - ${wellKey}: ${well.calcj_value} (method: ${calcjResult.method})`);
             } else if (typeof window.calculateCalcj === 'function' && well.amplitude) {
-                // Fallback to frontend calculation if backend value not available
+                // Fallback to basic calculation if control-based not available
                 const numericThreshold = typeof threshold === 'string' ? parseFloat(threshold) : threshold;
                 const numericAmplitude = typeof well.amplitude === 'string' ? parseFloat(well.amplitude) : well.amplitude;
                 well.amplitude = numericAmplitude;
                 well.calcj_value = window.calculateCalcj(well, numericThreshold);
-                // console.log(`✅ CALCJ-CALC - ${wellKey}: ${well.calcj_value} (amplitude: ${numericAmplitude}, threshold: ${numericThreshold})`);
+                well.calcj_method = 'basic';
+                // console.log(`✅ CALCJ-CALC - ${wellKey}: ${well.calcj_value} (method: basic)`);
             } else {
                 well.calcj_value = null;
+                well.calcj_method = 'failed';
                 // console.warn(`❌ CALCJ-MISSING - Cannot calculate CalcJ for ${wellKey}`);
             }
             
@@ -7243,7 +7252,7 @@ async function updatePathogenChannelStatusInBreakdown() {
                 
                 // Dynamic detection for single-channel tests using pathogen library
                 if (!detectedFluorophore || detectedFluorophore === 'Unknown') {
-                    detectedFluorophore = detectFluorophoreFromPathogenLibrary(currentAnalysisResults.filename);
+                         detectedFluorophore = detectFluorophoreFromPathogenLibrary(currentAnalysisResults.filename);
                 }
                 
                 if (detectedFluorophore && detectedFluorophore !== 'Unknown') {

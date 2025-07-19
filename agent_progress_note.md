@@ -48,6 +48,25 @@ Working on MDL-PCR-Analyzer timing issues and multichannel threshold display pro
 **Expected Behavior After Fixes**:
 - Thresholds should appear immediately and persist
 - No brief flashing/disappearing of threshold lines
+
+## H/M/L Control-Based CalcJ System Analysis (July 19, 2025)
+
+### Current Findings:
+✅ **concentration_controls.js**: Complete H/M/L concentration values for all test codes/channels  
+✅ **qpcr_analyzer.py line 805**: H/M/L CalcJ calculation function EXISTS using log-linear interpolation  
+🔍 **Current CalcJ**: Basic amplitude/threshold calculation (not using H/M/L controls)  
+❌ **Integration Gap**: H/M/L function exists but not integrated into pipeline  
+
+### Implementation Plan:
+1. **Identify H/M/L Controls**: Parse well names/sample names for H_, M_, L_ patterns
+2. **Collect Control CQJ**: Average CQJ values for H/M/L controls per channel
+3. **Apply Standard Curve**: Use existing `calculate_calcj()` function for unknowns
+4. **Handle Early Crossings**: Mark samples crossing before lowest control as "N/A"
+
+### Files to Update:
+- `cqj_calcj_utils.py`: Add H/M/L control identification and averaging
+- `static/cqj_calcj_utils.js`: Update CalcJ calculation to use control-based logic
+- Integration with `concentration_controls.js` for H/M/L values per test/channel
 - Multichannel mode should show thresholds correctly on first load
 
 ### 🎯 **Threshold Strategy Robustness Improvements (July 19, 2025)**

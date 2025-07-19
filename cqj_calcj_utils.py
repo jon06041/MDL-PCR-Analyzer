@@ -84,6 +84,123 @@ def calculate_cqj(well, threshold):
     print(f"[CQJ-DEBUG] Well {well_id}: No threshold crossing found (max RFU: {max(raw_rfu) if raw_rfu else 'N/A'})")
     return None  # never crossed
 
+def calculate_calcj_with_controls(well_data, threshold, all_well_results, test_code, channel):
+    """
+    Calculate CalcJ using H/M/L control-based standard curve.
+    
+    Args:
+        well_data: The well data dict with RFU values
+        threshold: The threshold value
+        all_well_results: Dict of all wells for finding controls
+        test_code: The test code (e.g., 'Cglab', 'Ngon')
+        channel: The fluorophore channel (e.g., 'FAM', 'HEX')
+    
+    Returns:
+        dict with calcj_value and method used
+    """
+    # Try multiple ways to get well identifier
+    well_id = well_data.get('well_id') or well_data.get('wellKey') or well_data.get('well_key') or 'UNKNOWN'
+    
+    # Standard concentration values from concentration_controls.js
+    CONCENTRATION_CONTROLS = {
+        'Lacto': {
+            'Cy5': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3},
+            'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'TexasRed': {'H': 1e7, 'M': 1e5, 'L': 1e3}
+        },
+        'Calb': {'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Ctrach': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'Ngon': {'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Tvag': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'Cglab': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Cpara': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'Ctrop': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Gvag': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'BVAB2': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'CHVIC': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'AtopVag': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Megasphaera': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'Efaecalis': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Saureus': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'Ecoli': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'AtopVagNY': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'BVAB2NY': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'GvagNY': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'MegasphaeraNY': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'LactoNY': {'Cy5': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'TexasRed': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'RNaseP': {'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}}
+    }
+    
+    # Get concentration values for this test/channel
+    conc_values = CONCENTRATION_CONTROLS.get(test_code, {}).get(channel, {})
+    if not conc_values:
+        print(f"[CALCJ-DEBUG] Well {well_id}: No concentration controls found for {test_code}/{channel}, using basic method")
+        return {'calcj_value': calculate_calcj(well_data, threshold), 'method': 'basic'}
+    
+    # Find H/M/L control wells
+    control_cqj = {}
+    for well_key, well in all_well_results.items():
+        if not well_key or not well:
+            continue
+            
+        # Check if this is a control well (H_, M_, L_ patterns)
+        control_type = None
+        if well_key.startswith('H_') or '_H_' in well_key or well_key.upper().startswith('HIGH'):
+            control_type = 'H'
+        elif well_key.startswith('M_') or '_M_' in well_key or well_key.upper().startswith('MEDIUM'):
+            control_type = 'M'  
+        elif well_key.startswith('L_') or '_L_' in well_key or well_key.upper().startswith('LOW'):
+            control_type = 'L'
+            
+        if control_type and well.get('cqj_value') is not None:
+            if control_type not in control_cqj:
+                control_cqj[control_type] = []
+            control_cqj[control_type].append(well.get('cqj_value'))
+    
+    # Calculate average CQJ for each control level
+    avg_control_cqj = {}
+    for control_type, cqj_list in control_cqj.items():
+        if cqj_list:
+            avg_control_cqj[control_type] = sum(cqj_list) / len(cqj_list)
+            print(f"[CALCJ-DEBUG] {control_type} control average CQJ: {avg_control_cqj[control_type]:.2f} (n={len(cqj_list)})")
+    
+    # Check if we have enough controls for standard curve
+    if len(avg_control_cqj) < 2:
+        print(f"[CALCJ-DEBUG] Well {well_id}: Insufficient controls found ({len(avg_control_cqj)}), using basic method")
+        return {'calcj_value': calculate_calcj(well_data, threshold), 'method': 'basic'}
+    
+    # Get CQJ for current well
+    current_cqj = well_data.get('cqj_value')
+    if current_cqj is None:
+        print(f"[CALCJ-DEBUG] Well {well_id}: No CQJ value, cannot calculate CalcJ")
+        return {'calcj_value': None, 'method': 'control_based_failed'}
+    
+    # Use existing calculate_calcj function from qpcr_analyzer.py
+    # Try H/M/L first, then fallback to available controls
+    h_cq = avg_control_cqj.get('H')
+    m_cq = avg_control_cqj.get('M') 
+    l_cq = avg_control_cqj.get('L')
+    h_val = conc_values.get('H')
+    m_val = conc_values.get('M')
+    l_val = conc_values.get('L')
+    
+    # Check for early crossing (crossing before lowest control)
+    min_control_cqj = None
+    if avg_control_cqj:
+        min_control_cqj = min(avg_control_cqj.values())
+        if current_cqj < min_control_cqj:
+            print(f"[CALCJ-DEBUG] Well {well_id}: Early crossing detected (CQJ {current_cqj:.2f} < min control {min_control_cqj:.2f})")
+            return {'calcj_value': 'N/A', 'method': 'early_crossing'}
+    
+    try:
+        if h_cq is not None and l_cq is not None and h_val and l_val:
+            # Use the existing calculate_calcj function
+            import math
+            slope = (math.log10(h_val) - math.log10(l_val)) / (l_cq - h_cq)
+            intercept = math.log10(h_val) - slope * h_cq
+            log_conc = slope * current_cqj + intercept
+            calcj_result = 10 ** log_conc
+            
+            print(f"[CALCJ-DEBUG] Well {well_id}: Control-based CalcJ = {calcj_result:.2e} (CQJ: {current_cqj:.2f})")
+            return {'calcj_value': calcj_result, 'method': 'control_based'}
+        else:
+            print(f"[CALCJ-DEBUG] Well {well_id}: Missing H/L controls, using basic method")
+            return {'calcj_value': calculate_calcj(well_data, threshold), 'method': 'basic'}
+            
+    except Exception as e:
+        print(f"[CALCJ-DEBUG] Well {well_id}: Error in control-based calculation: {e}, using basic method")
+        return {'calcj_value': calculate_calcj(well_data, threshold), 'method': 'basic'}
+
 def calculate_calcj(well, threshold):
     """
     Example: Calc-J = amplitude / threshold (replace with real formula if needed)
