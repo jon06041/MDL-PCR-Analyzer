@@ -2,3 +2,145 @@
 .results-col-curve-class { min-width: 130px; }
 .results-col-status { min-width: 110px; }
 .results-col-anom { min-width: 110px; }
+
+/* Optimized table layout for better data visibility */
+#resultsTable {
+    font-size: 12px !important; /* Smaller font for more data visibility */
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+#resultsTable th,
+#resultsTable td {
+    padding: 4px 6px !important; /* Tighter padding */
+    vertical-align: middle;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Column-specific width optimizations */
+.results-col-well { 
+    min-width: 60px; 
+    max-width: 80px; 
+    width: 70px;
+}
+
+.results-col-sample-name { 
+    min-width: 180px; 
+    max-width: 220px; 
+    width: 200px;
+    white-space: normal !important; /* Allow wrapping for long sample names */
+    word-wrap: break-word;
+}
+
+.results-col-fluorophore { 
+    min-width: 70px; 
+    max-width: 90px; 
+    width: 80px;
+}
+
+.results-col-results { 
+    min-width: 50px; 
+    max-width: 70px; 
+    width: 60px;
+}
+
+.results-col-curve-class { 
+    min-width: 110px; 
+    max-width: 130px; 
+    width: 120px;
+}
+
+.results-col-status { 
+    min-width: 90px; 
+    max-width: 110px; 
+    width: 100px;
+}
+
+.results-col-r2 { 
+    min-width: 45px; 
+    max-width: 55px; 
+    width: 50px;
+}
+
+.results-col-rmse { 
+    min-width: 60px; 
+    max-width: 80px; 
+    width: 70px;
+}
+
+.results-col-amp { 
+    min-width: 70px; 
+    max-width: 90px; 
+    width: 80px;
+}
+
+.results-col-steep { 
+    min-width: 50px; 
+    max-width: 65px; 
+    width: 55px;
+}
+
+.results-col-mid { 
+    min-width: 50px; 
+    max-width: 65px; 
+    width: 55px;
+}
+
+.results-col-base { 
+    min-width: 60px; 
+    max-width: 80px; 
+    width: 70px;
+}
+
+.results-col-cq { 
+    min-width: 50px; 
+    max-width: 65px; 
+    width: 55px;
+}
+
+.results-col-cqj { 
+    min-width: 50px; 
+    max-width: 65px; 
+    width: 55px;
+}
+
+.results-col-calcj { 
+    min-width: 60px; 
+    max-width: 80px; 
+    width: 70px;
+}
+
+.results-col-anom { 
+    min-width: 70px; 
+    max-width: 90px; 
+    width: 80px;
+}
+
+/* Table header styling */
+#resultsTable th {
+    font-weight: 600;
+    background-color: #f8f9fa;
+    border-bottom: 2px solid #dee2e6;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+/* Improve readability with alternating row colors */
+#resultsTable tbody tr:nth-child(even) {
+    background-color: #f8f9fa;
+}
+
+#resultsTable tbody tr:hover {
+    background-color: #e9ecef;
+}
+
+/* Compact table container */
+.results-table-container {
+    max-height: 70vh;
+    overflow-x: auto;
+    overflow-y: auto;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+}
