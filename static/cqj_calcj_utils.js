@@ -221,7 +221,14 @@ function recalculateCQJValues() {
             
             // Recalculate CalcJ (concentration) using the new CQJ
             const oldCalcj = well.calcj_value;
-            const calcjResult = calculateCalcjWithControls(well, threshold, results, testCode, channel);
+            let calcjResult;
+            
+            // CRITICAL: If CQJ is null/N/A, CalcJ must also be null/N/A
+            if (newCqj === null || newCqj === undefined) {
+                calcjResult = { calcj_value: null, method: 'no_cqj_value' };
+            } else {
+                calcjResult = calculateCalcjWithControls(well, threshold, results, testCode, channel);
+            }
             
             // Update CalcJ in well data
             well.calcj_value = calcjResult.calcj_value;
