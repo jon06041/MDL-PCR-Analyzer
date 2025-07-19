@@ -167,19 +167,49 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
             const wellData = allWellResults[wellKey];
             if (!wellKey || !wellData) return;
             
-            // Check if this is a control well (H_, M_, L_ patterns)
+            // Check if this is a control well with comprehensive pattern matching
             let controlType = null;
             const upperKey = wellKey.toUpperCase();
-            if (wellKey.startsWith('H_') || wellKey.includes('_H_') || upperKey.startsWith('HIGH')) {
+            
+            // HIGH control patterns
+            if (wellKey.startsWith('H_') || wellKey.includes('_H_') || upperKey.startsWith('HIGH') ||
+                upperKey.includes('HIGH') || upperKey.includes('H1') || upperKey.includes('H2') || 
+                upperKey.includes('H3') || upperKey.includes('POS') || upperKey.includes('POSITIVE') ||
+                upperKey.includes('1E7') || upperKey.includes('10E7') || upperKey.includes('1E+7')) {
                 controlType = 'H';
-            } else if (wellKey.startsWith('M_') || wellKey.includes('_M_') || upperKey.startsWith('MEDIUM')) {
+            } 
+            // MEDIUM control patterns  
+            else if (wellKey.startsWith('M_') || wellKey.includes('_M_') || upperKey.startsWith('MEDIUM') ||
+                     upperKey.includes('MEDIUM') || upperKey.includes('M1') || upperKey.includes('M2') ||
+                     upperKey.includes('M3') || upperKey.includes('MED') || 
+                     upperKey.includes('1E5') || upperKey.includes('10E5') || upperKey.includes('1E+5')) {
                 controlType = 'M';
-            } else if (wellKey.startsWith('L_') || wellKey.includes('_L_') || upperKey.startsWith('LOW')) {
+            }
+            // LOW control patterns
+            else if (wellKey.startsWith('L_') || wellKey.includes('_L_') || upperKey.startsWith('LOW') ||
+                     upperKey.includes('LOW') || upperKey.includes('L1') || upperKey.includes('L2') ||
+                     upperKey.includes('L3') || 
+                     upperKey.includes('1E3') || upperKey.includes('10E3') || upperKey.includes('1E+3')) {
                 controlType = 'L';
+            }
+            // Also check sample_name if available
+            else if (wellData.sample_name) {
+                const upperSample = wellData.sample_name.toUpperCase();
+                if (upperSample.includes('HIGH') || upperSample.includes('POS') || upperSample.includes('H1') ||
+                    upperSample.includes('1E7') || upperSample.includes('10E7') || upperSample.includes('1E+7')) {
+                    controlType = 'H';
+                } else if (upperSample.includes('MEDIUM') || upperSample.includes('MED') || upperSample.includes('M1') ||
+                          upperSample.includes('1E5') || upperSample.includes('10E5') || upperSample.includes('1E+5')) {
+                    controlType = 'M';
+                } else if (upperSample.includes('LOW') || upperSample.includes('L1') ||
+                          upperSample.includes('1E3') || upperSample.includes('10E3') || upperSample.includes('1E+3')) {
+                    controlType = 'L';
+                }
             }
             
             if (controlType && wellData.cqj_value !== null && wellData.cqj_value !== undefined) {
                 controlCqj[controlType].push(wellData.cqj_value);
+                console.log(`[CALCJ-DEBUG] Found ${controlType} control: ${wellKey} (CQJ: ${wellData.cqj_value})`);
             }
         });
     }
@@ -196,7 +226,24 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
     
     // Check if we have enough controls for standard curve
     if (Object.keys(avgControlCqj).length < 2) {
-        console.log(`[CALCJ-DEBUG] Insufficient controls found (${Object.keys(avgControlCqj).length}), using basic method`);
+        console.log(`[CALCJ-DEBUG] Insufficient controls found (${Object.keys(avgControlCqj).length}), checking all wells for any patterns...`);
+        
+        // DEBUGGING: Show all well keys to help identify control patterns
+        if (allWellResults) {
+            const allKeys = Object.keys(allWellResults);
+            console.log(`[CALCJ-DEBUG] All available wells: ${allKeys.join(', ')}`);
+            
+            // Try to find ANY wells that might be controls with more flexible patterns
+            allKeys.forEach(key => {
+                const upperKey = key.toUpperCase();
+                const wellData = allWellResults[key];
+                if (wellData && wellData.cqj_value !== null && wellData.cqj_value !== undefined) {
+                    console.log(`[CALCJ-DEBUG] Well ${key}: CQJ=${wellData.cqj_value}, sample_name=${wellData.sample_name || 'N/A'}`);
+                }
+            });
+        }
+        
+        console.log(`[CALCJ-DEBUG] Using basic method due to insufficient controls`);
         return { calcj_value: calculateCalcj(well, threshold), method: 'basic' };
     }
     

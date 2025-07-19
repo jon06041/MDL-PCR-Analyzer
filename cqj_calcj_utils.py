@@ -133,19 +133,44 @@ def calculate_calcj_with_controls(well_data, threshold, all_well_results, test_c
         if not well_key or not well:
             continue
             
-        # Check if this is a control well (H_, M_, L_ patterns)
+        # Check if this is a control well with comprehensive pattern matching
         control_type = None
-        if well_key.startswith('H_') or '_H_' in well_key or well_key.upper().startswith('HIGH'):
+        upper_key = well_key.upper()
+        
+        # HIGH control patterns
+        if (well_key.startswith('H_') or '_H_' in well_key or upper_key.startswith('HIGH') or
+            'HIGH' in upper_key or 'H1' in upper_key or 'H2' in upper_key or 'H3' in upper_key or
+            'POS' in upper_key or 'POSITIVE' in upper_key or 
+            '1E7' in upper_key or '10E7' in upper_key or '1E+7' in upper_key):
             control_type = 'H'
-        elif well_key.startswith('M_') or '_M_' in well_key or well_key.upper().startswith('MEDIUM'):
-            control_type = 'M'  
-        elif well_key.startswith('L_') or '_L_' in well_key or well_key.upper().startswith('LOW'):
+        # MEDIUM control patterns  
+        elif (well_key.startswith('M_') or '_M_' in well_key or upper_key.startswith('MEDIUM') or
+              'MEDIUM' in upper_key or 'M1' in upper_key or 'M2' in upper_key or 'M3' in upper_key or
+              'MED' in upper_key or '1E5' in upper_key or '10E5' in upper_key or '1E+5' in upper_key):
+            control_type = 'M'
+        # LOW control patterns
+        elif (well_key.startswith('L_') or '_L_' in well_key or upper_key.startswith('LOW') or
+              'LOW' in upper_key or 'L1' in upper_key or 'L2' in upper_key or 'L3' in upper_key or
+              '1E3' in upper_key or '10E3' in upper_key or '1E+3' in upper_key):
             control_type = 'L'
+        # Also check sample_name if available
+        elif well.get('sample_name'):
+            upper_sample = well.get('sample_name', '').upper()
+            if ('HIGH' in upper_sample or 'POS' in upper_sample or 'H1' in upper_sample or
+                '1E7' in upper_sample or '10E7' in upper_sample or '1E+7' in upper_sample):
+                control_type = 'H'
+            elif ('MEDIUM' in upper_sample or 'MED' in upper_sample or 'M1' in upper_sample or
+                  '1E5' in upper_sample or '10E5' in upper_sample or '1E+5' in upper_sample):
+                control_type = 'M'
+            elif ('LOW' in upper_sample or 'L1' in upper_sample or
+                  '1E3' in upper_sample or '10E3' in upper_sample or '1E+3' in upper_sample):
+                control_type = 'L'
             
         if control_type and well.get('cqj_value') is not None:
             if control_type not in control_cqj:
                 control_cqj[control_type] = []
             control_cqj[control_type].append(well.get('cqj_value'))
+            print(f"[CALCJ-DEBUG] Found {control_type} control: {well_key} (CQJ: {well.get('cqj_value')})")
     
     # Calculate average CQJ for each control level
     avg_control_cqj = {}
