@@ -1948,16 +1948,17 @@ document.addEventListener('DOMContentLoaded', function() {
         // console.error('❌ INIT - populateThresholdStrategyDropdown function not available');
     }
     // Default to show all wells on load if analysis section is visible
-    setTimeout(function() {
-        if (typeof showAllCurves === 'function') {
-            showAllCurves('all');
-        }
-        // Also set chart mode to 'all' and update display if needed
-        if (typeof updateChartDisplayMode === 'function') {
-            window.currentChartMode = 'all';
-            updateChartDisplayMode();
-        }
-    }, 500);
+    // ❌ COMMENTED OUT: Duplicate chart creation causing timing issues
+    // setTimeout(function() {
+    //     if (typeof showAllCurves === 'function') {
+    //         showAllCurves('all');
+    //     }
+    //     // Also set chart mode to 'all' and update display if needed
+    //     if (typeof updateChartDisplayMode === 'function') {
+    //         window.currentChartMode = 'all';
+    //         updateChartDisplayMode();
+    //     }
+    // }, 500);
     
     const select = document.getElementById('thresholdStrategySelect');
     if (select) {
@@ -2113,15 +2114,16 @@ function getChannelColor(channel) {
     }
 
     // 5. Default to "Show All Curves" view
-    setTimeout(function() {
-        if (typeof showAllCurves === 'function') {
-            showAllCurves('all');
-        }
-        if (typeof updateChartDisplayMode === 'function') {
-            window.currentChartMode = 'all';
-            updateChartDisplayMode();
-        }
-    }, 500);
+    // ❌ COMMENTED OUT: Duplicate DOM ready handler causing timing conflicts
+    // setTimeout(function() {
+    //     if (typeof showAllCurves === 'function') {
+    //         showAllCurves('all');
+    //     }
+    //     if (typeof updateChartDisplayMode === 'function') {
+    //         window.currentChartMode = 'all';
+    //         updateChartDisplayMode();
+    //     }
+    // }, 500);
 });          
 // Patch updateAllChannelThresholds to always enable draggable lines
 // COMMENTED OUT - Draggable functionality disabled
@@ -6027,6 +6029,40 @@ function detectFluorophoreFromFilename(fileName) {
     return 'Unknown';
 }
 
+/**
+ * Dynamic fluorophore detection using pathogen library for single-channel tests
+ * @param {string} fileName - The filename to analyze
+ * @returns {string} Detected fluorophore or 'Unknown'
+ */
+function detectFluorophoreFromPathogenLibrary(fileName) {
+    if (!fileName || typeof extractTestCode !== 'function' || typeof getRequiredChannels !== 'function') {
+        // console.log(`🔍 PATHOGEN LIBRARY - Missing dependencies for dynamic detection`);
+        return 'Unknown';
+    }
+    
+    // Extract test code from filename (e.g., "AcNgon_12345_CFX.csv" -> "Ngon")
+    const fullPattern = fileName.split('.')[0]; // Remove extension
+    const testCode = extractTestCode(fullPattern);
+    
+    if (!testCode) {
+        // console.log(`🔍 PATHOGEN LIBRARY - No test code extracted from: ${fileName}`);
+        return 'Unknown';
+    }
+    
+    // Get required channels for this test from pathogen library
+    const requiredChannels = getRequiredChannels(testCode);
+    
+    // For single-channel tests, return the only required channel
+    if (requiredChannels.length === 1) {
+        // console.log(`🔍 PATHOGEN LIBRARY - Dynamic detection: ${fileName} (${testCode}) → ${requiredChannels[0]}`);
+        return requiredChannels[0];
+    }
+    
+    // For multi-channel tests, can't determine specific channel from filename alone
+    // console.log(`🔍 PATHOGEN LIBRARY - Multi-channel test ${testCode}, cannot determine specific fluorophore from filename`);
+    return 'Unknown';
+}
+
 function updateAmplificationFilesList() {
     const filesList = document.getElementById('uploadedFiles');
     if (!filesList) return;
@@ -7202,15 +7238,9 @@ async function updatePathogenChannelStatusInBreakdown() {
             if (availableChannels.size === 0 && currentAnalysisResults.filename) {
                 let detectedFluorophore = detectFluorophoreFromFilename(currentAnalysisResults.filename);
                 
-                // Enhanced detection for single-channel tests
+                // Dynamic detection for single-channel tests using pathogen library
                 if (!detectedFluorophore || detectedFluorophore === 'Unknown') {
-                    if (currentAnalysisResults.filename.includes('AcNgon')) detectedFluorophore = 'HEX';
-                    else if (currentAnalysisResults.filename.includes('AcCtrach')) detectedFluorophore = 'FAM';
-                    else if (currentAnalysisResults.filename.includes('AcTvag')) detectedFluorophore = 'FAM';
-                    else if (currentAnalysisResults.filename.includes('AcCalb')) detectedFluorophore = 'HEX';
-                    else if (currentAnalysisResults.filename.includes('AcMgen')) detectedFluorophore = 'FAM';
-                    else if (currentAnalysisResults.filename.includes('AcUpar')) detectedFluorophore = 'FAM';
-                    else if (currentAnalysisResults.filename.includes('AcUure')) detectedFluorophore = 'FAM';
+                    detectedFluorophore = detectFluorophoreFromPathogenLibrary(currentAnalysisResults.filename);
                 }
                 
                 if (detectedFluorophore && detectedFluorophore !== 'Unknown') {

@@ -17,6 +17,7 @@ Working on MDL-PCR-Analyzer timing issues and multichannel threshold display pro
 ✅ **Chart Recreation Problem**: **COMPLETELY FIXED** - All duplicate chart creation sources eliminated
 ✅ **State Desynchronization**: **RESOLVED** - CSMS properly coordinates all UI components  
 ✅ **Event Handler Conflicts**: **RESOLVED** - Single chart creation prevents conflicts  
+✅ **Dynamic Fluorophore Detection**: **COMPLETED** - Added `detectFluorophoreFromPathogenLibrary()` function
 🚧 **Platform-Specific Dragging**: Threshold dragging only works on Windows browsers  
 
 ## Ready for Testing
@@ -28,6 +29,14 @@ Working on MDL-PCR-Analyzer timing issues and multichannel threshold display pro
 2. **script.js line 4481**: Commented out duplicate `showAllCurves('all')` call in `displayMultiFluorophoreResults()`
 3. **script.js lines 5685-5720**: Commented out duplicate chart creation in `updateChart()` function
 4. **script.js line 379**: Already fixed CSMS to prevent chart recreation when chart exists
+5. **script.js lines 6040-6070**: **NEW** - Implemented missing `detectFluorophoreFromPathogenLibrary()` function
+
+**Dynamic Fluorophore Detection Implementation**:
+- ✅ Uses pathogen library (`extractTestCode()` and `getRequiredChannels()`) for detection
+- ✅ Works for single-channel tests (returns the one required fluorophore)
+- ✅ Handles multi-channel tests gracefully (returns 'Unknown' as expected)
+- ✅ No hardcoded test code to fluorophore mappings in main script
+- ✅ All detection logic now uses the centralized pathogen library
 
 **Current State**:
 - ✅ **ONLY** `createUnifiedChart()` creates charts
