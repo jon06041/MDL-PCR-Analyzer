@@ -18,6 +18,7 @@ Working on MDL-PCR-Analyzer timing issues and multichannel threshold display pro
 ✅ **State Desynchronization**: **RESOLVED** - CSMS properly coordinates all UI components  
 ✅ **Event Handler Conflicts**: **RESOLVED** - Single chart creation prevents conflicts  
 ✅ **Dynamic Fluorophore Detection**: **COMPLETED** - Added `detectFluorophoreFromPathogenLibrary()` function
+✅ **Threshold Strategy Robustness**: **COMPLETED** - Fixed parameter handling for all strategies
 🚧 **Platform-Specific Dragging**: Threshold dragging only works on Windows browsers  
 
 ## Ready for Testing
@@ -48,6 +49,34 @@ Working on MDL-PCR-Analyzer timing issues and multichannel threshold display pro
 - Thresholds should appear immediately and persist
 - No brief flashing/disappearing of threshold lines
 - Multichannel mode should show thresholds correctly on first load
+
+### 🎯 **Threshold Strategy Robustness Improvements (July 19, 2025)**
+
+**Summary of Issues Fixed**:
+1. **2nd Derivative Missing Thresholds**: Fixed parameter passing and data extraction
+2. **Linear Max Slope Not Working**: Improved curve data handling and calculation logic
+3. **Console.log Cleanup**: Removed all debugging statements from threshold strategies
+4. **Parameter Compatibility**: Made all strategies accept multiple parameter formats
+
+**Technical Improvements Made**:
+- ✅ **static/threshold_strategies.js**: Enhanced parameter handling to accept `curve`, `rfu`, or `log_rfu` formats
+- ✅ **Derivative Strategies**: Fixed data extraction and null checks for robust calculation
+- ✅ **Error Handling**: Added graceful fallbacks for invalid or missing data
+- ✅ **Multi-channel Support**: Ensured all strategies work consistently across channels
+- ✅ **Code Cleanup**: Removed all console.log and console.warn statements
+
+**Functions Enhanced**:
+- `linear_threshold()`: Now accepts multiple parameter formats
+- `first_derivative_max()`: Improved curve data handling and error checking
+- `second_derivative_max()`: Fixed parameter extraction and calculation logic
+- `linear_max_slope()`: Enhanced data validation and slope calculation
+- `calculateStableChannelThreshold()`: Improved curve data passing for derivative strategies
+
+**Expected Behavior**:
+- All threshold strategies should work consistently across all channels
+- 2nd derivative thresholds should appear for all applicable channels
+- Linear max slope should calculate properly for all curve data
+- No console debugging output in production
 - All chart transitions should be smooth and stable  
 
 ## Latest Analysis (July 19, 2025)
