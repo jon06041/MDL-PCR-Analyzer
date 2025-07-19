@@ -1,7 +1,7 @@
-# Agent Progress Note (July 18, 2025)
+# Agent Progress Note (July 19, 2025)
 
 ## Current Context
-Working on MDL-PCR-Analyzer timing issues and multiple loading problems that are causing chart and threshold display inconsistencies.
+Working on MDL-PCR-Analyzer timing issues and multichannel threshold display problems. Made significant progress on multichannel threshold fix. Currently investigating chart recreation problem.
 
 ## Recently Completed
 ✅ **Central State Management System (CSMS)**: Implemented comprehensive UI state coordination  
@@ -9,13 +9,84 @@ Working on MDL-PCR-Analyzer timing issues and multiple loading problems that are
 ✅ **Export Button Integration**: Fully integrated into CSMS with proper state management  
 ✅ **Threshold Strategy System**: Robust dropdown and strategy management working  
 ✅ **Chart Animation Timing**: Fixed using Chart.js animation callbacks  
+✅ **Multichannel Threshold Display**: Fixed threshold lines not appearing in multichannel mode  
+✅ **Database File Management**: Added SQLite temporary files to .gitignore  
+✅ **Detailed Chart Recreation Analysis**: Identified all duplicate chart creation sources
 
 ## Current Issues (Active Work)
-🚧 **Timing Issues**: Chart and threshold loading synchronization problems  
-🚧 **Multiple Loading**: Preventing duplicate chart/threshold initialization  
+🚧 **Chart Recreation Problem**: Multiple functions creating duplicate charts, destroying thresholds
 🚧 **State Desynchronization**: UI components not staying properly coordinated  
 🚧 **Event Handler Conflicts**: Multiple listeners causing interference  
 🚧 **Platform-Specific Dragging**: Threshold dragging only works on Windows browsers  
+
+## Latest Analysis (July 19, 2025)
+
+### 🎯 **Chart Recreation Problem - DETAILED ANALYSIS**
+
+**Root Cause**: Multiple functions are calling chart creation independently:
+
+**CSMS updateDisplays()** (line 379): ✅ **FIXED** - Now checks `!window.amplificationChart` 
+**displayAnalysisResults()** (line 4223): ❌ **DUPLICATE** - Still calls `showAllCurves('all')`
+**displayMultiFluorophoreResults()** (line 4481): ❌ **DUPLICATE** - Still calls `showAllCurves('all')`  
+**updateChart()** (line 5674): ❌ **DUPLICATE** - Creates independent `new Chart()` 
+
+**The Problem Sequence**: 
+1. `createUnifiedChart()` creates chart + applies thresholds ✅
+2. Thresholds trigger `updateAppState()` → CSMS (now fixed) ✅  
+3. BUT `displayAnalysisResults/Multi()` still call `showAllCurves('all')` ❌
+4. AND `updateChart()` also creates charts independently ❌
+5. **Result**: Chart gets recreated, destroying thresholds
+
+### 🔧 **Function Analysis Results**
+
+**showAllCurves and CSMS**: Yes, `showAllCurves` is called by CSMS but that part is now fixed.
+
+**Default Log Function RFU/Cycles**: ✅ **WORKING CORRECTLY**
+- Default strategy expects `{L, B}` (amplitude/baseline) - correctly extracted
+- Derivative strategies expect `{rfu, cycles}` - correctly extracted  
+- Fixed strategy expects `{fixed_value}` - correctly extracted
+- `calculateThresholdForStrategy()` extracts all parameters properly
+
+**Duplicate Functions Found**:
+1. **Chart Creation**: 
+   - `createUnifiedChart()` ✅ Main function
+   - `updateChart()` ❌ **DUPLICATE** 
+
+2. **Chart Triggering**:
+   - CSMS `updateDisplays()` ✅ Fixed 
+   - `displayAnalysisResults()` ❌ **Still calls showAllCurves**
+   - `displayMultiFluorophoreResults()` ❌ **Still calls showAllCurves**
+
+### 🛠️ **Required Fixes**
+1. **Comment out** `showAllCurves('all')` calls in display functions  
+2. **Comment out** `updateChart()` duplicate chart creation
+3. **Keep** only `createUnifiedChart()` as the single chart creator
+
+## Previous Fixes Applied (July 19, 2025)
+
+### 🎯 Multichannel Threshold Display Fix
+**Problem**: In multichannel mode, threshold changes wouldn't show until strategy changed again.
+
+**Root Cause**: `updateAllChannelThresholds()` had overly strict guards preventing execution when annotation plugin wasn't fully initialized.
+
+**Solution Applied**:
+1. **Relaxed Guards** in `threshold_frontend.js`:
+   - Changed from failing when annotation parts missing to initializing missing structures
+   - Better error recovery for timing issues between chart creation and annotation plugin
+
+2. **Forced Updates** in `script.js`:
+   - Modified `updateAppState()` to temporarily clear `chartUpdating` flag during threshold updates
+   - Ensures thresholds always update even when chart is busy
+
+**Files Modified**:
+- `static/threshold_frontend.js` - Fixed `updateAllChannelThresholds()` guards
+- `static/script.js` - Enhanced `updateAppState()` threshold update logic, added chart existence check to CSMS
+- `.gitignore` - Added SQLite temporary files (*.db-shm, *.db-wal, *.db-journal)
+
+**Commits**:
+- `bd5e5ea` - Fix multichannel threshold display issue
+- `7069fde` - Add SQLite temporary files to .gitignore
+- Latest - Fix CSMS to prevent chart recreation when chart exists  
 
 ## Technical Details
 
