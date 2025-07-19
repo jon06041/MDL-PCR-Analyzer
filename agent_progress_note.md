@@ -12,6 +12,9 @@ Working on MDL-PCR-Analyzer timing issues and multichannel threshold display pro
 ✅ **Multichannel Threshold Display**: Fixed threshold lines not appearing in multichannel mode  
 ✅ **Database File Management**: Added SQLite temporary files to .gitignore  
 ✅ **Detailed Chart Recreation Analysis**: Identified all duplicate chart creation sources
+✅ **CQJ Well ID Bug Fix**: Fixed wellKey/well_id mismatch causing "unknown" well IDs in both frontend and backend
+✅ **H/M/L Control-Based CalcJ Implementation**: Added aggressive control detection with regex and substring matching for embedded H/M/L patterns
+✅ **Results Table Layout Optimization**: Improved font size, column spacing, and overall readability
 
 ## Current Issues (Active Work)
 ✅ **Chart Recreation Problem**: **COMPLETELY FIXED** - All duplicate chart creation sources eliminated
@@ -19,6 +22,10 @@ Working on MDL-PCR-Analyzer timing issues and multichannel threshold display pro
 ✅ **Event Handler Conflicts**: **RESOLVED** - Single chart creation prevents conflicts  
 ✅ **Dynamic Fluorophore Detection**: **COMPLETED** - Added `detectFluorophoreFromPathogenLibrary()` function
 ✅ **Threshold Strategy Robustness**: **COMPLETED** - Fixed parameter handling for all strategies
+✅ **CQJ Well ID Bug**: **FIXED** - Resolved wellKey/well_id mismatch in both JS and Python
+✅ **H/M/L Control-Based CalcJ**: **IMPLEMENTED** - Aggressive control detection with fallback logic
+✅ **Results Table Layout**: **OPTIMIZED** - Improved font size and column spacing for visibility
+🚧 **"No valid analysis results found" Error**: Currently debugging single-channel analysis failures
 🚧 **Platform-Specific Dragging**: Threshold dragging only works on Windows browsers  
 
 ## Ready for Testing
@@ -48,6 +55,67 @@ Working on MDL-PCR-Analyzer timing issues and multichannel threshold display pro
 **Expected Behavior After Fixes**:
 - Thresholds should appear immediately and persist
 - No brief flashing/disappearing of threshold lines
+- All fluorophore detection uses the pathogen library dynamically
+- Robust threshold strategies work for all channel configurations
+- CQJ/CalcJ calculations use aggressive H/M/L control detection
+- Results table layout is optimized for readability
+
+### 🚧 **Current Investigation: Single-Channel Analysis Error (July 19, 2025)**
+
+**User-Reported Issue**:
+- Error message: "No valid analysis results found for this channel"
+- Occurs especially for single-channel runs
+- Results appear in history after page refresh (suggests backend processing succeeds)
+
+**Root Cause Analysis**:
+- Error occurs in main analysis flow when `singleResult` is null or has empty `individual_results`
+- `processChannelsSequentially()` sets `allResults[fluorophore] = null` when channel fails
+- Backend might be returning HTTP errors (400, 500) causing frontend to return empty results
+- Timing issues possible - backend might still be processing when frontend times out
+
+**Debugging Steps Taken**:
+1. ✅ **Enhanced Error Messages**: Added more specific error reporting for different failure modes
+2. ✅ **Improved Channel Failure Logging**: Added detailed error reasons in `processChannelsSequentially`
+3. 🚧 **Backend Response Investigation**: Need to check what HTTP status/errors backend returns
+
+**Files Modified**:
+- `static/script.js`: Enhanced error handling in main analysis flow and `processChannelsSequentially`
+
+**Next Steps**:
+- Check backend logs for HTTP errors during single-channel analysis
+- Investigate if there are data format or validation issues in backend
+- Consider adding retry logic for failed single-channel analysis
+
+### 🛠️ **Anti-Throttling Measures Added (July 19, 2025)**
+
+**User-Reported Issue**:
+- Backend appears to pause when browser tab is in background
+- Processing resumes when user returns to the server/tab
+- Classic browser tab throttling symptoms
+
+**Root Cause Analysis**:
+- Modern browsers throttle JavaScript execution and network requests in background tabs
+- Flask development server auto-reload was causing frequent restarts during file changes
+- No monitoring of tab visibility state or backend health
+
+**Solutions Implemented**:
+1. ✅ **Tab Visibility Monitoring**: Added event listener to detect when tab goes to background
+2. ✅ **Keep-Alive Mechanism**: Title updates every second during long requests to prevent throttling
+3. ✅ **Background Warning**: Shows notification when tab goes to background during analysis
+4. ✅ **Enhanced Health Check**: Backend endpoint now includes timing, thread count, and request headers
+5. ✅ **Pre-flight Health Check**: Checks backend responsiveness before starting analysis
+6. ✅ **Improved Error Logging**: Tracks tab state and timing information in error messages
+7. ✅ **Server Stabilization**: Restarted Flask server cleanly to stop auto-reload issues
+
+**Files Modified**:
+- `static/script.js`: Added visibility monitoring, keep-alive, warnings, health checks
+- `app.py`: Enhanced health endpoint with detailed timing and system information
+
+**Expected Behavior After Fixes**:
+- Users get warned if tab goes to background during analysis
+- Browser throttling is minimized through keep-alive mechanism
+- Better error reporting when backend issues occur
+- Pre-flight checks catch backend problems before analysis starts
 
 ## H/M/L Control-Based CalcJ System Implementation (COMPLETED - July 19, 2025)
 
