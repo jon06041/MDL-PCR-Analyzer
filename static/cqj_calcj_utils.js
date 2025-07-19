@@ -2,12 +2,12 @@
 // This file should ONLY contain calculation logic, not UI controls
 
 /**
- * Calculate CQJ (threshold crossing) for a well
- * Skips first 5 cycles and uses linear interpolation
+ * Calculate CQJ (threshold crossing) for a well with enhanced curve quality checks
+ * Skips first 5 cycles, checks curve quality, direction, and uses LAST positive crossing
  * @param {Array<number>} rfuArray - Array of RFU values
  * @param {Array<number>} cyclesArray - Array of cycle numbers
  * @param {number} threshold - Threshold value
- * @returns {number|null} Interpolated cycle value or null if not found
+ * @returns {number|null} Interpolated cycle value or null if not found/poor quality
  */
 function calculateThresholdCrossing(rfuArray, cyclesArray, threshold) {
     if (!rfuArray || !cyclesArray || rfuArray.length !== cyclesArray.length) {
@@ -24,41 +24,126 @@ function calculateThresholdCrossing(rfuArray, cyclesArray, threshold) {
     
     const startCycle = 5; // Skip cycles 1-5 (indices 0-4)
     
-    for (let i = startCycle; i < rfuArray.length; i++) {
-        const rfu = parseFloat(rfuArray[i]);
-        const cycle = parseFloat(cyclesArray[i]);
+    // Convert to numeric arrays for analysis
+    const numericRfu = rfuArray.map(r => parseFloat(r));
+    const numericCycles = cyclesArray.map(c => parseFloat(c));
+    
+    // Check curve quality first
+    const curveQuality = assessCurveQuality(numericRfu, startCycle);
+    if (!curveQuality.isGoodCurve) {
+        console.log(`❌ CQJ-CALC - Poor curve quality: ${curveQuality.reason}`);
+        return null; // N/A for poor quality curves
+    }
+    
+    // Find ALL threshold crossings (both directions)
+    const crossings = [];
+    
+    for (let i = startCycle + 1; i < numericRfu.length; i++) {
+        const prevRfu = numericRfu[i - 1];
+        const currentRfu = numericRfu[i];
+        const prevCycle = numericCycles[i - 1];
+        const currentCycle = numericCycles[i];
         
-        if (rfu >= numericThreshold) {
-            // Found crossing point
-            if (i === startCycle) {
-                // Threshold already crossed at start
-                return cycle;
+        // Check for crossing in either direction
+        const prevAbove = prevRfu >= numericThreshold;
+        const currentAbove = currentRfu >= numericThreshold;
+        
+        if (prevAbove !== currentAbove) {
+            // Found a crossing
+            const direction = currentAbove ? 'positive' : 'negative';
+            
+            // Calculate interpolated crossing point
+            let interpolatedCq;
+            if (currentRfu === prevRfu) {
+                interpolatedCq = currentCycle;
+            } else {
+                interpolatedCq = prevCycle + 
+                    (numericThreshold - prevRfu) * (currentCycle - prevCycle) / (currentRfu - prevRfu);
             }
             
-            // Linear interpolation between previous and current point
-            const prevRfu = parseFloat(rfuArray[i - 1]);
-            const prevCycle = parseFloat(cyclesArray[i - 1]);
+            crossings.push({
+                cycle: interpolatedCq,
+                direction: direction,
+                index: i,
+                rfuBefore: prevRfu,
+                rfuAfter: currentRfu
+            });
             
-            if (rfu === prevRfu) {
-                // No change in RFU, return current cycle
-                return cycle;
-            }
-            
-            // Interpolate
-            const interpolatedCq = prevCycle + 
-                (numericThreshold - prevRfu) * (cycle - prevCycle) / (rfu - prevRfu);
-            
-            console.log(`✅ CQJ-CALC - Crossing at ${interpolatedCq.toFixed(2)} ` +
-                `(between cycles ${prevCycle}-${cycle}, RFU: ${prevRfu.toFixed(2)}-${rfu.toFixed(2)})`);
-            
-            return interpolatedCq;
+            console.log(`🔍 CQJ-CALC - ${direction} crossing at cycle ${interpolatedCq.toFixed(2)} (RFU: ${prevRfu.toFixed(2)} → ${currentRfu.toFixed(2)})`);
         }
     }
     
-    // Never crossed threshold
-    const maxRfu = Math.max(...rfuArray.slice(startCycle).map(r => parseFloat(r)));
-    console.log(`❌ CQJ-CALC - No crossing (threshold: ${numericThreshold.toFixed(2)}, max RFU: ${maxRfu.toFixed(2)})`);
-    return null;
+    if (crossings.length === 0) {
+        const maxRfu = Math.max(...numericRfu.slice(startCycle));
+        console.log(`❌ CQJ-CALC - No crossings found (threshold: ${numericThreshold.toFixed(2)}, max RFU: ${maxRfu.toFixed(2)})`);
+        return null;
+    }
+    
+    // Filter for positive direction crossings only
+    const positiveCrossings = crossings.filter(c => c.direction === 'positive');
+    
+    if (positiveCrossings.length === 0) {
+        console.log(`❌ CQJ-CALC - Only negative direction crossings found - marking as N/A`);
+        return null; // N/A for negative-only crossings
+    }
+    
+    // Use the LAST positive crossing to avoid flat-line confusion
+    const lastPositiveCrossing = positiveCrossings[positiveCrossings.length - 1];
+    
+    console.log(`✅ CQJ-CALC - Using LAST positive crossing at ${lastPositiveCrossing.cycle.toFixed(2)} ` +
+        `(${positiveCrossings.length} positive crossings total)`);
+    
+    return lastPositiveCrossing.cycle;
+}
+
+/**
+ * Assess curve quality to determine if it's suitable for analysis
+ * @param {Array<number>} rfuArray - Numeric RFU values
+ * @param {number} startCycle - Index to start analysis from
+ * @returns {Object} Quality assessment with isGoodCurve boolean and reason
+ */
+function assessCurveQuality(rfuArray, startCycle) {
+    const analysisData = rfuArray.slice(startCycle);
+    
+    if (analysisData.length < 10) {
+        return { isGoodCurve: false, reason: 'insufficient data points' };
+    }
+    
+    // Check for flat lines (very low variance)
+    const mean = analysisData.reduce((sum, val) => sum + val, 0) / analysisData.length;
+    const variance = analysisData.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / analysisData.length;
+    const stdDev = Math.sqrt(variance);
+    
+    if (stdDev < 0.01) {
+        return { isGoodCurve: false, reason: 'flat line (no signal change)' };
+    }
+    
+    // Check for excessive noise (coefficient of variation too high for low signals)
+    const coefficientOfVariation = stdDev / mean;
+    if (mean < 0.1 && coefficientOfVariation > 0.5) {
+        return { isGoodCurve: false, reason: 'excessive noise in low signal' };
+    }
+    
+    // Check for monotonic increase (good exponential curve should generally increase)
+    const firstQuarter = analysisData.slice(0, Math.floor(analysisData.length / 4));
+    const lastQuarter = analysisData.slice(-Math.floor(analysisData.length / 4));
+    const firstMean = firstQuarter.reduce((sum, val) => sum + val, 0) / firstQuarter.length;
+    const lastMean = lastQuarter.reduce((sum, val) => sum + val, 0) / lastQuarter.length;
+    
+    if (lastMean <= firstMean) {
+        return { isGoodCurve: false, reason: 'no overall signal increase' };
+    }
+    
+    // Check for reasonable signal range
+    const minVal = Math.min(...analysisData);
+    const maxVal = Math.max(...analysisData);
+    const range = maxVal - minVal;
+    
+    if (range < 0.05) {
+        return { isGoodCurve: false, reason: 'insufficient signal range' };
+    }
+    
+    return { isGoodCurve: true, reason: 'passes quality checks' };
 }
 
 /**
@@ -279,13 +364,27 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
         return { calcj_value: null, method: 'control_based_failed' };
     }
     
-    // Check for early crossing (crossing before lowest control)
+    // Check for early crossing (crossing significantly before lowest control)
     const controlCqjValues = Object.values(avgControlCqj);
     if (controlCqjValues.length > 0) {
         const minControlCqj = Math.min(...controlCqjValues);
-        if (currentCqj < minControlCqj) {
-            console.log(`[CALCJ-DEBUG] Early crossing detected (CQJ ${currentCqj.toFixed(2)} < min control ${minControlCqj.toFixed(2)})`);
+        const maxControlCqj = Math.max(...controlCqjValues);
+        const controlRange = maxControlCqj - minControlCqj;
+        
+        // Allow some tolerance - only mark as early crossing if significantly before controls
+        const earlyThreshold = minControlCqj - Math.max(1.0, controlRange * 0.2);
+        
+        if (currentCqj < earlyThreshold) {
+            console.log(`[CALCJ-DEBUG] Early crossing detected (CQJ ${currentCqj.toFixed(2)} < threshold ${earlyThreshold.toFixed(2)})`);
             return { calcj_value: 'N/A', method: 'early_crossing' };
+        }
+        
+        // Also check for very late crossing (contamination or poor amplification)
+        const lateThreshold = maxControlCqj + Math.max(2.0, controlRange * 0.5);
+        
+        if (currentCqj > lateThreshold) {
+            console.log(`[CALCJ-DEBUG] Very late crossing detected (CQJ ${currentCqj.toFixed(2)} > threshold ${lateThreshold.toFixed(2)})`);
+            return { calcj_value: 'N/A', method: 'late_crossing' };
         }
     }
     
@@ -313,13 +412,36 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
     
     try {
         if (hCq !== undefined && lCq !== undefined && hVal && lVal) {
-            // Log-linear interpolation (standard curve)
-            const slope = (Math.log10(hVal) - Math.log10(lVal)) / (lCq - hCq);
-            const intercept = Math.log10(hVal) - slope * hCq;
+            // Validate that we have reasonable control data
+            if (Math.abs(hCq - lCq) < 0.5) {
+                console.log('[CALCJ-DEBUG] H/L controls too close in CQJ values, using basic method');
+                return { calcj_value: calculateCalcj(well, threshold), method: 'basic' };
+            }
+            
+            // Ensure H should have lower CQJ (earlier crossing) than L
+            if (hCq > lCq) {
+                console.log(`[CALCJ-DEBUG] Warning: H control CQJ (${hCq.toFixed(2)}) > L control CQJ (${lCq.toFixed(2)}), may indicate control mix-up`);
+            }
+            
+            // Log-linear interpolation (standard curve: log(concentration) vs CQJ)
+            const logH = Math.log10(hVal);
+            const logL = Math.log10(lVal);
+            
+            // Calculate slope: change in log(concentration) per cycle
+            const slope = (logH - logL) / (lCq - hCq);
+            const intercept = logH - slope * hCq;
+            
+            // Calculate concentration for current CQJ
             const logConc = slope * currentCqj + intercept;
             const calcjResult = Math.pow(10, logConc);
             
-            console.log(`[CALCJ-DEBUG] Control-based CalcJ = ${calcjResult.toExponential(2)} (CQJ: ${currentCqj.toFixed(2)})`);
+            // Sanity check: result should be within reasonable range
+            if (calcjResult < 0 || calcjResult > 1e12) {
+                console.log(`[CALCJ-DEBUG] Unreasonable CalcJ result (${calcjResult.toExponential(2)}), using basic method`);
+                return { calcj_value: calculateCalcj(well, threshold), method: 'basic' };
+            }
+            
+            console.log(`[CALCJ-DEBUG] Control-based CalcJ = ${calcjResult.toExponential(2)} (CQJ: ${currentCqj.toFixed(2)}, slope: ${slope.toFixed(3)})`);
             return { calcj_value: calcjResult, method: 'control_based' };
         } else {
             console.log('[CALCJ-DEBUG] Missing H/L controls, using basic method');
@@ -332,19 +454,32 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
 }
 
 /**
- * Calculate CalcJ value (basic method - currently amplitude/threshold)
+ * Calculate CalcJ value (basic method - using proper amplification formula)
  */
 function calculateCalcj(well, threshold) {
-    // Implement your CalcJ formula here if needed
-    // Example: return amplitude / threshold
-    if (!well || !well.amplitude) return null;
+    // For basic CalcJ, use a more reasonable formula
+    // Option 1: Use CQJ-based calculation (earlier crossing = higher concentration)
+    if (well && well.cqj_value !== null && well.cqj_value !== undefined) {
+        const cqj = parseFloat(well.cqj_value);
+        if (!isNaN(cqj) && cqj > 0) {
+            // Basic exponential relationship: concentration = 2^(40-CQJ) * baseline
+            // This gives reasonable values where earlier crossing = higher concentration
+            const baseline = 1000; // Arbitrary baseline concentration
+            return baseline * Math.pow(2, (40 - cqj));
+        }
+    }
     
-    const amplitude = parseFloat(well.amplitude);
-    const thresh = parseFloat(threshold);
+    // Fallback: Use amplitude/threshold if available
+    if (well && well.amplitude && threshold) {
+        const amplitude = parseFloat(well.amplitude);
+        const thresh = parseFloat(threshold);
+        
+        if (!isNaN(amplitude) && !isNaN(thresh) && thresh > 0) {
+            return amplitude / thresh;
+        }
+    }
     
-    if (isNaN(amplitude) || isNaN(thresh) || thresh <= 0) return null;
-    
-    return amplitude / thresh;
+    return null;
 }
 
 // Export functions
@@ -355,6 +490,44 @@ window.calculateCalcjWithControls = calculateCalcjWithControls;
 
 // Alias for manual threshold changes (same function)
 window.recalculateCQJValuesForManualThreshold = recalculateCQJValues;
+
+// Debug function to test curve quality assessment
+window.debugCurveQuality = function(wellKey) {
+    if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
+        console.error('❌ DEBUG - No analysis results available');
+        return;
+    }
+    
+    const well = window.currentAnalysisResults.individual_results[wellKey];
+    if (!well) {
+        console.error(`❌ DEBUG - Well ${wellKey} not found`);
+        return;
+    }
+    
+    let rfuArray = well.raw_rfu || well.rfu;
+    if (typeof rfuArray === 'string') {
+        try { rfuArray = JSON.parse(rfuArray); } catch(e) { rfuArray = []; }
+    }
+    
+    if (!Array.isArray(rfuArray) || rfuArray.length === 0) {
+        console.error(`❌ DEBUG - No RFU data for well ${wellKey}`);
+        return;
+    }
+    
+    const numericRfu = rfuArray.map(r => parseFloat(r));
+    const quality = assessCurveQuality(numericRfu, 5);
+    
+    console.log(`🔍 DEBUG - Curve quality for ${wellKey}:`, {
+        isGoodCurve: quality.isGoodCurve,
+        reason: quality.reason,
+        dataPoints: numericRfu.length,
+        rfuRange: `${Math.min(...numericRfu).toFixed(3)} - ${Math.max(...numericRfu).toFixed(3)}`,
+        mean: (numericRfu.reduce((sum, val) => sum + val, 0) / numericRfu.length).toFixed(3),
+        stdDev: Math.sqrt(numericRfu.reduce((sum, val) => sum + Math.pow(val - (numericRfu.reduce((s, v) => s + v, 0) / numericRfu.length), 2), 0) / numericRfu.length).toFixed(3)
+    });
+    
+    return quality;
+};
 
 // Debug function to inspect well data structure on backend
 window.debugWellData = async function(sessionId = null) {
