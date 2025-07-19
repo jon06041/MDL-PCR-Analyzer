@@ -116,6 +116,37 @@ Working on MDL-PCR-Analyzer timing issues and multichannel threshold display pro
 - Browser throttling is minimized through keep-alive mechanism
 - Better error reporting when backend issues occur
 - Pre-flight checks catch backend problems before analysis starts
+- CalcJ (concentration) values recalculate when thresholds change
+
+### 🔧 **CalcJ Recalculation Fix (July 19, 2025)**
+
+**User-Reported Issue**:
+- CalcJ (concentration) values not updating when threshold strategy changes
+- Expected flow: threshold change → CQJ recalculation → CalcJ recalculation
+- Only CQJ was recalculating, CalcJ remained static
+
+**Root Cause Analysis**:
+- `recalculateCQJValues()` function only updated CQJ values
+- No CalcJ recalculation after CQJ changes
+- Missing `recalculateCQJValuesForManualThreshold` function causing errors
+- CalcJ depends on CQJ for standard curve calculations
+
+**Solutions Implemented**:
+1. ✅ **Enhanced recalculateCQJValues()**: Now recalculates both CQJ and CalcJ
+2. ✅ **CalcJ Update Logic**: Uses `calculateCalcjWithControls()` with new CQJ values
+3. ✅ **Proper Test Code Detection**: Gets test code for standard curve calculations
+4. ✅ **Added Missing Function**: `recalculateCQJValuesForManualThreshold` alias
+5. ✅ **Enhanced Logging**: Shows both CQJ and CalcJ updates with method used
+6. ✅ **Update Counter**: Tracks separate counts for CQJ and CalcJ updates
+
+**Files Modified**:
+- `static/cqj_calcj_utils.js`: Enhanced recalculation functions with CalcJ support
+
+**Expected Behavior After Fix**:
+- Changing threshold strategy immediately updates both CQJ and CalcJ values
+- Manual threshold dragging recalculates concentrations in real-time
+- Console shows detailed logging of both CQJ and CalcJ updates
+- Standard curve calculations use proper test code and control detection
 
 ## H/M/L Control-Based CalcJ System Implementation (COMPLETED - July 19, 2025)
 
