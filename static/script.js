@@ -8,6 +8,78 @@ window.chartUpdating = false;
 // Global flag to prevent multiple simultaneous chart initializations
 window.chartInitializing = false;
 
+// Anti-throttling and visibility monitoring
+let isTabInBackground = false;
+let backgroundWarningShown = false;
+
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+        isTabInBackground = true;
+        console.warn('⚠️ TAB-THROTTLING - Tab went to background during analysis. This may slow down processing.');
+        
+        // Show warning if analysis is ongoing and we haven't warned before
+        if (!backgroundWarningShown && (window.chartInitializing || window.chartUpdating)) {
+            backgroundWarningShown = true;
+            const warningDiv = document.createElement('div');
+            warningDiv.id = 'background-warning';
+            warningDiv.style.cssText = `
+                position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+                background: #ff9800; color: white; padding: 10px 20px;
+                border-radius: 5px; z-index: 10000; font-weight: bold;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            `;
+            warningDiv.textContent = '⚠️ Keep this tab active during analysis to prevent delays';
+            document.body.appendChild(warningDiv);
+            
+            // Remove warning after 5 seconds
+            setTimeout(() => {
+                const warning = document.getElementById('background-warning');
+                if (warning) warning.remove();
+            }, 5000);
+        }
+    } else {
+        isTabInBackground = false;
+        if (isTabInBackground) {
+            console.log('✅ TAB-ACTIVE - Tab returned to foreground');
+        }
+    }
+});
+
+// Backend health check function
+async function checkBackendHealth() {
+    try {
+        const startTime = performance.now();
+        const response = await fetch('/health', { 
+            method: 'GET',
+            headers: { 'X-Health-Check': 'frontend' }
+        });
+        const endTime = performance.now();
+        const responseTime = endTime - startTime;
+        
+        if (response.ok) {
+            const health = await response.json();
+            console.log(`✅ HEALTH-CHECK - Backend responsive (${responseTime.toFixed(0)}ms)`, health);
+            return { healthy: true, responseTime, health };
+        } else {
+            console.warn(`⚠️ HEALTH-CHECK - Backend returned ${response.status} (${responseTime.toFixed(0)}ms)`);
+            return { healthy: false, responseTime, status: response.status };
+        }
+    } catch (error) {
+        console.error(`❌ HEALTH-CHECK - Backend unreachable:`, error.message);
+        return { healthy: false, error: error.message };
+    }
+}
+
+// Auto health check when tab becomes active again
+document.addEventListener('visibilitychange', function() {
+    if (!document.hidden && isTabInBackground) {
+        // Tab became active again after being in background
+        setTimeout(() => {
+            checkBackendHealth();
+        }, 1000);
+    }
+});
+
 // ========================================
 // EXPORT BUTTON STATE MANAGEMENT
 // ========================================
@@ -2618,7 +2690,17 @@ async function processChannelsSequentially(fluorophores, experimentPattern) {
                 // console.log(`✅ SEQUENTIAL-PROCESSING - Channel ${fluorophore} completed successfully. Wells: ${Object.keys(channelResult.individual_results).length}`);
                 
             } else {
-                throw new Error(`Channel ${fluorophore} returned empty or invalid results`);
+                // More detailed error for debugging single-channel issues
+                let errorReason = 'unknown';
+                if (!channelResult) {
+                    errorReason = 'backend returned null/undefined result';
+                } else if (!channelResult.individual_results) {
+                    errorReason = 'missing individual_results in backend response';
+                } else if (Object.keys(channelResult.individual_results).length === 0) {
+                    errorReason = 'individual_results is empty (no wells analyzed)';
+                }
+                
+                throw new Error(`Channel ${fluorophore} returned empty or invalid results: ${errorReason}`);
             }
             
         } catch (error) {
@@ -2706,16 +2788,26 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
                 // timestamp: new Date().toISOString()
             // });
             
+            // Anti-throttling: Keep browser tab active during long requests
+            const keepAliveInterval = setInterval(() => {
+                // Minimal DOM operation to prevent browser throttling
+                document.title = `Analyzing ${fluorophore}... ${new Date().getSeconds()}s`;
+            }, 1000);
+            
             const response = await fetch('/analyze', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-Filename': amplificationFiles[fluorophore]?.fileName || `${fluorophore}.csv`,
-                    'X-Fluorophore': fluorophore
+                    'X-Fluorophore': fluorophore,
+                    'X-Timestamp': new Date().toISOString() // Help backend track timing
                 },
                 body: JSON.stringify(payload),
                 signal: controller.signal
             });
+            
+            clearInterval(keepAliveInterval); // Stop keep-alive
+            document.title = 'qPCR Analyzer'; // Reset title
             
             clearTimeout(timeoutId); // Clear timeout if request succeeds
             
@@ -2731,7 +2823,7 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
                 let errorDetails = null;
                 try {
                     const errorText = await response.text();
-                    // console.log(`🔍 SINGLE-CHANNEL - Raw error response for ${fluorophore}:`, errorText);
+                    console.log(`🔍 DEBUG-ERROR - Backend error response for ${fluorophore} (${response.status}):`, errorText);
                     
                     // Try to parse as JSON
                     try {
@@ -2744,27 +2836,25 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
                         }
                     }
                 } catch (readError) {
-                    // console.error(`❌ Could not read error response for ${fluorophore}:`, readError);
+                    console.error(`❌ Could not read error response for ${fluorophore}:`, readError);
                 }
                 
-                // console.error(`❌ SINGLE-CHANNEL - Backend error for ${fluorophore}: ${msg}`);
-                // console.error(`❌ SINGLE-CHANNEL - Error details for ${fluorophore}:`, {
-                    // status: response.status,
-                    // statusText: response.statusText,
-                    // headers: Object.fromEntries(response.headers.entries()),
-                    // errorDetails,
-                    // fluorophore,
-                    // requestPayloadSize: JSON.stringify(payload).length
-                // });
-                
+                console.error(`❌ DEBUG-ERROR - Backend HTTP error for ${fluorophore}: ${msg}`);
                 return { individual_results: {} };
             }
             result = await response.json();
         } catch (fetchError) {
             // Network or other failure - log and return empty
+            console.error(`❌ DEBUG-ERROR - Fetch failed for ${fluorophore}:`, {
+                error: fetchError.message,
+                name: fetchError.name,
+                timestamp: new Date().toISOString(),
+                tabInBackground: isTabInBackground
+            });
+            
             if (fetchError.name === 'AbortError') {
-                // console.error(`⏰ SINGLE-CHANNEL - Request timeout for ${fluorophore} (60 seconds)`);
-                // console.error(`💡 TIMEOUT-TIP - Backend may still be processing. Check backend logs for completion.`);
+                console.error(`⏰ DEBUG-ERROR - Request timeout for ${fluorophore} (60 seconds)`);
+                console.error(`💡 TIMEOUT-TIP - Backend may still be processing. Check backend logs for completion.`);
                 
                 // Try to recover from timeout by checking if data was saved to database
                 try {
@@ -2791,9 +2881,9 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
                     // console.warn(`⚠️ TIMEOUT-RECOVERY - Could not recover ${fluorophore} data:`, recoveryError);
                 }
             } else {
-                // console.error(`❌ SINGLE-CHANNEL - Network error for ${fluorophore}:`, fetchError.message);
+                console.error(`❌ DEBUG-ERROR - Network error for ${fluorophore}:`, fetchError.message);
             }
-            // console.error(`❌ SINGLE-CHANNEL - Full fetch error for ${fluorophore}:`, fetchError);
+            console.error(`❌ DEBUG-ERROR - Full fetch error for ${fluorophore}:`, fetchError);
             return { individual_results: {} };
         }
         // COMMENTED OUT: Mock data was interfering with real channel analysis
@@ -3903,6 +3993,17 @@ async function performAnalysis() {
     if (loadingIndicator) loadingIndicator.style.display = 'flex';
 
     try {
+        // Pre-flight health check to ensure backend is responsive
+        console.log('🔍 PRE-FLIGHT - Checking backend health before analysis...');
+        const healthCheck = await checkBackendHealth();
+        if (!healthCheck.healthy) {
+            console.error('❌ PRE-FLIGHT - Backend health check failed:', healthCheck);
+            alert('Backend server is not responding properly. Please refresh the page and try again.');
+            if (loadingIndicator) loadingIndicator.style.display = 'none';
+            return;
+        }
+        console.log('✅ PRE-FLIGHT - Backend health check passed, proceeding with analysis');
+        
         // Get experiment pattern for tracking
         const experimentPattern = getCurrentFullPattern();
         const fluorophores = Object.keys(amplificationFiles);
@@ -3935,9 +4036,27 @@ async function performAnalysis() {
         // If only one fluorophore was analyzed, save it properly to database
         if (fluorophores.length === 1) {
             const singleResult = allResults[fluorophores[0]];
-            if (!singleResult || !singleResult.individual_results) {
-                alert('Error: No valid analysis results found for this channel. Please check your input files.');
-                // console.error('❌ SINGLE-CHANNEL - No valid individual_results in singleResult:', singleResult);
+            
+            // Check if the single channel failed completely
+            if (!singleResult || !singleResult.individual_results || Object.keys(singleResult.individual_results).length === 0) {
+                // More specific error message based on what went wrong
+                let errorMessage = 'Error: No valid analysis results found for this channel.';
+                
+                if (!singleResult) {
+                    errorMessage += ' The analysis failed completely. Please check your input files and try again.';
+                } else if (!singleResult.individual_results) {
+                    errorMessage += ' The backend returned results without individual well data. Please check the backend logs.';
+                } else if (Object.keys(singleResult.individual_results).length === 0) {
+                    errorMessage += ' No wells were successfully analyzed. Please verify your data format and threshold settings.';
+                }
+                
+                alert(errorMessage);
+                // console.error('❌ SINGLE-CHANNEL - Analysis failed:', {
+                    // singleResult: !!singleResult,
+                    // hasIndividualResults: !!(singleResult && singleResult.individual_results),
+                    // wellCount: singleResult && singleResult.individual_results ? Object.keys(singleResult.individual_results).length : 0,
+                    // fluorophore: fluorophores[0]
+                // });
                 if (loadingIndicator) loadingIndicator.style.display = 'none';
                 return;
             }

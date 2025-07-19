@@ -1460,7 +1460,12 @@ def get_experiment_statistics():
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint for Railway deployment"""
+    import time
+    import threading
+    
     try:
+        start_time = time.time()
+        
         # Basic app health check
         port = os.environ.get('PORT', '5000')
         environment = os.environ.get('FLASK_ENV', 'development')
@@ -1470,7 +1475,10 @@ def health_check():
             'message': 'qPCR S-Curve Analyzer with Database',
             'version': '2.1.0-database',
             'port': port,
-            'environment': environment
+            'environment': environment,
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'thread_count': threading.active_count(),
+            'request_headers': {k: v for k, v in request.headers.items() if k.startswith('X-')}
         }
         
         # Test database connection if possible
@@ -1483,6 +1491,9 @@ def health_check():
             # Don't fail health check due to database issues
             response_data['database'] = f'warning: {str(db_error)}'
         
+        # Add timing information
+        response_data['response_time_ms'] = round((time.time() - start_time) * 1000, 2)
+        
         return jsonify(response_data), 200
         
     except Exception as e:
@@ -1492,7 +1503,8 @@ def health_check():
             'message': 'Health check failed',
             'error': str(e),
             'port': os.environ.get('PORT', '5000'),
-            'environment': os.environ.get('FLASK_ENV', 'development')
+            'environment': os.environ.get('FLASK_ENV', 'development'),
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
         }), 503
 
 @app.route('/ping', methods=['GET'])
