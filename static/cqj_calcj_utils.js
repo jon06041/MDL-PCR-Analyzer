@@ -159,10 +159,14 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
         return { calcj_value: calculateCalcj(well, threshold), method: 'basic' };
     }
     
+    console.log(`[CALCJ-DEBUG] Starting control-based calculation for ${testCode}/${channel}...`);
+    
     // Find H/M/L control wells and collect their CQJ values
     const controlCqj = { H: [], M: [], L: [] };
     
     if (allWellResults && typeof allWellResults === 'object') {
+        console.log(`[CALCJ-DEBUG] Analyzing ${Object.keys(allWellResults).length} wells for controls...`);
+        
         Object.keys(allWellResults).forEach(wellKey => {
             const wellData = allWellResults[wellKey];
             if (!wellKey || !wellData) return;
@@ -231,14 +235,13 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
         // DEBUGGING: Show all well keys to help identify control patterns
         if (allWellResults) {
             const allKeys = Object.keys(allWellResults);
-            console.log(`[CALCJ-DEBUG] All available wells: ${allKeys.join(', ')}`);
+            console.log(`[CALCJ-DEBUG] All available wells: ${allKeys.slice(0, 10).join(', ')}${allKeys.length > 10 ? '...' : ''}`);
             
-            // Try to find ANY wells that might be controls with more flexible patterns
-            allKeys.forEach(key => {
-                const upperKey = key.toUpperCase();
+            // Show a sample of wells with their sample names
+            allKeys.slice(0, 5).forEach(key => {
                 const wellData = allWellResults[key];
                 if (wellData && wellData.cqj_value !== null && wellData.cqj_value !== undefined) {
-                    console.log(`[CALCJ-DEBUG] Well ${key}: CQJ=${wellData.cqj_value}, sample_name=${wellData.sample_name || 'N/A'}`);
+                    console.log(`[CALCJ-DEBUG] Sample well ${key}: CQJ=${wellData.cqj_value}, sample_name="${wellData.sample_name || 'N/A'}"`);
                 }
             });
         }
