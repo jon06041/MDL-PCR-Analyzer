@@ -53,7 +53,11 @@ const LOG_THRESHOLD_STRATEGIES = {
   "log_max_derivative": {
     name: "Log: Max First Derivative",
     calculate: ({rfu, cycles}) => {
-      if (!rfu || rfu.length < 3) return null;
+      console.log('🔍 DERIVATIVE-DEBUG - log_max_derivative called with rfu:', rfu ? rfu.length : 'null', 'cycles:', cycles ? cycles.length : 'null');
+      if (!rfu || rfu.length < 3) {
+        console.warn('🔍 DERIVATIVE-DEBUG - log_max_derivative: Insufficient data points');
+        return null;
+      }
       let maxSlope = -Infinity, maxIdx = 1;
       for (let i = 1; i < rfu.length - 1; i++) {
         const slope = rfu[i + 1] - rfu[i - 1];
@@ -62,7 +66,9 @@ const LOG_THRESHOLD_STRATEGIES = {
           maxIdx = i;
         }
       }
-      return rfu[maxIdx];
+      const result = rfu[maxIdx];
+      console.log('🔍 DERIVATIVE-DEBUG - log_max_derivative result:', result, 'at index:', maxIdx);
+      return result;
     },
     description: "Threshold at the point of maximum slope (first derivative) on the log-transformed curve.",
     reference: "See qPCR_Curve_Classification_Reference.md"
@@ -70,7 +76,11 @@ const LOG_THRESHOLD_STRATEGIES = {
   "log_second_derivative_max": {
     name: "Log: Max Second Derivative",
     calculate: ({rfu, cycles}) => {
-      if (!rfu || rfu.length < 5) return null;
+      console.log('🔍 DERIVATIVE-DEBUG - log_second_derivative_max called with rfu:', rfu ? rfu.length : 'null', 'cycles:', cycles ? cycles.length : 'null');
+      if (!rfu || rfu.length < 5) {
+        console.warn('🔍 DERIVATIVE-DEBUG - log_second_derivative_max: Insufficient data points');
+        return null;
+      }
       let maxSecond = -Infinity, maxIdx = 2;
       for (let i = 2; i < rfu.length - 2; i++) {
         const second = (rfu[i + 1] - 2 * rfu[i] + rfu[i - 1]);
@@ -79,7 +89,9 @@ const LOG_THRESHOLD_STRATEGIES = {
           maxIdx = i;
         }
       }
-      return rfu[maxIdx];
+      const result = rfu[maxIdx];
+      console.log('🔍 DERIVATIVE-DEBUG - log_second_derivative_max result:', result, 'at index:', maxIdx);
+      return result;
     },
     description: "Threshold at the point of maximum second derivative (inflection) on the log-transformed curve.",
     reference: "See qPCR_Curve_Classification_Reference.md"
@@ -306,12 +318,32 @@ function calculateThresholdForStrategy(strategy, analysisResults, currentScale =
             if (channelWells.length > 0) {
                 // Extract parameters from first well of this channel
                 const firstWell = analysisResults[channelWells[0]];
+                
+                // Extract RFU and cycle data for derivative strategies
+                let rfu = null, cycles = null;
+                try {
+                    if (firstWell.raw_rfu) {
+                        rfu = typeof firstWell.raw_rfu === 'string' ? JSON.parse(firstWell.raw_rfu) : firstWell.raw_rfu;
+                    }
+                    if (firstWell.raw_cycles) {
+                        cycles = typeof firstWell.raw_cycles === 'string' ? JSON.parse(firstWell.raw_cycles) : firstWell.raw_cycles;
+                    }
+                } catch (parseError) {
+                    console.warn(`⚠️ THRESHOLD-STRATEGY - Error parsing RFU/cycles data for ${channel}:`, parseError);
+                }
+                
                 const params = {
                     fluorophore: channel,
                     pathogen: firstWell.pathogen || firstWell.test_code,
                     baseline: firstWell.baseline,
                     baseline_std: firstWell.baseline_std || (firstWell.baseline ? firstWell.baseline * 0.1 : 100), // Estimate if not available
+                    L: firstWell.L || (firstWell.amplitude && firstWell.baseline ? firstWell.amplitude : null),
+                    B: firstWell.B || firstWell.baseline,
+                    // Add RFU and cycles data for derivative strategies
+                    rfu: rfu,
+                    cycles: cycles,
                     // Add other parameters as needed
+                    fixed_value: null // Will be auto-populated by calculateThreshold if needed
                 };
                 
                 try {

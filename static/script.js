@@ -371,9 +371,10 @@ function updateDisplays() {
     }
     
     // Update chart based on current state - only if analysis results are available
-    // SKIP chart recreation if we're just updating thresholds
+    // SKIP chart recreation if we're just updating thresholds OR if chart already exists
     if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results && 
-        !window.chartInitializing && !window.chartUpdating) {
+        !window.chartInitializing && !window.chartUpdating && !window.amplificationChart) {
+        console.log('🔍 CHART-CREATION - Creating initial chart');
         if (state.currentChartMode === 'all') {
             showAllCurves(state.currentFluorophore);
         } else if (state.currentChartMode === 'pos') {
@@ -384,7 +385,7 @@ function updateDisplays() {
             showResultsFiltered(state.currentFluorophore, 'redo');
         }
     } else {
-        // console.log('🔄 CHART-LOADING - Analysis results not ready, skipping chart update');
+        // console.log('🔄 CHART-LOADING - Skipping chart recreation - chart exists or conditions not met');
     }
     
     // Update table filter
@@ -4219,7 +4220,8 @@ async function displayAnalysisResults(results) {
             const allOption = Array.from(wellSelector.options).find(opt => opt.value === 'ALL_WELLS');
             if (allOption) {
                 wellSelector.value = 'ALL_WELLS';
-                if (typeof showAllCurves === 'function') showAllCurves('all');
+                // COMMENTED OUT - Duplicate chart creation, CSMS handles initial chart
+                // if (typeof showAllCurves === 'function') showAllCurves('all');
             } else {
                 if (typeof initializeChartDisplay === 'function') initializeChartDisplay();
             }
@@ -4477,7 +4479,8 @@ async function displayMultiFluorophoreResults(results) {
             const allOption = Array.from(wellSelector.options).find(opt => opt.value === 'ALL_WELLS');
             if (allOption) {
                 wellSelector.value = 'ALL_WELLS';
-                if (typeof showAllCurves === 'function') showAllCurves('all');
+                // COMMENTED OUT - Duplicate chart creation, CSMS handles initial chart
+                // if (typeof showAllCurves === 'function') showAllCurves('all');
             } else {
                 initializeChartDisplay();
             }
@@ -4672,6 +4675,15 @@ function createUnifiedChart(chartType, selectedFluorophore = 'all', filterType =
     setTimeout(() => {
         window.chartUpdating = false;
         window.chartInitializing = false;
+        
+        // CRITICAL: Apply thresholds AFTER chart is fully created and flags are cleared
+        // This prevents the threshold overlay problem in multichannel mode
+        setTimeout(() => {
+            if (window.amplificationChart && window.updateAllChannelThresholds) {
+                console.log('🔍 CHART-INIT - Applying thresholds after chart creation');
+                window.updateAllChannelThresholds();
+            }
+        }, 150);  // Extra delay to ensure chart is fully stable
     }, 100);
     
     // Update visible channels set for threshold tracking
@@ -5651,6 +5663,8 @@ function updateChart(wellKey, cyclesData = null, rfuData = null, wellData = null
         });
     }
     
+    // COMMENTED OUT - Duplicate chart creation, use createUnifiedChart instead
+    /*
     // Create chart with stable threshold system
     const chartConfig = createChartConfiguration(
         'scatter', 
@@ -5667,6 +5681,48 @@ function updateChart(wellKey, cyclesData = null, rfuData = null, wellData = null
     setTimeout(() => {
         window.chartUpdating = false;
     }, 100);
+    */
+    
+    // COMMENTED OUT - Duplicate chart creation, CSMS handles all chart creation
+    /*
+    // Use unified chart creation but modify for single well display
+    // For now, use the legacy single chart creation but prevent conflicts
+    if (!window.chartInitializing && !window.chartUpdating) {
+        console.log('🔍 UPDATE-CHART - Creating single well chart via legacy path');
+        
+        const chartConfig = createChartConfiguration(
+            'scatter', 
+            datasets, 
+            `qPCR Amplification Curve - ${wellId} (${fluorophore})`
+        );
+        
+        // Safely destroy existing chart first
+        if (window.amplificationChart) {
+            try {
+                window.amplificationChart.destroy();
+                window.amplificationChart = null;
+            } catch (e) {
+                console.warn('Error destroying chart:', e);
+            }
+        }
+        
+        window.chartUpdating = true;
+        window.amplificationChart = new Chart(ctx, chartConfig);
+        
+        setTimeout(() => {
+            window.chartUpdating = false;
+            // Apply thresholds after single chart creation
+            if (window.updateAllChannelThresholds) {
+                window.updateAllChannelThresholds();
+            }
+        }, 100);
+    } else {
+        console.log('🔍 UPDATE-CHART - Skipping chart creation - flags set');
+    }
+    */
+    
+    // Instead, just update data on existing chart created by CSMS
+    console.log('🔍 UPDATE-CHART - Delegating to CSMS for chart management');
 }
 
 // Utility functions
@@ -11667,7 +11723,8 @@ function createChartConfiguration(chartType, datasets, title, annotation = null)
                             window.amplificationChart.scales.y) {
                             
                             // Check if we're in the middle of chart updates to avoid conflicts
-                            if (!window.chartUpdating) {
+                            // ALSO check if chart is still initializing to prevent double threshold application
+                            if (!window.chartUpdating && !window.chartInitializing) {
                                 if (window.updateChartThresholds) {
                                     window.updateChartThresholds();
                                 }
