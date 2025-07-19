@@ -75,6 +75,12 @@ function recalculateCQJValues() {
     const results = window.currentAnalysisResults.individual_results;
     const currentScale = window.currentScaleMode || 'linear';
     let updateCount = 0;
+    let calcjUpdateCount = 0;
+    
+    // Get test code for CalcJ calculations
+    const testCode = window.currentAnalysisResults?.test_code || 
+                     window.getCurrentFullPattern?.() || 
+                     'Unknown';
     
     // Process each well
     Object.entries(results).forEach(([wellKey, well]) => {
@@ -127,10 +133,28 @@ function recalculateCQJValues() {
                 updateCount++;
                 console.log(`✅ CQJ-UPDATE - ${wellKey} (${channel}): ${oldCqj?.toFixed(2) || 'null'} → ${newCqj?.toFixed(2) || 'null'}`);
             }
+            
+            // Recalculate CalcJ (concentration) using the new CQJ
+            const oldCalcj = well.calcj_value;
+            const calcjResult = calculateCalcjWithControls(well, threshold, results, testCode, channel);
+            
+            // Update CalcJ in well data
+            well.calcj_value = calcjResult.calcj_value;
+            well['CalcJ'] = calcjResult.calcj_value; // Also update display field
+            well.calcj_method = calcjResult.method;
+            
+            if (oldCalcj !== calcjResult.calcj_value) {
+                calcjUpdateCount++;
+                const oldVal = oldCalcj === null || oldCalcj === undefined ? 'null' : 
+                              (typeof oldCalcj === 'number' ? oldCalcj.toExponential(2) : oldCalcj);
+                const newVal = calcjResult.calcj_value === null || calcjResult.calcj_value === undefined ? 'null' :
+                              (typeof calcjResult.calcj_value === 'number' ? calcjResult.calcj_value.toExponential(2) : calcjResult.calcj_value);
+                console.log(`✅ CALCJ-UPDATE - ${wellKey} (${channel}): ${oldVal} → ${newVal} (${calcjResult.method})`);
+            }
         }
     });
     
-    console.log(`🔍 CQJ-RECALC - Updated ${updateCount} wells`);
+    console.log(`🔍 CQJ-RECALC - Updated ${updateCount} CQJ values and ${calcjUpdateCount} CalcJ values`);
     
     // Update the results table
     if (window.populateResultsTable) {
@@ -328,6 +352,9 @@ window.calculateThresholdCrossing = calculateThresholdCrossing;
 window.recalculateCQJValues = recalculateCQJValues;
 window.calculateCalcj = calculateCalcj;
 window.calculateCalcjWithControls = calculateCalcjWithControls;
+
+// Alias for manual threshold changes (same function)
+window.recalculateCQJValuesForManualThreshold = recalculateCQJValues;
 
 // Debug function to inspect well data structure on backend
 window.debugWellData = async function(sessionId = null) {
