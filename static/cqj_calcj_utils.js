@@ -258,20 +258,20 @@ function recalculateCQJValues() {
 function calculateCalcjWithControls(well, threshold, allWellResults, testCode, channel) {
     // Check if we have concentration controls for this test/channel
     if (typeof CONCENTRATION_CONTROLS === 'undefined') {
-        console.log('[CALCJ-DEBUG] CONCENTRATION_CONTROLS not available, using basic method');
-        return { calcj_value: calculateCalcj(well, threshold), method: 'basic' };
+        console.log('[CALCJ-DEBUG] CONCENTRATION_CONTROLS not available - CalcJ calculation impossible');
+        return { calcj_value: null, method: 'no_concentration_controls' };
     }
     
     const concValues = CONCENTRATION_CONTROLS[testCode]?.[channel];
     if (!concValues) {
-        console.log(`[CALCJ-DEBUG] No concentration controls found for ${testCode}/${channel}, using basic method`);
-        return { calcj_value: calculateCalcj(well, threshold), method: 'basic' };
+        console.log(`[CALCJ-DEBUG] No concentration controls found for ${testCode}/${channel} - CalcJ calculation impossible`);
+        return { calcj_value: null, method: 'no_concentration_controls' };
     }
     
     console.log(`[CALCJ-DEBUG] Starting control-based calculation for ${testCode}/${channel}...`);
     
-    // Find H/M/L control wells and collect their CQJ values
-    const controlCqj = { H: [], M: [], L: [] };
+    // Find H/M/L/NTC control wells and collect their CQJ values
+    const controlCqj = { H: [], M: [], L: [], NTC: [] };
     
     if (allWellResults && typeof allWellResults === 'object') {
         Object.keys(allWellResults).forEach(wellKey => {
@@ -282,6 +282,13 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
             let controlType = null;
             const upperKey = wellKey.toUpperCase();
             
+            // NTC (No Template Control) patterns - should have NO amplification unless contaminated
+            if (wellKey.startsWith('NTC') || wellKey.includes('_NTC_') || upperKey.startsWith('NEG') ||
+                upperKey.includes('NEGATIVE') || upperKey.includes('NTC') || upperKey.includes('NO_TEMPLATE') ||
+                upperKey.includes('BLANK') || upperKey.includes('N_T_C') || wellKey.endsWith('NTC') ||
+                upperKey.includes('D01N') || upperKey.includes('D02N') || upperKey.includes('D03N')) {
+                controlType = 'NTC';
+            }
             // More aggressive pattern matching for embedded control indicators
             // HIGH control patterns (including embedded H patterns)
             if (wellKey.startsWith('H_') || wellKey.includes('_H_') || upperKey.startsWith('HIGH') ||
@@ -313,7 +320,11 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
             // Also check sample_name if available with same aggressive patterns
             else if (wellData.sample_name) {
                 const upperSample = wellData.sample_name.toUpperCase();
-                if (upperSample.includes('HIGH') || upperSample.includes('POS') || upperSample.includes('H1') ||
+                if (upperSample.includes('NTC') || upperSample.includes('NEGATIVE') || upperSample.includes('NEG') ||
+                    upperSample.includes('NO_TEMPLATE') || upperSample.includes('BLANK') || upperSample.includes('N_T_C') ||
+                    upperSample.includes('D01N') || upperSample.includes('D02N') || upperSample.includes('D03N')) {
+                    controlType = 'NTC';
+                } else if (upperSample.includes('HIGH') || upperSample.includes('POS') || upperSample.includes('H1') ||
                     upperSample.includes('1E7') || upperSample.includes('10E7') || upperSample.includes('1E+7') ||
                     /[A-Z]\d+H-/.test(wellData.sample_name) || /H-\d+/.test(wellData.sample_name) ||
                     upperSample.includes('A05H') || upperSample.includes('A06H') || upperSample.includes('A07H')) {
@@ -331,7 +342,17 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
                 }
             }
             
-            if (controlType && wellData.cqj_value !== null && wellData.cqj_value !== undefined) {
+            // Handle control types appropriately
+            if (controlType === 'NTC') {
+                // NTC controls should NOT have CQJ values unless contaminated
+                if (wellData.cqj_value !== null && wellData.cqj_value !== undefined) {
+                    console.warn(`[CALCJ-DEBUG] ⚠️  CONTAMINATION DETECTED in NTC control ${wellKey}: CQJ ${wellData.cqj_value.toFixed(2)}`);
+                    controlCqj[controlType].push(wellData.cqj_value);
+                } else {
+                    console.log(`[CALCJ-DEBUG] ✅ NTC control ${wellKey}: No amplification (normal)`);
+                }
+            } else if (controlType && wellData.cqj_value !== null && wellData.cqj_value !== undefined) {
+                // H/M/L controls should have CQJ values
                 controlCqj[controlType].push(wellData.cqj_value);
                 // Only log if controls are found
                 if (controlCqj[controlType].length === 1) {
@@ -351,10 +372,11 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
         }
     });
     
-    // Check if we have enough controls for standard curve (relaxed to 1 control minimum for testing)
-    if (Object.keys(avgControlCqj).length < 1) {
-        console.log(`[CALCJ-DEBUG] No controls found, using basic method`);
-        return { calcj_value: calculateCalcj(well, threshold), method: 'basic' };
+    // Check if we have enough controls for standard curve (REQUIRE H and L controls)
+    if (!avgControlCqj.H || !avgControlCqj.L) {
+        console.log(`[CALCJ-DEBUG] Missing required H and/or L controls - CalcJ calculation impossible`);
+        console.log(`[CALCJ-DEBUG] Found controls: ${Object.keys(avgControlCqj).join(', ')}`);
+        return { calcj_value: null, method: 'missing_required_controls' };
     }
     
     // Get CQJ for current well
@@ -388,97 +410,64 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
         }
     }
     
-    // Use H and L controls for standard curve (most reliable)
-    let hCq = avgControlCqj.H;
-    let lCq = avgControlCqj.L;
-    let hVal = concValues.H;
-    let lVal = concValues.L;
+    // Use ACTUAL H and L controls from this run (no fallbacks)
+    const hCq = avgControlCqj.H;
+    const lCq = avgControlCqj.L;
+    const hVal = concValues.H;
+    const lVal = concValues.L;
     
-    // Fallback: if we only have one control type, use it as both H and L for now
-    if (!hCq && !lCq) {
-        console.log(`[CALCJ-DEBUG] No H/L controls, using basic method`);
-        return { calcj_value: calculateCalcj(well, threshold), method: 'basic' };
-    } else if (!hCq && avgControlCqj.M) {
-        // Use M as H if no H available
-        hCq = avgControlCqj.M;
-        hVal = concValues.M;
-        console.log(`[CALCJ-DEBUG] Using M control as H for standard curve`);
-    } else if (!lCq && avgControlCqj.M) {
-        // Use M as L if no L available
-        lCq = avgControlCqj.M;
-        lVal = concValues.M;
-        console.log(`[CALCJ-DEBUG] Using M control as L for standard curve`);
+    // Validate that we have all required data
+    if (!hCq || !lCq || !hVal || !lVal) {
+        console.log(`[CALCJ-DEBUG] Missing H/L control data - cannot calculate CalcJ`);
+        return { calcj_value: null, method: 'incomplete_control_data' };
     }
     
+    // Calculate CalcJ using ACTUAL H/L controls from this specific run
     try {
-        if (hCq !== undefined && lCq !== undefined && hVal && lVal) {
-            // Validate that we have reasonable control data
-            if (Math.abs(hCq - lCq) < 0.5) {
-                console.log('[CALCJ-DEBUG] H/L controls too close in CQJ values, using basic method');
-                return { calcj_value: calculateCalcj(well, threshold), method: 'basic' };
-            }
-            
-            // Ensure H should have lower CQJ (earlier crossing) than L
-            if (hCq > lCq) {
-                console.log(`[CALCJ-DEBUG] Warning: H control CQJ (${hCq.toFixed(2)}) > L control CQJ (${lCq.toFixed(2)}), may indicate control mix-up`);
-            }
-            
-            // Log-linear interpolation (standard curve: log(concentration) vs CQJ)
-            const logH = Math.log10(hVal);
-            const logL = Math.log10(lVal);
-            
-            // Calculate slope: change in log(concentration) per cycle
-            const slope = (logH - logL) / (lCq - hCq);
-            const intercept = logH - slope * hCq;
-            
-            // Calculate concentration for current CQJ
-            const logConc = slope * currentCqj + intercept;
-            const calcjResult = Math.pow(10, logConc);
-            
-            // Sanity check: result should be within reasonable range
-            if (calcjResult < 0 || calcjResult > 1e12) {
-                console.log(`[CALCJ-DEBUG] Unreasonable CalcJ result (${calcjResult.toExponential(2)}), using basic method`);
-                return { calcj_value: calculateCalcj(well, threshold), method: 'basic' };
-            }
-            
-            console.log(`[CALCJ-DEBUG] Control-based CalcJ = ${calcjResult.toExponential(2)} (CQJ: ${currentCqj.toFixed(2)}, slope: ${slope.toFixed(3)})`);
-            return { calcj_value: calcjResult, method: 'control_based' };
-        } else {
-            console.log('[CALCJ-DEBUG] Missing H/L controls, using basic method');
-            return { calcj_value: calculateCalcj(well, threshold), method: 'basic' };
+        // Validate that we have reasonable control data
+        if (Math.abs(hCq - lCq) < 0.5) {
+            console.log('[CALCJ-DEBUG] H/L controls too close in CQJ values - invalid run');
+            return { calcj_value: null, method: 'controls_too_close' };
         }
+        
+        // Ensure H should have lower CQJ (earlier crossing) than L
+        if (hCq > lCq) {
+            console.log(`[CALCJ-DEBUG] Warning: H control CQJ (${hCq.toFixed(2)}) > L control CQJ (${lCq.toFixed(2)}), may indicate control mix-up`);
+        }
+        
+        // Log-linear interpolation using ACTUAL control values from this run
+        const logH = Math.log10(hVal);
+        const logL = Math.log10(lVal);
+        
+        // Calculate slope: change in log(concentration) per cycle
+        const slope = (logH - logL) / (lCq - hCq);
+        const intercept = logH - slope * hCq;
+        
+        // Calculate concentration for current CQJ
+        const logConc = slope * currentCqj + intercept;
+        const calcjResult = Math.pow(10, logConc);
+        
+        // Sanity check: result should be within reasonable range
+        if (calcjResult < 0 || calcjResult > 1e12) {
+            console.log(`[CALCJ-DEBUG] Unreasonable CalcJ result (${calcjResult.toExponential(2)}) - run quality issue`);
+            return { calcj_value: null, method: 'unreasonable_result' };
+        }
+        
+        console.log(`[CALCJ-DEBUG] Dynamic CalcJ = ${calcjResult.toExponential(2)} (CQJ: ${currentCqj.toFixed(2)}, H_avg: ${hCq.toFixed(2)}, L_avg: ${lCq.toFixed(2)})`);
+        return { calcj_value: calcjResult, method: 'dynamic_control_based' };
     } catch (error) {
-        console.log(`[CALCJ-DEBUG] Error in control-based calculation: ${error.message}, using basic method`);
-        return { calcj_value: calculateCalcj(well, threshold), method: 'basic' };
+        console.log(`[CALCJ-DEBUG] Error in dynamic calculation: ${error.message}`);
+        return { calcj_value: null, method: 'calculation_error' };
     }
 }
 
 /**
- * Calculate CalcJ value (basic method - using proper amplification formula)
+ * Calculate CalcJ value (basic method - requires actual H/L controls from run)
  */
 function calculateCalcj(well, threshold) {
-    // For basic CalcJ, use a more reasonable formula
-    // Option 1: Use CQJ-based calculation (earlier crossing = higher concentration)
-    if (well && well.cqj_value !== null && well.cqj_value !== undefined) {
-        const cqj = parseFloat(well.cqj_value);
-        if (!isNaN(cqj) && cqj > 0) {
-            // Basic exponential relationship: concentration = 2^(40-CQJ) * baseline
-            // This gives reasonable values where earlier crossing = higher concentration
-            const baseline = 1000; // Arbitrary baseline concentration
-            return baseline * Math.pow(2, (40 - cqj));
-        }
-    }
-    
-    // Fallback: Use amplitude/threshold if available
-    if (well && well.amplitude && threshold) {
-        const amplitude = parseFloat(well.amplitude);
-        const thresh = parseFloat(threshold);
-        
-        if (!isNaN(amplitude) && !isNaN(thresh) && thresh > 0) {
-            return amplitude / thresh;
-        }
-    }
-    
+    // This basic method cannot work without actual control data from the run
+    // Always return null to force use of control-based method
+    console.log('[CALCJ] Basic method cannot calculate without actual H/L controls from run');
     return null;
 }
 
@@ -527,6 +516,63 @@ window.debugCurveQuality = function(wellKey) {
     });
     
     return quality;
+};
+
+// Debug function to test CalcJ formula issue
+window.debugCalcJFormula = function(testCqjValues = [null, 22.80, 29.39]) {
+    console.log('🔍 DEBUG - Testing CalcJ formula with corrected expected values:');
+    console.log('CORRECTED: NTC should be N/A (no amplification unless contaminated)');
+    console.log('Only H (22.80) and M (29.39) should have CalcJ values');
+    console.log('');
+    
+    const results = [];
+    testCqjValues.forEach((cqj, index) => {
+        const labels = ['NTC', 'H', 'M'];
+        let calcj;
+        
+        if (index === 0) { // NTC
+            if (cqj === null || cqj === undefined) {
+                calcj = null; // Normal NTC - no amplification
+                console.log(`${labels[index]}: No CQJ (normal) → CalcJ N/A`);
+            } else {
+                calcj = calculateCalcj({ cqj_value: cqj }, 100);
+                console.warn(`⚠️  ${labels[index]}: CQJ ${cqj.toFixed(2)} → CalcJ ${calcj ? calcj.toExponential(2) : 'null'} (CONTAMINATION DETECTED!)`);
+            }
+        } else {
+            // H and M controls should have values
+            const well = { cqj_value: cqj };
+            calcj = calculateCalcj(well, 100);
+            console.log(`${labels[index]}: CQJ ${cqj.toFixed(2)} → CalcJ ${calcj ? calcj.toExponential(2) : 'null'}`);
+        }
+        
+        results.push({ label: labels[index], cqj, calcj });
+    });
+    
+    // Check ratios only for H/M (skip NTC since it should be N/A)
+    if (results.length >= 3 && results[1].calcj && results[2].calcj) {
+        const hMRatio = results[1].calcj / results[2].calcj;
+        
+        console.log('');
+        console.log(`📊 Concentration ratios:`);
+        console.log(`H/M ratio: ${hMRatio.toFixed(2)} (should be > 1, typically 4-8x)`);
+        
+        if (hMRatio < 2) {
+            console.warn('⚠️  PROBLEM: H and M concentrations are too similar');
+        }
+        
+        // Check NTC for contamination
+        if (results[0].cqj !== null && results[0].cqj !== undefined) {
+            console.warn('⚠️  CONTAMINATION: NTC has amplification - this indicates contamination!');
+        } else {
+            console.log('✅ NTC: No amplification (normal negative control)');
+        }
+    }
+    
+    console.log('');
+    console.log('🔬 Current formula: concentration = baseline * 2^(40 - CQJ)');
+    console.log('🔬 With baseline = 1000 and reference cycle = 40');
+    
+    return results;
 };
 
 // Debug function to inspect well data structure on backend
