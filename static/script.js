@@ -176,7 +176,11 @@ function updateAppState(newState) {
     // Update thresholds
     setTimeout(() => {
         if (window.updateAllChannelThresholds) {
+            // Force threshold update even if chart is busy
+            const wasChartUpdating = window.chartUpdating;
+            window.chartUpdating = false; // Temporarily clear flag
             window.updateAllChannelThresholds();
+            window.chartUpdating = wasChartUpdating; // Restore flag
         }
         
         // Update threshold strategy dropdown if threshold strategy changed

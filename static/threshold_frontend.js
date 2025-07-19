@@ -294,19 +294,24 @@ function loadChannelThresholds() {
 function updateAllChannelThresholds() {
      // console.log('🔍 THRESHOLD - Updating all channel thresholds');
     
-    // Extra strict guard: do not proceed if any part of the chart config is missing
-    if (!window.amplificationChart ||
-        typeof window.amplificationChart !== 'object' ||
-        !window.amplificationChart.options ||
-        typeof window.amplificationChart.options !== 'object' ||
-        !window.amplificationChart.options.plugins ||
-        typeof window.amplificationChart.options.plugins !== 'object' ||
-        !window.amplificationChart.options.plugins.annotation ||
-        typeof window.amplificationChart.options.plugins.annotation !== 'object' ||
-        !window.amplificationChart.options.plugins.annotation.annotations ||
-        typeof window.amplificationChart.options.plugins.annotation.annotations !== 'object') {
-        // console.warn('🔍 THRESHOLD - Chart or annotation plugin not ready, skipping threshold update');
+    // Basic guard: check if chart exists
+    if (!window.amplificationChart || typeof window.amplificationChart !== 'object') {
+        // console.warn('🔍 THRESHOLD - No chart available, skipping threshold update');
         return;
+    }
+    
+    // Initialize annotation structure if missing (instead of failing)
+    if (!window.amplificationChart.options) {
+        window.amplificationChart.options = {};
+    }
+    if (!window.amplificationChart.options.plugins) {
+        window.amplificationChart.options.plugins = {};
+    }
+    if (!window.amplificationChart.options.plugins.annotation) {
+        window.amplificationChart.options.plugins.annotation = {};
+    }
+    if (!window.amplificationChart.options.plugins.annotation.annotations) {
+        window.amplificationChart.options.plugins.annotation.annotations = {};
     }
     
     // Also guard: do not proceed if no valid analysis results
