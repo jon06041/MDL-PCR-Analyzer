@@ -147,6 +147,56 @@ Working on MDL-PCR-Analyzer timing issues and multichannel threshold display pro
 - Manual threshold dragging recalculates concentrations in real-time
 - Console shows detailed logging of both CQJ and CalcJ updates
 - Standard curve calculations use proper test code and control detection
+- Poor quality curves are marked as N/A instead of giving false results
+- Concentration calculations are more accurate and reasonable
+
+### 🧮 **Comprehensive CQJ/CalcJ Calculation Overhaul (July 19, 2025)**
+
+**User-Reported Issues**:
+1. CalcJ calculations are wildly off/unreasonable
+2. Need better N/A rules for poor quality curves
+3. Negative direction crossings should be N/A
+4. Multiple crossings should use LAST positive crossing to avoid flat-line confusion
+
+**Root Cause Analysis**:
+- Original CQJ logic used FIRST crossing, causing issues with noisy/flat signals near threshold
+- No curve quality assessment - flat lines and poor signals were processed
+- CalcJ basic formula was too simplistic (amplitude/threshold)
+- Control-based CalcJ lacked validation and sanity checks
+- No detection of negative-only threshold crossings
+
+**Solutions Implemented**:
+
+**🎯 CQJ (Threshold Crossing) Improvements**:
+1. ✅ **Curve Quality Assessment**: Checks for flat lines, excessive noise, no signal increase
+2. ✅ **Direction Detection**: Tracks positive vs negative crossings separately  
+3. ✅ **LAST Positive Crossing**: Uses final positive crossing to avoid flat-line confusion
+4. ✅ **Enhanced N/A Rules**: Poor curves, negative-only crossings → N/A
+5. ✅ **Better Interpolation**: Improved crossing calculation with direction tracking
+
+**💰 CalcJ (Concentration) Improvements**:
+1. ✅ **Fixed Basic Formula**: Now uses exponential relationship (2^(40-CQJ) * baseline)
+2. ✅ **Enhanced Control Validation**: Checks H/L control separation and reasonableness
+3. ✅ **Sanity Checks**: Validates results are within reasonable concentration ranges
+4. ✅ **Improved Early/Late Detection**: Tolerance-based thresholds instead of strict limits
+5. ✅ **Better Error Handling**: Graceful fallbacks when calculations fail
+
+**📏 N/A Rules Implementation**:
+- Flat lines (low variance) → N/A
+- No overall signal increase → N/A  
+- Excessive noise in low signals → N/A
+- Negative direction only crossings → N/A
+- Very early crossings (before controls - tolerance) → N/A
+- Very late crossings (contamination indicator) → N/A
+- Unreasonable concentration values → fallback to basic method
+
+**🛠️ Debug Tools Added**:
+- `debugCurveQuality(wellKey)` - Test curve quality assessment for any well
+- Enhanced logging throughout calculation chain
+- Direction tracking and crossing analysis logging
+
+**Files Modified**:
+- `static/cqj_calcj_utils.js`: Complete rewrite of CQJ and CalcJ calculation logic
 
 ## H/M/L Control-Based CalcJ System Implementation (COMPLETED - July 19, 2025)
 
