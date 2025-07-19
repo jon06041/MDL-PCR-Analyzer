@@ -14,17 +14,21 @@ const LINEAR_THRESHOLD_STRATEGIES = {
   // Removed duplicate linear_baseline_plus_nsd
   "linear_max_slope": {
     name: "Linear: Max Slope",
-    calculate: ({curve, cycles}) => {
-      if (!curve || curve.length < 3) return null;
+    calculate: ({curve, cycles, rfu}) => {
+      // Accept either 'curve' or 'rfu' parameter for flexibility
+      const data = curve || rfu;
+      if (!data || data.length < 3) {
+        return null;
+      }
       let maxSlope = -Infinity, maxIdx = 1;
-      for (let i = 1; i < curve.length - 1; i++) {
-        const slope = curve[i + 1] - curve[i - 1];
+      for (let i = 1; i < data.length - 1; i++) {
+        const slope = data[i + 1] - data[i - 1];
         if (slope > maxSlope) {
           maxSlope = slope;
           maxIdx = i;
         }
       }
-      return curve[maxIdx];
+      return data[maxIdx];
     },
     description: "Threshold at the point of maximum slope (first derivative) on the linear curve.",
     reference: "See qPCR_Curve_Classification_Reference.md"
@@ -75,23 +79,21 @@ const LOG_THRESHOLD_STRATEGIES = {
   },
   "log_second_derivative_max": {
     name: "Log: Max Second Derivative",
-    calculate: ({rfu, cycles}) => {
-      console.log('🔍 DERIVATIVE-DEBUG - log_second_derivative_max called with rfu:', rfu ? rfu.length : 'null', 'cycles:', cycles ? cycles.length : 'null');
-      if (!rfu || rfu.length < 5) {
-        console.warn('🔍 DERIVATIVE-DEBUG - log_second_derivative_max: Insufficient data points');
+    calculate: ({rfu, cycles, curve, log_rfu}) => {
+      // Accept multiple parameter formats for flexibility
+      const data = log_rfu || rfu || curve;
+      if (!data || data.length < 5) {
         return null;
       }
       let maxSecond = -Infinity, maxIdx = 2;
-      for (let i = 2; i < rfu.length - 2; i++) {
-        const second = (rfu[i + 1] - 2 * rfu[i] + rfu[i - 1]);
+      for (let i = 2; i < data.length - 2; i++) {
+        const second = (data[i + 1] - 2 * data[i] + data[i - 1]);
         if (second > maxSecond) {
           maxSecond = second;
           maxIdx = i;
         }
       }
-      const result = rfu[maxIdx];
-      console.log('🔍 DERIVATIVE-DEBUG - log_second_derivative_max result:', result, 'at index:', maxIdx);
-      return result;
+      return data[maxIdx];
     },
     description: "Threshold at the point of maximum second derivative (inflection) on the log-transformed curve.",
     reference: "See qPCR_Curve_Classification_Reference.md"
@@ -208,33 +210,18 @@ function calculateThreshold(strategy, params, scale = 'log') {
     const pathogen = params.pathogen || params.test_code || params.target || params.pathogen_code;
     const fluor = params.fluorophore || params.channel;
     
-    console.log(`🔍 FIXED-THRESHOLD-DEBUG - Strategy: ${strategy}, Scale: ${scale}`);
-    console.log(`🔍 FIXED-THRESHOLD-DEBUG - Pathogen: "${pathogen}" (from params.pathogen=${params.pathogen}, params.test_code=${params.test_code})`);
-    console.log(`🔍 FIXED-THRESHOLD-DEBUG - Fluorophore: "${fluor}" (from params.fluorophore=${params.fluorophore}, params.channel=${params.channel})`);
-    console.log(`🔍 FIXED-THRESHOLD-DEBUG - PATHOGEN_FIXED_THRESHOLDS available:`, Object.keys(window.PATHOGEN_FIXED_THRESHOLDS || {}));
-    
     if (window.PATHOGEN_FIXED_THRESHOLDS && pathogen) {
       const pathogenEntry = window.PATHOGEN_FIXED_THRESHOLDS[pathogen];
-      console.log(`🔍 FIXED-THRESHOLD-DEBUG - Pathogen entry for "${pathogen}":`, pathogenEntry);
       
       if (pathogenEntry) {
-        console.log(`🔍 FIXED-THRESHOLD-DEBUG - Available fluorophores in ${pathogen}:`, Object.keys(pathogenEntry));
         const channelEntry = (fluor && pathogenEntry[fluor]) ? pathogenEntry[fluor] : pathogenEntry['default'];
-        console.log(`🔍 FIXED-THRESHOLD-DEBUG - Channel entry for "${fluor}":`, channelEntry);
         
         if (channelEntry && typeof channelEntry === 'object' && scale in channelEntry) {
           // CRITICAL: Ensure fixed_value is always a number, not a string
           const rawValue = channelEntry[scale];
           params.fixed_value = typeof rawValue === 'string' ? parseFloat(rawValue) : rawValue;
-          console.log(`🔍 FIXED-THRESHOLD-DEBUG - SUCCESS: Using fixed threshold for ${pathogen}/${fluor}/${scale}: ${params.fixed_value} (type: ${typeof params.fixed_value})`);
-        } else {
-          console.warn(`🔍 FIXED-THRESHOLD-DEBUG - FAIL: No ${scale} threshold found for ${pathogen}/${fluor}. channelEntry:`, channelEntry);
         }
-      } else {
-        console.warn(`🔍 FIXED-THRESHOLD-DEBUG - FAIL: Pathogen "${pathogen}" not found in PATHOGEN_FIXED_THRESHOLDS`);
       }
-    } else {
-      console.warn(`🔍 FIXED-THRESHOLD-DEBUG - FAIL: Missing data - PATHOGEN_FIXED_THRESHOLDS:`, !!window.PATHOGEN_FIXED_THRESHOLDS, `pathogen: "${pathogen}"`);
     }
   }
 
@@ -245,7 +232,6 @@ function calculateThreshold(strategy, params, scale = 'log') {
         const value = params[key];
         if (value !== null && value !== undefined && typeof value === 'string' && !isNaN(value)) {
           params[key] = parseFloat(value);
-          console.log(`🔍 THRESHOLD-DEBUG - Converted ${key} from string to number: ${params[key]}`);
         }
       }
     });
@@ -255,10 +241,9 @@ function calculateThreshold(strategy, params, scale = 'log') {
     const result = strat.calculate(params);
     // Ensure result is always a number
     const finalResult = typeof result === 'string' ? parseFloat(result) : result;
-    console.log(`🔍 THRESHOLD-DEBUG - Strategy '${strategy}' calculated: ${finalResult} (type: ${typeof finalResult})`);
     return finalResult;
   } catch (e) {
-    console.warn(`Threshold strategy '${strategy}' failed, using default.`, e);
+    // Threshold strategy failed, use fallback
     if (scale === 'linear') {
       return LINEAR_THRESHOLD_STRATEGIES[Object.keys(LINEAR_THRESHOLD_STRATEGIES)[0]].calculate(params);
     } else {
@@ -280,12 +265,9 @@ window.calculateThreshold = calculateThreshold;
  * @returns {Object} Updated threshold values by channel/scale
  */
 function calculateThresholdForStrategy(strategy, analysisResults, currentScale = 'log') {
-    console.log(`🔍 THRESHOLD-STRATEGY - Calculating strategy "${strategy}" for scale "${currentScale}"`);
-    
     try {
         // Check if we have valid analysis results
         if (!analysisResults || typeof analysisResults !== 'object' || Object.keys(analysisResults).length === 0) {
-            console.warn(`⚠️ THRESHOLD-STRATEGY - No valid analysis results provided. Skipping threshold calculation.`);
             return null;
         }
         

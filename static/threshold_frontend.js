@@ -389,10 +389,13 @@ function updateAllChannelThresholds() {
     
     // Add new threshold annotations for visible channels
     const currentScale = window.currentScaleMode;
+    console.log(`🔍 THRESHOLD-UPDATE - Processing ${visibleChannels.size} channels: [${Array.from(visibleChannels).join(', ')}] on ${currentScale} scale`);
+    
     Array.from(visibleChannels).forEach(channel => {
+        console.log(`🔍 THRESHOLD-UPDATE - Processing channel: ${channel}`);
         const threshold = getCurrentChannelThreshold(channel, currentScale);
         
-        // console.log(`🔍 THRESHOLD-ANNOTATION - Processing ${channel}: threshold=${threshold}, scale=${currentScale}`);
+        console.log(`🔍 THRESHOLD-ANNOTATION - Processing ${channel}: threshold=${threshold}, scale=${currentScale}`);
         
         if (threshold !== null && threshold !== undefined && !isNaN(threshold)) {
             const annotationKey = `threshold_${channel}`;
@@ -720,11 +723,11 @@ leave: function(ctx) {
 // Replace lines 616-703 (the calculateStableChannelThreshold function) with this:
 
 function calculateStableChannelThreshold(channel, scale) {
-    // console.log(`🔍 THRESHOLD - Calculating ${scale} threshold for channel: ${channel}`);
+    console.log(`🔍 THRESHOLD-CALC - Calculating ${scale} threshold for channel: ${channel}`);
     
     // Get the current threshold strategy
     const strategy = getSelectedThresholdStrategy() || 'default';
-    // console.log(`🔍 THRESHOLD - Using strategy: ${strategy} for ${channel} on ${scale} scale`);
+    console.log(`🔍 THRESHOLD-CALC - Using strategy: ${strategy} for ${channel} on ${scale} scale`);
     
     // Debug: Check if this is a fixed strategy
     if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
