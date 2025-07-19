@@ -84,6 +84,11 @@ function recalculateCQJValues() {
             return; // Skip wells without fluorophore
         }
         
+        // Ensure wellKey is available in the well object for backend CQJ calculations
+        if (!well.wellKey && !well.well_id) {
+            well.wellKey = wellKey;
+        }
+        
         // Get threshold for this channel
         const threshold = window.getChannelThreshold ? 
             window.getChannelThreshold(channel, currentScale) : null;

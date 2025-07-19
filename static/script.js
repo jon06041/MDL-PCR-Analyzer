@@ -2581,6 +2581,9 @@ async function processChannelsSequentially(fluorophores, experimentPattern) {
             // Update status to show current channel being processed
             updateChannelStatus(fluorophore, 'processing');
             
+            // Add a small delay to allow UI updates to render
+            await new Promise(resolve => setTimeout(resolve, 50));
+            
             // Get data for this specific fluorophore
             const data = amplificationFiles[fluorophore].data;
             

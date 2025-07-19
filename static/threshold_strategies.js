@@ -20,14 +20,20 @@ const LINEAR_THRESHOLD_STRATEGIES = {
       if (!data || data.length < 3) {
         return null;
       }
+      
+      // Calculate actual slope (first derivative) at each point
       let maxSlope = -Infinity, maxIdx = 1;
       for (let i = 1; i < data.length - 1; i++) {
-        const slope = data[i + 1] - data[i - 1];
+        // Calculate slope as (y2 - y1) / (x2 - x1) = (data[i+1] - data[i-1]) / 2
+        // Using central difference for more stable derivative calculation
+        const slope = (data[i + 1] - data[i - 1]) / 2;
         if (slope > maxSlope) {
           maxSlope = slope;
           maxIdx = i;
         }
       }
+      
+      // Return the RFU value at the point of maximum slope
       return data[maxIdx];
     },
     description: "Threshold at the point of maximum slope (first derivative) on the linear curve.",
@@ -85,14 +91,19 @@ const LOG_THRESHOLD_STRATEGIES = {
       if (!data || data.length < 5) {
         return null;
       }
+      
+      // Calculate second derivative (rate of change of slope) at each point
       let maxSecond = -Infinity, maxIdx = 2;
       for (let i = 2; i < data.length - 2; i++) {
-        const second = (data[i + 1] - 2 * data[i] + data[i - 1]);
-        if (second > maxSecond) {
-          maxSecond = second;
+        // Calculate second derivative using central difference: f''(x) = f(x+1) - 2*f(x) + f(x-1)
+        const secondDerivative = (data[i + 1] - 2 * data[i] + data[i - 1]);
+        if (secondDerivative > maxSecond) {
+          maxSecond = secondDerivative;
           maxIdx = i;
         }
       }
+      
+      // Return the RFU value at the point of maximum second derivative (inflection point)
       return data[maxIdx];
     },
     description: "Threshold at the point of maximum second derivative (inflection) on the log-transformed curve.",

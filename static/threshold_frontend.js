@@ -389,13 +389,9 @@ function updateAllChannelThresholds() {
     
     // Add new threshold annotations for visible channels
     const currentScale = window.currentScaleMode;
-    console.log(`🔍 THRESHOLD-UPDATE - Processing ${visibleChannels.size} channels: [${Array.from(visibleChannels).join(', ')}] on ${currentScale} scale`);
     
     Array.from(visibleChannels).forEach(channel => {
-        console.log(`🔍 THRESHOLD-UPDATE - Processing channel: ${channel}`);
         const threshold = getCurrentChannelThreshold(channel, currentScale);
-        
-        console.log(`🔍 THRESHOLD-ANNOTATION - Processing ${channel}: threshold=${threshold}, scale=${currentScale}`);
         
         if (threshold !== null && threshold !== undefined && !isNaN(threshold)) {
             const annotationKey = `threshold_${channel}`;
@@ -723,11 +719,8 @@ leave: function(ctx) {
 // Replace lines 616-703 (the calculateStableChannelThreshold function) with this:
 
 function calculateStableChannelThreshold(channel, scale) {
-    console.log(`🔍 THRESHOLD-CALC - Calculating ${scale} threshold for channel: ${channel}`);
-    
     // Get the current threshold strategy
     const strategy = getSelectedThresholdStrategy() || 'default';
-    console.log(`🔍 THRESHOLD-CALC - Using strategy: ${strategy} for ${channel} on ${scale} scale`);
     
     // Debug: Check if this is a fixed strategy
     if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
@@ -1001,79 +994,40 @@ if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
                     }
                     
                     if (Array.isArray(rfu) && Array.isArray(cycles) && rfu.length === cycles.length && rfu.length > 5) {
-                        params.rfu = rfu;
-                        params.cycles = cycles;
-                        params.curve = rfu; // Alias for compatibility
-                        // console.log(`🔍 DERIVATIVE-STRATEGY - Added curve data: ${rfu.length} points for ${channel}`);
-                        // console.log(`🔍 DERIVATIVE-STRATEGY - Sample RFU values:`, rfu.slice(0, 10));
-                        // console.log(`🔍 DERIVATIVE-STRATEGY - Sample cycle values:`, cycles.slice(0, 10));
+                        // Validate that the data is actually numeric and reasonable
+                        const validData = rfu.every(val => typeof val === 'number' && !isNaN(val) && val >= 0);
+                        const validCycles = cycles.every(val => typeof val === 'number' && !isNaN(val) && val > 0);
+                        
+                        if (validData && validCycles) {
+                            params.rfu = rfu;
+                            params.cycles = cycles;
+                            params.curve = rfu; // Alias for compatibility
+                        } else {
+                            return null; // Invalid data, can't calculate derivative
+                        }
                     } else {
-                        // console.warn(`⚠️ DERIVATIVE-STRATEGY - Invalid curve data for ${channel}`);
-                        // console.warn(`⚠️ DERIVATIVE-STRATEGY - RFU: isArray=${Array.isArray(rfu)}, length=${rfu?.length}`);
-                        // console.warn(`⚠️ DERIVATIVE-STRATEGY - Cycles: isArray=${Array.isArray(cycles)}, length=${cycles?.length}`);
-                        // console.warn(`⚠️ DERIVATIVE-STRATEGY - Lengths match: ${rfu?.length === cycles?.length}`);
                         return null; // Can't calculate derivative without proper curve data
                     }
                 } else {
-                    // console.warn(`⚠️ DERIVATIVE-STRATEGY - No wells with curve data found for channel: ${channel}`);
-                    // Let's see what wells we do have
-                    const allWells = Object.values(resultsToCheck);
-                    const channelWellsAny = allWells.filter(well => well != null && well.fluorophore === channel);
-                    // console.warn(`⚠️ DERIVATIVE-STRATEGY - Total wells for ${channel}: ${channelWellsAny.length}`);
-                    if (channelWellsAny.length > 0) {
-                        const sampleWell = channelWellsAny[0];
-                        // console.warn(`⚠️ DERIVATIVE-STRATEGY - Sample well structure:`, {
-                            // well_id: sampleWell.well_id,
-                            // fluorophore: sampleWell.fluorophore,
-                            // has_raw_rfu: !!sampleWell.raw_rfu,
-                            // has_cycles: !!sampleWell.cycles,
-                            // raw_rfu_type: typeof sampleWell.raw_rfu,
-                            // cycles_type: typeof sampleWell.cycles
-                        // });
-                    }
                     return null; // Can't calculate derivative without curve data
                 }
             }
         }
         
         try {
-            // console.log(`🔍 THRESHOLD-CALL - About to call calculateThreshold with:`, {
-                // strategy: strategy,
-                // scale: scale,
-                // paramsKeys: Object.keys(params),
-                // hasRfu: !!params.rfu,
-                // hasCycles: !!params.cycles,
-                // rfuLength: params.rfu?.length,
-                // cyclesLength: params.cycles?.length
-            // });
-            
             const threshold = window.calculateThreshold(strategy, params, scale);
             
-            // console.log(`🔍 THRESHOLD-RESULT - calculateThreshold returned:`, {
-                // strategy: strategy,
-                // scale: scale,
-                // result: threshold,
-                // type: typeof threshold,
-                // isNull: threshold === null,
-                // isNaN: isNaN(threshold),
-                // isPositive: threshold > 0
-            // });
-            
             if (threshold !== null && !isNaN(threshold) && threshold > 0) {
-                // console.log(`✅ THRESHOLD-CALC - ${channel}[${scale}]: ${threshold.toFixed(2)} (strategy: ${strategy})`);
                 return threshold;
-            } else {
-                // console.warn(`⚠️ THRESHOLD-CALC - calculateThreshold returned invalid value: ${threshold} for ${strategy}`);
             }
         } catch (error) {
-            // console.error(`❌ THRESHOLD-ERROR - Failed to calculate ${strategy} for ${channel}[${scale}]:`, error);
+            // Strategy calculation failed, continue to fallback
         }
     } else {
-        // console.error(`❌ THRESHOLD-ERROR - window.calculateThreshold function not available`);
+        // Strategy function not available
     }
     
     // Only strategy-based calculations - no fallbacks
-    // console.warn(`❌ THRESHOLD-FAIL - No valid threshold calculated for ${channel}[${scale}] with strategy ${strategy}`);
     return null;
 }
 // Expose globally
