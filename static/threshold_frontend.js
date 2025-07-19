@@ -22,11 +22,11 @@ function debounce(func, wait) {
  * Call this ONCE after displayAnalysisResults or displayMultiFluorophoreResults
  */
 window.initializeThresholdSystem = function() {
-    console.log('🔍 THRESHOLD-INIT - Initializing complete threshold system');
+    // console.log('🔍 THRESHOLD-INIT - Initializing complete threshold system');
     
     // Add loading state guard to prevent multiple concurrent initializations
     if (window.appState && window.appState.uiState && window.appState.uiState.isThresholdLoading) {
-        console.log('🔍 THRESHOLD-INIT - Already initializing, skipping duplicate request');
+        // console.log('🔍 THRESHOLD-INIT - Already initializing, skipping duplicate request');
         return;
     }
     
@@ -60,7 +60,7 @@ window.initializeThresholdSystem = function() {
         window.appState.uiState.isThresholdLoading = false;
     }
     
-    console.log('✅ THRESHOLD-INIT - Threshold system initialization complete');
+    // console.log('✅ THRESHOLD-INIT - Threshold system initialization complete');
 };
 
 // Create debounced version for use in rapid-fire scenarios
@@ -80,21 +80,21 @@ if (!window.manualThresholds) {
 
 // --- Threshold Calculation Functions ---
 function calculateChannelThreshold(channel, scale) {
-    console.log(`🔍 THRESHOLD-CALC - Calculating ${scale} threshold for channel: ${channel} using ALL wells`);
+    // console.log(`🔍 THRESHOLD-CALC - Calculating ${scale} threshold for channel: ${channel} using ALL wells`);
     
     // Multiple null checks for robustness
     if (!window.currentAnalysisResults) {
-        console.warn('🔍 THRESHOLD-CALC - window.currentAnalysisResults is null');
+        // console.warn('🔍 THRESHOLD-CALC - window.currentAnalysisResults is null');
         return scale === 'log' ? 10 : 100;
     }
     
     if (!window.currentAnalysisResults.individual_results) {
-        console.warn('🔍 THRESHOLD-CALC - individual_results is null');
+        // console.warn('🔍 THRESHOLD-CALC - individual_results is null');
         return scale === 'log' ? 10 : 100;
     }
     
     if (typeof window.currentAnalysisResults.individual_results !== 'object') {
-        console.warn('🔍 THRESHOLD-CALC - individual_results is not an object');
+        // console.warn('🔍 THRESHOLD-CALC - individual_results is not an object');
         return scale === 'log' ? 10 : 100;
     }
     
@@ -104,11 +104,11 @@ function calculateChannelThreshold(channel, scale) {
         .filter(well => well != null && well.fluorophore === channel); // Filter by fluorophore property
     
     if (channelWells.length === 0) {
-        console.warn(`🔍 THRESHOLD-CALC - No wells found for channel: ${channel}`);
+        // console.warn(`🔍 THRESHOLD-CALC - No wells found for channel: ${channel}`);
         return scale === 'log' ? 10 : 100;
     }
     
-    console.log(`🔍 THRESHOLD-CALC - Found ${channelWells.length} wells for channel ${channel} (using ALL wells in dataset)`);
+    // console.log(`🔍 THRESHOLD-CALC - Found ${channelWells.length} wells for channel ${channel} (using ALL wells in dataset)`);
     
     // Use ONLY threshold_strategies.js - no fallbacks
     if (typeof window.calculateThreshold === 'function') {
@@ -180,15 +180,15 @@ function calculateChannelThreshold(channel, scale) {
         try {
             const threshold = window.calculateThreshold(strategy, params, scale);
             if (threshold !== null && !isNaN(threshold) && threshold > 0) {
-                console.log(`✅ THRESHOLD-CALC - ${channel}[${scale}]: ${threshold.toFixed(2)} (strategy: ${strategy})`);
+                // console.log(`✅ THRESHOLD-CALC - ${channel}[${scale}]: ${threshold.toFixed(2)} (strategy: ${strategy})`);
                 return threshold;
             }
         } catch (error) {
-            console.error(`❌ THRESHOLD-ERROR - Strategy calculation failed:`, error);
+            // console.error(`❌ THRESHOLD-ERROR - Strategy calculation failed:`, error);
         }
     }
     
-    console.error(`❌ THRESHOLD-FAIL - No valid threshold calculated for ${channel}[${scale}]`);
+    // console.error(`❌ THRESHOLD-FAIL - No valid threshold calculated for ${channel}[${scale}]`);
     return null;
 }
 
@@ -203,7 +203,7 @@ function safeSetItem(storage, key, value) {
     try {
         storage.setItem(key, value);
     } catch (e) {
-        console.warn(`🔍 STORAGE - Failed to save ${key}:`, e);
+        // console.warn(`🔍 STORAGE - Failed to save ${key}:`, e);
     }
 }
 
@@ -235,15 +235,15 @@ function initializeThresholdStrategyDropdown() {
         // Add new listener
         select.addEventListener('change', select._thresholdStrategyHandler);
         
-        console.log(`🔍 STRATEGY-INIT - Added change listener to threshold strategy dropdown`);
+        // console.log(`🔍 STRATEGY-INIT - Added change listener to threshold strategy dropdown`);
     } else {
-        console.warn(`🔍 STRATEGY-INIT - Threshold strategy dropdown not found`);
+        // console.warn(`🔍 STRATEGY-INIT - Threshold strategy dropdown not found`);
     }
 }
 
 function handleThresholdStrategyDropdownChange(event) {
     const newStrategy = event.target.value;
-    console.log(`🔍 STRATEGY-CHANGE - User selected new strategy: "${newStrategy}"`);
+    // console.log(`🔍 STRATEGY-CHANGE - User selected new strategy: "${newStrategy}"`);
     
     // Update global variable
     window.selectedThresholdStrategy = newStrategy;
@@ -252,7 +252,7 @@ function handleThresholdStrategyDropdownChange(event) {
     window.stableChannelThresholds = {};
     
     // Simple notification - don't trigger cascading updates
-    console.log(`✅ Strategy changed to: ${newStrategy}`);
+    // console.log(`✅ Strategy changed to: ${newStrategy}`);
 }
 
 // --- Threshold Storage Functions ---
@@ -292,7 +292,7 @@ function loadChannelThresholds() {
 
 // --- Chart Annotation Functions ---
 function updateAllChannelThresholds() {
-     console.log('🔍 THRESHOLD - Updating all channel thresholds');
+     // console.log('🔍 THRESHOLD - Updating all channel thresholds');
     
     // Extra strict guard: do not proceed if any part of the chart config is missing
     if (!window.amplificationChart ||
@@ -305,7 +305,7 @@ function updateAllChannelThresholds() {
         typeof window.amplificationChart.options.plugins.annotation !== 'object' ||
         !window.amplificationChart.options.plugins.annotation.annotations ||
         typeof window.amplificationChart.options.plugins.annotation.annotations !== 'object') {
-        console.warn('🔍 THRESHOLD - Chart or annotation plugin not ready, skipping threshold update');
+        // console.warn('🔍 THRESHOLD - Chart or annotation plugin not ready, skipping threshold update');
         return;
     }
     
@@ -314,7 +314,7 @@ function updateAllChannelThresholds() {
         !window.currentAnalysisResults.individual_results ||
         typeof window.currentAnalysisResults.individual_results !== 'object' ||
         Object.keys(window.currentAnalysisResults.individual_results).length === 0) {
-        console.warn('🔍 THRESHOLD - No valid analysis results found for this channel. Please check your input files.');
+        // console.warn('🔍 THRESHOLD - No valid analysis results found for this channel. Please check your input files.');
         return;
     }
     
@@ -327,7 +327,7 @@ function updateAllChannelThresholds() {
     
     // If no global visibleChannels set, detect from current context
     if (visibleChannels.size === 0) {
-        console.log('🔍 THRESHOLD - No global visibleChannels found, detecting from context...');
+        // console.log('🔍 THRESHOLD - No global visibleChannels found, detecting from context...');
         
         // Method 1: Get channels from chart datasets (for currently displayed data)
         if (window.amplificationChart.data && window.amplificationChart.data.datasets) {
@@ -336,7 +336,7 @@ function updateAllChannelThresholds() {
                 const match = dataset.label?.match(/\(([^)]+)\)/);
                 if (match && match[1] !== 'Unknown') {
                     visibleChannels.add(match[1]);
-                    console.log(`🔍 THRESHOLD - Found channel from dataset: ${match[1]}`);
+                    // console.log(`🔍 THRESHOLD - Found channel from dataset: ${match[1]}`);
                 }
             });
         }
@@ -373,7 +373,7 @@ function updateAllChannelThresholds() {
         window.visibleChannels = visibleChannels;
     }
     
-    console.log(`🔍 THRESHOLD - Detected ${visibleChannels.size} channels: [${Array.from(visibleChannels).join(', ')}]`);
+    // console.log(`🔍 THRESHOLD - Detected ${visibleChannels.size} channels: [${Array.from(visibleChannels).join(', ')}]`);
     
     // Clear old threshold annotations
     Object.keys(annotations).forEach(key => {
@@ -387,7 +387,7 @@ function updateAllChannelThresholds() {
     Array.from(visibleChannels).forEach(channel => {
         const threshold = getCurrentChannelThreshold(channel, currentScale);
         
-        console.log(`🔍 THRESHOLD-ANNOTATION - Processing ${channel}: threshold=${threshold}, scale=${currentScale}`);
+        // console.log(`🔍 THRESHOLD-ANNOTATION - Processing ${channel}: threshold=${threshold}, scale=${currentScale}`);
         
         if (threshold !== null && threshold !== undefined && !isNaN(threshold)) {
             const annotationKey = `threshold_${channel}`;
@@ -426,29 +426,29 @@ onDragEnd: function(e) {
         }
         // Persist and update chart
         window.updateAllChannelThresholds();
-        console.log(`🔍 DRAG-END - Threshold for ${channel} (${currentScale}) set to ${newY}`);
+        // console.log(`🔍 DRAG-END - Threshold for ${channel} (${currentScale}) set to ${newY}`);
     } else {
-        console.warn('🔍 DRAG-END - Invalid newY value:', newY);
+        // console.warn('🔍 DRAG-END - Invalid newY value:', newY);
     }
 }
             };
-            console.log(`✅ THRESHOLD-ANNOTATION - Added threshold annotation for ${channel}: ${threshold.toFixed(2)}`);
+            // console.log(`✅ THRESHOLD-ANNOTATION - Added threshold annotation for ${channel}: ${threshold.toFixed(2)}`);
         } else {
-            console.warn(`⚠️ THRESHOLD-ANNOTATION - Invalid threshold for ${channel}: ${threshold} (type: ${typeof threshold})`);
+            // console.warn(`⚠️ THRESHOLD-ANNOTATION - Invalid threshold for ${channel}: ${threshold} (type: ${typeof threshold})`);
         }
     });
     
     // Update chart
     window.amplificationChart.update('none');
     
-    console.log(`🔍 THRESHOLD - Updated thresholds for channels: ${Array.from(visibleChannels).join(', ')}`);
+    // console.log(`🔍 THRESHOLD - Updated thresholds for channels: ${Array.from(visibleChannels).join(', ')}`);
 }
    
 
 // Custom dragging handler for threshold annotations (since plugin dragging is broken)
 function addThresholdDragging() {
     if (!window.amplificationChart) {
-        console.log('🔍 THRESHOLD-DRAG - No chart available, skipping dragging setup');
+        // console.log('🔍 THRESHOLD-DRAG - No chart available, skipping dragging setup');
         return;
     }
     
@@ -457,7 +457,7 @@ function addThresholdDragging() {
     
     // Add null check for canvas
     if (!canvas) {
-        console.log('🔍 THRESHOLD-DRAG - No canvas available, skipping dragging setup');
+        // console.log('🔍 THRESHOLD-DRAG - No canvas available, skipping dragging setup');
         return;
     }
     
@@ -518,7 +518,7 @@ function addThresholdDragging() {
     
     function handleMouseUp(e) {
         if (draggedChannel) {
-            console.log(`🔍 DRAG-END - ${draggedChannel} threshold updated`);
+            // console.log(`🔍 DRAG-END - ${draggedChannel} threshold updated`);
             
             // Mark as manual threshold
             if (!window.manualThresholds) window.manualThresholds = {};
@@ -608,7 +608,7 @@ function addThresholdDragging() {
     canvas.addEventListener('mouseup', handleMouseUp);
     canvas.addEventListener('mouseleave', handleMouseLeave);
     
-    console.log('✅ Custom threshold dragging enabled');
+    // console.log('✅ Custom threshold dragging enabled');
 }
 // Expose globally
 window.addThresholdDragging = addThresholdDragging;
@@ -629,10 +629,10 @@ window.updateSingleChannelThreshold = function() {
 };
 
 function updateSingleChannelThreshold(fluorophore) {
-   console.log(`🔍 THRESHOLD - Updating threshold for single channel: ${fluorophore}`);
+   // console.log(`🔍 THRESHOLD - Updating threshold for single channel: ${fluorophore}`);
     
     if (!window.amplificationChart) {
-        console.warn('🔍 THRESHOLD - No chart available');
+        // console.warn('🔍 THRESHOLD - No chart available');
         return;
     }
     
@@ -692,21 +692,21 @@ leave: function(ctx) {
                     thresholdInput.value = newY.toFixed(2);
                 }
                 updateSingleChannelThreshold(fluorophore);
-                console.log(`🔍 DRAG-END - Threshold for ${fluorophore} (${window.currentScaleMode}) set to ${newY}`);
+                // console.log(`🔍 DRAG-END - Threshold for ${fluorophore} (${window.currentScaleMode}) set to ${newY}`);
             } else {
-                console.warn('🔍 DRAG-END - Invalid newY value:', newY);
+                // console.warn('🔍 DRAG-END - Invalid newY value:', newY);
             }
         }
     };
-    console.log(`🔍 THRESHOLD - Added threshold for ${fluorophore}: ${threshold.toFixed(2)}`);
+    // console.log(`🔍 THRESHOLD - Added threshold for ${fluorophore}: ${threshold.toFixed(2)}`);
 } else {
-    console.warn(`🔍 THRESHOLD - Invalid threshold for ${fluorophore}: ${threshold}`);
+    // console.warn(`🔍 THRESHOLD - Invalid threshold for ${fluorophore}: ${threshold}`);
 }
     
     // Update chart
     window.amplificationChart.update('none');
     
-    console.log(`🔍 THRESHOLD - Updated threshold for channel: ${fluorophore}`);
+    // console.log(`🔍 THRESHOLD - Updated threshold for channel: ${fluorophore}`);
 }
 
 /**
@@ -715,18 +715,18 @@ leave: function(ctx) {
 // Replace lines 616-703 (the calculateStableChannelThreshold function) with this:
 
 function calculateStableChannelThreshold(channel, scale) {
-    console.log(`🔍 THRESHOLD - Calculating ${scale} threshold for channel: ${channel}`);
+    // console.log(`🔍 THRESHOLD - Calculating ${scale} threshold for channel: ${channel}`);
     
     // Get the current threshold strategy
     const strategy = getSelectedThresholdStrategy() || 'default';
-    console.log(`🔍 THRESHOLD - Using strategy: ${strategy} for ${channel} on ${scale} scale`);
+    // console.log(`🔍 THRESHOLD - Using strategy: ${strategy} for ${channel} on ${scale} scale`);
     
     // Debug: Check if this is a fixed strategy
     if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
-        console.log(`🔍 THRESHOLD-FIXED-DEBUG - Attempting fixed threshold strategy: ${strategy}`);
-        console.log(`🔍 THRESHOLD-FIXED-DEBUG - Channel: ${channel}, Scale: ${scale}`);
-        console.log(`🔍 THRESHOLD-FIXED-DEBUG - Current experiment pattern:`, window.currentExperimentPattern);
-        console.log(`🔍 THRESHOLD-FIXED-DEBUG - extractTestCode function available:`, typeof window.extractTestCode);
+        // console.log(`🔍 THRESHOLD-FIXED-DEBUG - Attempting fixed threshold strategy: ${strategy}`);
+        // console.log(`🔍 THRESHOLD-FIXED-DEBUG - Channel: ${channel}, Scale: ${scale}`);
+        // console.log(`🔍 THRESHOLD-FIXED-DEBUG - Current experiment pattern:`, window.currentExperimentPattern);
+        // console.log(`🔍 THRESHOLD-FIXED-DEBUG - extractTestCode function available:`, typeof window.extractTestCode);
     }
     
     // HANDLE MANUAL STRATEGY FIRST
@@ -736,10 +736,10 @@ function calculateStableChannelThreshold(channel, scale) {
             window.stableChannelThresholds[channel] && 
             window.stableChannelThresholds[channel][scale]) {
             const manualValue = window.stableChannelThresholds[channel][scale];
-            console.log(`🔍 THRESHOLD-MANUAL - Returning stored manual value for ${channel}[${scale}]: ${manualValue}`);
+            // console.log(`🔍 THRESHOLD-MANUAL - Returning stored manual value for ${channel}[${scale}]: ${manualValue}`);
             return manualValue;
         } else {
-            console.log(`🔍 THRESHOLD-MANUAL - No manual value stored for ${channel}[${scale}], returning null`);
+            // console.log(`🔍 THRESHOLD-MANUAL - No manual value stored for ${channel}[${scale}], returning null`);
             return null;
         }
     }
@@ -750,7 +750,7 @@ function calculateStableChannelThreshold(channel, scale) {
 
 // HANDLE FIXED STRATEGIES DIRECTLY
 if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
-    console.log(`🔍 THRESHOLD-FIXED - Starting fixed strategy calculation for ${channel}[${scale}] using strategy: ${strategy}`);
+    // console.log(`🔍 THRESHOLD-FIXED - Starting fixed strategy calculation for ${channel}[${scale}] using strategy: ${strategy}`);
     
     // Get pathogen from experiment pattern instead of well data
     let pathogen = null;
@@ -759,20 +759,20 @@ if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
     if (typeof window.getCurrentFullPattern === 'function') {
         const fullPattern = window.getCurrentFullPattern();
         pathogen = window.extractTestCode ? window.extractTestCode(fullPattern) : extractTestCode(fullPattern);
-        console.log(`🔍 THRESHOLD-FIXED - Extracted pathogen "${pathogen}" from getCurrentFullPattern: ${fullPattern}`);
+        // console.log(`🔍 THRESHOLD-FIXED - Extracted pathogen "${pathogen}" from getCurrentFullPattern: ${fullPattern}`);
     }
     
     // Fallback: try to get from window.currentExperimentPattern if available  
     if (!pathogen && window.currentExperimentPattern) {
         pathogen = window.extractTestCode ? window.extractTestCode(window.currentExperimentPattern) : extractTestCode(window.currentExperimentPattern);
-        console.log(`🔍 THRESHOLD-FIXED - Extracted pathogen "${pathogen}" from window.currentExperimentPattern: ${window.currentExperimentPattern}`);
+        // console.log(`🔍 THRESHOLD-FIXED - Extracted pathogen "${pathogen}" from window.currentExperimentPattern: ${window.currentExperimentPattern}`);
     }
     
     // If not found, try to extract from filename in analysis results
     if (!pathogen && window.currentAnalysisResults && window.currentAnalysisResults.metadata && window.currentAnalysisResults.metadata.filename) {
         const filename = window.currentAnalysisResults.metadata.filename;
         pathogen = window.extractTestCode ? window.extractTestCode(filename) : extractTestCode(filename);
-        console.log(`🔍 THRESHOLD-FIXED - Extracted pathogen "${pathogen}" from filename: ${filename}`);
+        // console.log(`🔍 THRESHOLD-FIXED - Extracted pathogen "${pathogen}" from filename: ${filename}`);
     }
     
     // If still not found, try to get from the first well's experiment_pattern if available
@@ -783,38 +783,38 @@ if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
             const well = resultsToCheck[wellKey];
             if (well && well.experiment_pattern) {
                 pathogen = window.extractTestCode ? window.extractTestCode(well.experiment_pattern) : extractTestCode(well.experiment_pattern);
-                console.log(`🔍 THRESHOLD-FIXED - Extracted pathogen "${pathogen}" from well experiment_pattern: ${well.experiment_pattern}`);
+                // console.log(`🔍 THRESHOLD-FIXED - Extracted pathogen "${pathogen}" from well experiment_pattern: ${well.experiment_pattern}`);
                 break;
             }
         }
     }
     
     // Debug: Check availability of required components
-    console.log(`🔍 THRESHOLD-FIXED-DEBUG - Components check:`, {
-        pathogen: pathogen,
-        PATHOGEN_FIXED_THRESHOLDS_available: !!window.PATHOGEN_FIXED_THRESHOLDS,
-        extractTestCode_available: typeof extractTestCode,
-        extractTestCode_function: typeof window.extractTestCode,
-        channel: channel,
-        scale: scale,
-        strategy: strategy,
-        currentExperimentPattern: window.currentExperimentPattern,
-        analysisResults_filename: window.currentAnalysisResults?.metadata?.filename
-    });
+    // console.log(`🔍 THRESHOLD-FIXED-DEBUG - Components check:`, {
+        // pathogen: pathogen,
+        // PATHOGEN_FIXED_THRESHOLDS_available: !!window.PATHOGEN_FIXED_THRESHOLDS,
+        // extractTestCode_available: typeof extractTestCode,
+        // extractTestCode_function: typeof window.extractTestCode,
+        // channel: channel,
+        // scale: scale,
+        // strategy: strategy,
+        // currentExperimentPattern: window.currentExperimentPattern,
+        // analysisResults_filename: window.currentAnalysisResults?.metadata?.filename
+    // });
     
     // NO FALLBACK - if we can't find the pathogen, we can't use fixed thresholds
     if (!pathogen) {
-        console.error(`❌ THRESHOLD-FIXED - Could not extract pathogen from experiment pattern. Cannot use fixed threshold.`);
-        console.error(`❌ THRESHOLD-FIXED - Debug info:`, {
-            currentExperimentPattern: window.currentExperimentPattern,
-            analysisResultsExists: !!window.currentAnalysisResults,
-            metadataExists: !!(window.currentAnalysisResults?.metadata),
-            filename: window.currentAnalysisResults?.metadata?.filename
-        });
+        // console.error(`❌ THRESHOLD-FIXED - Could not extract pathogen from experiment pattern. Cannot use fixed threshold.`);
+        // console.error(`❌ THRESHOLD-FIXED - Debug info:`, {
+            // currentExperimentPattern: window.currentExperimentPattern,
+            // analysisResultsExists: !!window.currentAnalysisResults,
+            // metadataExists: !!(window.currentAnalysisResults?.metadata),
+            // filename: window.currentAnalysisResults?.metadata?.filename
+        // });
         return null;
     }
     
-    console.log(`🔍 THRESHOLD-FIXED - Using pathogen: ${pathogen} for ${strategy} strategy`);
+    // console.log(`🔍 THRESHOLD-FIXED - Using pathogen: ${pathogen} for ${strategy} strategy`);
     
     // Get fixed threshold value directly from PATHOGEN_FIXED_THRESHOLDS
     if (window.PATHOGEN_FIXED_THRESHOLDS && window.PATHOGEN_FIXED_THRESHOLDS[pathogen]) {
@@ -822,32 +822,32 @@ if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
         const scaleKey = scale === 'log' ? 'log' : 'linear';
         
         // Debug log to help troubleshooting
-        console.log(`🔍 THRESHOLD-DEBUG - Fixed values for ${pathogen}:`, 
-            fixedValues[channel] ? fixedValues[channel] : 'No entry for this channel');
-        console.log(`🔍 THRESHOLD-DEBUG - Available channels for pathogen ${pathogen}:`, Object.keys(fixedValues));
-        console.log(`🔍 THRESHOLD-DEBUG - Requested: channel=${channel}, scale=${scaleKey}`);
+        // console.log(`🔍 THRESHOLD-DEBUG - Fixed values for ${pathogen}:`,
+            // fixedValues[channel] ? fixedValues[channel] : 'No entry for this channel');
+        // console.log(`🔍 THRESHOLD-DEBUG - Available channels for pathogen ${pathogen}:`, Object.keys(fixedValues));
+        // console.log(`🔍 THRESHOLD-DEBUG - Requested: channel=${channel}, scale=${scaleKey}`);
         
         // Access structure is pathogen->channel->scale (not pathogen->scale->channel)
         if (fixedValues[channel] && fixedValues[channel][scaleKey] !== undefined) {
             const fixedValue = fixedValues[channel][scaleKey];
-            console.log(`✅ THRESHOLD-FIXED - ${channel}[${scale}]: ${fixedValue} (pathogen: ${pathogen})`);
+            // console.log(`✅ THRESHOLD-FIXED - ${channel}[${scale}]: ${fixedValue} (pathogen: ${pathogen})`);
             
             // Immediately store the calculated value
             if (!window.stableChannelThresholds[channel]) {
                 window.stableChannelThresholds[channel] = {};
             }
             window.stableChannelThresholds[channel][scale] = fixedValue;
-            console.log(`✅ THRESHOLD-FIXED - Stored threshold value in stableChannelThresholds`);
+            // console.log(`✅ THRESHOLD-FIXED - Stored threshold value in stableChannelThresholds`);
             
             return fixedValue;
         } else {
-            console.warn(`⚠️ THRESHOLD-FIXED - No fixed value for ${channel}[${scaleKey}] in pathogen ${pathogen}`);
+            // console.warn(`⚠️ THRESHOLD-FIXED - No fixed value for ${channel}[${scaleKey}] in pathogen ${pathogen}`);
             if (fixedValues[channel]) {
-                console.warn(`⚠️ THRESHOLD-FIXED - Available scales for ${channel}:`, Object.keys(fixedValues[channel]));
+                // console.warn(`⚠️ THRESHOLD-FIXED - Available scales for ${channel}:`, Object.keys(fixedValues[channel]));
             }
         }
     } else {
-        console.warn(`⚠️ THRESHOLD-FIXED - No fixed thresholds found for pathogen ${pathogen}`);
+        // console.warn(`⚠️ THRESHOLD-FIXED - No fixed thresholds found for pathogen ${pathogen}`);
     }
     
     // Return null if no fixed value found
@@ -903,7 +903,7 @@ if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
     
     // NO FALLBACK - use null if no pathogen found
     if (!pathogen) {
-        console.warn(`⚠️ THRESHOLD-CALC - No pathogen found for calculated threshold`);
+        // console.warn(`⚠️ THRESHOLD-CALC - No pathogen found for calculated threshold`);
         pathogen = null; // Don't use BVPanelPCR1 as fallback
     }
     
@@ -927,7 +927,7 @@ if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
                     B = baselines.reduce((a,b) => a+b, 0) / baselines.length;
                 }
                 
-                console.log(`🔍 THRESHOLD-PARAMS - Channel ${channel}: L=${L.toFixed(2)}, B=${B.toFixed(2)}`);
+                // console.log(`🔍 THRESHOLD-PARAMS - Channel ${channel}: L=${L.toFixed(2)}, B=${B.toFixed(2)}`);
             }
         }
     }
@@ -948,19 +948,19 @@ if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
         
         // FOR DERIVATIVE STRATEGIES: Add curve data (rfu and cycles arrays)
         if (strategy === 'log_max_derivative' || strategy === 'log_second_derivative_max' || strategy === 'linear_max_slope') {
-            console.log(`🔍 DERIVATIVE-STRATEGY - Preparing curve data for strategy: ${strategy}`);
-            console.log(`🔍 DERIVATIVE-STRATEGY - Analysis results available:`, !!window.currentAnalysisResults);
+            // console.log(`🔍 DERIVATIVE-STRATEGY - Preparing curve data for strategy: ${strategy}`);
+            // console.log(`🔍 DERIVATIVE-STRATEGY - Analysis results available:`, !!window.currentAnalysisResults);
             
             // Find a representative well for this channel with full curve data
             if (window.currentAnalysisResults) {
                 const resultsToCheck = window.currentAnalysisResults.individual_results || window.currentAnalysisResults;
-                console.log(`🔍 DERIVATIVE-STRATEGY - Results to check:`, Object.keys(resultsToCheck).length, 'wells');
+                // console.log(`🔍 DERIVATIVE-STRATEGY - Results to check:`, Object.keys(resultsToCheck).length, 'wells');
                 
                 const channelWells = Object.values(resultsToCheck).filter(well => 
                     well != null && well.fluorophore === channel && well.raw_rfu && well.cycles
                 );
                 
-                console.log(`🔍 DERIVATIVE-STRATEGY - Found ${channelWells.length} wells for channel ${channel} with curve data`);
+                // console.log(`🔍 DERIVATIVE-STRATEGY - Found ${channelWells.length} wells for channel ${channel} with curve data`);
                 
                 if (channelWells.length > 0) {
                     // Use the first well with complete data
@@ -968,26 +968,26 @@ if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
                     let rfu = representativeWell.raw_rfu;
                     let cycles = representativeWell.cycles;
                     
-                    console.log(`🔍 DERIVATIVE-STRATEGY - Representative well:`, representativeWell.well_id);
-                    console.log(`🔍 DERIVATIVE-STRATEGY - Raw RFU type:`, typeof rfu, `Length:`, rfu?.length);
-                    console.log(`🔍 DERIVATIVE-STRATEGY - Raw cycles type:`, typeof cycles, `Length:`, cycles?.length);
+                    // console.log(`🔍 DERIVATIVE-STRATEGY - Representative well:`, representativeWell.well_id);
+                    // console.log(`🔍 DERIVATIVE-STRATEGY - Raw RFU type:`, typeof rfu, `Length:`, rfu?.length);
+                    // console.log(`🔍 DERIVATIVE-STRATEGY - Raw cycles type:`, typeof cycles, `Length:`, cycles?.length);
                     
                     // Parse if they're strings
                     if (typeof rfu === 'string') {
                         try { 
                             rfu = JSON.parse(rfu); 
-                            console.log(`🔍 DERIVATIVE-STRATEGY - Parsed RFU from string, new length:`, rfu?.length);
+                            // console.log(`🔍 DERIVATIVE-STRATEGY - Parsed RFU from string, new length:`, rfu?.length);
                         } catch(e) { 
-                            console.error(`🔍 DERIVATIVE-STRATEGY - Failed to parse RFU:`, e);
+                            // console.error(`🔍 DERIVATIVE-STRATEGY - Failed to parse RFU:`, e);
                             rfu = null; 
                         }
                     }
                     if (typeof cycles === 'string') {
                         try { 
                             cycles = JSON.parse(cycles); 
-                            console.log(`🔍 DERIVATIVE-STRATEGY - Parsed cycles from string, new length:`, cycles?.length);
+                            // console.log(`🔍 DERIVATIVE-STRATEGY - Parsed cycles from string, new length:`, cycles?.length);
                         } catch(e) { 
-                            console.error(`🔍 DERIVATIVE-STRATEGY - Failed to parse cycles:`, e);
+                            // console.error(`🔍 DERIVATIVE-STRATEGY - Failed to parse cycles:`, e);
                             cycles = null; 
                         }
                     }
@@ -996,32 +996,32 @@ if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
                         params.rfu = rfu;
                         params.cycles = cycles;
                         params.curve = rfu; // Alias for compatibility
-                        console.log(`🔍 DERIVATIVE-STRATEGY - Added curve data: ${rfu.length} points for ${channel}`);
-                        console.log(`🔍 DERIVATIVE-STRATEGY - Sample RFU values:`, rfu.slice(0, 10));
-                        console.log(`🔍 DERIVATIVE-STRATEGY - Sample cycle values:`, cycles.slice(0, 10));
+                        // console.log(`🔍 DERIVATIVE-STRATEGY - Added curve data: ${rfu.length} points for ${channel}`);
+                        // console.log(`🔍 DERIVATIVE-STRATEGY - Sample RFU values:`, rfu.slice(0, 10));
+                        // console.log(`🔍 DERIVATIVE-STRATEGY - Sample cycle values:`, cycles.slice(0, 10));
                     } else {
-                        console.warn(`⚠️ DERIVATIVE-STRATEGY - Invalid curve data for ${channel}`);
-                        console.warn(`⚠️ DERIVATIVE-STRATEGY - RFU: isArray=${Array.isArray(rfu)}, length=${rfu?.length}`);
-                        console.warn(`⚠️ DERIVATIVE-STRATEGY - Cycles: isArray=${Array.isArray(cycles)}, length=${cycles?.length}`);
-                        console.warn(`⚠️ DERIVATIVE-STRATEGY - Lengths match: ${rfu?.length === cycles?.length}`);
+                        // console.warn(`⚠️ DERIVATIVE-STRATEGY - Invalid curve data for ${channel}`);
+                        // console.warn(`⚠️ DERIVATIVE-STRATEGY - RFU: isArray=${Array.isArray(rfu)}, length=${rfu?.length}`);
+                        // console.warn(`⚠️ DERIVATIVE-STRATEGY - Cycles: isArray=${Array.isArray(cycles)}, length=${cycles?.length}`);
+                        // console.warn(`⚠️ DERIVATIVE-STRATEGY - Lengths match: ${rfu?.length === cycles?.length}`);
                         return null; // Can't calculate derivative without proper curve data
                     }
                 } else {
-                    console.warn(`⚠️ DERIVATIVE-STRATEGY - No wells with curve data found for channel: ${channel}`);
+                    // console.warn(`⚠️ DERIVATIVE-STRATEGY - No wells with curve data found for channel: ${channel}`);
                     // Let's see what wells we do have
                     const allWells = Object.values(resultsToCheck);
                     const channelWellsAny = allWells.filter(well => well != null && well.fluorophore === channel);
-                    console.warn(`⚠️ DERIVATIVE-STRATEGY - Total wells for ${channel}: ${channelWellsAny.length}`);
+                    // console.warn(`⚠️ DERIVATIVE-STRATEGY - Total wells for ${channel}: ${channelWellsAny.length}`);
                     if (channelWellsAny.length > 0) {
                         const sampleWell = channelWellsAny[0];
-                        console.warn(`⚠️ DERIVATIVE-STRATEGY - Sample well structure:`, {
-                            well_id: sampleWell.well_id,
-                            fluorophore: sampleWell.fluorophore,
-                            has_raw_rfu: !!sampleWell.raw_rfu,
-                            has_cycles: !!sampleWell.cycles,
-                            raw_rfu_type: typeof sampleWell.raw_rfu,
-                            cycles_type: typeof sampleWell.cycles
-                        });
+                        // console.warn(`⚠️ DERIVATIVE-STRATEGY - Sample well structure:`, {
+                            // well_id: sampleWell.well_id,
+                            // fluorophore: sampleWell.fluorophore,
+                            // has_raw_rfu: !!sampleWell.raw_rfu,
+                            // has_cycles: !!sampleWell.cycles,
+                            // raw_rfu_type: typeof sampleWell.raw_rfu,
+                            // cycles_type: typeof sampleWell.cycles
+                        // });
                     }
                     return null; // Can't calculate derivative without curve data
                 }
@@ -1029,43 +1029,43 @@ if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
         }
         
         try {
-            console.log(`🔍 THRESHOLD-CALL - About to call calculateThreshold with:`, {
-                strategy: strategy,
-                scale: scale,
-                paramsKeys: Object.keys(params),
-                hasRfu: !!params.rfu,
-                hasCycles: !!params.cycles,
-                rfuLength: params.rfu?.length,
-                cyclesLength: params.cycles?.length
-            });
+            // console.log(`🔍 THRESHOLD-CALL - About to call calculateThreshold with:`, {
+                // strategy: strategy,
+                // scale: scale,
+                // paramsKeys: Object.keys(params),
+                // hasRfu: !!params.rfu,
+                // hasCycles: !!params.cycles,
+                // rfuLength: params.rfu?.length,
+                // cyclesLength: params.cycles?.length
+            // });
             
             const threshold = window.calculateThreshold(strategy, params, scale);
             
-            console.log(`🔍 THRESHOLD-RESULT - calculateThreshold returned:`, {
-                strategy: strategy,
-                scale: scale,
-                result: threshold,
-                type: typeof threshold,
-                isNull: threshold === null,
-                isNaN: isNaN(threshold),
-                isPositive: threshold > 0
-            });
+            // console.log(`🔍 THRESHOLD-RESULT - calculateThreshold returned:`, {
+                // strategy: strategy,
+                // scale: scale,
+                // result: threshold,
+                // type: typeof threshold,
+                // isNull: threshold === null,
+                // isNaN: isNaN(threshold),
+                // isPositive: threshold > 0
+            // });
             
             if (threshold !== null && !isNaN(threshold) && threshold > 0) {
-                console.log(`✅ THRESHOLD-CALC - ${channel}[${scale}]: ${threshold.toFixed(2)} (strategy: ${strategy})`);
+                // console.log(`✅ THRESHOLD-CALC - ${channel}[${scale}]: ${threshold.toFixed(2)} (strategy: ${strategy})`);
                 return threshold;
             } else {
-                console.warn(`⚠️ THRESHOLD-CALC - calculateThreshold returned invalid value: ${threshold} for ${strategy}`);
+                // console.warn(`⚠️ THRESHOLD-CALC - calculateThreshold returned invalid value: ${threshold} for ${strategy}`);
             }
         } catch (error) {
-            console.error(`❌ THRESHOLD-ERROR - Failed to calculate ${strategy} for ${channel}[${scale}]:`, error);
+            // console.error(`❌ THRESHOLD-ERROR - Failed to calculate ${strategy} for ${channel}[${scale}]:`, error);
         }
     } else {
-        console.error(`❌ THRESHOLD-ERROR - window.calculateThreshold function not available`);
+        // console.error(`❌ THRESHOLD-ERROR - window.calculateThreshold function not available`);
     }
     
     // Only strategy-based calculations - no fallbacks
-    console.warn(`❌ THRESHOLD-FAIL - No valid threshold calculated for ${channel}[${scale}] with strategy ${strategy}`);
+    // console.warn(`❌ THRESHOLD-FAIL - No valid threshold calculated for ${channel}[${scale}] with strategy ${strategy}`);
     return null;
 }
 // Expose globally
@@ -1073,7 +1073,7 @@ if (strategy === 'linear_fixed' || strategy === 'log_fixed') {
 window.calculateChannelThresholdPerChannel = calculateChannelThreshold; // (channel, scale)
 window.calculateChannelThresholdPerWell = function(cycles, rfu) {
     if (!cycles || !rfu || cycles.length !== rfu.length || cycles.length < 5) {
-        console.warn('Insufficient data for threshold calculation');
+        // console.warn('Insufficient data for threshold calculation');
         return null;
     }
     // Extract RFU values for cycles 1-5
@@ -1084,7 +1084,7 @@ window.calculateChannelThresholdPerWell = function(cycles, rfu) {
         }
     }
     if (earlyRfuValues.length < 3) {
-        console.warn('Insufficient early cycle data for threshold calculation');
+        // console.warn('Insufficient early cycle data for threshold calculation');
         return null;
     }
     // Calculate mean and standard deviation
@@ -1100,7 +1100,7 @@ window.calculateChannelThresholdPerWell = function(cycles, rfu) {
     if (window.currentScaleMode === 'log') {
         threshold = Math.max(threshold, mean * 2); // At least 2x baseline for log visibility
     }
-    console.log(`Threshold calculation - Mean: ${mean.toFixed(3)}, StdDev: ${stdDev.toFixed(3)}, Threshold: ${threshold.toFixed(3)}`);
+    // console.log(`Threshold calculation - Mean: ${mean.toFixed(3)}, StdDev: ${stdDev.toFixed(3)}, Threshold: ${threshold.toFixed(3)}`);
     return {
         threshold: threshold,
         baseline: mean,
@@ -1133,28 +1133,28 @@ function updateThresholdInputForCurrentScale() {
         const threshold = window.stableChannelThresholds[channel][window.currentScaleMode];
         if (threshold !== null && threshold !== undefined) {
             thresholdInput.value = threshold.toFixed(2);
-            console.log(`🔍 THRESHOLD-INPUT-UPDATE - Set input to ${threshold.toFixed(2)} for ${channel} ${window.currentScaleMode}`);
+            // console.log(`🔍 THRESHOLD-INPUT-UPDATE - Set input to ${threshold.toFixed(2)} for ${channel} ${window.currentScaleMode}`);
         }
     }
 }
 
 function updateChartThresholds() {
-    console.log('🔍 CHART-THRESHOLD - Updating chart thresholds');
+    // console.log('🔍 CHART-THRESHOLD - Updating chart thresholds');
     
     // Add loading state guard to prevent multiple concurrent updates
     if (window.appState && window.appState.uiState && window.appState.uiState.isChartLoading) {
-        console.log('🔍 CHART-THRESHOLD - Chart is loading, skipping threshold update');
+        // console.log('🔍 CHART-THRESHOLD - Chart is loading, skipping threshold update');
         return;
     }
     
     if (!window.amplificationChart) {
-        console.warn('🔍 CHART-THRESHOLD - No chart available');
+        // console.warn('🔍 CHART-THRESHOLD - No chart available');
         return;
     }
     
     // Ensure we have analysis results and channel thresholds are initialized
     if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
-        console.warn('🔍 CHART-THRESHOLD - No analysis results available, trying to initialize thresholds');
+        // console.warn('🔍 CHART-THRESHOLD - No analysis results available, trying to initialize thresholds');
         // Try to initialize thresholds if we have analysis data
         if (window.currentAnalysisResults) {
             if (typeof initializeChannelThresholds === 'function') {
@@ -1167,7 +1167,7 @@ function updateChartThresholds() {
     // Check if this is a single-well chart or multi-well chart
     const datasets = window.amplificationChart.data?.datasets || [];
     if (datasets.length === 0) {
-        console.warn('🔍 CHART-THRESHOLD - No datasets found in chart');
+        // console.warn('🔍 CHART-THRESHOLD - No datasets found in chart');
         return;
     }
     
@@ -1178,11 +1178,11 @@ function updateChartThresholds() {
     if (match && match[1] !== 'Unknown') {
         // Single-channel chart - apply threshold for specific fluorophore
         const fluorophore = match[1];
-        console.log(`🔍 CHART-THRESHOLD - Detected single-channel chart for ${fluorophore}`);
+        // console.log(`🔍 CHART-THRESHOLD - Detected single-channel chart for ${fluorophore}`);
         if (window.updateSingleChannelThreshold) window.updateSingleChannelThreshold(fluorophore);
     } else {
         // Multi-channel chart - apply thresholds for all channels
-        console.log('🔍 CHART-THRESHOLD - Detected multi-channel chart');
+        // console.log('🔍 CHART-THRESHOLD - Detected multi-channel chart');
         if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
     }
 }
@@ -1206,7 +1206,7 @@ function setThresholdControls(value, updateChart = true) {
         }
     }
     if (!channel) {
-        console.warn('No channel selected or detected!');
+        // console.warn('No channel selected or detected!');
         return;
     }
     const scale = window.currentScaleMode;
@@ -1218,7 +1218,7 @@ function setThresholdControls(value, updateChart = true) {
 
 function restoreAutoThreshold(channel) {
     if (!channel) {
-        console.warn('🔍 AUTO-THRESHOLD - No channel specified');
+        // console.warn('🔍 AUTO-THRESHOLD - No channel specified');
         return;
     }
     
@@ -1243,16 +1243,16 @@ function restoreAutoThreshold(channel) {
             thresholdInput.value = autoValue.toFixed(2);
         }
         
-        console.log(`🔍 AUTO-THRESHOLD - Set ${channel} ${scale} to auto value: ${autoValue.toFixed(2)}`);
+        // console.log(`🔍 AUTO-THRESHOLD - Set ${channel} ${scale} to auto value: ${autoValue.toFixed(2)}`);
     } else {
-        console.warn(`🔍 AUTO-THRESHOLD - Could not calculate auto threshold for ${channel} ${scale}`);
+        // console.warn(`🔍 AUTO-THRESHOLD - Could not calculate auto threshold for ${channel} ${scale}`);
     }
 }
 
 function enableDraggableThresholds() {
     // DISABLED: Draggable threshold functionality commented out
     // Will be replaced with test.html implementation later
-    console.log('🔍 THRESHOLD - Draggable thresholds disabled (will use test.html implementation)');
+    // console.log('🔍 THRESHOLD - Draggable thresholds disabled (will use test.html implementation)');
     return;
 }
 
@@ -1263,21 +1263,21 @@ function ensureThresholdFeaturesActive() {
 }
 
 function initializeChannelThresholds() {
-    console.log('🔍 THRESHOLD-INIT - Initializing channel thresholds');
+    // console.log('🔍 THRESHOLD-INIT - Initializing channel thresholds');
     
     // Multiple null checks for robustness
     if (!window.currentAnalysisResults) {
-        console.warn('🔍 THRESHOLD-INIT - No currentAnalysisResults available');
+        // console.warn('🔍 THRESHOLD-INIT - No currentAnalysisResults available');
         return;
     }
     
     if (!window.currentAnalysisResults.individual_results) {
-        console.warn('🔍 THRESHOLD-INIT - No individual_results in currentAnalysisResults');
+        // console.warn('🔍 THRESHOLD-INIT - No individual_results in currentAnalysisResults');
         return;
     }
     
     if (typeof window.currentAnalysisResults.individual_results !== 'object') {
-        console.warn('🔍 THRESHOLD-INIT - individual_results is not an object');
+        // console.warn('🔍 THRESHOLD-INIT - individual_results is not an object');
         return;
     }
     
@@ -1290,16 +1290,16 @@ function initializeChannelThresholds() {
             }
         });
     } catch (e) {
-        console.error('🔍 THRESHOLD-INIT - Error extracting channels:', e);
+        // console.error('🔍 THRESHOLD-INIT - Error extracting channels:', e);
         return;
     }
     
     if (channels.size === 0) {
-        console.warn('🔍 THRESHOLD-INIT - No valid channels found in analysis results');
+        // console.warn('🔍 THRESHOLD-INIT - No valid channels found in analysis results');
         return;
     }
     
-    console.log(`🔍 THRESHOLD-INIT - Found channels: [${Array.from(channels).join(', ')}]`);
+    // console.log(`🔍 THRESHOLD-INIT - Found channels: [${Array.from(channels).join(', ')}]`);
     
     // Extract control wells for each channel before calculating thresholds
     if (typeof window.extractChannelControlWells === 'function') {
@@ -1315,7 +1315,7 @@ function initializeChannelThresholds() {
                     window.stableChannelThresholds[channel] = {};
                 }
                 window.stableChannelThresholds[channel][scale] = threshold;
-                console.log(`🔍 THRESHOLD-INIT - ${channel} ${scale}: ${threshold.toFixed(2)}`);
+                // console.log(`🔍 THRESHOLD-INIT - ${channel} ${scale}: ${threshold.toFixed(2)}`);
             }
         });
     });
@@ -1326,7 +1326,7 @@ function initializeChannelThresholds() {
     }
     
     // Chart thresholds will be updated via animation onComplete callback
-    console.log('🔍 THRESHOLD-INIT - Channel thresholds initialized, chart updates will follow via animation callback');
+    // console.log('🔍 THRESHOLD-INIT - Channel thresholds initialized, chart updates will follow via animation callback');
 }
 // Add this function to handle single-channel validation
 function validateAndSetSingleChannel() {
@@ -1340,7 +1340,7 @@ function validateAndSetSingleChannel() {
         });
     }
     
-    console.log(`🔍 CHANNEL-VALIDATION - Found ${channels.size} channels: ${Array.from(channels).join(', ')}`);
+    // console.log(`🔍 CHANNEL-VALIDATION - Found ${channels.size} channels: ${Array.from(channels).join(', ')}`);
     
     // If only one channel, automatically set it as current
     if (channels.size === 1) {
@@ -1362,7 +1362,7 @@ function validateAndSetSingleChannel() {
                 fluorophoreSelector.appendChild(option);
                 fluorophoreSelector.value = singleChannel;
             }
-            console.log(`🔍 CHANNEL-VALIDATION - Auto-selected single channel: ${singleChannel}`);
+            // console.log(`🔍 CHANNEL-VALIDATION - Auto-selected single channel: ${singleChannel}`);
         }
         
         return singleChannel;
@@ -1370,7 +1370,7 @@ function validateAndSetSingleChannel() {
     
     // If multiple channels but "all" is selected, prompt user to select one for manual threshold
     if (channels.size > 1 && window.currentFluorophore === 'all') {
-        console.log(`🔍 CHANNEL-VALIDATION - Multiple channels available, user should select one for manual threshold`);
+        // console.log(`🔍 CHANNEL-VALIDATION - Multiple channels available, user should select one for manual threshold`);
     }
     
     return window.currentFluorophore;
@@ -1382,7 +1382,7 @@ window.validateAndSetSingleChannel = validateAndSetSingleChannel;
 // Modify initializeThresholdSystem to include channel validation
 const originalInitializeThresholdSystem = window.initializeThresholdSystem;
 window.initializeThresholdSystem = function() {
-    console.log('🔍 THRESHOLD-INIT - Initializing complete threshold system');
+    // console.log('🔍 THRESHOLD-INIT - Initializing complete threshold system');
     
     // Validate and set single channel first
     validateAndSetSingleChannel();
@@ -1397,29 +1397,29 @@ function getCurrentChannelThreshold(channel, scale = null) {
     if (!window.stableChannelThresholds) window.stableChannelThresholds = {};
     if (!scale) scale = window.currentScaleMode;
     
-    console.log(`🔍 GET-THRESHOLD - Getting threshold for ${channel}[${scale}]`);
+    // console.log(`🔍 GET-THRESHOLD - Getting threshold for ${channel}[${scale}]`);
     
     // Load from storage if not in memory
     if (!window.stableChannelThresholds[channel] && sessionStorage.getItem('stableChannelThresholds')) {
         try {
             window.stableChannelThresholds = JSON.parse(sessionStorage.getItem('stableChannelThresholds'));
-            console.log(`🔍 GET-THRESHOLD - Loaded thresholds from storage for ${channel}`);
+            // console.log(`🔍 GET-THRESHOLD - Loaded thresholds from storage for ${channel}`);
         } catch (e) {
-            console.warn('🔍 THRESHOLD - Error loading thresholds from storage:', e);
+            // console.warn('🔍 THRESHOLD - Error loading thresholds from storage:', e);
         }
     }
     
     if (!window.stableChannelThresholds[channel] || !window.stableChannelThresholds[channel][scale]) {
-        console.log(`🔍 GET-THRESHOLD - No cached threshold found for ${channel}[${scale}], calculating...`);
+        // console.log(`🔍 GET-THRESHOLD - No cached threshold found for ${channel}[${scale}], calculating...`);
         const baseThreshold = window.calculateStableChannelThreshold ? window.calculateStableChannelThreshold(channel, scale) : null;
         if (!window.stableChannelThresholds[channel]) window.stableChannelThresholds[channel] = {};
         window.stableChannelThresholds[channel][scale] = baseThreshold;
-        console.log(`🔍 GET-THRESHOLD - Calculated and stored threshold for ${channel}[${scale}]: ${baseThreshold}`);
+        // console.log(`🔍 GET-THRESHOLD - Calculated and stored threshold for ${channel}[${scale}]: ${baseThreshold}`);
     }
     
     const baseThreshold = window.stableChannelThresholds[channel][scale];
     
-    console.log(`🔍 GET-THRESHOLD - Returning threshold for ${channel}[${scale}]: ${baseThreshold}`);
+    // console.log(`🔍 GET-THRESHOLD - Returning threshold for ${channel}[${scale}]: ${baseThreshold}`);
     
     // Return the base threshold WITHOUT any multiplier
     // The scale multiplier only affects chart view, not threshold values
@@ -1436,7 +1436,7 @@ function updateThresholdInputForCurrentScale() {
     const channel = window.currentFluorophore;
     const scale = window.currentScaleMode;
     
-    console.log(`🔍 UPDATE-INPUT - Channel: ${channel}, Scale: ${scale}`);
+    // console.log(`🔍 UPDATE-INPUT - Channel: ${channel}, Scale: ${scale}`);
     
     if (!channel || channel === 'all') {
         // If no specific channel, try to find first available threshold
@@ -1447,12 +1447,12 @@ function updateThresholdInputForCurrentScale() {
                 const threshold = window.stableChannelThresholds[firstChannel][scale];
                 if (threshold !== null && threshold !== undefined) {
                     thresholdInput.value = threshold.toFixed(2);
-                    console.log(`🔍 UPDATE-INPUT - Set to ${firstChannel} threshold: ${threshold.toFixed(2)}`);
+                    // console.log(`🔍 UPDATE-INPUT - Set to ${firstChannel} threshold: ${threshold.toFixed(2)}`);
                     return;
                 }
             }
         }
-        console.log(`🔍 UPDATE-INPUT - No channel selected, keeping current input value`);
+        // console.log(`🔍 UPDATE-INPUT - No channel selected, keeping current input value`);
         return;
     }
     
@@ -1460,9 +1460,9 @@ function updateThresholdInputForCurrentScale() {
     const currentThreshold = getCurrentChannelThreshold(channel, scale);
     if (currentThreshold !== null && currentThreshold !== undefined && !isNaN(currentThreshold)) {
         thresholdInput.value = currentThreshold.toFixed(2);
-        console.log(`🔍 UPDATE-INPUT - Updated to ${channel} ${scale} threshold: ${currentThreshold.toFixed(2)}`);
+        // console.log(`🔍 UPDATE-INPUT - Updated to ${channel} ${scale} threshold: ${currentThreshold.toFixed(2)}`);
     } else {
-        console.warn(`🔍 UPDATE-INPUT - No valid threshold found for ${channel} ${scale}`);
+        // console.warn(`🔍 UPDATE-INPUT - No valid threshold found for ${channel} ${scale}`);
     }
 }
 
@@ -1545,7 +1545,7 @@ function attachAutoButtonHandler() {
             if (channel) {
                 window.restoreAutoThreshold(channel);
             } else {
-                console.warn('🔍 AUTO-THRESHOLD - Could not determine current channel');
+                // console.warn('🔍 AUTO-THRESHOLD - Could not determine current channel');
             }
         };
     }
@@ -1581,10 +1581,10 @@ function handleManualThresholdChange() {
     const scale = window.currentScaleMode;
     const value = parseFloat(thresholdInput.value);
     
-    console.log(`🔍 MANUAL-THRESHOLD-DEBUG - Channel: ${channel}, Scale: ${scale}, Value: ${value}`);
+    // console.log(`🔍 MANUAL-THRESHOLD-DEBUG - Channel: ${channel}, Scale: ${scale}, Value: ${value}`);
     
     if (channel && !isNaN(value) && value > 0) {
-        console.log(`🔍 MANUAL-THRESHOLD-INPUT - Setting ${channel} ${scale} threshold to ${value}`);
+        // console.log(`🔍 MANUAL-THRESHOLD-INPUT - Setting ${channel} ${scale} threshold to ${value}`);
         
         // Mark this threshold as manually set to prevent override
         if (!window.manualThresholds) window.manualThresholds = {};
@@ -1601,17 +1601,17 @@ function handleManualThresholdChange() {
         // Send manual threshold to backend for proper CQJ recalculation
         sendManualThresholdToBackend(channel, scale, value);
         
-        console.log(`🔍 MANUAL-THRESHOLD-SET - ${channel} ${scale} threshold set to ${value}`);
+        // console.log(`🔍 MANUAL-THRESHOLD-SET - ${channel} ${scale} threshold set to ${value}`);
         
         // Force strategy to manual when user manually sets threshold
         const strategySelect = document.getElementById('thresholdStrategySelect');
         if (strategySelect && strategySelect.value !== 'manual') {
             strategySelect.value = 'manual';
             window.selectedThresholdStrategy = 'manual';
-            console.log(`🔍 MANUAL-THRESHOLD - Switched strategy to manual`);
+            // console.log(`🔍 MANUAL-THRESHOLD - Switched strategy to manual`);
         }
     } else {
-        console.warn(`🔍 MANUAL-THRESHOLD-INVALID - Invalid input: channel=${channel}, scale=${scale}, value=${value}`);
+        // console.warn(`🔍 MANUAL-THRESHOLD-INVALID - Invalid input: channel=${channel}, scale=${scale}, value=${value}`);
     }
 }
         
@@ -1652,7 +1652,7 @@ async function sendManualThresholdToBackend(channel, scale, value) {
             session_id: window.currentSessionId || null
         };
         
-        console.log(`🔍 BACKEND-THRESHOLD - Sending manual threshold:`, payload);
+        // console.log(`🔍 BACKEND-THRESHOLD - Sending manual threshold:`, payload);
         
         const response = await fetch('/threshold/manual', {
             method: 'POST',
@@ -1662,7 +1662,7 @@ async function sendManualThresholdToBackend(channel, scale, value) {
         
         if (response.ok) {
             const result = await response.json();
-            console.log(`🔍 BACKEND-THRESHOLD - Backend response:`, result);
+            // console.log(`🔍 BACKEND-THRESHOLD - Backend response:`, result);
             
             if (result.success && result.updated_results) {
                 // CRITICAL: Create a deep copy of current results to preserve all data
@@ -1689,7 +1689,7 @@ async function sendManualThresholdToBackend(channel, scale, value) {
                             preservedResults[wellKey]['Calc-J'] = updates.calcj_value;
                         }
                         
-                        console.log(`🔍 BACKEND-THRESHOLD - Updated well ${wellKey}: CQJ=${updates.cqj_value}, CalcJ=${updates.calcj_value} for fluorophore ${fluorophore}`);
+                        // console.log(`🔍 BACKEND-THRESHOLD - Updated well ${wellKey}: CQJ=${updates.cqj_value}, CalcJ=${updates.calcj_value} for fluorophore ${fluorophore}`);
                     }
                 });
                 
@@ -1717,12 +1717,12 @@ async function sendManualThresholdToBackend(channel, scale, value) {
                     syncUIElements();
                 }
                 
-                console.log(`✅ BACKEND-THRESHOLD - Updated ${Object.keys(result.updated_results).length} wells with new CQJ/CalcJ values and reset filter to 'all'`);
+                // console.log(`✅ BACKEND-THRESHOLD - Updated ${Object.keys(result.updated_results).length} wells with new CQJ/CalcJ values and reset filter to 'all'`);
                 
                 // Force refresh the table display to show updated values
                 setTimeout(() => {
                     if (typeof populateResultsTable === 'function') {
-                        console.log(`🔄 BACKEND-THRESHOLD - Force refreshing table with updated CQJ values`);
+                        // console.log(`🔄 BACKEND-THRESHOLD - Force refreshing table with updated CQJ values`);
                         populateResultsTable(window.currentAnalysisResults.individual_results);
                         
                         // Apply any existing filters after table refresh
@@ -1744,16 +1744,16 @@ async function sendManualThresholdToBackend(channel, scale, value) {
                 
                 return result;
             } else if (result.success) {
-                console.log(`✅ BACKEND-THRESHOLD - Manual threshold acknowledged by backend`);
+                // console.log(`✅ BACKEND-THRESHOLD - Manual threshold acknowledged by backend`);
                 return result;
             } else {
-                console.warn(`⚠️ BACKEND-THRESHOLD - Backend returned success=false:`, result);
+                // console.warn(`⚠️ BACKEND-THRESHOLD - Backend returned success=false:`, result);
             }
         } else {
-            console.warn(`⚠️ BACKEND-THRESHOLD - HTTP ${response.status}: ${response.statusText}`);
+            // console.warn(`⚠️ BACKEND-THRESHOLD - HTTP ${response.status}: ${response.statusText}`);
         }
     } catch (error) {
-        console.error(`❌ BACKEND-THRESHOLD - Backend update failed:`, error);
+        // console.error(`❌ BACKEND-THRESHOLD - Backend update failed:`, error);
     }
 }
 
@@ -1785,7 +1785,7 @@ function updateChartThreshold(value) {
         }
     }
     if (!channel) {
-        console.warn('No channel selected or detected!');
+        // console.warn('No channel selected or detected!');
         return;
     }
     if (
@@ -1804,9 +1804,9 @@ function updateChartThreshold(value) {
                 annotations[key].label.content = `${channel}: ${Number(value).toFixed(2)}`;
             }
             chart.update('none');
-            console.log(`[THRESHOLD] Updated ${key} to ${value}`);
+            // console.log(`[THRESHOLD] Updated ${key} to ${value}`);
         } else {
-            console.warn(`[THRESHOLD] Annotation key not found: ${key}`);
+            // console.warn(`[THRESHOLD] Annotation key not found: ${key}`);
         }
     }
 }
@@ -1821,7 +1821,7 @@ function updateChartThreshold(value) {
 function populateThresholdStrategyDropdown() {
     const select = document.getElementById('thresholdStrategySelect');
     if (!select) {
-        console.warn('🔍 STRATEGY-DROPDOWN - thresholdStrategySelect element not found');
+        // console.warn('🔍 STRATEGY-DROPDOWN - thresholdStrategySelect element not found');
         return;
     }
     
@@ -1843,19 +1843,19 @@ function populateThresholdStrategyDropdown() {
         window.currentScaleMode = scale; // Update global
     }
     
-    console.log(`🔍 DROPDOWN-DEBUG - Scale: ${scale}, window.currentScaleMode: ${window.currentScaleMode}`);
-    console.log(`🔍 DROPDOWN-DEBUG - window.LOG_THRESHOLD_STRATEGIES: ${typeof window.LOG_THRESHOLD_STRATEGIES}, window.LINEAR_THRESHOLD_STRATEGIES: ${typeof window.LINEAR_THRESHOLD_STRATEGIES}`);
+    // console.log(`🔍 DROPDOWN-DEBUG - Scale: ${scale}, window.currentScaleMode: ${window.currentScaleMode}`);
+    // console.log(`🔍 DROPDOWN-DEBUG - window.LOG_THRESHOLD_STRATEGIES: ${typeof window.LOG_THRESHOLD_STRATEGIES}, window.LINEAR_THRESHOLD_STRATEGIES: ${typeof window.LINEAR_THRESHOLD_STRATEGIES}`);
     
     // Use the appropriate strategies from threshold_strategies.js
     const strategies = scale === 'log' ? window.LOG_THRESHOLD_STRATEGIES : window.LINEAR_THRESHOLD_STRATEGIES;
     
     if (!strategies || typeof strategies !== 'object') {
-        console.error('❌ STRATEGY-DROPDOWN - Threshold strategies not available', {
-            scale: scale,
-            strategies: strategies,
-            window_log: window.LOG_THRESHOLD_STRATEGIES,
-            window_linear: window.LINEAR_THRESHOLD_STRATEGIES
-        });
+        // console.error('❌ STRATEGY-DROPDOWN - Threshold strategies not available', {
+            // scale: scale,
+            // strategies: strategies,
+            // window_log: window.LOG_THRESHOLD_STRATEGIES,
+            // window_linear: window.LINEAR_THRESHOLD_STRATEGIES
+        // });
         return;
     }
     
@@ -1888,16 +1888,16 @@ function populateThresholdStrategyDropdown() {
     
     // Set default strategy if current selection not available
     if (!found && firstKey) {
-        console.log(`🔄 STRATEGY-DROPDOWN - Current strategy "${window.selectedThresholdStrategy}" not found, setting to default: ${firstKey}`);
+        // console.log(`🔄 STRATEGY-DROPDOWN - Current strategy "${window.selectedThresholdStrategy}" not found, setting to default: ${firstKey}`);
         window.selectedThresholdStrategy = firstKey;
     } else if (found) {
-        console.log(`✅ STRATEGY-DROPDOWN - Current strategy "${window.selectedThresholdStrategy}" is valid, preserving it`);
+        // console.log(`✅ STRATEGY-DROPDOWN - Current strategy "${window.selectedThresholdStrategy}" is valid, preserving it`);
     }
     
     select.value = window.selectedThresholdStrategy || firstKey;
     window.selectedThresholdStrategy = select.value;
     
-    console.log(`✅ STRATEGY-DROPDOWN - Populated with ${Object.keys(strategies).length} ${scale} strategies, selected: ${select.value}`);
+    // console.log(`✅ STRATEGY-DROPDOWN - Populated with ${Object.keys(strategies).length} ${scale} strategies, selected: ${select.value}`);
     
     // IMPORTANT: Remove ALL existing event listeners to prevent conflicts
     const newSelect = select.cloneNode(true);
@@ -1911,7 +1911,7 @@ function populateThresholdStrategyDropdown() {
     newSelect.addEventListener('change', function(e) {
         const newStrategy = e.target.value;
         window.selectedThresholdStrategy = newStrategy;
-        console.log(`🔍 STRATEGY-CHANGE - Strategy changed to: ${newStrategy}`);
+        // console.log(`🔍 STRATEGY-CHANGE - Strategy changed to: ${newStrategy}`);
         
         // Update app state through centralized state management
         if (typeof updateAppState === 'function') {
@@ -1949,13 +1949,13 @@ function populateThresholdStrategyDropdown() {
  * Apply threshold strategy and update threshold input box
  */
 function applyThresholdStrategy(strategy) {
-    console.log(`🔍 APPLY-STRATEGY - Applying threshold strategy: ${strategy}`);
+    // console.log(`🔍 APPLY-STRATEGY - Applying threshold strategy: ${strategy}`);
     
     const currentChannel = window.currentFluorophore;
     const currentScale = window.currentScaleMode;
     
     if (!currentChannel || currentChannel === 'all') {
-        console.warn('🔍 APPLY-STRATEGY - No specific channel selected, applying to all channels');
+        // console.warn('🔍 APPLY-STRATEGY - No specific channel selected, applying to all channels');
         
         // Apply to all available channels
         if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
@@ -1970,7 +1970,7 @@ function applyThresholdStrategy(strategy) {
                 const threshold = calculateStableChannelThreshold(channel, currentScale);
                 if (threshold !== null) {
                     setChannelThreshold(channel, currentScale, threshold);
-                    console.log(`🔍 APPLY-STRATEGY - Set ${channel} ${currentScale} threshold: ${threshold.toFixed(2)}`);
+                    // console.log(`🔍 APPLY-STRATEGY - Set ${channel} ${currentScale} threshold: ${threshold.toFixed(2)}`);
                 }
             });
         }
@@ -1983,16 +1983,16 @@ function applyThresholdStrategy(strategy) {
         const threshold = calculateStableChannelThreshold(currentChannel, currentScale);
         if (threshold !== null) {
             setChannelThreshold(currentChannel, currentScale, threshold);
-            console.log(`🔍 APPLY-STRATEGY - Set ${currentChannel} ${currentScale} threshold: ${threshold.toFixed(2)}`);
+            // console.log(`🔍 APPLY-STRATEGY - Set ${currentChannel} ${currentScale} threshold: ${threshold.toFixed(2)}`);
             
             // Update threshold input box immediately
             const thresholdInput = document.getElementById('thresholdInput');
             if (thresholdInput) {
                 thresholdInput.value = threshold.toFixed(2);
-                console.log(`🔍 APPLY-STRATEGY - Updated threshold input to: ${threshold.toFixed(2)}`);
+                // console.log(`🔍 APPLY-STRATEGY - Updated threshold input to: ${threshold.toFixed(2)}`);
             }
         } else {
-            console.warn(`🔍 APPLY-STRATEGY - Failed to calculate threshold for ${currentChannel} using strategy ${strategy}`);
+            // console.warn(`🔍 APPLY-STRATEGY - Failed to calculate threshold for ${currentChannel} using strategy ${strategy}`);
         }
     }
     
@@ -2018,7 +2018,7 @@ function applyThresholdStrategy(strategy) {
  */
 window.extractChannelControlWells = function() {
     if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
-        console.log('🔍 CONTROL-WELLS - No analysis results available for control extraction');
+        // console.log('🔍 CONTROL-WELLS - No analysis results available for control extraction');
         return;
     }
     
@@ -2066,11 +2066,11 @@ window.extractChannelControlWells = function() {
         }
     });
     
-    console.log('🔍 CONTROL-WELLS - Extracted control wells by channel:', window.channelControlWells);
+    // console.log('🔍 CONTROL-WELLS - Extracted control wells by channel:', window.channelControlWells);
     
     // Log summary for debugging
     Object.entries(window.channelControlWells).forEach(([channel, controls]) => {
-        console.log(`🔍 CONTROL-WELLS - ${channel}: NTC=${controls.NTC.length}, POS=${controls.POS.length}, H=${controls.H.length}, M=${controls.M.length}, L=${controls.L.length}`);
+        // console.log(`🔍 CONTROL-WELLS - ${channel}: NTC=${controls.NTC.length}, POS=${controls.POS.length}, H=${controls.H.length}, M=${controls.M.length}, L=${controls.L.length}`);
     });
 };
 // --- End Additional Functions ---
@@ -2107,7 +2107,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Populate threshold strategy dropdown on page load
     setTimeout(() => {
         populateThresholdStrategyDropdown();
-        console.log('🔍 THRESHOLD-INIT - Strategy dropdown populated on DOM ready');
+        // console.log('🔍 THRESHOLD-INIT - Strategy dropdown populated on DOM ready');
     }, 500); // Small delay to ensure threshold_strategies.js is loaded
 });
 
