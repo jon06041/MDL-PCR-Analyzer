@@ -207,8 +207,51 @@ Need to verify fixes work for:
 4. Test all scenarios thoroughly
 5. Document the final solution
 
+## 🚨 **CRITICAL LEARNING: What NOT to Do** (Added July 19, 2025)
+
+### 🔍 **Failed Approach Analysis**
+
+**❌ FAILED STRATEGY**: Aggressive commenting of ALL `showAllCurves` calls
+
+**What Went Wrong**:
+1. **🚫 No Chart Display**: After commenting out ALL `showAllCurves` calls, no charts displayed at all
+2. **🔍 Root Cause**: Commented out **essential** chart creation calls, not just duplicates
+3. **⚠️ Key Insight**: Some `showAllCurves` calls are **REQUIRED** for normal chart functionality
+
+**Essential vs Duplicate `showAllCurves` Calls**:
+- ❌ **Line 379 (CSMS)**: Called on every state update → **CRITICAL DUPLICATE**
+- ❌ **DOM Ready handlers**: Multiple chart creation on page load → **DUPLICATES**  
+- ❌ **History/session loading**: Multiple recreations → **DUPLICATES**
+- ✅ **User interactions**: Well selector, filter buttons → **ESSENTIAL**
+- ✅ **Chart mode switches**: POS/NEG/ALL buttons → **ESSENTIAL**
+
+**Failed Test Results Before Revert**:
+- 🚫 No chart appears on fresh analysis
+- 🚫 No chart appears on session loading  
+- 🚫 Complete chart functionality broken
+- ⚠️ Browser switching/timing issues persist (root cause not addressed)
+
+### 🎯 **Correct Approach Moving Forward**
+
+**Root Issue Identified**: The browser switching requirement suggests **timing/async issues**, not just duplicate chart creation.
+
+**Likely Real Causes**:
+1. **Async Race Conditions**: Chart creation vs threshold initialization timing
+2. **Backend Processing**: Multi-channel analysis completion timing
+3. **State Management**: UI state updates not properly synchronized
+4. **Resource Loading**: Chart.js/plugins loading timing issues
+
+**Next Steps (Using Lessons Learned)**:
+1. **Keep essential chart creation calls** (user interactions, mode switches)
+2. **Focus on timing/async issues** instead of just commenting out code
+3. **Add proper loading states and completion callbacks**
+4. **Investigate why browser tab switching "fixes" the timing**
+5. **Identify minimal, surgical fixes** rather than mass commenting
+
+**Key Takeaway**: Over-aggressive removal breaks functionality. The real issue is likely async timing, not just duplicates.
+
 ---
 
-*Last Updated: July 18, 2025*
-*Focus: Timing Issues & Multiple Loading Prevention*
-*Ready for: Implementation of loading state guards and centralized initialization*
+*Last Updated: July 19, 2025*
+*Focus: Learning from failed aggressive fixes, preparing for targeted async/timing solutions*
+*Status: Reverted to working state (c3c9e5e), documented what doesn't work*
