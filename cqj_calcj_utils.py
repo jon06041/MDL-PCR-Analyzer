@@ -102,24 +102,25 @@ def calculate_calcj_with_controls(well_data, threshold, all_well_results, test_c
     well_id = well_data.get('well_id') or well_data.get('wellKey') or well_data.get('well_key') or 'UNKNOWN'
     
     # Standard concentration values from concentration_controls.js
-    CONCENTRATION_CONTROLS = {
-        'Lacto': {
-            'Cy5': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3},
-            'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'TexasRed': {'H': 1e7, 'M': 1e5, 'L': 1e3}
-        },
-        'Calb': {'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Ctrach': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-        'Ngon': {'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Tvag': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-        'Cglab': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Cpara': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-        'Ctrop': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Gvag': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-        'BVAB2': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'CHVIC': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-        'AtopVag': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Megasphaera': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-        'Efaecalis': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Saureus': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-        'Ecoli': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'AtopVagNY': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-        'BVAB2NY': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'GvagNY': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-        'MegasphaeraNY': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-        'LactoNY': {'Cy5': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'TexasRed': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-        'RNaseP': {'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}}
-    }
+    # COMMENTED OUT: These should be in JavaScript only, not duplicated here
+    # CONCENTRATION_CONTROLS = {
+    #     'Lacto': {
+    #         'Cy5': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3},
+    #         'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'TexasRed': {'H': 1e7, 'M': 1e5, 'L': 1e3}
+    #     },
+    #     'Calb': {'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Ctrach': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+    #     'Ngon': {'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Tvag': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+    #     'Cglab': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Cpara': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+    #     'Ctrop': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Gvag': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+    #     'BVAB2': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'CHVIC': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+    #     'AtopVag': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Megasphaera': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+    #     'Efaecalis': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Saureus': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+    #     'Ecoli': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'AtopVagNY': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+    #     'BVAB2NY': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'GvagNY': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+    #     'MegasphaeraNY': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+    #     'LactoNY': {'Cy5': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'TexasRed': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+    #     'RNaseP': {'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}}
+    # }
     
     # Get concentration values for this test/channel
     conc_values = CONCENTRATION_CONTROLS.get(test_code, {}).get(channel, {})

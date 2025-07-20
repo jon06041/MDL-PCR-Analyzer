@@ -514,11 +514,12 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
         }
         threshold = analysis.get('threshold_value')
         cqj_val = py_cqj(well_for_cqj, threshold) if threshold is not None else None
-        calcj_val = py_calcj(well_for_cqj, threshold) if threshold is not None else None
+        # CalcJ calculation moved to frontend - backend should not calculate it
+        # calcj_val = py_calcj(well_for_cqj, threshold) if threshold is not None else None
 
         # Store as dict for per-channel support (even if only one channel)
         analysis['cqj'] = {channel_name: cqj_val}
-        analysis['calcj'] = {channel_name: calcj_val}
+        # analysis['calcj'] = {channel_name: calcj_val}
 
         from app import get_pathogen_target
         test_code = data.get('test_code', None)

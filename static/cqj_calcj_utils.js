@@ -487,12 +487,19 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
 }
 
 /**
- * Calculate CalcJ value (basic method - requires actual H/L controls from run)
+ * Calculate CalcJ value (basic method - amplitude/threshold)
  */
 function calculateCalcj(well, threshold) {
-    // This basic method cannot work without actual control data from the run
-    // Always return null to force use of control-based method
-    return null;
+    // Implement your CalcJ formula here if needed
+    // Example: return amplitude / threshold
+    if (!well || !well.amplitude) return null;
+    
+    const amplitude = parseFloat(well.amplitude);
+    const thresh = parseFloat(threshold);
+    
+    if (isNaN(amplitude) || isNaN(thresh) || thresh <= 0) return null;
+    
+    return amplitude / thresh;
 }
 
 // Export functions
@@ -503,6 +510,59 @@ window.calculateCalcjWithControls = calculateCalcjWithControls;
 
 // Alias for manual threshold changes (same function)
 window.recalculateCQJValuesForManualThreshold = recalculateCQJValues;
+
+// Simple debug function to check control detection
+window.debugControlDetection = function() {
+    if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
+        console.log('DEBUG: No analysis results available');
+        return;
+    }
+    
+    const results = window.currentAnalysisResults.individual_results;
+    const testCode = getCurrentTestCode();
+    console.log(`DEBUG: Test code = ${testCode}`);
+    
+    const controlCqj = { H: [], M: [], L: [], NTC: [] };
+    
+    Object.keys(results).forEach(wellKey => {
+        const wellData = results[wellKey];
+        if (!wellKey || !wellData) return;
+        
+        const sampleName = wellData.sample_name || '';
+        let controlType = null;
+        
+        // Use the same control detection logic as calculateCalcjWithControls
+        if (sampleName.includes('NTC')) {
+            controlType = 'NTC';
+        } else {
+            const controlMatch = sampleName.match(/([HML])-?\d*$/);
+            if (controlMatch) {
+                controlType = controlMatch[1];
+            }
+        }
+        
+        if (controlType && wellData.cqj_value !== null && wellData.cqj_value !== undefined) {
+            controlCqj[controlType].push({
+                wellKey: wellKey,
+                sampleName: sampleName,
+                cqj: wellData.cqj_value
+            });
+        }
+    });
+    
+    console.log('DEBUG: Found controls:', controlCqj);
+    
+    // Check if we have H and L controls
+    const hasH = controlCqj.H.length > 0;
+    const hasL = controlCqj.L.length > 0;
+    console.log(`DEBUG: Has H controls: ${hasH}, Has L controls: ${hasL}`);
+    
+    if (hasH && hasL) {
+        const hAvg = controlCqj.H.reduce((sum, c) => sum + c.cqj, 0) / controlCqj.H.length;
+        const lAvg = controlCqj.L.reduce((sum, c) => sum + c.cqj, 0) / controlCqj.L.length;
+        console.log(`DEBUG: H avg CQJ: ${hAvg.toFixed(2)}, L avg CQJ: ${lAvg.toFixed(2)}`);
+    }
+};
 
 // Debug function to test curve quality assessment
 window.debugCurveQuality = function(wellKey) {
@@ -623,8 +683,8 @@ window.testActualSessionCalcJ = function() {
     const results = window.currentAnalysisResults.individual_results;
     const testCode = getCurrentTestCode();
     
-    // Find H/L controls quickly
-    const controlCqj = { H: [], L: [], M: [] };
+    // Find H/L controls quickly - include NTC to avoid errors
+    const controlCqj = { H: [], L: [], M: [], NTC: [] };
     
     Object.keys(results).forEach(wellKey => {
         const wellData = results[wellKey];
@@ -649,7 +709,7 @@ window.testActualSessionCalcJ = function() {
             }
         }
         
-        if (controlType) {
+        if (controlType && controlCqj[controlType]) {
             controlCqj[controlType].push({ wellKey, cqj: wellData.cqj_value, sample: wellData.sample_name });
         }
     });
@@ -1084,6 +1144,67 @@ window.debugInfinityWells = function() {
         lAvg, 
         testCode,
         controlRange: lAvg - hAvg
+    };
+};
+
+// Debug function to check table cell content
+window.debugTableCalcJ = function() {
+    // Try multiple possible table selectors
+    let table = document.querySelector('#results-table');
+    if (!table) table = document.querySelector('.results-table');
+    if (!table) table = document.querySelector('table');
+    if (!table) {
+        // List all tables on the page for debugging
+        const allTables = document.querySelectorAll('table');
+        return { 
+            error: 'Results table not found', 
+            tablesFound: allTables.length,
+            tableIds: Array.from(allTables).map(t => t.id || 'no-id'),
+            tableClasses: Array.from(allTables).map(t => t.className || 'no-class')
+        };
+    }
+    
+    const rows = table.querySelectorAll('tbody tr');
+    if (rows.length === 0) {
+        // Try all rows if tbody doesn't exist
+        const allRows = table.querySelectorAll('tr');
+        return { error: 'No tbody rows found', totalRows: allRows.length };
+    }
+    
+    const calcjData = [];
+    const allRowData = []; // Capture all rows for debugging
+    
+    rows.forEach((row, index) => {
+        const cells = row.querySelectorAll('td');
+        if (cells.length > 0) {
+            const wellId = cells[0]?.textContent?.trim();
+            const rowData = {
+                rowIndex: index,
+                wellId,
+                cellCount: cells.length,
+                allCells: Array.from(cells).map(cell => cell.textContent?.trim())
+            };
+            allRowData.push(rowData);
+            
+            if (wellId && wellId.includes('D10_FAM')) {
+                // Try different column positions for CalcJ
+                calcjData.push({
+                    wellId,
+                    displayedCalcJ_col5: cells[5]?.textContent?.trim(),
+                    displayedCalcJ_col4: cells[4]?.textContent?.trim(),
+                    displayedCalcJ_col6: cells[6]?.textContent?.trim(),
+                    cellHTML_col5: cells[5]?.innerHTML,
+                    allCellsText: Array.from(cells).map(cell => cell.textContent?.trim())
+                });
+            }
+        }
+    });
+    
+    return { 
+        calcjData,
+        allRowData: allRowData.slice(0, 5), // Show first 5 rows for debugging
+        totalRows: rows.length,
+        tableFound: true
     };
 };
 

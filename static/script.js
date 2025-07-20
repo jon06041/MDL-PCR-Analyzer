@@ -5410,12 +5410,18 @@ function populateResultsTable(individualResults) {
             // console.log(`🔍 CQJ-DISPLAY - ${result.well}: No valid CQJ for ${result.fluorophore} (value: ${result.cqj?.[result.fluorophore]})`);
         }
 
+        // Check both nested object structure and direct value
         if (
             result.calcj && typeof result.calcj === 'object' && result.fluorophore &&
             result.calcj[result.fluorophore] !== undefined && result.calcj[result.fluorophore] !== null &&
             !isNaN(result.calcj[result.fluorophore])
         ) {
-            calcjDisplay = Number(result.calcj[result.fluorophore]).toExponential(2);
+            calcjDisplay = Number(result.calcj[result.fluorophore]);
+        } else if (
+            result.calcj_value !== undefined && result.calcj_value !== null &&
+            !isNaN(result.calcj_value) && result.calcj_value !== 'N/A'
+        ) {
+            calcjDisplay = Number(result.calcj_value);
         }
 
         // If backend value is missing, show 'N/A' (no formatting)
@@ -5427,10 +5433,9 @@ function populateResultsTable(individualResults) {
         if (calcjDisplay !== null && calcjDisplay !== undefined && !isNaN(Number(calcjDisplay))) {
             // Only show scientific notation if value is > 0
             if (Number(calcjDisplay) > 0) {
-                // Convert 10^x to scientific notation (e.g., 10^4.25 = 1.78e+4)
+                // Format as scientific notation for readability
                 const calcjValue = Number(calcjDisplay);
-                const scientificValue = Math.pow(10, calcjValue);
-                calcjCell = scientificValue.toExponential(2); // e.g., "1.78e+4"
+                calcjCell = calcjValue.toExponential(2); // e.g., "1.17e+7"
             } else {
                 calcjCell = 'N/A';
             }
