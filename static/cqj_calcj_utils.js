@@ -1009,7 +1009,7 @@ window.debugCQJCalculation = function(wellKey) {
     };
 };
 
-// Debug function for CalcJ calculation issues
+// Debug function for CalcJ calculation issues - MULTICHANNEL AWARE
 window.debugCalcJMath = function(wellKey) {
     if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
         return { error: 'No analysis results available' };
@@ -1023,17 +1023,26 @@ window.debugCalcJMath = function(wellKey) {
         return { error: `Well ${wellKey} not found` };
     }
     
-    // Get concentration controls
-    const concValues = CONCENTRATION_CONTROLS[testCode]?.FAM;
-    if (!concValues) {
-        return { error: 'No concentration controls' };
+    // CRITICAL: Get the actual channel for this well (not hardcoded FAM)
+    const channel = well.fluorophore;
+    if (!channel) {
+        return { error: 'Well has no fluorophore channel' };
     }
     
-    // Find H/L controls
+    // Get concentration controls for THIS SPECIFIC CHANNEL
+    const concValues = CONCENTRATION_CONTROLS[testCode]?.[channel];
+    if (!concValues) {
+        return { error: `No concentration controls for ${testCode}/${channel}` };
+    }
+    
+    // Find H/L controls FOR THIS SPECIFIC CHANNEL ONLY
     const controlCqj = { H: [], L: [] };
     Object.keys(results).forEach(key => {
         const wellData = results[key];
         if (!wellData.cqj_value) return;
+        
+        // CRITICAL: Only include controls from the same channel
+        if (wellData.fluorophore !== channel) return;
         
         const sampleName = wellData.sample_name || '';
         const controlMatch = sampleName.match(/([HML])-?\d*$/);
@@ -1046,7 +1055,7 @@ window.debugCalcJMath = function(wellKey) {
     });
     
     if (controlCqj.H.length === 0 || controlCqj.L.length === 0) {
-        return { error: 'Missing H or L controls' };
+        return { error: `Missing H or L controls for channel ${channel}` };
     }
     
     const hCqj = controlCqj.H.reduce((sum, val) => sum + val, 0) / controlCqj.H.length;
@@ -1063,6 +1072,7 @@ window.debugCalcJMath = function(wellKey) {
     const result = {
         wellKey,
         sample: well.sample_name,
+        channel: channel,  // Show which channel we're analyzing
         currentCqj: well.cqj_value,
         currentCalcj: well.calcj_value,
         hCqj, lCqj, hConc, lConc,
@@ -1084,6 +1094,130 @@ window.debugCalcJMath = function(wellKey) {
     }
     
     return result;
+};
+
+// Debug function for multichannel CalcJ analysis - shows all channels at once
+window.debugMultichannelCalcJ = function() {
+    if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
+        return { error: 'No analysis results available' };
+    }
+    
+    const results = window.currentAnalysisResults.individual_results;
+    const testCode = getCurrentTestCode();
+    
+    // Find all channels in this run
+    const channels = new Set();
+    Object.values(results).forEach(well => {
+        if (well.fluorophore) {
+            channels.add(well.fluorophore);
+        }
+    });
+    
+    const channelAnalysis = {};
+    
+    Array.from(channels).forEach(channel => {
+        // Get concentration controls for this channel
+        const concValues = CONCENTRATION_CONTROLS[testCode]?.[channel];
+        if (!concValues) {
+            channelAnalysis[channel] = { error: `No concentration controls for ${testCode}/${channel}` };
+            return;
+        }
+        
+        // Find H/L controls for this specific channel
+        const controlCqj = { H: [], L: [], M: [] };
+        const sampleWells = [];
+        
+        Object.keys(results).forEach(wellKey => {
+            const wellData = results[wellKey];
+            
+            // Only process wells from this channel
+            if (wellData.fluorophore !== channel) return;
+            
+            const sampleName = wellData.sample_name || '';
+            let controlType = null;
+            
+            // Use same control detection logic as main calculation
+            if (sampleName.includes('NTC')) {
+                controlType = 'NTC';
+            } else {
+                const controlMatch = sampleName.match(/([HML])-?\d*$/);
+                if (controlMatch) {
+                    controlType = controlMatch[1];
+                } else if (sampleName.includes('H-') || /[A-Z]\d+H-/.test(sampleName)) {
+                    controlType = 'H';
+                } else if (sampleName.includes('M-') || /[A-Z]\d+M-/.test(sampleName)) {
+                    controlType = 'M';
+                } else if (sampleName.includes('L-') || /[A-Z]\d+L-/.test(sampleName)) {
+                    controlType = 'L';
+                }
+            }
+            
+            if (controlType && controlType !== 'NTC' && wellData.cqj_value !== null && wellData.cqj_value !== undefined) {
+                controlCqj[controlType].push({
+                    wellKey: wellKey,
+                    sampleName: sampleName,
+                    cqj: wellData.cqj_value,
+                    calcj: wellData.calcj_value
+                });
+            } else if (controlType !== 'NTC' && !controlType) {
+                // This is a sample well
+                sampleWells.push({
+                    wellKey: wellKey,
+                    sampleName: sampleName,
+                    cqj: wellData.cqj_value,
+                    calcj: wellData.calcj_value
+                });
+            }
+        });
+        
+        // Analyze this channel
+        const hCount = controlCqj.H.length;
+        const lCount = controlCqj.L.length;
+        const mCount = controlCqj.M.length;
+        
+        if (hCount === 0 || lCount === 0) {
+            channelAnalysis[channel] = {
+                error: `Missing required controls (H: ${hCount}, L: ${lCount})`,
+                controlCqj,
+                sampleCount: sampleWells.length
+            };
+        } else {
+            // Calculate averages and standard curve
+            const hCqj = controlCqj.H.reduce((sum, c) => sum + c.cqj, 0) / controlCqj.H.length;
+            const lCqj = controlCqj.L.reduce((sum, c) => sum + c.cqj, 0) / controlCqj.L.length;
+            const mCqj = mCount > 0 ? controlCqj.M.reduce((sum, c) => sum + c.cqj, 0) / controlCqj.M.length : null;
+            
+            const hConc = concValues.H;
+            const lConc = concValues.L;
+            
+            const logH = Math.log10(hConc);
+            const logL = Math.log10(lConc);
+            const slope = (logH - logL) / (hCqj - lCqj);
+            const intercept = logH - slope * hCqj;
+            
+            // Find problematic samples
+            const problematicSamples = sampleWells.filter(sample => {
+                return sample.calcj === null || sample.calcj === 'N/A' || 
+                       !isFinite(sample.calcj) || sample.calcj > 1e10;
+            });
+            
+            channelAnalysis[channel] = {
+                success: true,
+                controls: { hCount, lCount, mCount, hCqj, lCqj, mCqj },
+                standardCurve: { slope, intercept, valid: slope < 0 },
+                concentrations: { hConc, lConc },
+                sampleCount: sampleWells.length,
+                problematicSamples: problematicSamples.length,
+                sampleDetails: problematicSamples.slice(0, 3) // Show first 3 problematic samples
+            };
+        }
+    });
+    
+    return {
+        testCode,
+        channels: Array.from(channels),
+        channelAnalysis
+    };
 };
 
 // Debug function to test infinity issues
