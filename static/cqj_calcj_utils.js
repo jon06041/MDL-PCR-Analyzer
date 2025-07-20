@@ -294,9 +294,14 @@ function recalculateCQJValues() {
             well['CalcJ'] = calcjResult.calcj_value; // Also update display field
             well.calcj_method = calcjResult.method;
             
-            // FORCE CLEAR any old calcj object values to prevent caching issues
-            if (well.calcj && channel) {
-                well.calcj[channel] = calcjResult.calcj_value;
+            // Update CalcJ object structure (CRITICAL FIX: Initialize if doesn't exist)
+            if (!well.calcj) well.calcj = {};
+            well.calcj[channel] = calcjResult.calcj_value;
+            
+            // Debug logging for multichannel CalcJ fix
+            if (wellKey.includes('_')) { // Likely multichannel well
+                // console.log(`🔧 CALCJ-FIX - ${wellKey}: CalcJ object created/updated for ${channel}:`, well.calcj[channel]);
+                // console.log(`🔧 CALCJ-FIX - ${wellKey}: CQJ=${newCqj}, CalcJ=${calcjResult.calcj_value}, Method=${calcjResult.method}`);
             }
             
             if (oldCalcj !== calcjResult.calcj_value) {

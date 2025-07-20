@@ -1,15 +1,16 @@
-# [2025-07-20] CRITICAL: CalcJ Display Fixed for Single-Channel + Multichannel Preparation
+# MDL-PCR-Analyzer: Comprehensive Agent Instructions & Progress Log
 
-## 🎯 MAJOR SUCCESS: Single-Channel CalcJ Fixed
+## 🎯 **CURRENT STATUS: Multichannel CalcJ Debugging & Backend Cleanup** (July 20, 2025)
 
-### ✅ CalcJ Display Issue RESOLVED:
-**Problem**: CalcJ values calculated correctly but displayed as "N/A" in results table.
-**Root Cause**: `populateResultsTable` function only checked nested object, not direct `calcj_value` field.
-**Solution**: Updated table display logic to check both data structures.
+### ✅ **RECENT MAJOR SUCCESS: Single-Channel CalcJ Display Fixed**
 
-### 🔧 Key Fix Applied in `script.js`:
+**Problem**: CalcJ values were being calculated correctly but displayed as "N/A" in results table for positive wells in single-channel runs.
+
+**Root Cause**: The `populateResultsTable` function was only checking for CalcJ in nested object structure (`result.calcj[result.fluorophore]`) but not the direct `calcj_value` field where values were actually stored.
+
+**Solution Applied in `script.js` (lines 5414-5425)**:
 ```javascript
-// Lines 5414-5425: Enhanced CalcJ display logic
+// Enhanced CalcJ display logic - checks both data structures
 if (result.calcj && typeof result.calcj === 'object' && result.fluorophore &&
     result.calcj[result.fluorophore] !== undefined && !isNaN(result.calcj[result.fluorophore])) {
     calcjDisplay = Number(result.calcj[result.fluorophore]);
@@ -18,31 +19,209 @@ if (result.calcj && typeof result.calcj === 'object' && result.fluorophore &&
 }
 ```
 
-### 🚀 Debug Functions Enhanced for Multichannel:
-- `window.debugMultichannelCalcJ()` - NEW: Analyzes all channels simultaneously
-- `window.debugCalcJMath(wellKey)` - ENHANCED: Now channel-aware (no hardcoded FAM)
+**Key Insights from Debugging**:
+- ✅ Control detection and standard curve math were already correct
+- ✅ CalcJ calculation logic (`calculateCalcjWithControls`) was working properly  
+- ✅ Data structure updates (`recalculateCQJValues`) were successful
+- ✅ Issue was isolated to the display layer only
+- ✅ Fix applies to both single-channel and multichannel results (same table function)
+
+### � **ACTIVE WORK: Multichannel CalcJ Debugging**
+
+**Current Investigation**: Ensuring CalcJ calculation logic and rules are consistent between single-channel and multichannel runs.
+
+**Key Issue Discovered**: After threshold adjustment, CalcJ appears for multichannel but shows:
+- Concentrations on negative wells (should be N/A)
+- Faulty values on control wells
+- Inconsistent behavior compared to single-channel runs
+
+**Debug Functions Enhanced for Multichannel**:
+- `window.debugMultichannelCalcJ()` - Analyzes all channels simultaneously
+- `window.debugCalcJMath(wellKey)` - Now channel-aware (no longer hardcoded to FAM)
 - `window.debugTableCalcJ()` - Inspects actual table cell content
+- `window.testMultichannelCalcJ()` - Quick test for multichannel CalcJ setup
+- `window.debugMultichannelCalcJFixed()` - Verifies CalcJ structure post-fix
 
-### 🔍 MULTICHANNEL CALCJ INSIGHTS:
-
-#### Key Requirements for Multichannel Success:
+**Multichannel Requirements for Success**:
 1. **Channel Isolation**: Each fluorophore must use only its own H/L controls
-2. **Dynamic Pathogen Mapping**: Remove hardcoded mappings from app.py, use pathogen_library.js
+2. **Dynamic Pathogen Mapping**: Remove hardcoded mappings from app.py, use pathogen_library.js  
 3. **Control Detection Per Channel**: Ensure controls are matched to correct fluorophore
-4. **Session Loading**: Verify CalcJ displays correctly for saved multichannel sessions
+4. **Calculation Consistency**: Same CalcJ rules applied for single and multichannel
+5. **Session Loading**: Verify CalcJ displays correctly for saved multichannel sessions
 
-#### Current Status:
+**Current Status**:
 - ✅ Single-channel CalcJ: **WORKING**
 - ✅ Calculation logic: **CORRECT** (`calculateCalcjWithControls`)
 - ✅ Data updates: **CORRECT** (`recalculateCQJValues`)
 - ✅ Display logic: **FIXED** (`populateResultsTable`)
-- 🔄 Multichannel CalcJ: **TESTING NEEDED**
+- � Multichannel CalcJ: **DEBUGGING CALCULATION CONSISTENCY**
 
-#### Next Steps for Multichannel:
-1. Test with `debugMultichannelCalcJ()` to verify channel isolation
-2. Remove hardcoded pathogen mappings from app.py
-3. Test session loading for multichannel CalcJ values
-4. Verify each channel uses only its own controls
+### 🎯 **NEXT STEPS**:
+1. Use debug functions to compare single vs multichannel CalcJ behavior
+2. Identify why multichannel logic diverges from single-channel after threshold changes
+3. Ensure negative wells return N/A instead of concentration values
+4. Remove hardcoded pathogen mappings from app.py (use pathogen_library.js as single source)
+5. Test session loading for multichannel CalcJ persistence
+
+---
+
+## 📋 **COMPREHENSIVE PROJECT STATUS & TECHNICAL CONTEXT** (July 20, 2025)
+
+### 🎯 **Recent Major Accomplishments**
+
+#### ✅ **Single-Channel CalcJ Display Fix** (July 20, 2025)
+- **Fixed**: CalcJ values now display correctly for positive wells in single-channel runs
+- **Root Cause**: Display layer issue in `populateResultsTable` function
+- **Impact**: Both single-channel and multichannel benefit from same table function fix
+
+#### ✅ **Multichannel Debug Framework** (July 19-20, 2025)  
+- **Added**: Comprehensive debug functions for multichannel CalcJ analysis
+- **Enhanced**: Existing debug functions to be channel-aware
+- **Available**: `debugMultichannelCalcJ()`, `debugCalcJMath()`, `testMultichannelCalcJ()`
+
+#### ✅ **Chart Recreation Problem** (July 19, 2025)
+- **Identified**: Multiple chart creation sources causing threshold flashing
+- **Fixed**: Commented out duplicate `showAllCurves` calls and chart creation logic
+- **Result**: Stable threshold display and chart performance
+
+#### ✅ **Anti-Throttling Measures** (July 19, 2025)
+- **Added**: Tab visibility monitoring and keep-alive mechanism
+- **Enhanced**: Health checks and pre-flight validation  
+- **Result**: Better handling of browser tab background throttling
+
+#### ✅ **Data Contamination Prevention** (July 3, 2025)
+- **Implemented**: `emergencyReset()` function and protected state management
+- **Added**: Safe functions like `setAnalysisResults()` and `displayHistorySession()`
+- **Status**: **MERGED TO MAIN** - Production ready
+
+### 🔧 **Current Technical Stack & Architecture**
+
+#### **Frontend JavaScript**:
+- `static/cqj_calcj_utils.js` - CQJ/CalcJ calculation logic, debug functions
+- `static/script.js` - Main application logic, table display, multichannel processing
+- `static/threshold_strategies.js` - Threshold calculation strategies
+- `static/pathogen_library.js` - Pathogen configuration and mapping
+
+#### **Backend Python**:
+- `app.py` - Flask backend, session management, **contains hardcoded pathogen mappings to remove**
+- `qpcr_analyzer.py` - Core qPCR analysis logic
+- `cqj_calcj_utils.py` - Backend calculation utilities (parallel to JS)
+- `sql_integration.py` - Database operations
+
+#### **Key Data Structures**:
+- `window.currentAnalysisResults.individual_results` - Main results container
+- `window.stableChannelThresholds` - Per-channel threshold storage
+- `CONCENTRATION_CONTROLS` - Standard curve control definitions
+- Multichannel wells: `result.cqj[result.fluorophore]` and `result.calcj[result.fluorophore]`
+
+### 🚧 **Active Issues & Current Work**
+
+#### **Primary Issue: Multichannel CalcJ Calculation Consistency**
+- **Status**: CalcJ appears after threshold adjustment but shows inconsistent behavior
+- **Symptoms**: Concentrations on negatives, faulty control values, different from single-channel
+- **Investigation**: Using debug functions to compare calculation flows
+
+#### **Secondary Issue: Backend Code Cleanup**
+- **Target**: Remove hardcoded pathogen mappings from `app.py`
+- **Goal**: Use `pathogen_library.js` as single source of truth
+- **Impact**: Eliminates code duplication and improves maintainability
+
+#### **Platform Limitation: Threshold Dragging**
+- **Issue**: Threshold dragging only works on Windows browsers
+- **Status**: Known limitation - mouse event handling differs across platforms
+- **Alternatives**: Input fields with +/- buttons, keyboard shortcuts
+
+### 🔍 **Recent Debugging History & Lessons Learned**
+
+#### **Failed Fix Attempt** (July 20, 2025):
+- **Attempt**: Added control/negative detection logic to `calculateCalcjWithControls`
+- **Result**: Broke single-channel CalcJ for all wells
+- **Action**: Reverted immediately to restore single-channel functionality
+- **Lesson**: Do not break working single-channel logic when fixing multichannel
+
+#### **Critical Debug Process**:
+- **Tool**: `window.testMultichannelCalcJ()` revealed `{error: "no_results"}`
+- **Finding**: `window.currentAnalysisResults` was empty during test
+- **Insight**: Need active analysis data to debug CalcJ calculation
+
+#### **Chart Recreation Resolution**:
+- **Problem**: Multiple chart creation sources causing threshold line flashing
+- **Solution**: Systematic commenting of duplicate chart creation calls
+- **Key**: Only `createUnifiedChart()` should create charts
+- **Verification**: Chart behavior now stable across all scenarios
+
+### 🛠️ **Development Workflow & Best Practices**
+
+#### **Debug Function Usage**:
+- Always test with active analysis data (`window.currentAnalysisResults`)
+- Use `debugMultichannelCalcJ()` for channel-by-channel analysis
+- Use `debugCalcJMath(wellKey)` for specific well calculation tracing
+- Use `testMultichannelCalcJ()` for quick multichannel setup verification
+
+#### **Code Safety Guidelines**:
+- Never break working single-channel logic when fixing multichannel
+- Always test changes with both single and multichannel data
+- Use debug logging extensively during development
+- Commit working states before attempting experimental fixes
+
+#### **Git Branch Strategy**:
+- **Current Branch**: `fix-fluorophore-coordination-and-multichannel`
+- **Target**: Merge to `main` after multichannel CalcJ issues resolved
+- **Policy**: Commit frequently with descriptive messages
+
+### 📚 **Key Technical References**
+
+#### **CalcJ Calculation Pipeline**:
+1. **CQJ Calculation**: `calculateThresholdCrossing()` - finds cycle where RFU crosses threshold
+2. **Control Detection**: Find H/L controls using regex patterns in sample names
+3. **Standard Curve**: Log-linear interpolation between H and L control concentrations
+4. **CalcJ Result**: `calculateCalcjWithControls()` returns concentration value
+
+#### **Multichannel Data Flow**:
+1. **Analysis**: `displayMultiFluorophoreResults()` processes multiple channels
+2. **Storage**: Results stored per channel in nested objects
+3. **Display**: `populateResultsTable()` renders all channels in unified table
+4. **Calculation**: Each channel uses its own thresholds and controls
+
+#### **Control Detection Patterns**:
+- Sample names ending with H/M/L followed by optional digits: `([HML])-?\d*$`
+- Alternative patterns: `H-`, `M-`, `L-` anywhere in sample name
+- NTC detection: Sample names containing "NTC"
+
+---
+
+## 🚨 **CRITICAL: Agent Onboarding & Safety Guidelines**
+
+### ✅ **MANDATORY STEPS FOR NEW AGENTS**
+
+#### **STEP 1: Understand Data Protection**
+- ❌ **NEVER** use direct assignment: `currentAnalysisResults = data`
+- ✅ **ALWAYS** use: `setAnalysisResults(data, source)` for safe state setting
+- ✅ **ALWAYS** use: `displayHistorySession(data)` for viewing history
+- ✅ **ALWAYS** call: `emergencyReset()` before loading any history session
+
+#### **STEP 2: Verify Current Status**
+- **Primary Focus**: Multichannel CalcJ calculation consistency
+- **Secondary Focus**: Backend pathogen mapping cleanup
+- **Known Working**: Single-channel CalcJ display and calculation
+- **Known Issues**: Platform-specific threshold dragging limitations
+
+#### **STEP 3: Test Emergency Functions**
+- Test `emergencyReset()` button in app header before making changes
+- Verify debug functions work with active analysis data
+- Confirm single-channel CalcJ still works after any changes
+
+#### **STEP 4: Follow Documentation Standards**
+- ✅ Update THIS file with all findings and changes
+- ❌ NEVER create standalone documentation files
+- ✅ Include date stamps for all major changes
+- ✅ Archive old docs in `/docs/` folder only
+
+### 🔄 **AUTO-STARTUP CONFIGURED**:
+- ✅ VS Code terminal auto-runs onboarding on new sessions
+- ✅ Manual trigger: `./trigger_agent_onboarding.sh`
+- ✅ VS Code task: Ctrl+Shift+P → "Run Task" → "🚨 Run Agent Onboarding"
+- ✅ Window title reminder: Shows "READ Agent_instructions.md FIRST"
 
 ---
 
@@ -976,3 +1155,10 @@ if (strategy === 'log_fixed' || strategy === 'linear_fixed') {
 - Updated all usages in `script.js` to use `window.calculateThresholdCrossing`.
 - Added comments referencing new location for clarity.
 - Next: User to test and report any issues before proceeding to next function.
+
+---
+
+**Last Updated**: July 20, 2025  
+**Primary Focus**: Multichannel CalcJ debugging and backend cleanup  
+**Status**: Active development on calculation consistency issues  
+**Next Agent Priority**: Complete multichannel CalcJ investigation and backend refactoring
