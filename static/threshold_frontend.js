@@ -409,32 +409,7 @@ function updateAllChannelThresholds() {
                     backgroundColor: 'rgba(255,255,255,0.8)',
                     color: getChannelColor(channel),
                     font: { size: 10, weight: 'bold' }
-                },
-                draggable: true,
-dragAxis: 'y',
-enter: function(ctx) {
-    ctx.chart.canvas.style.cursor = 'ns-resize';
-},
-leave: function(ctx) {
-    ctx.chart.canvas.style.cursor = '';
-},
-onDragEnd: function(e) {
-    // e: { chart, annotation, event }
-    const newY = e?.annotation?.yMin;
-    if (typeof newY === 'number' && !isNaN(newY)) {
-        setChannelThreshold(channel, currentScale, newY);
-        // Optionally update UI input if present
-        const thresholdInput = document.getElementById('thresholdInput');
-        if (thresholdInput && (window.currentFluorophore === channel || window.currentFluorophore === 'all')) {
-            thresholdInput.value = newY.toFixed(2);
-        }
-        // Persist and update chart
-        window.updateAllChannelThresholds();
-        // console.log(`🔍 DRAG-END - Threshold for ${channel} (${currentScale}) set to ${newY}`);
-    } else {
-        // console.warn('🔍 DRAG-END - Invalid newY value:', newY);
-    }
-}
+                }
             };
             // console.log(`✅ THRESHOLD-ANNOTATION - Added threshold annotation for ${channel}: ${threshold.toFixed(2)}`);
         } else {
@@ -449,170 +424,307 @@ onDragEnd: function(e) {
 }
    
 
-// Custom dragging handler for threshold annotations (since plugin dragging is broken)
+// Custom threshold dragging implementation that works across all platforms
 function addThresholdDragging() {
-    if (!window.amplificationChart) {
-        // console.log('🔍 THRESHOLD-DRAG - No chart available, skipping dragging setup');
+    if (!window.amplificationChart || !window.amplificationChart.canvas) {
+        // console.warn('🔍 THRESHOLD-DRAG - No chart canvas available');
         return;
     }
     
-    const chart = window.amplificationChart;
-    const canvas = chart.canvas;
+    const canvas = window.amplificationChart.canvas;
+    let isDragging = false;
+    let draggedThreshold = null;
+    let startY = 0;
+    let startThresholdValue = 0;
     
-    // Add null check for canvas
-    if (!canvas) {
-        // console.log('🔍 THRESHOLD-DRAG - No canvas available, skipping dragging setup');
-        return;
-    }
+    // Make canvas focusable for better event handling
+    canvas.setAttribute('tabindex', '0');
+    canvas.style.touchAction = 'none'; // Prevent touch scrolling
     
-    let draggedChannel = null;
-    let dragStartY = null;
-    
-    // Define event handlers as named functions
-    function handleMouseDown(e) {
-        const pos = getMousePos(e);
-        const threshold = findNearestThreshold(pos);
+    // Helper function to get threshold from canvas position
+    function getThresholdAtPosition(x, y) {
+        const canvasRect = canvas.getBoundingClientRect();
+        const chartArea = window.amplificationChart.chartArea;
         
+        // Check if click is within chart area
+        if (x < chartArea.left || x > chartArea.right || y < chartArea.top || y > chartArea.bottom) {
+            return null;
+        }
+        
+        // Get Y value from chart scale
+        const yScale = window.amplificationChart.scales.y;
+        const clickedValue = yScale.getValueForPixel(y);
+        
+        // Find closest threshold line within 10 pixels
+        const annotations = window.amplificationChart.options.plugins.annotation.annotations;
+        let closestThreshold = null;
+        let minDistance = 10; // 10 pixel tolerance
+        
+        Object.keys(annotations).forEach(key => {
+            if (key.startsWith('threshold_')) {
+                const annotation = annotations[key];
+                const thresholdY = yScale.getPixelForValue(annotation.yMin);
+                const distance = Math.abs(y - thresholdY);
+                
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    closestThreshold = {
+                        key: key,
+                        channel: key.replace('threshold_', ''),
+                        value: annotation.yMin,
+                        pixelY: thresholdY
+                    };
+                }
+            }
+        });
+        
+        return closestThreshold;
+    }
+    
+    // Mouse event handlers
+    function onMouseDown(event) {
+        // Only handle left mouse button
+        if (event.button !== 0) return;
+        
+        const rect = canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+        
+        const threshold = getThresholdAtPosition(x, y);
         if (threshold) {
-            draggedChannel = threshold.channel;
-            dragStartY = pos.y;
+            isDragging = true;
+            draggedThreshold = threshold;
+            startY = y;
+            startThresholdValue = threshold.value;
             canvas.style.cursor = 'ns-resize';
-            e.preventDefault();
+            
+            // Prevent text selection and other defaults
+            event.preventDefault();
+            event.stopPropagation();
+            
+            // console.log(`🔍 DRAG-START - Started dragging ${threshold.channel} threshold`);
         }
     }
     
-    function handleMouseMove(e) {
-        const pos = getMousePos(e);
+    function onMouseMove(event) {
+        const rect = canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
         
-        if (draggedChannel) {
-            // Dragging
-            const yScale = chart.scales.y;
-            const newValue = yScale.getValueForPixel(pos.y);
+        if (isDragging && draggedThreshold) {
+            // Calculate new threshold value
+            const yScale = window.amplificationChart.scales.y;
+            const newValue = yScale.getValueForPixel(y);
             
-            if (newValue > 0) {
+            // Validate new value (must be positive and reasonable)
+            if (newValue > 0 && newValue < yScale.max * 2) {
                 // Update the annotation
-                const annotations = chart.options.plugins.annotation.annotations;
-                const annotationKey = `threshold_${draggedChannel}`;
-                
-                if (annotations[annotationKey]) {
-                    annotations[annotationKey].yMin = newValue;
-                    annotations[annotationKey].yMax = newValue;
-                    annotations[annotationKey].label.content = `${draggedChannel}: ${newValue.toFixed(2)}`;
+                const annotations = window.amplificationChart.options.plugins.annotation.annotations;
+                const annotation = annotations[draggedThreshold.key];
+                if (annotation) {
+                    annotation.yMin = newValue;
+                    annotation.yMax = newValue;
+                    annotation.label.content = `${draggedThreshold.channel}: ${newValue.toFixed(2)}`;
+                    
+                    // Update chart without animation for smooth dragging
+                    window.amplificationChart.update('none');
                 }
+            }
+            
+            event.preventDefault();
+            event.stopPropagation();
+        } else {
+            // Check if cursor is over a threshold line
+            const threshold = getThresholdAtPosition(x, y);
+            canvas.style.cursor = threshold ? 'ns-resize' : '';
+        }
+    }
+    
+    function onMouseUp(event) {
+        if (isDragging && draggedThreshold) {
+            const rect = canvas.getBoundingClientRect();
+            const y = event.clientY - rect.top;
+            const yScale = window.amplificationChart.scales.y;
+            const newValue = yScale.getValueForPixel(y);
+            
+            // Validate and save the new threshold
+            if (newValue > 0 && newValue < yScale.max * 2) {
+                // Store the new threshold value
+                setChannelThreshold(draggedThreshold.channel, window.currentScaleMode, newValue);
                 
-                // Update stored threshold
-                const currentScale = window.currentScaleMode || 'linear';
-                setChannelThreshold(draggedChannel, currentScale, newValue);
-                
-                // Update input if this is the current channel
+                // Update threshold input if it's for the current channel
                 const thresholdInput = document.getElementById('thresholdInput');
-                if (thresholdInput && (window.currentFluorophore === draggedChannel || window.currentFluorophore === 'all')) {
+                if (thresholdInput && 
+                    (window.currentFluorophore === draggedThreshold.channel || window.currentFluorophore === 'all')) {
                     thresholdInput.value = newValue.toFixed(2);
                 }
                 
-                // Update chart without animation
-                chart.update('none');
-            }
-        } else {
-            // Hovering
-            const threshold = findNearestThreshold(pos);
-            canvas.style.cursor = threshold ? 'ns-resize' : 'default';
-        }
-    }
-    
-    function handleMouseUp(e) {
-        if (draggedChannel) {
-            // console.log(`🔍 DRAG-END - ${draggedChannel} threshold updated`);
-            
-            // Mark as manual threshold
-            if (!window.manualThresholds) window.manualThresholds = {};
-            if (!window.manualThresholds[draggedChannel]) window.manualThresholds[draggedChannel] = {};
-            window.manualThresholds[draggedChannel][window.currentScaleMode] = true;
-            
-            // Update strategy to manual
-            const strategySelect = document.getElementById('thresholdStrategySelect');
-            if (strategySelect && strategySelect.value !== 'manual') {
-                strategySelect.value = 'manual';
-                window.selectedThresholdStrategy = 'manual';
-            }
-            
-            // Send to backend
-            if (window.sendManualThresholdToBackend) {
-                const currentScale = window.currentScaleMode || 'linear';
-                const annotations = chart.options.plugins.annotation.annotations;
-                const annotationKey = `threshold_${draggedChannel}`;
-                const newValue = annotations[annotationKey]?.yMin;
-                if (newValue) {
-                    window.sendManualThresholdToBackend(draggedChannel, currentScale, newValue);
+                // Mark as manual threshold
+                if (!window.manualThresholds) window.manualThresholds = {};
+                if (!window.manualThresholds[draggedThreshold.channel]) {
+                    window.manualThresholds[draggedThreshold.channel] = {};
                 }
-            }
-            
-            draggedChannel = null;
-            dragStartY = null;
-        }
-    }
-    
-    function handleMouseLeave(e) {
-        draggedChannel = null;
-        dragStartY = null;
-        canvas.style.cursor = 'default';
-    }
-    
-    // Helper functions
-    function getMousePos(e) {
-        const rect = canvas.getBoundingClientRect();
-        return {
-            x: (e.clientX - rect.left) * (canvas.width / rect.width),
-            y: (e.clientY - rect.top) * (canvas.height / rect.height)
-        };
-    }
-    
-    function isNearThreshold(mouseY, thresholdY, tolerance = 10) {
-        return Math.abs(mouseY - thresholdY) < tolerance;
-    }
-    
-    function findNearestThreshold(mousePos) {
-        const yScale = chart.scales.y;
-        const annotations = chart.options.plugins.annotation.annotations;
-        
-        for (const [key, annotation] of Object.entries(annotations)) {
-            if (key.startsWith('threshold_')) {
-                const channel = key.replace('threshold_', '');
-                const thresholdValue = annotation.yMin;
-                const thresholdY = yScale.getPixelForValue(thresholdValue);
+                window.manualThresholds[draggedThreshold.channel][window.currentScaleMode] = true;
                 
-                if (isNearThreshold(mousePos.y, thresholdY)) {
-                    return { channel, value: thresholdValue, pixelY: thresholdY };
+                // console.log(`🔍 DRAG-END - Set ${draggedThreshold.channel} threshold to ${newValue.toFixed(2)}`);
+                
+                // Trigger any backend updates if needed
+                if (typeof sendManualThresholdToBackend === 'function') {
+                    console.log(`🔍 DRAG-DEBUG - About to call sendManualThresholdToBackend with:`, {
+                        channel: draggedThreshold.channel,
+                        scale: window.currentScaleMode,
+                        value: newValue
+                    });
+                    sendManualThresholdToBackend(draggedThreshold.channel, window.currentScaleMode, newValue);
+                }
+                
+                // Force CQJ recalculation after manual threshold change
+                if (typeof window.forceCQJCalcJRecalculation === 'function') {
+                    console.log(`🔍 DRAG-DEBUG - Forcing CQJ recalculation after manual threshold change`);
+                    window.forceCQJCalcJRecalculation();
+                } else {
+                    console.warn(`🔍 DRAG-DEBUG - forceCQJCalcJRecalculation function not available`);
                 }
             }
+            
+            // Reset dragging state
+            isDragging = false;
+            draggedThreshold = null;
+            canvas.style.cursor = '';
+            
+            event.preventDefault();
+            event.stopPropagation();
         }
-        return null;
     }
     
-    // Remove any existing listeners to prevent duplicates
-    if (canvas._thresholdDragHandlers) {
-        canvas.removeEventListener('mousedown', canvas._thresholdDragHandlers.mousedown);
-        canvas.removeEventListener('mousemove', canvas._thresholdDragHandlers.mousemove);
-        canvas.removeEventListener('mouseup', canvas._thresholdDragHandlers.mouseup);
-        canvas.removeEventListener('mouseleave', canvas._thresholdDragHandlers.mouseleave);
-        delete canvas._thresholdDragHandlers;
+    // Touch event handlers for mobile/tablet support
+    function onTouchStart(event) {
+        if (event.touches.length === 1) {
+            const touch = event.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            const x = touch.clientX - rect.left;
+            const y = touch.clientY - rect.top;
+            
+            const threshold = getThresholdAtPosition(x, y);
+            if (threshold) {
+                isDragging = true;
+                draggedThreshold = threshold;
+                startY = y;
+                startThresholdValue = threshold.value;
+                
+                event.preventDefault();
+                event.stopPropagation();
+            }
+        }
     }
     
-    // Store handlers for future cleanup
-    canvas._thresholdDragHandlers = {
-        mousedown: handleMouseDown,
-        mousemove: handleMouseMove,
-        mouseup: handleMouseUp,
-        mouseleave: handleMouseLeave
-    };
+    function onTouchMove(event) {
+        if (isDragging && draggedThreshold && event.touches.length === 1) {
+            const touch = event.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            const y = touch.clientY - rect.top;
+            
+            // Calculate new threshold value
+            const yScale = window.amplificationChart.scales.y;
+            const newValue = yScale.getValueForPixel(y);
+            
+            // Validate new value
+            if (newValue > 0 && newValue < yScale.max * 2) {
+                // Update the annotation
+                const annotations = window.amplificationChart.options.plugins.annotation.annotations;
+                const annotation = annotations[draggedThreshold.key];
+                if (annotation) {
+                    annotation.yMin = newValue;
+                    annotation.yMax = newValue;
+                    annotation.label.content = `${draggedThreshold.channel}: ${newValue.toFixed(2)}`;
+                    
+                    // Update chart without animation
+                    window.amplificationChart.update('none');
+                }
+            }
+            
+            event.preventDefault();
+            event.stopPropagation();
+        }
+    }
+    
+    function onTouchEnd(event) {
+        if (isDragging && draggedThreshold) {
+            // Use last known position to finalize threshold
+            const annotations = window.amplificationChart.options.plugins.annotation.annotations;
+            const annotation = annotations[draggedThreshold.key];
+            if (annotation) {
+                const newValue = annotation.yMin;
+                
+                // Store the new threshold value
+                setChannelThreshold(draggedThreshold.channel, window.currentScaleMode, newValue);
+                
+                // Update threshold input if it's for the current channel
+                const thresholdInput = document.getElementById('thresholdInput');
+                if (thresholdInput && 
+                    (window.currentFluorophore === draggedThreshold.channel || window.currentFluorophore === 'all')) {
+                    thresholdInput.value = newValue.toFixed(2);
+                }
+                
+                // Mark as manual threshold
+                if (!window.manualThresholds) window.manualThresholds = {};
+                if (!window.manualThresholds[draggedThreshold.channel]) {
+                    window.manualThresholds[draggedThreshold.channel] = {};
+                }
+                window.manualThresholds[draggedThreshold.channel][window.currentScaleMode] = true;
+                
+                // console.log(`🔍 TOUCH-END - Set ${draggedThreshold.channel} threshold to ${newValue.toFixed(2)}`);
+                
+                // Force CQJ recalculation after manual threshold change
+                if (typeof window.forceCQJCalcJRecalculation === 'function') {
+                    console.log(`🔍 TOUCH-DEBUG - Forcing CQJ recalculation after manual threshold change`);
+                    window.forceCQJCalcJRecalculation();
+                }
+            }
+            
+            // Reset dragging state
+            isDragging = false;
+            draggedThreshold = null;
+            
+            event.preventDefault();
+            event.stopPropagation();
+        }
+    }
+    
+    // Remove any existing event listeners to prevent duplicates
+    canvas.removeEventListener('mousedown', canvas._thresholdMouseDown);
+    canvas.removeEventListener('mousemove', canvas._thresholdMouseMove);
+    canvas.removeEventListener('mouseup', canvas._thresholdMouseUp);
+    canvas.removeEventListener('touchstart', canvas._thresholdTouchStart);
+    canvas.removeEventListener('touchmove', canvas._thresholdTouchMove);
+    canvas.removeEventListener('touchend', canvas._thresholdTouchEnd);
+    
+    // Store handlers on canvas for later removal
+    canvas._thresholdMouseDown = onMouseDown;
+    canvas._thresholdMouseMove = onMouseMove;
+    canvas._thresholdMouseUp = onMouseUp;
+    canvas._thresholdTouchStart = onTouchStart;
+    canvas._thresholdTouchMove = onTouchMove;
+    canvas._thresholdTouchEnd = onTouchEnd;
     
     // Add event listeners
-    canvas.addEventListener('mousedown', handleMouseDown);
-    canvas.addEventListener('mousemove', handleMouseMove);
-    canvas.addEventListener('mouseup', handleMouseUp);
-    canvas.addEventListener('mouseleave', handleMouseLeave);
+    canvas.addEventListener('mousedown', onMouseDown, { passive: false });
+    canvas.addEventListener('mousemove', onMouseMove, { passive: false });
+    canvas.addEventListener('mouseup', onMouseUp, { passive: false });
+    canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+    canvas.addEventListener('touchend', onTouchEnd, { passive: false });
     
-    // console.log('✅ Custom threshold dragging enabled');
+    // Also add mouse leave to clean up cursor
+    canvas.addEventListener('mouseleave', () => {
+        canvas.style.cursor = '';
+        if (isDragging) {
+            isDragging = false;
+            draggedThreshold = null;
+        }
+    });
+    
+    // console.log('🔍 THRESHOLD-DRAG - Custom dragging system initialized');
 }
 // Expose globally
 window.addThresholdDragging = addThresholdDragging;
@@ -678,30 +790,8 @@ function updateSingleChannelThreshold(fluorophore) {
                 backgroundColor: 'rgba(255,255,255,0.8)',
                 color: getChannelColor(fluorophore),
                 font: { size: 10, weight: 'bold' }
-            },
-draggable: true,
-dragAxis: 'y',
-enter: function(ctx) {
-    ctx.chart.canvas.style.cursor = 'ns-resize';
-},
-leave: function(ctx) {
-    ctx.chart.canvas.style.cursor = '';
-},
-        onDragEnd: function(e) {
-            const newY = e?.annotation?.yMin;
-            if (typeof newY === 'number' && !isNaN(newY)) {
-                setChannelThreshold(fluorophore, window.currentScaleMode, newY);
-                const thresholdInput = document.getElementById('thresholdInput');
-                if (thresholdInput && (window.currentFluorophore === fluorophore || window.currentFluorophore === 'all')) {
-                    thresholdInput.value = newY.toFixed(2);
-                }
-                updateSingleChannelThreshold(fluorophore);
-                // console.log(`🔍 DRAG-END - Threshold for ${fluorophore} (${window.currentScaleMode}) set to ${newY}`);
-            } else {
-                // console.warn('🔍 DRAG-END - Invalid newY value:', newY);
             }
-        }
-    };
+        };
     // console.log(`🔍 THRESHOLD - Added threshold for ${fluorophore}: ${threshold.toFixed(2)}`);
 } else {
     // console.warn(`🔍 THRESHOLD - Invalid threshold for ${fluorophore}: ${threshold}`);
@@ -1605,6 +1695,17 @@ function handleManualThresholdChange() {
 
 async function sendManualThresholdToBackend(channel, scale, value) {
     try {
+        console.log(`🔍 BACKEND-DEBUG - Function called with parameters:`, {
+            channel: channel,
+            scale: scale,
+            value: value,
+            types: {
+                channel: typeof channel,
+                scale: typeof scale,
+                value: typeof value
+            }
+        });
+        
         const payload = {
             action: 'manual_threshold',
             channel: channel,
@@ -1614,7 +1715,7 @@ async function sendManualThresholdToBackend(channel, scale, value) {
             session_id: window.currentSessionId || null
         };
         
-        // console.log(`🔍 BACKEND-THRESHOLD - Sending manual threshold:`, payload);
+        console.log(`🔍 BACKEND-THRESHOLD - Sending manual threshold payload:`, payload);
         
         const response = await fetch('/threshold/manual', {
             method: 'POST',
