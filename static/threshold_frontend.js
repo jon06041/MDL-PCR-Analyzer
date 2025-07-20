@@ -570,20 +570,12 @@ function addThresholdDragging() {
                 
                 // Trigger any backend updates if needed
                 if (typeof sendManualThresholdToBackend === 'function') {
-                    console.log(`🔍 DRAG-DEBUG - About to call sendManualThresholdToBackend with:`, {
-                        channel: draggedThreshold.channel,
-                        scale: window.currentScaleMode,
-                        value: newValue
-                    });
                     sendManualThresholdToBackend(draggedThreshold.channel, window.currentScaleMode, newValue);
                 }
                 
                 // Force CQJ recalculation after manual threshold change
                 if (typeof window.forceCQJCalcJRecalculation === 'function') {
-                    console.log(`🔍 DRAG-DEBUG - Forcing CQJ recalculation after manual threshold change`);
                     window.forceCQJCalcJRecalculation();
-                } else {
-                    console.warn(`🔍 DRAG-DEBUG - forceCQJCalcJRecalculation function not available`);
                 }
             }
             
@@ -677,7 +669,6 @@ function addThresholdDragging() {
                 
                 // Force CQJ recalculation after manual threshold change
                 if (typeof window.forceCQJCalcJRecalculation === 'function') {
-                    console.log(`🔍 TOUCH-DEBUG - Forcing CQJ recalculation after manual threshold change`);
                     window.forceCQJCalcJRecalculation();
                 }
             }
