@@ -556,18 +556,25 @@ window.calculateCalcjWithControls = calculateCalcjWithControls;
 window.recalculateCQJValuesForManualThreshold = recalculateCQJValues;
 
 // Force immediate CQJ and CalcJ recalculation for threshold changes (no delays)
-window.forceCQJCalcJRecalculation = function() {
-    console.log('🔄 FORCE-CQJ-CALCJ - Forcing immediate CQJ and CalcJ recalculation...');
+window.forceCQJCalcJRecalculation = function(options = {}) {
+    // Default options: update everything unless specifically disabled
+    const {
+        updateWellSelector = true,
+        updateResultsTable = true,
+        recalculateCQJ = true
+    } = options;
+    
+    console.log('🔄 FORCE-CQJ-CALCJ - Forcing immediate CQJ and CalcJ recalculation...', options);
     
     try {
         // Recalculate CQJ/CalcJ immediately
-        if (typeof recalculateCQJValues === 'function') {
+        if (recalculateCQJ && typeof recalculateCQJValues === 'function') {
             recalculateCQJValues();
             console.log('✅ FORCE-CQJ-CALCJ - CQJ/CalcJ recalculation completed');
         }
         
         // Update results table immediately
-        if (typeof populateResultsTable === 'function' && window.currentAnalysisResults) {
+        if (updateResultsTable && typeof populateResultsTable === 'function' && window.currentAnalysisResults) {
             const resultsToDisplay = getCombinedIndividualResults();
             if (resultsToDisplay) {
                 populateResultsTable(resultsToDisplay);
@@ -575,8 +582,8 @@ window.forceCQJCalcJRecalculation = function() {
             }
         }
         
-        // Update well selector immediately
-        if (typeof populateWellSelector === 'function' && window.currentAnalysisResults) {
+        // Update well selector immediately (only when specifically requested)
+        if (updateWellSelector && typeof populateWellSelector === 'function' && window.currentAnalysisResults) {
             const wellsForSelector = getCombinedIndividualResults();
             if (wellsForSelector) {
                 populateWellSelector(wellsForSelector);

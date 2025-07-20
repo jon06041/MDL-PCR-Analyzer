@@ -1350,7 +1350,7 @@ async function handleThresholdStrategyChange() {
         
         // Force immediate CQJ and CalcJ recalculation for threshold strategy changes
         if (window.forceCQJCalcJRecalculation) {
-            window.forceCQJCalcJRecalculation();
+            window.forceCQJCalcJRecalculation({ updateWellSelector: false });
         } else if (window.recalculateCQJValues) {
             // Fallback to standard recalculation
             window.recalculateCQJValues();
@@ -1972,7 +1972,7 @@ async function sendThresholdStrategyToBackend(strategy) {
                         
                         // Force immediate CQJ and CalcJ recalculation (no delays for browser tab focus issues)
                         if (window.forceCQJCalcJRecalculation) {
-                            window.forceCQJCalcJRecalculation();
+                            window.forceCQJCalcJRecalculation({ updateWellSelector: false });
                         } else if (window.recalculateCQJValues) {
                             // Fallback to standard recalculation
                             window.recalculateCQJValues();
@@ -1994,7 +1994,7 @@ async function sendThresholdStrategyToBackend(strategy) {
                         updateThresholdInput();
                         // Force immediate CQJ and CalcJ recalculation even if threshold calc failed
                         if (window.forceCQJCalcJRecalculation) {
-                            window.forceCQJCalcJRecalculation();
+                            window.forceCQJCalcJRecalculation({ updateWellSelector: false });
                         }
                     }
                 } catch (calcError) {
@@ -2004,7 +2004,7 @@ async function sendThresholdStrategyToBackend(strategy) {
                     updateThresholdInput();
                     // Force immediate CQJ and CalcJ recalculation even on calc error
                     if (window.forceCQJCalcJRecalculation) {
-                        window.forceCQJCalcJRecalculation();
+                        window.forceCQJCalcJRecalculation({ updateWellSelector: false });
                     }
                 }
             } else {
@@ -2013,7 +2013,7 @@ async function sendThresholdStrategyToBackend(strategy) {
                 if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
                 updateThresholdInput();
                 if (window.forceCQJCalcJRecalculation) {
-                    window.forceCQJCalcJRecalculation();
+                    window.forceCQJCalcJRecalculation({ updateWellSelector: false });
                 }
             }
         }
@@ -8649,12 +8649,18 @@ transformedResults.individual_results[wellKey] = {
             currentChartMode: 'all'
         });
         
+        // Store the preselected fluorophore for addFluorophoreFilter to use
+        window.preselectedFluorophore = autoSelectedFluorophore;
+        
         // Trigger control validation directly for individual sessions
         // This ensures control grids appear for both single-channel and multi-channel tests
         // console.log('🔍 UNIVERSAL DISPLAY - Triggering control validation for individual session');
         
         // Display using multi-fluorophore layout (handles both single and multi-channel)
         displayMultiFluorophoreResults(transformedResults);
+        
+        // Clear the preselected fluorophore after use
+        delete window.preselectedFluorophore;
         
         // Control grids are now handled within displayMultiFluorophoreResults
         // console.log('🔍 HISTORY LOAD - Control grids handled by displayMultiFluorophoreResults');
@@ -8663,9 +8669,6 @@ transformedResults.individual_results[wellKey] = {
         setTimeout(() => {
             enhanceControlValidationWithPathogenInfo();
         }, 300);
-        
-        // Reset filter state when loading from history
-        resetFilterState();
         
         // Clear any existing pathogen breakdown from other experiments
         clearPathogenBreakdownDisplay();
@@ -8690,7 +8693,6 @@ transformedResults.individual_results[wellKey] = {
                     
                     // Initialize chart for single-channel session
                     if (sessionFluorophores.length === 1) {
-
                         updateChartDisplayMode('all');
                     }
                 }, 200);
@@ -8849,9 +8851,11 @@ function addFluorophoreFilter(individualResults) {
     // console.log('Fluorophores found in results:', fluorophores);
     // console.log('Number of fluorophores:', fluorophores.length);
     
-    // Auto-select single channel if only one fluorophore
-    let autoSelectedFluorophore = 'all';
-    if (fluorophores.length === 1) {
+    // Check if there's a preselected fluorophore from the calling context
+    let autoSelectedFluorophore = window.preselectedFluorophore || 'all';
+    
+    // Auto-select single channel if only one fluorophore and no preselection
+    if (!window.preselectedFluorophore && fluorophores.length === 1) {
         autoSelectedFluorophore = fluorophores[0];
         // console.log('🔍 SINGLE-CHANNEL - Auto-selecting:', autoSelectedFluorophore);
         
@@ -8888,6 +8892,9 @@ function addFluorophoreFilter(individualResults) {
     
     const filterSelect = document.getElementById('fluorophoreFilter');
     if (filterSelect) {
+        // Preserve current selection before rebuilding
+        const currentValue = filterSelect.value || 'all';
+        
         // Clear existing options except "All"
         filterSelect.innerHTML = '<option value="all">All Fluorophores</option>';
         
@@ -8908,6 +8915,10 @@ function addFluorophoreFilter(individualResults) {
             option.textContent = pathogenTarget !== 'Unknown' ? `${fluorophore} (${pathogenTarget})` : fluorophore;
             filterSelect.appendChild(option);
         });
+        
+        // If the previous selection is still valid, use it; otherwise use auto-selected
+        const finalSelection = fluorophores.includes(currentValue) ? currentValue : autoSelectedFluorophore;
+        autoSelectedFluorophore = finalSelection;
         
         // Add event listener using state management
         filterSelect.removeEventListener('change', filterTableByFluorophore);
@@ -8963,9 +8974,17 @@ function addFluorophoreFilter(individualResults) {
             }
         });
         
-        // Set initial value for single channel or default to 'all'
+        // Set the preserved/auto-selected value
         filterSelect.value = autoSelectedFluorophore;
-        // console.log('🔍 FLUOROPHORE-FILTER - Set initial value to:', autoSelectedFluorophore);
+        
+        // Ensure the value is actually set (sometimes DOM updates can be delayed)
+        setTimeout(() => {
+            if (filterSelect.value !== autoSelectedFluorophore) {
+                filterSelect.value = autoSelectedFluorophore;
+            }
+        }, 50);
+        
+        // console.log('🔍 FLUOROPHORE-FILTER - Set preserved/auto-selected value to:', autoSelectedFluorophore);
     }
 }
 

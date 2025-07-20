@@ -575,7 +575,7 @@ function addThresholdDragging() {
                 
                 // Force CQJ recalculation after manual threshold change
                 if (typeof window.forceCQJCalcJRecalculation === 'function') {
-                    window.forceCQJCalcJRecalculation();
+                    window.forceCQJCalcJRecalculation({ updateWellSelector: false });
                 }
             }
             
@@ -669,7 +669,7 @@ function addThresholdDragging() {
                 
                 // Force CQJ recalculation after manual threshold change
                 if (typeof window.forceCQJCalcJRecalculation === 'function') {
-                    window.forceCQJCalcJRecalculation();
+                    window.forceCQJCalcJRecalculation({ updateWellSelector: false });
                 }
             }
             
@@ -2068,7 +2068,7 @@ function applyThresholdStrategy(strategy) {
     
     // Force immediate CQJ and CalcJ recalculation for manual threshold changes
     if (window.forceCQJCalcJRecalculation) {
-        window.forceCQJCalcJRecalculation();
+        window.forceCQJCalcJRecalculation({ updateWellSelector: false });
     } else if (window.recalculateCQJValues) {
         // Fallback to standard recalculation
         window.recalculateCQJValues();
