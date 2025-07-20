@@ -271,10 +271,22 @@ function updateAppState(newState) {
 function syncUIElements() {
     const state = window.appState;
     
-    // Sync fluorophore selector
+    // Sync fluorophore selector - but don't override during manual threshold operations
     const fluorophoreSelect = document.getElementById('fluorophoreSelect');
     if (fluorophoreSelect && fluorophoreSelect.value !== state.currentFluorophore) {
-        fluorophoreSelect.value = state.currentFluorophore;
+        // Check if we're in the middle of a manual threshold operation
+        const isManualThresholdActive = window.selectedThresholdStrategy === 'manual' && 
+                                       fluorophoreSelect.value !== 'all' && 
+                                       fluorophoreSelect.value !== '';
+        
+        // Only sync if we're not actively using a specific channel for manual thresholds
+        if (!isManualThresholdActive) {
+            fluorophoreSelect.value = state.currentFluorophore;
+        } else {
+            // Update the state to match the current selector to prevent future conflicts
+            state.currentFluorophore = fluorophoreSelect.value;
+            window.currentFluorophore = fluorophoreSelect.value;
+        }
     }
     
     // Sync well selector
