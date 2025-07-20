@@ -1950,8 +1950,11 @@ async function sendThresholdStrategyToBackend(strategy) {
                         if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
                         updateThresholdInput();
                         
-                        // Recalculate CQJ values with new thresholds if needed
-                        if (window.recalculateCQJValues) {
+                        // Force immediate CQJ and CalcJ recalculation (no delays for browser tab focus issues)
+                        if (window.forceCQJCalcJRecalculation) {
+                            window.forceCQJCalcJRecalculation();
+                        } else if (window.recalculateCQJValues) {
+                            // Fallback to standard recalculation
                             window.recalculateCQJValues();
                         }
                         
@@ -1967,20 +1970,31 @@ async function sendThresholdStrategyToBackend(strategy) {
                     } else {
                         // console.log(`🔍 THRESHOLD-CALC - No thresholds calculated (no channels found or calculation failed)`);
                         // Still update UI to reflect strategy change
-                        window.updateAllChannelThresholds();
+                        if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
                         updateThresholdInput();
+                        // Force immediate CQJ and CalcJ recalculation even if threshold calc failed
+                        if (window.forceCQJCalcJRecalculation) {
+                            window.forceCQJCalcJRecalculation();
+                        }
                     }
                 } catch (calcError) {
                     // console.error(`❌ THRESHOLD-CALC - Local calculation failed:`, calcError);
                     // Still update UI to reflect strategy change
-                    window.updateAllChannelThresholds();
+                    if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
                     updateThresholdInput();
+                    // Force immediate CQJ and CalcJ recalculation even on calc error
+                    if (window.forceCQJCalcJRecalculation) {
+                        window.forceCQJCalcJRecalculation();
+                    }
                 }
             } else {
                 // console.warn(`⚠️ THRESHOLD-CALC - calculateThresholdForStrategy function not available`);
-                // Fallback: just update UI
+                // Fallback: just update UI and force CQJ and CalcJ recalculation
                 if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
                 updateThresholdInput();
+                if (window.forceCQJCalcJRecalculation) {
+                    window.forceCQJCalcJRecalculation();
+                }
             }
         }
         

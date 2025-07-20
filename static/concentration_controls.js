@@ -80,6 +80,12 @@ const CONCENTRATION_CONTROLS = {
     Mgen: {
         FAM: { H: 1e7, M: 1e5, L: 1e3 }
     },
+    BVPanelPCR3: {
+        FAM: { H: 1e7, M: 1e5, L: 1e3 },
+        HEX: { H: 1e7, M: 1e5, L: 1e3 },
+        'Texas Red': { H: 1e7, M: 1e5, L: 1e3 },
+        Cy5: { H: 1e7, M: 1e5, L: 1e3 }
+    },
     // ...repeat for all other tests/channels as needed...
 };
 

@@ -2,6 +2,43 @@
 
 ## 🎯 **CURRENT STATUS: Multichannel CalcJ Debugging & Backend Cleanup** (July 20, 2025)
 
+### � **CRITICAL PRODUCTION ISSUE DISCOVERED: Backend Processing Requires VS Code Focus** (July 20, 2025)
+
+**Problem**: CQJ/CalcJ recalculation after threshold changes requires **switching focus to VS Code application** (where Python server runs) to trigger backend processing.
+
+**Reproduction Steps**:
+1. Load multichannel qPCR data in **browser**
+2. Change threshold strategy or manual threshold values in **browser**
+3. **Stay focused on browser**: CalcJ values do NOT update
+4. **Switch to VS Code application**: Wait ~3 seconds, see "recalculating" message in terminal
+5. **Switch back to browser**: CalcJ values are now updated
+
+**Production Impact**: 🚨 **CRITICAL** - This is NOT a browser tab issue, but an **application focus dependency**:
+- In production, users won't have access to VS Code to trigger processing
+- Backend calculations appear to depend on VS Code application being focused
+- Suggests fundamental architecture issue with frontend-backend communication
+- Could make the application completely unusable in production environments
+
+**Root Cause**: Unknown - possible issues:
+- Backend event loop or polling mechanism tied to VS Code focus events
+- Development server behavior that won't exist in production
+- Async communication timing problem between browser and Python server
+- OS-level application focus affecting Python process scheduling
+
+**Immediate Fix Applied**: 
+- Added `forceCQJCalcJRecalculation()` function in `cqj_calcj_utils.js`
+- Updated threshold handlers in `script.js` to use immediate, synchronous execution
+- **NOTE**: This may only address symptoms, not root cause
+
+**URGENT INVESTIGATION NEEDED**: 
+- Test in production-like environment without VS Code
+- Identify why backend processing depends on VS Code application focus
+- Verify if this affects other real-time calculations
+
+**Status**: ⚠️ Fix implemented, **CRITICAL production testing required**.
+
+---
+
 ### ✅ **RECENT MAJOR SUCCESS: Single-Channel CalcJ Display Fixed**
 
 **Problem**: CalcJ values were being calculated correctly but displayed as "N/A" in results table for positive wells in single-channel runs.

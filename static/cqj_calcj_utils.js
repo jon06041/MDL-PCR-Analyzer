@@ -2,6 +2,44 @@
 // This file should ONLY contain calculation logic, not UI controls
 
 /**
+ * Helper function to get combined individual results from both single-channel and multichannel data
+ * @returns {Object|null} Combined individual_results object or null if no data
+ */
+function getCombinedIndividualResults() {
+    if (!window.currentAnalysisResults) {
+        return null;
+    }
+    
+    // Handle single-channel data (object format with individual_results property)
+    if (window.currentAnalysisResults.individual_results) {
+        return window.currentAnalysisResults.individual_results;
+    }
+    
+    // Handle multichannel data (array format)
+    if (Array.isArray(window.currentAnalysisResults)) {
+        const combinedResults = {};
+        window.currentAnalysisResults.forEach(channelData => {
+            if (channelData.individual_results) {
+                Object.assign(combinedResults, channelData.individual_results);
+            }
+        });
+        return Object.keys(combinedResults).length > 0 ? combinedResults : null;
+    }
+    
+    // Handle direct individual results object (multichannel loaded sessions)
+    // Check if it's a flat object with well keys like "A10_Cy5_Cy5"
+    if (typeof window.currentAnalysisResults === 'object' && !Array.isArray(window.currentAnalysisResults)) {
+        const keys = Object.keys(window.currentAnalysisResults);
+        if (keys.length > 0 && keys[0].includes('_')) {
+            // This looks like a direct individual results object
+            return window.currentAnalysisResults;
+        }
+    }
+    
+    return null;
+}
+
+/**
  * Calculate CQJ (threshold crossing) for a well with enhanced curve quality checks
  * Skips first 5 cycles, checks curve quality, direction, and uses LAST positive crossing
  * @param {Array<number>} rfuArray - Array of RFU values
@@ -189,8 +227,9 @@ function getCurrentTestCode() {
     }
     
     // Method 5: Last resort - look at actual well data for clues
-    if (window.currentAnalysisResults?.individual_results) {
-        const wells = Object.values(window.currentAnalysisResults.individual_results);
+    const results = getCombinedIndividualResults();
+    if (results) {
+        const wells = Object.values(results);
         if (wells.length > 0) {
             const sampleNames = wells.map(w => w.sample_name || '').filter(s => s);
             
@@ -215,11 +254,11 @@ function getCurrentTestCode() {
  * Recalculate CQJ values for all wells using current thresholds
  */
 function recalculateCQJValues() {
-    if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
+    const results = getCombinedIndividualResults();
+    if (!results) {
         return;
     }
     
-    const results = window.currentAnalysisResults.individual_results;
     const currentScale = window.currentScaleMode || 'linear';
     let updateCount = 0;
     let calcjUpdateCount = 0;
@@ -516,14 +555,50 @@ window.calculateCalcjWithControls = calculateCalcjWithControls;
 // Alias for manual threshold changes (same function)
 window.recalculateCQJValuesForManualThreshold = recalculateCQJValues;
 
+// Force immediate CQJ and CalcJ recalculation for threshold changes (no delays)
+window.forceCQJCalcJRecalculation = function() {
+    console.log('🔄 FORCE-CQJ-CALCJ - Forcing immediate CQJ and CalcJ recalculation...');
+    
+    try {
+        // Recalculate CQJ/CalcJ immediately
+        if (typeof recalculateCQJValues === 'function') {
+            recalculateCQJValues();
+            console.log('✅ FORCE-CQJ-CALCJ - CQJ/CalcJ recalculation completed');
+        }
+        
+        // Update results table immediately
+        if (typeof populateResultsTable === 'function' && window.currentAnalysisResults) {
+            const resultsToDisplay = getCombinedIndividualResults();
+            if (resultsToDisplay) {
+                populateResultsTable(resultsToDisplay);
+                console.log('✅ FORCE-CQJ-CALCJ - Results table updated');
+            }
+        }
+        
+        // Update well selector immediately
+        if (typeof populateWellSelector === 'function' && window.currentAnalysisResults) {
+            const wellsForSelector = getCombinedIndividualResults();
+            if (wellsForSelector) {
+                populateWellSelector(wellsForSelector);
+                console.log('✅ FORCE-CQJ-CALCJ - Well selector updated');
+            }
+        }
+        
+        return true;
+    } catch (error) {
+        console.error('❌ FORCE-CQJ-CALCJ - Error during forced recalculation:', error);
+        return false;
+    }
+};
+
 // Simple debug function to check control detection
 window.debugControlDetection = function() {
-    if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
+    const results = getCombinedIndividualResults();
+    if (!results) {
         console.log('DEBUG: No analysis results available');
         return;
     }
     
-    const results = window.currentAnalysisResults.individual_results;
     const testCode = getCurrentTestCode();
     console.log(`DEBUG: Test code = ${testCode}`);
     
@@ -571,11 +646,12 @@ window.debugControlDetection = function() {
 
 // Debug function to test curve quality assessment
 window.debugCurveQuality = function(wellKey) {
-    if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
+    const results = getCombinedIndividualResults();
+    if (!results) {
         return { error: 'No analysis results available' };
     }
     
-    const well = window.currentAnalysisResults.individual_results[wellKey];
+    const well = results[wellKey];
     if (!well) {
         return { error: `Well ${wellKey} not found` };
     }
@@ -760,11 +836,11 @@ window.testActualSessionCalcJ = function() {
 
 // Quick debug function to see what wells we have
 window.debugWellNames = function() {
-    if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
+    const results = getCombinedIndividualResults();
+    if (!results) {
         return { error: 'No analysis results available' };
     }
     
-    const results = window.currentAnalysisResults.individual_results;
     const wells = [];
     
     Object.keys(results).forEach(wellKey => {
@@ -787,12 +863,15 @@ window.debugAnalysisAvailability = function() {
         k.includes('analysis') || k.includes('session') || k.includes('result') || k.includes('data')
     );
     
+    const combinedResults = getCombinedIndividualResults();
+    
     return {
         currentAnalysisResults: !!window.currentAnalysisResults,
         currentSessionData: !!window.currentSessionData,
         analysisVars,
-        individualResultsCount: window.currentAnalysisResults?.individual_results ? 
-            Object.keys(window.currentAnalysisResults.individual_results).length : 0
+        isArray: Array.isArray(window.currentAnalysisResults),
+        arrayLength: Array.isArray(window.currentAnalysisResults) ? window.currentAnalysisResults.length : 'N/A',
+        individualResultsCount: combinedResults ? Object.keys(combinedResults).length : 0
     };
 };
 
@@ -1103,11 +1182,11 @@ window.debugCalcJMath = function(wellKey) {
 
 // Debug function for multichannel CalcJ analysis - shows all channels at once
 window.debugMultichannelCalcJ = function() {
-    if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
+    const results = getCombinedIndividualResults();
+    if (!results) {
         return { error: 'No analysis results available' };
     }
     
-    const results = window.currentAnalysisResults.individual_results;
     const testCode = getCurrentTestCode();
     
     // Find all channels in this run
