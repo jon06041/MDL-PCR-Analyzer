@@ -243,16 +243,12 @@ function initializeThresholdStrategyDropdown() {
 
 function handleThresholdStrategyDropdownChange(event) {
     const newStrategy = event.target.value;
-    // console.log(`🔍 STRATEGY-CHANGE - User selected new strategy: "${newStrategy}"`);
     
     // Update global variable
     window.selectedThresholdStrategy = newStrategy;
     
     // Clear cached thresholds to force recalculation with new strategy
     window.stableChannelThresholds = {};
-    
-    // Simple notification - don't trigger cascading updates
-    // console.log(`✅ Strategy changed to: ${newStrategy}`);
 }
 
 // --- Threshold Storage Functions ---
@@ -724,8 +720,18 @@ window.addThresholdDragging = addThresholdDragging;
 const originalUpdateAllChannelThresholds = window.updateAllChannelThresholds;
 window.updateAllChannelThresholds = function() {
     originalUpdateAllChannelThresholds.apply(this, arguments);
+    
     // Add dragging after a small delay to ensure chart is updated
     setTimeout(addThresholdDragging, 100);
+    
+    // Show threshold status after updating
+    setTimeout(() => {
+        if (window.showThresholdStatus) {
+            const currentStrategy = window.getSelectedThresholdStrategy ? 
+                window.getSelectedThresholdStrategy() : 'unknown';
+            window.showThresholdStatus(currentStrategy);
+        }
+    }, 200);
 };
 
 // Also call it after updateSingleChannelThreshold

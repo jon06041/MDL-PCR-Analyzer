@@ -4895,6 +4895,13 @@ function createUnifiedChart(chartType, selectedFluorophore = 'all', filterType =
             if (window.amplificationChart && window.updateAllChannelThresholds) {
                 console.log('🔍 CHART-INIT - Applying thresholds after chart creation');
                 window.updateAllChannelThresholds();
+                
+                // Update chart after threshold calculations
+                setTimeout(() => {
+                    if (window.amplificationChart && typeof window.amplificationChart.update === 'function') {
+                        window.amplificationChart.update();
+                    }
+                }, 100);
             }
         }, 150);  // Extra delay to ensure chart is fully stable
     }, 100);

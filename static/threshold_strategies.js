@@ -63,9 +63,7 @@ const LOG_THRESHOLD_STRATEGIES = {
   "log_max_derivative": {
     name: "Log: Max First Derivative",
     calculate: ({rfu, cycles}) => {
-      console.log('🔍 DERIVATIVE-DEBUG - log_max_derivative called with rfu:', rfu ? rfu.length : 'null', 'cycles:', cycles ? cycles.length : 'null');
       if (!rfu || rfu.length < 3) {
-        console.warn('🔍 DERIVATIVE-DEBUG - log_max_derivative: Insufficient data points');
         return null;
       }
       let maxSlope = -Infinity, maxIdx = 1;
@@ -77,7 +75,6 @@ const LOG_THRESHOLD_STRATEGIES = {
         }
       }
       const result = rfu[maxIdx];
-      console.log('🔍 DERIVATIVE-DEBUG - log_max_derivative result:', result, 'at index:', maxIdx);
       return result;
     },
     description: "Threshold at the point of maximum slope (first derivative) on the log-transformed curve.",
@@ -251,15 +248,41 @@ function calculateThreshold(strategy, params, scale = 'log') {
   try {
     const result = strat.calculate(params);
     // Ensure result is always a number
-    const finalResult = typeof result === 'string' ? parseFloat(result) : result;
+    let finalResult = typeof result === 'string' ? parseFloat(result) : result;
+    
+    // CRITICAL: Validate threshold minimum values to prevent negative or invalid thresholds
+    if (isNaN(finalResult) || finalResult < 0) {
+      console.warn(`⚠️ THRESHOLD-STRATEGY - Invalid threshold calculated: ${finalResult} for ${params?.fluorophore || 'unknown'}, using fallback`);
+      // Use a reasonable fallback based on scale
+      finalResult = scale === 'linear' ? 0.1 : 1.0;
+    }
+    
+    // Additional validation: ensure minimum practical thresholds
+    const minThreshold = scale === 'linear' ? 0.01 : 0.1;
+    if (finalResult < minThreshold) {
+      console.warn(`⚠️ THRESHOLD-STRATEGY - Threshold too low: ${finalResult} for ${params?.fluorophore || 'unknown'}, using minimum: ${minThreshold}`);
+      finalResult = minThreshold;
+    }
+    
     return finalResult;
   } catch (e) {
     // Threshold strategy failed, use fallback
+    console.warn(`⚠️ THRESHOLD-STRATEGY - Strategy calculation failed for ${params?.fluorophore || 'unknown'}, using fallback`);
+    let fallbackResult;
     if (scale === 'linear') {
-      return LINEAR_THRESHOLD_STRATEGIES[Object.keys(LINEAR_THRESHOLD_STRATEGIES)[0]].calculate(params);
+      fallbackResult = LINEAR_THRESHOLD_STRATEGIES[Object.keys(LINEAR_THRESHOLD_STRATEGIES)[0]].calculate(params);
     } else {
-      return LOG_THRESHOLD_STRATEGIES[Object.keys(LOG_THRESHOLD_STRATEGIES)[0]].calculate(params);
+      fallbackResult = LOG_THRESHOLD_STRATEGIES[Object.keys(LOG_THRESHOLD_STRATEGIES)[0]].calculate(params);
     }
+    
+    // Apply same validation to fallback
+    const minThreshold = scale === 'linear' ? 0.01 : 0.1;
+    if (isNaN(fallbackResult) || fallbackResult < minThreshold) {
+      console.warn(`⚠️ THRESHOLD-STRATEGY - Fallback threshold invalid: ${fallbackResult}, using minimum: ${minThreshold}`);
+      fallbackResult = minThreshold;
+    }
+    
+    return fallbackResult;
   }
 }
 
@@ -294,11 +317,8 @@ function calculateThresholdForStrategy(strategy, analysisResults, currentScale =
         });
         
         if (channels.size === 0) {
-            console.warn(`⚠️ THRESHOLD-STRATEGY - No channels found in analysis results. Available wells:`, Object.keys(analysisResults).slice(0, 3));
             return null;
         }
-        
-        console.log(`🔍 THRESHOLD-STRATEGY - Found channels:`, Array.from(channels));
         
         // Calculate threshold for each channel
         channels.forEach(channel => {
@@ -343,15 +363,20 @@ function calculateThresholdForStrategy(strategy, analysisResults, currentScale =
                     // Calculate threshold using the threshold_strategies.js logic
                     const thresholdValue = calculateThreshold(strategy, params, currentScale);
                     
+                    // Additional validation at the application level
+                    if (isNaN(thresholdValue) || thresholdValue <= 0) {
+                        console.warn(`⚠️ THRESHOLD-STRATEGY - Invalid final threshold for ${channel}: ${thresholdValue}, skipping`);
+                        return; // Skip this channel
+                    }
+                    
                     // Store result
                     if (!updatedThresholds[channel]) {
                         updatedThresholds[channel] = {};
                     }
                     updatedThresholds[channel][currentScale] = thresholdValue;
                     
-                    console.log(`🔍 THRESHOLD-STRATEGY - ${channel} ${currentScale}: ${thresholdValue}`);
                 } catch (calcError) {
-                    console.warn(`⚠️ THRESHOLD-STRATEGY - Failed to calculate threshold for ${channel}:`, calcError);
+                    // Threshold calculation failed - skip this channel
                 }
             }
         });
