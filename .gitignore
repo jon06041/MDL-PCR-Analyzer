@@ -95,3 +95,17 @@ static/xxxscript.js
 static/xxxxscript.js
 static/xmerged_hybrid_script.js
 static/this_works_but_isnt_perfect_script.js
+
+# Additional script backups and test files
+static/*script*.js.backup_*
+static/script_before_*.js
+static/script_broken*.js
+static/script_with_*.js
+static/script_partially_*.js
+static/temp_script.js
+static/performance_optimized_script.js
+static/*_backup.js
+static/7-10-working*.js
+static/not sure what version script.js
+static/script_problematic_*.js
+static/script_working_old_backup_*.js
