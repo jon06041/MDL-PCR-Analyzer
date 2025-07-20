@@ -11,14 +11,12 @@
  */
 function calculateThresholdCrossing(rfuArray, cyclesArray, threshold) {
     if (!rfuArray || !cyclesArray || rfuArray.length !== cyclesArray.length) {
-        console.warn('❌ CQJ-CALC - Invalid input arrays');
         return null;
     }
     
     // Ensure threshold is numeric
     const numericThreshold = parseFloat(threshold);
     if (isNaN(numericThreshold) || numericThreshold <= 0) {
-        console.warn('❌ CQJ-CALC - Invalid threshold:', threshold);
         return null;
     }
     
@@ -31,7 +29,6 @@ function calculateThresholdCrossing(rfuArray, cyclesArray, threshold) {
     // Check curve quality first
     const curveQuality = assessCurveQuality(numericRfu, startCycle);
     if (!curveQuality.isGoodCurve) {
-        console.log(`❌ CQJ-CALC - Poor curve quality: ${curveQuality.reason}`);
         return null; // N/A for poor quality curves
     }
     
@@ -68,14 +65,10 @@ function calculateThresholdCrossing(rfuArray, cyclesArray, threshold) {
                 rfuBefore: prevRfu,
                 rfuAfter: currentRfu
             });
-            
-            console.log(`🔍 CQJ-CALC - ${direction} crossing at cycle ${interpolatedCq.toFixed(2)} (RFU: ${prevRfu.toFixed(2)} → ${currentRfu.toFixed(2)})`);
         }
     }
     
     if (crossings.length === 0) {
-        const maxRfu = Math.max(...numericRfu.slice(startCycle));
-        console.log(`❌ CQJ-CALC - No crossings found (threshold: ${numericThreshold.toFixed(2)}, max RFU: ${maxRfu.toFixed(2)})`);
         return null;
     }
     
@@ -83,15 +76,11 @@ function calculateThresholdCrossing(rfuArray, cyclesArray, threshold) {
     const positiveCrossings = crossings.filter(c => c.direction === 'positive');
     
     if (positiveCrossings.length === 0) {
-        console.log(`❌ CQJ-CALC - Only negative direction crossings found - marking as N/A`);
         return null; // N/A for negative-only crossings
     }
     
     // Use the LAST positive crossing to avoid flat-line confusion
     const lastPositiveCrossing = positiveCrossings[positiveCrossings.length - 1];
-    
-    console.log(`✅ CQJ-CALC - Using LAST positive crossing at ${lastPositiveCrossing.cycle.toFixed(2)} ` +
-        `(${positiveCrossings.length} positive crossings total)`);
     
     return lastPositiveCrossing.cycle;
 }
@@ -147,13 +136,86 @@ function assessCurveQuality(rfuArray, startCycle) {
 }
 
 /**
+ * Extract test code from experiment pattern (AcCtrop_2577717_CFX366496 -> Ctrop)
+ */
+function extractTestCode(experimentPattern) {
+    if (!experimentPattern) return "";
+    const testName = experimentPattern.split('_')[0];
+    return testName.startsWith('Ac') ? testName.substring(2) : testName;
+}
+
+/**
+ * Get the current test code using multiple fallback methods
+ */
+function getCurrentTestCode() {
+    // Method 1: Try stored test_code from analysis results
+    if (window.currentAnalysisResults?.test_code) {
+        return window.currentAnalysisResults.test_code;
+    }
+    
+    // Method 2: Extract from current pattern
+    if (window.getCurrentFullPattern && typeof window.getCurrentFullPattern === 'function') {
+        const pattern = window.getCurrentFullPattern();
+        if (pattern) {
+            return extractTestCode(pattern);
+        }
+    }
+    
+    // Method 3: Try to extract from session filename
+    if (window.currentSessionData?.session?.filename) {
+        const filename = window.currentSessionData.session.filename;
+        
+        // Extract from filename patterns like "AcCtrop_2577717_CFX366496"
+        const match = filename.match(/Ac([A-Za-z]+)_\d+_CFX\d+/);
+        if (match) {
+            return match[1]; // Return the part after "Ac"
+        }
+        
+        // Handle other filename patterns
+        if (filename.includes('BVAB')) return 'BVAB2';
+        if (filename.includes('BVPanelPCR3')) return 'BVPanelPCR3';
+        if (filename.includes('Cglab')) return 'Cglab';
+        if (filename.includes('Ngon')) return 'Ngon';
+        if (filename.includes('Ctrach')) return 'Ctrach';
+        if (filename.includes('Tvag')) return 'Tvag';
+        if (filename.includes('Ctrop')) return 'Ctrop';
+        if (filename.includes('Mgen')) return 'Mgen';
+        if (filename.includes('Lacto')) return 'Lacto';
+    }
+    
+    // Method 4: Try to extract from experiment pattern in window
+    if (window.currentExperimentPattern) {
+        return extractTestCode(window.currentExperimentPattern);
+    }
+    
+    // Method 5: Last resort - look at actual well data for clues
+    if (window.currentAnalysisResults?.individual_results) {
+        const wells = Object.values(window.currentAnalysisResults.individual_results);
+        if (wells.length > 0) {
+            const sampleNames = wells.map(w => w.sample_name || '').filter(s => s);
+            
+            // Look for patterns in sample names
+            for (const sampleName of sampleNames) {
+                if (sampleName.includes('Cglab')) return 'Cglab';
+                if (sampleName.includes('Ctrop')) return 'Ctrop';
+                if (sampleName.includes('Ctrach')) return 'Ctrach';
+                if (sampleName.includes('Tvag')) return 'Tvag';
+                if (sampleName.includes('Ngon')) return 'Ngon';
+                if (sampleName.includes('Lacto')) return 'Lacto';
+                if (sampleName.includes('BVAB')) return 'BVAB2';
+                // Add more as needed
+            }
+        }
+    }
+    
+    return 'Unknown';
+}
+
+/**
  * Recalculate CQJ values for all wells using current thresholds
  */
 function recalculateCQJValues() {
-    console.log('🔍 CQJ-RECALC - Starting recalculation');
-    
     if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
-        console.warn('❌ CQJ-RECALC - No analysis results available');
         return;
     }
     
@@ -162,10 +224,8 @@ function recalculateCQJValues() {
     let updateCount = 0;
     let calcjUpdateCount = 0;
     
-    // Get test code for CalcJ calculations
-    const testCode = window.currentAnalysisResults?.test_code || 
-                     window.getCurrentFullPattern?.() || 
-                     'Unknown';
+    // Get test code for CalcJ calculations using robust extraction
+    const testCode = getCurrentTestCode();
     
     // Process each well
     Object.entries(results).forEach(([wellKey, well]) => {
@@ -185,7 +245,6 @@ function recalculateCQJValues() {
             window.getChannelThreshold(channel, currentScale) : null;
         
         if (!threshold) {
-            console.warn(`❌ CQJ-RECALC - No threshold for ${channel} on ${currentScale} scale`);
             return;
         }
         
@@ -216,7 +275,6 @@ function recalculateCQJValues() {
             
             if (oldCqj !== newCqj) {
                 updateCount++;
-                console.log(`✅ CQJ-UPDATE - ${wellKey} (${channel}): ${oldCqj?.toFixed(2) || 'null'} → ${newCqj?.toFixed(2) || 'null'}`);
             }
             
             // Recalculate CalcJ (concentration) using the new CQJ
@@ -227,26 +285,37 @@ function recalculateCQJValues() {
             if (newCqj === null || newCqj === undefined) {
                 calcjResult = { calcj_value: null, method: 'no_cqj_value' };
             } else {
+                // FORCE dynamic calculation - ignore any cached values
                 calcjResult = calculateCalcjWithControls(well, threshold, results, testCode, channel);
             }
             
-            // Update CalcJ in well data
+            // Update CalcJ in well data - FORCE null if CQJ is null
             well.calcj_value = calcjResult.calcj_value;
             well['CalcJ'] = calcjResult.calcj_value; // Also update display field
             well.calcj_method = calcjResult.method;
             
+            // FORCE CLEAR any old calcj object values to prevent caching issues
+            if (well.calcj && channel) {
+                well.calcj[channel] = calcjResult.calcj_value;
+            }
+            
             if (oldCalcj !== calcjResult.calcj_value) {
                 calcjUpdateCount++;
-                const oldVal = oldCalcj === null || oldCalcj === undefined ? 'null' : 
-                              (typeof oldCalcj === 'number' ? oldCalcj.toExponential(2) : oldCalcj);
-                const newVal = calcjResult.calcj_value === null || calcjResult.calcj_value === undefined ? 'null' :
-                              (typeof calcjResult.calcj_value === 'number' ? calcjResult.calcj_value.toExponential(2) : calcjResult.calcj_value);
-                console.log(`✅ CALCJ-UPDATE - ${wellKey} (${channel}): ${oldVal} → ${newVal} (${calcjResult.method})`);
             }
         }
     });
     
-    console.log(`🔍 CQJ-RECALC - Updated ${updateCount} CQJ values and ${calcjUpdateCount} CalcJ values`);
+    // SAFETY CHECK: Ensure any well with null CQJ has null CalcJ
+    let safetyFixCount = 0;
+    Object.entries(results).forEach(([wellKey, well]) => {
+        if ((well.cqj_value === null || well.cqj_value === undefined) && 
+            (well.calcj_value !== null && well.calcj_value !== undefined)) {
+            well.calcj_value = null;
+            well['CalcJ'] = null;
+            well.calcj_method = 'safety_fix_null_cqj';
+            safetyFixCount++;
+        }
+    });
     
     // Update the results table
     if (window.populateResultsTable) {
@@ -265,17 +334,13 @@ function recalculateCQJValues() {
 function calculateCalcjWithControls(well, threshold, allWellResults, testCode, channel) {
     // Check if we have concentration controls for this test/channel
     if (typeof CONCENTRATION_CONTROLS === 'undefined') {
-        console.log('[CALCJ-DEBUG] CONCENTRATION_CONTROLS not available - CalcJ calculation impossible');
         return { calcj_value: null, method: 'no_concentration_controls' };
     }
     
     const concValues = CONCENTRATION_CONTROLS[testCode]?.[channel];
     if (!concValues) {
-        console.log(`[CALCJ-DEBUG] No concentration controls found for ${testCode}/${channel} - CalcJ calculation impossible`);
         return { calcj_value: null, method: 'no_concentration_controls' };
     }
-    
-    console.log(`[CALCJ-DEBUG] Starting control-based calculation for ${testCode}/${channel}...`);
     
     // Find H/M/L/NTC control wells and collect their CQJ values
     const controlCqj = { H: [], M: [], L: [], NTC: [] };
@@ -285,66 +350,36 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
             const wellData = allWellResults[wellKey];
             if (!wellKey || !wellData) return;
             
-            // Check if this is a control well with comprehensive pattern matching
+            // Check if this is a control well using the same logic as main script
             let controlType = null;
             const upperKey = wellKey.toUpperCase();
+            const sampleName = wellData.sample_name || '';
             
-            // NTC (No Template Control) patterns - should have NO amplification unless contaminated
-            if (wellKey.startsWith('NTC') || wellKey.includes('_NTC_') || upperKey.startsWith('NEG') ||
-                upperKey.includes('NEGATIVE') || upperKey.includes('NTC') || upperKey.includes('NO_TEMPLATE') ||
-                upperKey.includes('BLANK') || upperKey.includes('N_T_C') || wellKey.endsWith('NTC') ||
-                upperKey.includes('D01N') || upperKey.includes('D02N') || upperKey.includes('D03N')) {
+            // Use the same control detection logic from script.js
+            // Check for NTC first
+            if (sampleName.includes('NTC')) {
                 controlType = 'NTC';
             }
-            // More aggressive pattern matching for embedded control indicators
-            // HIGH control patterns (including embedded H patterns)
-            if (wellKey.startsWith('H_') || wellKey.includes('_H_') || upperKey.startsWith('HIGH') ||
-                upperKey.includes('HIGH') || upperKey.includes('H1') || upperKey.includes('H2') || 
-                upperKey.includes('H3') || upperKey.includes('POS') || upperKey.includes('POSITIVE') ||
-                upperKey.includes('1E7') || upperKey.includes('10E7') || upperKey.includes('1E+7') ||
-                /[A-Z]\d+H-/.test(wellKey) || /H-\d+/.test(wellKey) || wellKey.endsWith('H') ||
-                upperKey.includes('A05H') || upperKey.includes('A06H') || upperKey.includes('A07H')) {
-                controlType = 'H';
-            } 
-            // MEDIUM control patterns (including embedded M patterns)
-            else if (wellKey.startsWith('M_') || wellKey.includes('_M_') || upperKey.startsWith('MEDIUM') ||
-                     upperKey.includes('MEDIUM') || upperKey.includes('M1') || upperKey.includes('M2') ||
-                     upperKey.includes('M3') || upperKey.includes('MED') || 
-                     upperKey.includes('1E5') || upperKey.includes('10E5') || upperKey.includes('1E+5') ||
-                     /[A-Z]\d+M-/.test(wellKey) || /M-\d+/.test(wellKey) || wellKey.endsWith('M') ||
-                     upperKey.includes('B08M') || upperKey.includes('B09M') || upperKey.includes('B10M')) {
-                controlType = 'M';
-            }
-            // LOW control patterns (including embedded L patterns)
-            else if (wellKey.startsWith('L_') || wellKey.includes('_L_') || upperKey.startsWith('LOW') ||
-                     upperKey.includes('LOW') || upperKey.includes('L1') || upperKey.includes('L2') ||
-                     upperKey.includes('L3') || 
-                     upperKey.includes('1E3') || upperKey.includes('10E3') || upperKey.includes('1E+3') ||
-                     /[A-Z]\d+L-/.test(wellKey) || /L-\d+/.test(wellKey) || wellKey.endsWith('L') ||
-                     upperKey.includes('C11L') || upperKey.includes('C12L') || upperKey.includes('C13L')) {
-                controlType = 'L';
-            }
-            // Also check sample_name if available with same aggressive patterns
-            else if (wellData.sample_name) {
-                const upperSample = wellData.sample_name.toUpperCase();
-                if (upperSample.includes('NTC') || upperSample.includes('NEGATIVE') || upperSample.includes('NEG') ||
-                    upperSample.includes('NO_TEMPLATE') || upperSample.includes('BLANK') || upperSample.includes('N_T_C') ||
-                    upperSample.includes('D01N') || upperSample.includes('D02N') || upperSample.includes('D03N')) {
-                    controlType = 'NTC';
-                } else if (upperSample.includes('HIGH') || upperSample.includes('POS') || upperSample.includes('H1') ||
-                    upperSample.includes('1E7') || upperSample.includes('10E7') || upperSample.includes('1E+7') ||
-                    /[A-Z]\d+H-/.test(wellData.sample_name) || /H-\d+/.test(wellData.sample_name) ||
-                    upperSample.includes('A05H') || upperSample.includes('A06H') || upperSample.includes('A07H')) {
+            // Look for H, M, L patterns at the end of sample name like AcCglab362271N01H-2573780
+            else {
+                const controlMatch = sampleName.match(/([HML])-?\d*$/);
+                if (controlMatch) {
+                    controlType = controlMatch[1];
+                }
+                // Alternative: check if sample ends with H, M, or L after coordinates
+                else if (sampleName.includes('H-') || /[A-Z]\d+H-/.test(sampleName)) {
                     controlType = 'H';
-                } else if (upperSample.includes('MEDIUM') || upperSample.includes('MED') || upperSample.includes('M1') ||
-                          upperSample.includes('1E5') || upperSample.includes('10E5') || upperSample.includes('1E+5') ||
-                          /[A-Z]\d+M-/.test(wellData.sample_name) || /M-\d+/.test(wellData.sample_name) ||
-                          upperSample.includes('B08M') || upperSample.includes('B09M') || upperSample.includes('B10M')) {
+                } else if (sampleName.includes('M-') || /[A-Z]\d+M-/.test(sampleName)) {
                     controlType = 'M';
-                } else if (upperSample.includes('LOW') || upperSample.includes('L1') ||
-                          upperSample.includes('1E3') || upperSample.includes('10E3') || upperSample.includes('1E+3') ||
-                          /[A-Z]\d+L-/.test(wellData.sample_name) || /L-\d+/.test(wellData.sample_name) ||
-                          upperSample.includes('C11L') || upperSample.includes('C12L') || upperSample.includes('C13L')) {
+                } else if (sampleName.includes('L-') || /[A-Z]\d+L-/.test(sampleName)) {
+                    controlType = 'L';
+                }
+                // Check wellKey patterns as backup
+                else if (upperKey.endsWith('H') || upperKey.includes('HIGH') || upperKey.includes('POS')) {
+                    controlType = 'H';
+                } else if (upperKey.endsWith('M') || upperKey.includes('MED')) {
+                    controlType = 'M';
+                } else if (upperKey.endsWith('L') || upperKey.includes('LOW')) {
                     controlType = 'L';
                 }
             }
@@ -353,18 +388,11 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
             if (controlType === 'NTC') {
                 // NTC controls should NOT have CQJ values unless contaminated
                 if (wellData.cqj_value !== null && wellData.cqj_value !== undefined) {
-                    console.warn(`[CALCJ-DEBUG] ⚠️  CONTAMINATION DETECTED in NTC control ${wellKey}: CQJ ${wellData.cqj_value.toFixed(2)}`);
                     controlCqj[controlType].push(wellData.cqj_value);
-                } else {
-                    console.log(`[CALCJ-DEBUG] ✅ NTC control ${wellKey}: No amplification (normal)`);
                 }
             } else if (controlType && wellData.cqj_value !== null && wellData.cqj_value !== undefined) {
                 // H/M/L controls should have CQJ values
                 controlCqj[controlType].push(wellData.cqj_value);
-                // Only log if controls are found
-                if (controlCqj[controlType].length === 1) {
-                    console.log(`[CALCJ-DEBUG] Found ${controlType} control wells`);
-                }
             }
         });
     }
@@ -375,21 +403,17 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
         const cqjList = controlCqj[controlType];
         if (cqjList.length > 0) {
             avgControlCqj[controlType] = cqjList.reduce((sum, val) => sum + val, 0) / cqjList.length;
-            console.log(`[CALCJ-DEBUG] ${controlType} control average CQJ: ${avgControlCqj[controlType].toFixed(2)} (n=${cqjList.length})`);
         }
     });
     
     // Check if we have enough controls for standard curve (REQUIRE H and L controls)
     if (!avgControlCqj.H || !avgControlCqj.L) {
-        console.log(`[CALCJ-DEBUG] Missing required H and/or L controls - CalcJ calculation impossible`);
-        console.log(`[CALCJ-DEBUG] Found controls: ${Object.keys(avgControlCqj).join(', ')}`);
         return { calcj_value: null, method: 'missing_required_controls' };
     }
     
     // Get CQJ for current well
     const currentCqj = well.cqj_value;
     if (currentCqj === null || currentCqj === undefined) {
-        console.log('[CALCJ-DEBUG] No CQJ value, cannot calculate CalcJ');
         return { calcj_value: null, method: 'control_based_failed' };
     }
     
@@ -404,7 +428,6 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
         const earlyThreshold = minControlCqj - Math.max(1.0, controlRange * 0.2);
         
         if (currentCqj < earlyThreshold) {
-            console.log(`[CALCJ-DEBUG] Early crossing detected (CQJ ${currentCqj.toFixed(2)} < threshold ${earlyThreshold.toFixed(2)})`);
             return { calcj_value: 'N/A', method: 'early_crossing' };
         }
         
@@ -412,7 +435,6 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
         const lateThreshold = maxControlCqj + Math.max(2.0, controlRange * 0.5);
         
         if (currentCqj > lateThreshold) {
-            console.log(`[CALCJ-DEBUG] Very late crossing detected (CQJ ${currentCqj.toFixed(2)} > threshold ${lateThreshold.toFixed(2)})`);
             return { calcj_value: 'N/A', method: 'late_crossing' };
         }
     }
@@ -425,7 +447,6 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
     
     // Validate that we have all required data
     if (!hCq || !lCq || !hVal || !lVal) {
-        console.log(`[CALCJ-DEBUG] Missing H/L control data - cannot calculate CalcJ`);
         return { calcj_value: null, method: 'incomplete_control_data' };
     }
     
@@ -433,13 +454,7 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
     try {
         // Validate that we have reasonable control data
         if (Math.abs(hCq - lCq) < 0.5) {
-            console.log('[CALCJ-DEBUG] H/L controls too close in CQJ values - invalid run');
             return { calcj_value: null, method: 'controls_too_close' };
-        }
-        
-        // Ensure H should have lower CQJ (earlier crossing) than L
-        if (hCq > lCq) {
-            console.log(`[CALCJ-DEBUG] Warning: H control CQJ (${hCq.toFixed(2)}) > L control CQJ (${lCq.toFixed(2)}), may indicate control mix-up`);
         }
         
         // Log-linear interpolation using ACTUAL control values from this run
@@ -447,23 +462,26 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
         const logL = Math.log10(lVal);
         
         // Calculate slope: change in log(concentration) per cycle
-        const slope = (logH - logL) / (lCq - hCq);
+        // NOTE: Slope should be NEGATIVE because lower CQJ = higher concentration
+        const slope = (logH - logL) / (hCq - lCq);
         const intercept = logH - slope * hCq;
         
         // Calculate concentration for current CQJ
         const logConc = slope * currentCqj + intercept;
         const calcjResult = Math.pow(10, logConc);
         
-        // Sanity check: result should be within reasonable range
-        if (calcjResult < 0 || calcjResult > 1e12) {
-            console.log(`[CALCJ-DEBUG] Unreasonable CalcJ result (${calcjResult.toExponential(2)}) - run quality issue`);
-            return { calcj_value: null, method: 'unreasonable_result' };
+        // Enhanced sanity checks: result should be within reasonable range
+        if (!isFinite(calcjResult) || calcjResult < 0 || calcjResult > 1e12 || isNaN(calcjResult)) {
+            return { calcj_value: 'N/A', method: 'unreasonable_result' };
         }
         
-        console.log(`[CALCJ-DEBUG] Dynamic CalcJ = ${calcjResult.toExponential(2)} (CQJ: ${currentCqj.toFixed(2)}, H_avg: ${hCq.toFixed(2)}, L_avg: ${lCq.toFixed(2)})`);
+        // Additional check for extremely small values that might round to 0
+        if (calcjResult < 1e-10) {
+            return { calcj_value: 'N/A', method: 'value_too_small' };
+        }
+        
         return { calcj_value: calcjResult, method: 'dynamic_control_based' };
     } catch (error) {
-        console.log(`[CALCJ-DEBUG] Error in dynamic calculation: ${error.message}`);
         return { calcj_value: null, method: 'calculation_error' };
     }
 }
@@ -474,7 +492,6 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
 function calculateCalcj(well, threshold) {
     // This basic method cannot work without actual control data from the run
     // Always return null to force use of control-based method
-    console.log('[CALCJ] Basic method cannot calculate without actual H/L controls from run');
     return null;
 }
 
@@ -490,14 +507,12 @@ window.recalculateCQJValuesForManualThreshold = recalculateCQJValues;
 // Debug function to test curve quality assessment
 window.debugCurveQuality = function(wellKey) {
     if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
-        console.error('❌ DEBUG - No analysis results available');
-        return;
+        return { error: 'No analysis results available' };
     }
     
     const well = window.currentAnalysisResults.individual_results[wellKey];
     if (!well) {
-        console.error(`❌ DEBUG - Well ${wellKey} not found`);
-        return;
+        return { error: `Well ${wellKey} not found` };
     }
     
     let rfuArray = well.raw_rfu || well.rfu;
@@ -506,78 +521,38 @@ window.debugCurveQuality = function(wellKey) {
     }
     
     if (!Array.isArray(rfuArray) || rfuArray.length === 0) {
-        console.error(`❌ DEBUG - No RFU data for well ${wellKey}`);
-        return;
+        return { error: `No RFU data for well ${wellKey}` };
     }
     
     const numericRfu = rfuArray.map(r => parseFloat(r));
     const quality = assessCurveQuality(numericRfu, 5);
     
-    console.log(`🔍 DEBUG - Curve quality for ${wellKey}:`, {
+    return {
+        wellKey,
         isGoodCurve: quality.isGoodCurve,
         reason: quality.reason,
         dataPoints: numericRfu.length,
-        rfuRange: `${Math.min(...numericRfu).toFixed(3)} - ${Math.max(...numericRfu).toFixed(3)}`,
-        mean: (numericRfu.reduce((sum, val) => sum + val, 0) / numericRfu.length).toFixed(3),
-        stdDev: Math.sqrt(numericRfu.reduce((sum, val) => sum + Math.pow(val - (numericRfu.reduce((s, v) => s + v, 0) / numericRfu.length), 2), 0) / numericRfu.length).toFixed(3)
-    });
-    
-    return quality;
+        rfuRange: [Math.min(...numericRfu), Math.max(...numericRfu)],
+        mean: numericRfu.reduce((sum, val) => sum + val, 0) / numericRfu.length,
+        stdDev: Math.sqrt(numericRfu.reduce((sum, val) => sum + Math.pow(val - (numericRfu.reduce((s, v) => s + v, 0) / numericRfu.length), 2), 0) / numericRfu.length)
+    };
 };
 
 // Debug function to test CalcJ formula issue
 window.debugCalcJFormula = function(testCqjValues = [null, 22.80, 29.39]) {
-    console.log('🔍 DEBUG - Testing CalcJ formula with corrected expected values:');
-    console.log('CORRECTED: NTC should be N/A (no amplification unless contaminated)');
-    console.log('Only H (22.80) and M (29.39) should have CalcJ values');
-    console.log('');
-    
     const results = [];
     testCqjValues.forEach((cqj, index) => {
         const labels = ['NTC', 'H', 'M'];
         let calcj;
         
         if (index === 0) { // NTC
-            if (cqj === null || cqj === undefined) {
-                calcj = null; // Normal NTC - no amplification
-                console.log(`${labels[index]}: No CQJ (normal) → CalcJ N/A`);
-            } else {
-                calcj = calculateCalcj({ cqj_value: cqj }, 100);
-                console.warn(`⚠️  ${labels[index]}: CQJ ${cqj.toFixed(2)} → CalcJ ${calcj ? calcj.toExponential(2) : 'null'} (CONTAMINATION DETECTED!)`);
-            }
+            calcj = (cqj === null || cqj === undefined) ? null : calculateCalcj({ cqj_value: cqj }, 100);
         } else {
-            // H and M controls should have values
-            const well = { cqj_value: cqj };
-            calcj = calculateCalcj(well, 100);
-            console.log(`${labels[index]}: CQJ ${cqj.toFixed(2)} → CalcJ ${calcj ? calcj.toExponential(2) : 'null'}`);
+            calcj = calculateCalcj({ cqj_value: cqj }, 100);
         }
         
         results.push({ label: labels[index], cqj, calcj });
     });
-    
-    // Check ratios only for H/M (skip NTC since it should be N/A)
-    if (results.length >= 3 && results[1].calcj && results[2].calcj) {
-        const hMRatio = results[1].calcj / results[2].calcj;
-        
-        console.log('');
-        console.log(`📊 Concentration ratios:`);
-        console.log(`H/M ratio: ${hMRatio.toFixed(2)} (should be > 1, typically 4-8x)`);
-        
-        if (hMRatio < 2) {
-            console.warn('⚠️  PROBLEM: H and M concentrations are too similar');
-        }
-        
-        // Check NTC for contamination
-        if (results[0].cqj !== null && results[0].cqj !== undefined) {
-            console.warn('⚠️  CONTAMINATION: NTC has amplification - this indicates contamination!');
-        } else {
-            console.log('✅ NTC: No amplification (normal negative control)');
-        }
-    }
-    
-    console.log('');
-    console.log('🔬 Current formula: concentration = baseline * 2^(40 - CQJ)');
-    console.log('🔬 With baseline = 1000 and reference cycle = 40');
     
     return results;
 };
@@ -585,45 +560,19 @@ window.debugCalcJFormula = function(testCqjValues = [null, 22.80, 29.39]) {
 // Debug function to inspect well data structure on backend
 window.debugWellData = async function(sessionId = null) {
     try {
-        // Try to get session ID from current analysis if not provided
         if (!sessionId && window.currentAnalysisResults && window.currentAnalysisResults.session_id) {
             sessionId = window.currentAnalysisResults.session_id;
         }
         
         if (!sessionId) {
-            console.error('❌ DEBUG - No session ID provided or available');
-            return;
+            return { error: 'No session ID provided or available' };
         }
-        
-        console.log(`🔍 DEBUG - Fetching well data for session ${sessionId}`);
         
         const response = await fetch(`/debug/well-data/${sessionId}`);
         const data = await response.json();
         
-        if (data.success) {
-            console.log('✅ DEBUG - Well data structure:', data);
-            
-            // Display key information
-            console.log(`📊 DEBUG - Session ${sessionId}: ${data.wells_count} wells`);
-            data.debug_info.forEach((wellInfo, index) => {
-                console.log(`🔍 DEBUG - Well ${index + 1}:`, {
-                    'DB well_id': wellInfo.db_well_id,
-                    'well_id type': wellInfo.well_id_type,
-                    'well_id value': wellInfo.well_id_value,
-                    'fluorophore': wellInfo.fluorophore,
-                    'sample_name': wellInfo.sample_name,
-                    'has data': wellInfo.has_raw_rfu && wellInfo.has_raw_cycles,
-                    'data length': `${wellInfo.raw_rfu_length}/${wellInfo.raw_cycles_length}`
-                });
-            });
-            
-            return data;
-        } else {
-            console.error('❌ DEBUG - Failed to fetch well data:', data.error);
-            return data;
-        }
+        return data;
     } catch (error) {
-        console.error('❌ DEBUG - Error fetching well data:', error);
         return { error: error.message };
     }
 };
@@ -631,48 +580,511 @@ window.debugWellData = async function(sessionId = null) {
 // Debug function to test CQJ calculation for a specific well
 window.debugTestCQJ = async function(wellId, sessionId = null) {
     try {
-        // Try to get session ID from current analysis if not provided
         if (!sessionId && window.currentAnalysisResults && window.currentAnalysisResults.session_id) {
             sessionId = window.currentAnalysisResults.session_id;
         }
         
-        if (!sessionId) {
-            console.error('❌ DEBUG - No session ID provided or available');
-            return;
+        if (!sessionId || !wellId) {
+            return { error: 'Missing session ID or well ID' };
         }
-        
-        if (!wellId) {
-            console.error('❌ DEBUG - No well ID provided');
-            return;
-        }
-        
-        console.log(`🔍 DEBUG - Testing CQJ calculation for well ${wellId} in session ${sessionId}`);
         
         const response = await fetch(`/debug/test-cqj/${sessionId}/${wellId}`);
         const data = await response.json();
         
-        if (data.success) {
-            console.log('✅ DEBUG - CQJ test results:', data);
-            
-            console.log(`🔍 DEBUG - Well ${wellId}:`, {
-                'Well data structure': data.well_data_structure,
-                'Test threshold': data.test_threshold,
-                'CQJ result': data.cqj_result,
-                'CalcJ result': data.calcj_result
-            });
-            
-            return data;
-        } else {
-            console.error('❌ DEBUG - Failed to test CQJ:', data.error);
-            if (data.traceback) {
-                console.error('❌ DEBUG - Traceback:', data.traceback);
-            }
-            return data;
-        }
+        return data;
     } catch (error) {
-        console.error('❌ DEBUG - Error testing CQJ:', error);
         return { error: error.message };
     }
+};
+
+// Test function to show exact CalcJ calculations
+window.testCalcJCalculations = function() {
+    // Your actual control values
+    const hCqj = 16.34;
+    const lCqj = 29.39;
+    const hConc = 1.00e7;  // 1.00E+7
+    const lConc = 1.00e3;  // 1.00E+3
+    
+    // Show the math
+    const logH = Math.log10(hConc);
+    const logL = Math.log10(lConc);
+    const slope = (logH - logL) / (hCqj - lCqj);
+    const intercept = logH - slope * hCqj;
+    
+    return { slope, intercept, hCqj, lCqj, hConc, lConc };
+};
+
+// Test function using ACTUAL controls from current session (simplified)
+window.testActualSessionCalcJ = function() {
+    if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
+        return { error: 'No analysis results available' };
+    }
+    
+    const results = window.currentAnalysisResults.individual_results;
+    const testCode = getCurrentTestCode();
+    
+    // Find H/L controls quickly
+    const controlCqj = { H: [], L: [], M: [] };
+    
+    Object.keys(results).forEach(wellKey => {
+        const wellData = results[wellKey];
+        if (!wellKey || !wellData || !wellData.cqj_value) return;
+        
+        const sampleName = wellData.sample_name || '';
+        let controlType = null;
+        
+        // Use same control detection logic as main calculation
+        if (sampleName.includes('NTC')) {
+            controlType = 'NTC';
+        } else {
+            const controlMatch = sampleName.match(/([HML])-?\d*$/);
+            if (controlMatch) {
+                controlType = controlMatch[1];
+            } else if (sampleName.includes('H-') || /[A-Z]\d+H-/.test(sampleName)) {
+                controlType = 'H';
+            } else if (sampleName.includes('M-') || /[A-Z]\d+M-/.test(sampleName)) {
+                controlType = 'M';
+            } else if (sampleName.includes('L-') || /[A-Z]\d+L-/.test(sampleName)) {
+                controlType = 'L';
+            }
+        }
+        
+        if (controlType) {
+            controlCqj[controlType].push({ wellKey, cqj: wellData.cqj_value, sample: wellData.sample_name });
+        }
+    });
+    
+    if (controlCqj.H.length === 0 || controlCqj.L.length === 0) {
+        return { error: 'Missing H or L controls', available: controlCqj };
+    }
+    
+    // Calculate averages
+    const hCqj = controlCqj.H.reduce((sum, val) => sum + val.cqj, 0) / controlCqj.H.length;
+    const lCqj = controlCqj.L.reduce((sum, val) => sum + val.cqj, 0) / controlCqj.L.length;
+    const mCqj = controlCqj.M.length > 0 ? controlCqj.M.reduce((sum, val) => sum + val.cqj, 0) / controlCqj.M.length : null;
+    
+    // Get concentration values
+    if (typeof CONCENTRATION_CONTROLS === 'undefined') {
+        return { error: 'CONCENTRATION_CONTROLS not available' };
+    }
+    
+    const concValues = CONCENTRATION_CONTROLS[testCode]?.FAM;
+    if (!concValues) {
+        return { error: `No controls for ${testCode}/FAM` };
+    }
+    
+    const hConc = concValues.H;
+    const lConc = concValues.L;
+    const mConc = concValues.M;
+    
+    // Calculate slope
+    const logH = Math.log10(hConc);
+    const logL = Math.log10(lConc);
+    const slope = (logH - logL) / (hCqj - lCqj);
+    const intercept = logH - slope * hCqj;
+    
+    return { 
+        testCode, 
+        slope, 
+        hCqj, lCqj, mCqj, 
+        hConc, lConc, mConc, 
+        controlCqj,
+        slopeValid: slope < 0
+    };
+};
+
+// Quick debug function to see what wells we have
+window.debugWellNames = function() {
+    if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
+        return { error: 'No analysis results available' };
+    }
+    
+    const results = window.currentAnalysisResults.individual_results;
+    const wells = [];
+    
+    Object.keys(results).forEach(wellKey => {
+        const wellData = results[wellKey];
+        wells.push({
+            wellKey,
+            sample: wellData.sample_name,
+            fluorophore: wellData.fluorophore,
+            cqj: wellData.cqj_value,
+            calcj: wellData.calcj_value
+        });
+    });
+    
+    return wells;
+};
+
+// Simple function to check what analysis data is available
+window.debugAnalysisAvailability = function() {
+    const analysisVars = Object.keys(window).filter(k => 
+        k.includes('analysis') || k.includes('session') || k.includes('result') || k.includes('data')
+    );
+    
+    return {
+        currentAnalysisResults: !!window.currentAnalysisResults,
+        currentSessionData: !!window.currentSessionData,
+        analysisVars,
+        individualResultsCount: window.currentAnalysisResults?.individual_results ? 
+            Object.keys(window.currentAnalysisResults.individual_results).length : 0
+    };
+};
+
+// Comprehensive debug function for fresh upload issues
+window.debugFreshUpload = function() {
+    if (!window.currentAnalysisResults) {
+        return { error: 'no_analysis_results' };
+    }
+    
+    const results = window.currentAnalysisResults.individual_results;
+    if (!results) {
+        return { error: 'no_individual_results' };
+    }
+    
+    const testCode = getCurrentTestCode();
+    
+    // Check CONCENTRATION_CONTROLS availability
+    if (typeof CONCENTRATION_CONTROLS === 'undefined') {
+        return { error: 'no_concentration_controls' };
+    }
+    
+    const concValues = CONCENTRATION_CONTROLS[testCode];
+    if (!concValues) {
+        return { error: 'no_test_code_match', availableTests: Object.keys(CONCENTRATION_CONTROLS) };
+    }
+    
+    // Check each channel
+    const channelAnalysis = {};
+    Object.keys(concValues).forEach(channel => {
+        // Find wells for this channel
+        const channelWells = Object.keys(results).filter(wellKey => {
+            const well = results[wellKey];
+            return well.fluorophore === channel;
+        });
+        
+        if (channelWells.length === 0) {
+            channelAnalysis[channel] = { error: 'no_wells' };
+            return;
+        }
+        
+        // Check for controls
+        const controlCqj = { H: [], M: [], L: [], NTC: [] };
+        const nonControlWells = [];
+        
+        channelWells.forEach(wellKey => {
+            const wellData = results[wellKey];
+            const sampleName = wellData.sample_name || '';
+            const upperKey = wellKey.toUpperCase();
+            
+            let controlType = null;
+            
+            // Use the same control detection logic as calculateCalcjWithControls
+            if (sampleName.includes('NTC')) {
+                controlType = 'NTC';
+            } else {
+                const controlMatch = sampleName.match(/([HML])-?\d*$/);
+                if (controlMatch) {
+                    controlType = controlMatch[1];
+                } else if (sampleName.includes('H-') || /[A-Z]\d+H-/.test(sampleName)) {
+                    controlType = 'H';
+                } else if (sampleName.includes('M-') || /[A-Z]\d+M-/.test(sampleName)) {
+                    controlType = 'M';
+                } else if (sampleName.includes('L-') || /[A-Z]\d+L-/.test(sampleName)) {
+                    controlType = 'L';
+                } else if (upperKey.endsWith('H') || upperKey.includes('HIGH') || upperKey.includes('POS')) {
+                    controlType = 'H';
+                } else if (upperKey.endsWith('M') || upperKey.includes('MED')) {
+                    controlType = 'M';
+                } else if (upperKey.endsWith('L') || upperKey.includes('LOW')) {
+                    controlType = 'L';
+                }
+            }
+            
+            if (controlType && wellData.cqj_value !== null && wellData.cqj_value !== undefined) {
+                controlCqj[controlType].push({
+                    wellKey: wellKey,
+                    sampleName: sampleName,
+                    cqj: wellData.cqj_value,
+                    calcj: wellData.calcj_value
+                });
+            } else if (controlType !== 'NTC') {
+                nonControlWells.push({
+                    wellKey: wellKey,
+                    sampleName: sampleName,
+                    cqj: wellData.cqj_value,
+                    calcj: wellData.calcj_value
+                });
+            }
+        });
+        
+        // Analyze control detection
+        const hCount = controlCqj.H.length;
+        const lCount = controlCqj.L.length;
+        const mCount = controlCqj.M.length;
+        
+        if (hCount === 0 || lCount === 0) {
+            channelAnalysis[channel] = { 
+                error: 'missing_controls', 
+                hCount, lCount, mCount,
+                nonControlWells: nonControlWells.slice(0, 3) // Show first 3 non-control wells
+            };
+        } else {
+            // Calculate what CalcJ should be
+            const hCqj = controlCqj.H.reduce((sum, c) => sum + c.cqj, 0) / controlCqj.H.length;
+            const lCqj = controlCqj.L.reduce((sum, c) => sum + c.cqj, 0) / controlCqj.L.length;
+            
+            channelAnalysis[channel] = {
+                success: true,
+                hCount, lCount, mCount,
+                hCqj, lCqj,
+                controlCqj,
+                nonControlWells: nonControlWells.length
+            };
+        }
+    });
+    
+    return {
+        testCode,
+        totalWells: Object.keys(results).length,
+        channelAnalysis,
+        concentrationControls: concValues
+    };
+};
+window.debugDetectedControls = function() {
+    if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
+        return { error: 'No analysis results available' };
+    }
+    
+    const results = window.currentAnalysisResults.individual_results;
+    const controlCqj = { H: [], M: [], L: [], NTC: [] };
+    
+    Object.keys(results).forEach(wellKey => {
+        const wellData = results[wellKey];
+        if (!wellKey || !wellData || !wellData.cqj_value) return;
+        
+        const upperKey = wellKey.toUpperCase();
+        let controlType = null;
+        
+        if (upperKey.includes('HIGH') || upperKey.includes('H1') || upperKey.includes('POS') || 
+            upperKey.includes('1E7') || upperKey.includes('10E7') || wellKey.endsWith('H')) {
+            controlType = 'H';
+        } else if (upperKey.includes('MEDIUM') || upperKey.includes('M1') || upperKey.includes('MED') ||
+                   upperKey.includes('1E5') || upperKey.includes('10E5') || wellKey.endsWith('M')) {
+            controlType = 'M';
+        } else if (upperKey.includes('LOW') || upperKey.includes('L1') || 
+                   upperKey.includes('1E3') || upperKey.includes('10E3') || wellKey.endsWith('L')) {
+            controlType = 'L';
+        } else if (upperKey.includes('NTC') || upperKey.includes('NEG') || upperKey.includes('BLANK')) {
+            controlType = 'NTC';
+        }
+        
+        if (controlType) {
+            controlCqj[controlType].push(wellData.cqj_value);
+        }
+    });
+    
+    // Simple summary
+    const summary = {};
+    Object.keys(controlCqj).forEach(type => {
+        if (controlCqj[type].length > 0) {
+            const avg = controlCqj[type].reduce((sum, val) => sum + val, 0) / controlCqj[type].length;
+            summary[type] = { count: controlCqj[type].length, avg: avg.toFixed(2), values: controlCqj[type] };
+        }
+    });
+    
+    return { controlCqj, summary, testCode: window.currentAnalysisResults?.test_code };
+};
+
+// Test CQJ calculation for a specific well
+window.debugCQJCalculation = function(wellKey) {
+    if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
+        return { error: 'No analysis results available' };
+    }
+    
+    const well = window.currentAnalysisResults.individual_results[wellKey];
+    if (!well) {
+        return { error: `Well ${wellKey} not found` };
+    }
+    
+    // Get RFU and cycles data
+    let rfuArray = well.raw_rfu || well.rfu;
+    let cyclesArray = well.raw_cycles || well.cycles;
+    
+    if (typeof rfuArray === 'string') {
+        try { rfuArray = JSON.parse(rfuArray); } catch(e) { rfuArray = []; }
+    }
+    if (typeof cyclesArray === 'string') {
+        try { cyclesArray = JSON.parse(cyclesArray); } catch(e) { cyclesArray = []; }
+    }
+    
+    // Get current threshold
+    const channel = well.fluorophore;
+    const currentScale = window.currentScaleMode || 'linear';
+    const threshold = window.getChannelThreshold ? 
+        window.getChannelThreshold(channel, currentScale) : null;
+    
+    if (!threshold) {
+        return { error: 'No threshold available' };
+    }
+    
+    // Test CQJ calculation
+    const cqjResult = calculateThresholdCrossing(rfuArray, cyclesArray, threshold);
+    
+    // Test curve quality
+    const numericRfu = rfuArray.map(r => parseFloat(r));
+    const quality = assessCurveQuality(numericRfu, 5);
+    
+    return {
+        wellKey,
+        sampleName: well.sample_name,
+        fluorophore: well.fluorophore,
+        dataPoints: rfuArray.length,
+        threshold,
+        calculatedCQJ: cqjResult,
+        storedCQJ: well.cqj_value,
+        curveQuality: quality,
+        rfuRange: [Math.min(...rfuArray), Math.max(...rfuArray)],
+        match: cqjResult === well.cqj_value
+    };
+};
+
+// Debug function for CalcJ calculation issues
+window.debugCalcJMath = function(wellKey) {
+    if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
+        return { error: 'No analysis results available' };
+    }
+    
+    const results = window.currentAnalysisResults.individual_results;
+    const testCode = getCurrentTestCode();
+    const well = results[wellKey];
+    
+    if (!well) {
+        return { error: `Well ${wellKey} not found` };
+    }
+    
+    // Get concentration controls
+    const concValues = CONCENTRATION_CONTROLS[testCode]?.FAM;
+    if (!concValues) {
+        return { error: 'No concentration controls' };
+    }
+    
+    // Find H/L controls
+    const controlCqj = { H: [], L: [] };
+    Object.keys(results).forEach(key => {
+        const wellData = results[key];
+        if (!wellData.cqj_value) return;
+        
+        const sampleName = wellData.sample_name || '';
+        const controlMatch = sampleName.match(/([HML])-?\d*$/);
+        if (controlMatch) {
+            const type = controlMatch[1];
+            if (type === 'H' || type === 'L') {
+                controlCqj[type].push(wellData.cqj_value);
+            }
+        }
+    });
+    
+    if (controlCqj.H.length === 0 || controlCqj.L.length === 0) {
+        return { error: 'Missing H or L controls' };
+    }
+    
+    const hCqj = controlCqj.H.reduce((sum, val) => sum + val, 0) / controlCqj.H.length;
+    const lCqj = controlCqj.L.reduce((sum, val) => sum + val, 0) / controlCqj.L.length;
+    const hConc = concValues.H;
+    const lConc = concValues.L;
+    
+    // Show the math step by step
+    const logH = Math.log10(hConc);
+    const logL = Math.log10(lConc);
+    const slope = (logH - logL) / (hCqj - lCqj);
+    const intercept = logH - slope * hCqj;
+    
+    const result = {
+        wellKey,
+        sample: well.sample_name,
+        currentCqj: well.cqj_value,
+        currentCalcj: well.calcj_value,
+        hCqj, lCqj, hConc, lConc,
+        logH, logL, slope, intercept
+    };
+    
+    // Calculate for current well
+    if (well.cqj_value !== null) {
+        const currentCqj = well.cqj_value;
+        const logConc = slope * currentCqj + intercept;
+        const calcjResult = Math.pow(10, logConc);
+        
+        result.calculation = {
+            logConc,
+            calcjResult,
+            isFinite: isFinite(calcjResult),
+            isNaN: isNaN(calcjResult)
+        };
+    }
+    
+    return result;
+};
+
+// Debug function to test infinity issues
+window.debugInfinityWells = function() {
+    if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
+        return { error: 'No analysis results available' };
+    }
+    
+    const results = window.currentAnalysisResults.individual_results;
+    const testCode = getCurrentTestCode();
+    
+    // Find wells with infinity or very large CalcJ values
+    const problematicWells = [];
+    Object.keys(results).forEach(wellKey => {
+        const well = results[wellKey];
+        const calcj = well.calcj_value;
+        
+        if (!isFinite(calcj) || calcj > 1e10 || calcj === 'N/A') {
+            problematicWells.push({
+                wellKey,
+                sampleName: well.sample_name,
+                cqj: well.cqj_value,
+                calcj: calcj,
+                fluorophore: well.fluorophore
+            });
+        }
+    });
+    
+    // Get current H/L control averages for comparison
+    const controlCqj = { H: [], L: [] };
+    Object.keys(results).forEach(wellKey => {
+        const wellData = results[wellKey];
+        if (!wellData.cqj_value) return;
+        
+        const sampleName = wellData.sample_name || '';
+        let controlType = null;
+        
+        const controlMatch = sampleName.match(/([HML])-?\d*$/);
+        if (controlMatch) {
+            controlType = controlMatch[1];
+        } else if (sampleName.includes('H-')) {
+            controlType = 'H';
+        } else if (sampleName.includes('L-')) {
+            controlType = 'L';
+        }
+        
+        if (controlType === 'H' || controlType === 'L') {
+            controlCqj[controlType].push(wellData.cqj_value);
+        }
+    });
+    
+    const hAvg = controlCqj.H.length > 0 ? controlCqj.H.reduce((sum, val) => sum + val, 0) / controlCqj.H.length : 0;
+    const lAvg = controlCqj.L.length > 0 ? controlCqj.L.reduce((sum, val) => sum + val, 0) / controlCqj.L.length : 0;
+    
+    return { 
+        problematicWells, 
+        hAvg, 
+        lAvg, 
+        testCode,
+        controlRange: lAvg - hAvg
+    };
 };
 
 // Alias for backward compatibility

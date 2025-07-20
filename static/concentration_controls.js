@@ -77,6 +77,9 @@ const CONCENTRATION_CONTROLS = {
     RNaseP: {
         HEX: { H: 1e7, M: 1e5, L: 1e3 }
     },
+    Mgen: {
+        FAM: { H: 1e7, M: 1e5, L: 1e3 }
+    },
     // ...repeat for all other tests/channels as needed...
 };
 

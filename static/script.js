@@ -2778,9 +2778,29 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
         // Try to perform the actual analysis via backend
         // Send to backend and handle HTTP errors gracefully
         try {
-            // Add timeout controller for large requests
+            // Add timeout controller for large requests - increased for complex analysis
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+            const timeoutId = setTimeout(() => {
+                console.warn(`⏰ TIMEOUT-ABORT - Aborting ${fluorophore} request after 3 minutes`);
+                controller.abort();
+            }, 180000); // 3 minute timeout for complex analysis
+            
+            // Debug: Log controller creation
+            console.log(`🔍 DEBUG-CONTROLLER - Created AbortController for ${fluorophore}`, {
+                fluorophore,
+                timestamp: new Date().toISOString(),
+                timeoutId: timeoutId
+            });
+            
+            // Debug: Add abort event listener to track abort source
+            controller.signal.addEventListener('abort', () => {
+                console.warn(`🚨 ABORT-EVENT - ${fluorophore} request was aborted`, {
+                    fluorophore,
+                    timestamp: new Date().toISOString(),
+                    reason: controller.signal.reason || 'unknown',
+                    stackTrace: new Error().stack
+                });
+            });
             
             // console.log(`🔍 SINGLE-CHANNEL - Making fetch request for ${fluorophore}`, {
                 // url: '/analyze',
@@ -2788,10 +2808,17 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
                 // timestamp: new Date().toISOString()
             // });
             
-            // Anti-throttling: Keep browser tab active during long requests
+            // Anti-throttling: Keep browser tab active during long requests with progress indication
+            let progressSeconds = 0;
             const keepAliveInterval = setInterval(() => {
+                progressSeconds++;
                 // Minimal DOM operation to prevent browser throttling
-                document.title = `Analyzing ${fluorophore}... ${new Date().getSeconds()}s`;
+                document.title = `Analyzing ${fluorophore}... ${progressSeconds}s`;
+                
+                // Show progress in console every 15 seconds for very long requests
+                if (progressSeconds % 15 === 0) {
+                    console.log(`⏳ PROGRESS - ${fluorophore} analysis: ${progressSeconds}s elapsed (max 180s)`);
+                }
             }, 1000);
             
             const response = await fetch('/analyze', {
@@ -2804,6 +2831,14 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
                 },
                 body: JSON.stringify(payload),
                 signal: controller.signal
+            });
+            
+            // Debug: Log successful response
+            console.log(`✅ DEBUG-RESPONSE - ${fluorophore} fetch completed successfully`, {
+                fluorophore,
+                status: response.status,
+                ok: response.ok,
+                timestamp: new Date().toISOString()
             });
             
             clearInterval(keepAliveInterval); // Stop keep-alive
@@ -2844,7 +2879,11 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
             }
             result = await response.json();
         } catch (fetchError) {
-            // Network or other failure - log and return empty
+            // Network or other failure - clean up and log
+            clearInterval(keepAliveInterval); // Stop keep-alive on error
+            clearTimeout(timeoutId); // Clear timeout
+            document.title = 'qPCR Analyzer'; // Reset title
+            
             console.error(`❌ DEBUG-ERROR - Fetch failed for ${fluorophore}:`, {
                 error: fetchError.message,
                 name: fetchError.name,
@@ -2853,8 +2892,8 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
             });
             
             if (fetchError.name === 'AbortError') {
-                console.error(`⏰ DEBUG-ERROR - Request timeout for ${fluorophore} (60 seconds)`);
-                console.error(`💡 TIMEOUT-TIP - Backend may still be processing. Check backend logs for completion.`);
+                console.error(`⏰ DEBUG-ERROR - Request timeout for ${fluorophore} (3 minutes)`);
+                console.error(`💡 TIMEOUT-TIP - Complex analysis took too long. Check backend logs for completion.`);
                 
                 // Try to recover from timeout by checking if data was saved to database
                 try {
