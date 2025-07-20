@@ -1,3 +1,51 @@
+# [2025-07-20] CRITICAL: CalcJ Display Fixed for Single-Channel + Multichannel Preparation
+
+## 🎯 MAJOR SUCCESS: Single-Channel CalcJ Fixed
+
+### ✅ CalcJ Display Issue RESOLVED:
+**Problem**: CalcJ values calculated correctly but displayed as "N/A" in results table.
+**Root Cause**: `populateResultsTable` function only checked nested object, not direct `calcj_value` field.
+**Solution**: Updated table display logic to check both data structures.
+
+### 🔧 Key Fix Applied in `script.js`:
+```javascript
+// Lines 5414-5425: Enhanced CalcJ display logic
+if (result.calcj && typeof result.calcj === 'object' && result.fluorophore &&
+    result.calcj[result.fluorophore] !== undefined && !isNaN(result.calcj[result.fluorophore])) {
+    calcjDisplay = Number(result.calcj[result.fluorophore]);
+} else if (result.calcj_value !== undefined && !isNaN(result.calcj_value) && result.calcj_value !== 'N/A') {
+    calcjDisplay = Number(result.calcj_value);
+}
+```
+
+### 🚀 Debug Functions Enhanced for Multichannel:
+- `window.debugMultichannelCalcJ()` - NEW: Analyzes all channels simultaneously
+- `window.debugCalcJMath(wellKey)` - ENHANCED: Now channel-aware (no hardcoded FAM)
+- `window.debugTableCalcJ()` - Inspects actual table cell content
+
+### 🔍 MULTICHANNEL CALCJ INSIGHTS:
+
+#### Key Requirements for Multichannel Success:
+1. **Channel Isolation**: Each fluorophore must use only its own H/L controls
+2. **Dynamic Pathogen Mapping**: Remove hardcoded mappings from app.py, use pathogen_library.js
+3. **Control Detection Per Channel**: Ensure controls are matched to correct fluorophore
+4. **Session Loading**: Verify CalcJ displays correctly for saved multichannel sessions
+
+#### Current Status:
+- ✅ Single-channel CalcJ: **WORKING**
+- ✅ Calculation logic: **CORRECT** (`calculateCalcjWithControls`)
+- ✅ Data updates: **CORRECT** (`recalculateCQJValues`)
+- ✅ Display logic: **FIXED** (`populateResultsTable`)
+- 🔄 Multichannel CalcJ: **TESTING NEEDED**
+
+#### Next Steps for Multichannel:
+1. Test with `debugMultichannelCalcJ()` to verify channel isolation
+2. Remove hardcoded pathogen mappings from app.py
+3. Test session loading for multichannel CalcJ values
+4. Verify each channel uses only its own controls
+
+---
+
 # [2025-07-18] CRITICAL: Application Restart Command
 
 ## 🚀 RESTART THE APPLICATION

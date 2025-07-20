@@ -25,8 +25,64 @@ Working on MDL-PCR-Analyzer timing issues and multichannel threshold display pro
 ✅ **CQJ Well ID Bug**: **FIXED** - Resolved wellKey/well_id mismatch in both JS and Python
 ✅ **H/M/L Control-Based CalcJ**: **IMPLEMENTED** - Aggressive control detection with fallback logic
 ✅ **Results Table Layout**: **OPTIMIZED** - Improved font size and column spacing for visibility
-🚧 **"No valid analysis results found" Error**: Currently debugging single-channel analysis failures
+✅ **Single-Channel CalcJ Display Fix**: **FIXED** - CalcJ values now display correctly for positive wells in single-channel runs
+🚧 **Multichannel CalcJ Analysis**: Next phase - ensure CalcJ works for multichannel runs with multiple fluorophores
 🚧 **Platform-Specific Dragging**: Threshold dragging only works on Windows browsers  
+
+## Recent Major Fix: Single-Channel CalcJ Display (July 20, 2025)
+
+### 🎯 **CalcJ Display Issue Resolved**
+
+**Problem**: CalcJ values were being calculated correctly but displayed as "N/A" in the results table for positive wells.
+
+**Root Cause**: The `populateResultsTable` function in `script.js` was only checking for CalcJ in a nested object structure (`result.calcj[result.fluorophore]`) but not checking the direct `calcj_value` field where the values were actually stored.
+
+**Solution Applied**:
+```javascript
+// Fixed code in populateResultsTable (lines 5414-5425)
+if (
+    result.calcj && typeof result.calcj === 'object' && result.fluorophore &&
+    result.calcj[result.fluorophore] !== undefined && result.calcj[result.fluorophore] !== null &&
+    !isNaN(result.calcj[result.fluorophore])
+) {
+    calcjDisplay = Number(result.calcj[result.fluorophore]);
+} else if (
+    result.calcj_value !== undefined && result.calcj_value !== null &&
+    !isNaN(result.calcj_value) && result.calcj_value !== 'N/A'
+) {
+    calcjDisplay = Number(result.calcj_value);
+}
+```
+
+**Key Insights**:
+- ✅ Control detection and standard curve math were already correct
+- ✅ CalcJ calculation logic (`calculateCalcjWithControls`) was working properly
+- ✅ Data structure updates (`recalculateCQJValues`) were successful
+- ✅ Issue was isolated to the display layer only
+- ✅ Fix applies to both single-channel and multichannel results (same table function)
+
+**Debug Functions Used**:
+- `window.debugTableCalcJ()` - Inspected actual table cell content
+- `window.debugCalcJMath()` - Verified calculation math and control detection
+- `window.debugControlDetection()` - Confirmed H/L controls were found correctly
+
+### 🔍 **Multichannel CalcJ Analysis Framework Ready**
+
+**Enhanced Debug Functions for Multichannel**:
+- `window.debugMultichannelCalcJ()` - Analyzes all channels at once
+- `window.debugCalcJMath()` - Now channel-aware (no longer hardcoded to FAM)
+
+**Key Multichannel Considerations**:
+1. **Channel Isolation**: Each fluorophore channel must use only its own H/L controls
+2. **Pathogen Library Integration**: Need dynamic lookup instead of hardcoded mappings in app.py
+3. **Data Structure Consistency**: Ensure CalcJ values are stored consistently across channels
+4. **Session Parsing**: Verify CalcJ displays correctly when loading saved multichannel sessions
+
+**Next Steps for Multichannel**:
+1. Test multichannel CalcJ calculation with `debugMultichannelCalcJ()`
+2. Remove hardcoded pathogen mappings from app.py (use pathogen_library.js)
+3. Verify session loading works for multichannel CalcJ
+4. Test that each channel uses only its own controls for standard curve
 
 ## Ready for Testing
 
