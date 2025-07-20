@@ -1963,8 +1963,11 @@ function applyThresholdStrategy(strategy) {
         window.updateAllChannelThresholds();
     }
     
-    // Trigger CQJ recalculation if available
-    if (window.recalculateCQJValues) {
+    // Force immediate CQJ and CalcJ recalculation for manual threshold changes
+    if (window.forceCQJCalcJRecalculation) {
+        window.forceCQJCalcJRecalculation();
+    } else if (window.recalculateCQJValues) {
+        // Fallback to standard recalculation
         window.recalculateCQJValues();
     }
 }

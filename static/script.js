@@ -1336,6 +1336,14 @@ async function handleThresholdStrategyChange() {
     if (localResult && localResult.success) {
         // console.log(`🔍 LOCAL-THRESHOLD - Local calculation success. Refreshing UI.`);
         
+        // Force immediate CQJ and CalcJ recalculation for threshold strategy changes
+        if (window.forceCQJCalcJRecalculation) {
+            window.forceCQJCalcJRecalculation();
+        } else if (window.recalculateCQJValues) {
+            // Fallback to standard recalculation
+            window.recalculateCQJValues();
+        }
+        
         // Explicitly call populateResultsTable with the now-updated global results object.
         const resultsObj = window.currentAnalysisResults.individual_results || window.currentAnalysisResults;
         populateResultsTable(resultsObj);
