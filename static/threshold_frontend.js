@@ -1309,8 +1309,8 @@ function validateAndSetSingleChannel() {
         const singleChannel = Array.from(channels)[0];
         window.currentFluorophore = singleChannel;
         
-        // Update fluorophore selector if it exists
-        const fluorophoreSelector = document.getElementById('fluorophoreFilter');
+        // Update main fluorophore selector if it exists (correct ID)
+        const fluorophoreSelector = document.getElementById('fluorophoreSelect');
         if (fluorophoreSelector) {
             // Check if the single channel option exists
             const hasOption = Array.from(fluorophoreSelector.options).some(opt => opt.value === singleChannel);
@@ -1658,10 +1658,14 @@ async function sendManualThresholdToBackend(channel, scale, value) {
                 // Update the global results with preserved data
                 window.currentAnalysisResults.individual_results = preservedResults;
                 
-                // CRITICAL: Reset filter to 'all' and sync UI when threshold calculations change
+                // Store current fluorophore selection before any resets
+                const currentFluorophore = window.appState?.currentFluorophore || window.currentFluorophore;
+                
+                // Update table filter to 'all' but preserve fluorophore selection
                 if (window.appState) {
                     window.appState.currentFilter = 'all';
                     window.appState.currentChartMode = 'all';
+                    // Don't reset currentFluorophore - keep user's selection
                 }
                 
                 // Update results table with preserved data
@@ -1669,14 +1673,21 @@ async function sendManualThresholdToBackend(channel, scale, value) {
                     populateResultsTable(preservedResults);
                 }
                 
-                // CRITICAL: Apply current filter state after table update
+                // Apply current filter state after table update
                 if (typeof filterTable === 'function') {
                     filterTable();
                 }
                 
-                // CRITICAL: Sync filter dropdown to match reset state
-                if (typeof syncUIElements === 'function') {
-                    syncUIElements();
+                // Restore fluorophore selection after sync
+                if (currentFluorophore && window.appState) {
+                    window.appState.currentFluorophore = currentFluorophore;
+                    window.currentFluorophore = currentFluorophore;
+                    
+                    // Update the selector directly without triggering events
+                    const fluorophoreSelect = document.getElementById('fluorophoreSelect');
+                    if (fluorophoreSelect && fluorophoreSelect.value !== currentFluorophore) {
+                        fluorophoreSelect.value = currentFluorophore;
+                    }
                 }
                 
                 // console.log(`✅ BACKEND-THRESHOLD - Updated ${Object.keys(result.updated_results).length} wells with new CQJ/CalcJ values and reset filter to 'all'`);
