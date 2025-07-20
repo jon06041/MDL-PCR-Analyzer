@@ -1357,3 +1357,321 @@ window.calculateCqj = function(well, threshold) {
     
     return calculateThresholdCrossing(rfuArray, cyclesArray, threshold);
 };
+
+// Quick test function for multichannel CalcJ debugging
+window.testMultichannelCalcJ = function() {
+    console.log('=== TESTING MULTICHANNEL CALCJ ===');
+    
+    // First check if we have analysis results
+    if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
+        console.log('❌ No analysis results found');
+        return { error: 'no_results' };
+    }
+    
+    const results = window.currentAnalysisResults.individual_results;
+    const testCode = getCurrentTestCode();
+    console.log(`🧪 Test code: ${testCode}`);
+    
+    // Find fluorophores
+    const fluorophores = [...new Set(Object.values(results).map(well => well.fluorophore).filter(Boolean))];
+    console.log(`📡 Fluorophores found: ${fluorophores.join(', ')}`);
+    
+    if (fluorophores.length === 0) {
+        console.log('❌ No fluorophores found in results');
+        return { error: 'no_fluorophores' };
+    }
+    
+    // Check how many wells already have CalcJ
+    let totalCalcJWells = 0;
+    const calcJBychannel = {};
+    
+    fluorophores.forEach(channel => {
+        const channelWells = Object.values(results).filter(well => well.fluorophore === channel);
+        const calcJWells = channelWells.filter(well => well.calcj_value || well.CalcJ);
+        calcJBychannel[channel] = {
+            total: channelWells.length,
+            withCalcJ: calcJWells.length
+        };
+        totalCalcJWells += calcJWells.length;
+    });
+    
+    console.log('📊 Current CalcJ status by channel:', calcJBychannel);
+    console.log(`📊 Total wells with CalcJ: ${totalCalcJWells}`);
+    
+    // Try recalculating CalcJ for all channels
+    console.log('🔄 Attempting CalcJ recalculation...');
+    
+    try {
+        const recalcResults = {};
+        fluorophores.forEach(channel => {
+            console.log(`🔄 Recalculating ${channel}...`);
+            recalcResults[channel] = recalculateCalcJForChannel(channel);
+        });
+        
+        // Count how many wells have CalcJ after recalculation
+        let newCalcJCount = 0;
+        fluorophores.forEach(channel => {
+            const channelWells = Object.values(results).filter(well => well.fluorophore === channel);
+            const calcJWells = channelWells.filter(well => well.calcj_value || well.CalcJ);
+            newCalcJCount += calcJWells.length;
+        });
+        
+        console.log(`📊 Wells with CalcJ after recalc: ${newCalcJCount}`);
+        
+        // Force table refresh
+        if (window.populateResultsTable) {
+            console.log('🔄 Refreshing results table...');
+            window.populateResultsTable(results);
+        }
+        
+        return {
+            success: true,
+            testCode: testCode,
+            fluorophores: fluorophores,
+            beforeRecalc: calcJBychannel,
+            afterRecalc: newCalcJCount,
+            recalcResults: recalcResults
+        };
+        
+    } catch (error) {
+        console.log(`❌ Error during CalcJ recalculation: ${error.message}`);
+        return { error: error.message };
+    }
+};
+
+/**
+ * Enhanced debug function to verify CalcJ is properly structured for multichannel
+ * This confirms the fix for multichannel CalcJ display
+ */
+window.debugMultichannelCalcJFixed = function() {
+    console.log('🔍 DEBUGGING MULTICHANNEL CALCJ STRUCTURE (POST-FIX)');
+    
+    if (!window.currentAnalysisResults?.individual_results) {
+        return {error: "no_analysis_results"};
+    }
+    
+    const results = window.currentAnalysisResults.individual_results;
+    const wellKeys = Object.keys(results);
+    const calcjStructure = {};
+    const cqjStructure = {};
+    const displayData = {};
+    
+    // Analyze structure for each well
+    wellKeys.slice(0, 10).forEach(wellKey => {
+        const well = results[wellKey];
+        const fluorophore = well.fluorophore;
+        
+        // Check CalcJ structure
+        calcjStructure[wellKey] = {
+            fluorophore: fluorophore,
+            calcj_value: well.calcj_value,
+            calcj_object: well.calcj,
+            calcj_object_type: typeof well.calcj,
+            calcj_for_fluorophore: well.calcj?.[fluorophore],
+            has_proper_structure: !!(well.calcj && typeof well.calcj === 'object' && well.calcj[fluorophore] !== undefined)
+        };
+        
+        // Check CQJ structure for comparison
+        cqjStructure[wellKey] = {
+            fluorophore: fluorophore,
+            cqj_value: well.cqj_value,
+            cqj_object: well.cqj,
+            cqj_for_fluorophore: well.cqj?.[fluorophore],
+            has_proper_structure: !!(well.cqj && typeof well.cqj === 'object' && well.cqj[fluorophore] !== undefined)
+        };
+        
+        // Simulate what the table display logic would show
+        const tableCalcJ = (well.calcj && typeof well.calcj === 'object' && fluorophore &&
+            well.calcj[fluorophore] !== undefined && well.calcj[fluorophore] !== null &&
+            !isNaN(well.calcj[fluorophore])) ? Number(well.calcj[fluorophore]) : 'N/A';
+            
+        const tableCQJ = (well.cqj && typeof well.cqj === 'object' && fluorophore &&
+            well.cqj[fluorophore] !== undefined && well.cqj[fluorophore] !== null &&
+            !isNaN(well.cqj[fluorophore])) ? Number(well.cqj[fluorophore]).toFixed(2) : 'N/A';
+        
+        displayData[wellKey] = {
+            fluorophore: fluorophore,
+            will_show_calcj: tableCalcJ,
+            will_show_cqj: tableCQJ
+        };
+    });
+    
+    const summary = {
+        total_wells: wellKeys.length,
+        wells_with_proper_calcj: Object.values(calcjStructure).filter(w => w.has_proper_structure).length,
+        wells_with_proper_cqj: Object.values(cqjStructure).filter(w => w.has_proper_structure).length,
+        fluorophores: [...new Set(wellKeys.map(k => results[k].fluorophore))],
+        fix_working: Object.values(calcjStructure).every(w => w.has_proper_structure)
+    };
+    
+    console.log('📊 MULTICHANNEL CALCJ STRUCTURE ANALYSIS:', {
+        summary: summary,
+        sample_calcj_structure: Object.fromEntries(Object.entries(calcjStructure).slice(0, 3)),
+        sample_display_data: Object.fromEntries(Object.entries(displayData).slice(0, 3))
+    });
+    
+    return {
+        summary: summary,
+        calcj_structure: calcjStructure,
+        cqj_structure: cqjStructure,
+        display_data: displayData
+    };
+};
+
+/**
+ * Enhanced debug function to verify CalcJ is properly structured for multichannel
+ * This confirms the fix for multichannel CalcJ display
+ */
+window.debugMultichannelCalcJFixed = function() {
+    console.log('🔍 DEBUGGING MULTICHANNEL CALCJ STRUCTURE (POST-FIX)');
+    
+    if (!window.currentAnalysisResults?.individual_results) {
+        return {error: "no_analysis_results"};
+    }
+    
+    const results = window.currentAnalysisResults.individual_results;
+    const wellKeys = Object.keys(results);
+    const calcjStructure = {};
+    const cqjStructure = {};
+    const displayData = {};
+    
+    // Analyze structure for each well
+    wellKeys.slice(0, 10).forEach(wellKey => {
+        const well = results[wellKey];
+        const fluorophore = well.fluorophore;
+        
+        // Check CalcJ structure
+        calcjStructure[wellKey] = {
+            fluorophore: fluorophore,
+            calcj_value: well.calcj_value,
+            calcj_object: well.calcj,
+            calcj_object_type: typeof well.calcj,
+            calcj_for_fluorophore: well.calcj?.[fluorophore],
+            has_proper_structure: !!(well.calcj && typeof well.calcj === 'object' && well.calcj[fluorophore] !== undefined)
+        };
+        
+        // Check CQJ structure for comparison
+        cqjStructure[wellKey] = {
+            fluorophore: fluorophore,
+            cqj_value: well.cqj_value,
+            cqj_object: well.cqj,
+            cqj_for_fluorophore: well.cqj?.[fluorophore],
+            has_proper_structure: !!(well.cqj && typeof well.cqj === 'object' && well.cqj[fluorophore] !== undefined)
+        };
+        
+        // Simulate what the table display logic would show
+        const tableCalcJ = (well.calcj && typeof well.calcj === 'object' && fluorophore &&
+            well.calcj[fluorophore] !== undefined && well.calcj[fluorophore] !== null &&
+            !isNaN(well.calcj[fluorophore])) ? Number(well.calcj[fluorophore]) : 'N/A';
+            
+        const tableCQJ = (well.cqj && typeof well.cqj === 'object' && fluorophore &&
+            well.cqj[fluorophore] !== undefined && well.cqj[fluorophore] !== null &&
+            !isNaN(well.cqj[fluorophore])) ? Number(well.cqj[fluorophore]).toFixed(2) : 'N/A';
+        
+        displayData[wellKey] = {
+            fluorophore: fluorophore,
+            will_show_calcj: tableCalcJ,
+            will_show_cqj: tableCQJ
+        };
+    });
+    
+    const summary = {
+        total_wells: wellKeys.length,
+        wells_with_proper_calcj: Object.values(calcjStructure).filter(w => w.has_proper_structure).length,
+        wells_with_proper_cqj: Object.values(cqjStructure).filter(w => w.has_proper_structure).length,
+        fluorophores: [...new Set(wellKeys.map(k => results[k].fluorophore))],
+        fix_working: Object.values(calcjStructure).every(w => w.has_proper_structure)
+    };
+    
+    console.log('📊 MULTICHANNEL CALCJ STRUCTURE ANALYSIS:', {
+        summary: summary,
+        sample_calcj_structure: Object.fromEntries(Object.entries(calcjStructure).slice(0, 3)),
+        sample_display_data: Object.fromEntries(Object.entries(displayData).slice(0, 3))
+    });
+    
+    return {
+        summary: summary,
+        calcj_structure: calcjStructure,
+        cqj_structure: cqjStructure,
+        display_data: displayData
+    };
+};
+
+/**
+ * Enhanced debug function to verify CalcJ is properly structured for multichannel
+ * This confirms the fix for multichannel CalcJ display
+ */
+window.debugMultichannelCalcJFixed = function() {
+    console.log('🔍 DEBUGGING MULTICHANNEL CALCJ STRUCTURE (POST-FIX)');
+    
+    if (!window.currentAnalysisResults?.individual_results) {
+        return {error: "no_analysis_results"};
+    }
+    
+    const results = window.currentAnalysisResults.individual_results;
+    const wellKeys = Object.keys(results);
+    const calcjStructure = {};
+    const cqjStructure = {};
+    const displayData = {};
+    
+    // Analyze structure for each well
+    wellKeys.slice(0, 10).forEach(wellKey => {
+        const well = results[wellKey];
+        const fluorophore = well.fluorophore;
+        
+        // Check CalcJ structure
+        calcjStructure[wellKey] = {
+            fluorophore: fluorophore,
+            calcj_value: well.calcj_value,
+            calcj_object: well.calcj,
+            calcj_object_type: typeof well.calcj,
+            calcj_for_fluorophore: well.calcj?.[fluorophore],
+            has_proper_structure: !!(well.calcj && typeof well.calcj === 'object' && well.calcj[fluorophore] !== undefined)
+        };
+        
+        // Check CQJ structure for comparison
+        cqjStructure[wellKey] = {
+            fluorophore: fluorophore,
+            cqj_value: well.cqj_value,
+            cqj_object: well.cqj,
+            cqj_for_fluorophore: well.cqj?.[fluorophore],
+            has_proper_structure: !!(well.cqj && typeof well.cqj === 'object' && well.cqj[fluorophore] !== undefined)
+        };
+        
+        // Simulate what the table display logic would show
+        const tableCalcJ = (well.calcj && typeof well.calcj === 'object' && fluorophore &&
+            well.calcj[fluorophore] !== undefined && well.calcj[fluorophore] !== null &&
+            !isNaN(well.calcj[fluorophore])) ? Number(well.calcj[fluorophore]) : 'N/A';
+            
+        const tableCQJ = (well.cqj && typeof well.cqj === 'object' && fluorophore &&
+            well.cqj[fluorophore] !== undefined && well.cqj[fluorophore] !== null &&
+            !isNaN(well.cqj[fluorophore])) ? Number(well.cqj[fluorophore]).toFixed(2) : 'N/A';
+        
+        displayData[wellKey] = {
+            fluorophore: fluorophore,
+            will_show_calcj: tableCalcJ,
+            will_show_cqj: tableCQJ
+        };
+    });
+    
+    const summary = {
+        total_wells: wellKeys.length,
+        wells_with_proper_calcj: Object.values(calcjStructure).filter(w => w.has_proper_structure).length,
+        wells_with_proper_cqj: Object.values(cqjStructure).filter(w => w.has_proper_structure).length,
+        fluorophores: [...new Set(wellKeys.map(k => results[k].fluorophore))],
+        fix_working: Object.values(calcjStructure).every(w => w.has_proper_structure)
+    };
+    
+    console.log('📊 MULTICHANNEL CALCJ STRUCTURE ANALYSIS:', {
+        summary: summary,
+        sample_calcj_structure: Object.fromEntries(Object.entries(calcjStructure).slice(0, 3)),
+        sample_display_data: Object.fromEntries(Object.entries(displayData).slice(0, 3))
+    });
+    
+    return {
+        summary: summary,
+        calcj_structure: calcjStructure,
+        cqj_structure: cqjStructure,
+        display_data: displayData
+    };
+};

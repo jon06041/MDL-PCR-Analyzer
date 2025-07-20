@@ -4582,6 +4582,13 @@ async function displayMultiFluorophoreResults(results) {
         }
     }
     
+    // CRITICAL FIX: Recalculate CQJ/CalcJ to ensure proper object structure for multichannel
+    // This ensures CQJ and CalcJ are structured as objects keyed by fluorophore, just like single-channel
+    if (window.recalculateCQJValues) {
+        // console.log('🔄 MULTICHANNEL-FIX - Restructuring CQJ/CalcJ objects for multichannel display');
+        window.recalculateCQJValues();
+    }
+
     // Populate well selector and results table
     // Diagnostic: Check for missing sample names before rendering
     const missingSampleNames = Object.entries(results.individual_results).filter(([key, result]) => !result.sample_name && !result.sample);
