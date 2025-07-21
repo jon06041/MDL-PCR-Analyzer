@@ -101,17 +101,30 @@ class MLFeedbackInterface {
                         </div>
                     </div>
                     
-                    <!-- CQJ/CalcJ Metrics Display -->
-                    <div class="cqj-calcj-metrics" id="cqj-calcj-display" style="display: none;">
-                        <h6>📊 CQJ/CalcJ Metrics</h6>
-                        <div class="metrics-grid">
-                            <div class="metric-item">
-                                <span class="metric-label">CQJ:</span>
-                                <span id="metric-cqj">-</span>
+                    <!-- Visual Curve Analysis Display -->
+                    <div class="visual-curve-analysis" id="visual-curve-display" style="display: none;">
+                        <h6>�️ Visual Curve Analysis</h6>
+                        <div class="visual-metrics-grid">
+                            <div class="visual-metric-item">
+                                <span class="metric-label">Curve Shape:</span>
+                                <span id="curve-shape-assessment">-</span>
                             </div>
-                            <div class="metric-item">
-                                <span class="metric-label">CalcJ:</span>
-                                <span id="metric-calcj">-</span>
+                            <div class="visual-metric-item">
+                                <span class="metric-label">Pattern Type:</span>
+                                <span id="curve-pattern-type">-</span>
+                            </div>
+                            <div class="visual-metric-item">
+                                <span class="metric-label">Visual Quality:</span>
+                                <span id="visual-quality-score">-</span>
+                            </div>
+                            <div class="visual-metric-item">
+                                <span class="metric-label">Similar Patterns:</span>
+                                <span id="similar-patterns-count">-</span>
+                            </div>
+                        </div>
+                        <div class="curve-characteristics">
+                            <div class="characteristic-tags" id="curve-characteristics">
+                                <!-- Dynamic tags for curve characteristics -->
                             </div>
                         </div>
                     </div>
@@ -279,6 +292,385 @@ class MLFeedbackInterface {
         } else {
             this.displayExistingMLClassification(wellData.ml_classification);
         }
+        
+        // Update visual curve analysis
+        this.updateVisualCurveDisplay(wellData);
+    }
+
+    // Visual curve analysis functions
+    analyzeVisualCurvePattern(wellData) {
+        if (!wellData || !wellData.rfu_data || !wellData.cycles) {
+            return {
+                shape: 'Unknown',
+                pattern: 'No Data',
+                quality: 'N/A',
+                characteristics: []
+            };
+        }
+
+        const rfuData = wellData.rfu_data;
+        const cycles = wellData.cycles;
+        const analysis = {
+            shape: this.assessCurveShape(rfuData, wellData),
+            pattern: this.identifyPatternType(rfuData, wellData),
+            quality: this.calculateVisualQuality(rfuData, wellData),
+            characteristics: this.extractCurveCharacteristics(rfuData, wellData)
+        };
+
+        return analysis;
+    }
+
+    assessCurveShape(rfuData, wellData) {
+        const amplitude = wellData.amplitude || 0;
+        const isGoodSCurve = wellData.is_good_scurve;
+        const r2Score = wellData.r2_score || 0;
+        const steepness = wellData.steepness || 0;
+
+        if (!isGoodSCurve) {
+            if (amplitude < 100) return 'Flat/No Rise';
+            if (r2Score < 0.5) return 'Irregular/Noisy';
+            return 'Poor S-Curve';
+        }
+
+        if (steepness > 0.5) return 'Sharp S-Curve';
+        if (steepness > 0.3) return 'Good S-Curve';
+        if (steepness > 0.1) return 'Gradual S-Curve';
+        return 'Weak S-Curve';
+    }
+
+    identifyPatternType(rfuData, wellData) {
+        const amplitude = wellData.amplitude || 0;
+        const snr = wellData.snr || 0;
+        const hasAnomalies = wellData.anomalies && wellData.anomalies.length > 0;
+
+        if (amplitude < 200) return 'Negative/Background';
+        if (hasAnomalies) {
+            const anomalies = wellData.anomalies;
+            if (anomalies.includes('early_plateau')) return 'Early Plateau';
+            if (anomalies.includes('high_noise')) return 'High Noise';
+            if (anomalies.includes('unstable_baseline')) return 'Unstable Baseline';
+            return 'Anomalous';
+        }
+        
+        if (amplitude > 1000 && snr > 15) return 'Strong Positive';
+        if (amplitude > 500 && snr > 8) return 'Clear Positive';
+        if (amplitude > 300 && snr > 4) return 'Weak Positive';
+        return 'Borderline';
+    }
+
+    calculateVisualQuality(rfuData, wellData) {
+        const r2Score = wellData.r2_score || 0;
+        const snr = wellData.snr || 0;
+        const amplitude = wellData.amplitude || 0;
+        
+        let qualityScore = 0;
+        
+        // R² contribution (40%)
+        qualityScore += Math.min(r2Score * 40, 40);
+        
+        // SNR contribution (30%)
+        qualityScore += Math.min((snr / 20) * 30, 30);
+        
+        // Amplitude contribution (30%)
+        qualityScore += Math.min((amplitude / 1000) * 30, 30);
+        
+        if (qualityScore >= 80) return 'Excellent';
+        if (qualityScore >= 60) return 'Good';
+        if (qualityScore >= 40) return 'Fair';
+        if (qualityScore >= 20) return 'Poor';
+        return 'Very Poor';
+    }
+
+    extractCurveCharacteristics(rfuData, wellData) {
+        const characteristics = [];
+        const amplitude = wellData.amplitude || 0;
+        const snr = wellData.snr || 0;
+        const steepness = wellData.steepness || 0;
+        const r2Score = wellData.r2_score || 0;
+
+        // Amplitude characteristics
+        if (amplitude > 1000) characteristics.push('High Amplitude');
+        else if (amplitude > 500) characteristics.push('Medium Amplitude');
+        else if (amplitude > 200) characteristics.push('Low Amplitude');
+        else characteristics.push('Very Low Amplitude');
+
+        // Signal quality characteristics
+        if (snr > 15) characteristics.push('Excellent SNR');
+        else if (snr > 8) characteristics.push('Good SNR');
+        else if (snr > 4) characteristics.push('Fair SNR');
+        else characteristics.push('Poor SNR');
+
+        // Curve steepness
+        if (steepness > 0.5) characteristics.push('Very Steep');
+        else if (steepness > 0.3) characteristics.push('Steep');
+        else if (steepness > 0.1) characteristics.push('Gradual');
+        else characteristics.push('Very Gradual');
+
+        // Fit quality
+        if (r2Score > 0.95) characteristics.push('Perfect Fit');
+        else if (r2Score > 0.9) characteristics.push('Excellent Fit');
+        else if (r2Score > 0.8) characteristics.push('Good Fit');
+        else characteristics.push('Poor Fit');
+
+        return characteristics;
+    }
+
+    // Update the display with visual analysis
+    updateVisualCurveDisplay(wellData) {
+        const analysis = this.analyzeVisualCurvePattern(wellData);
+        
+        // Update visual metrics
+        const shapeElement = document.getElementById('curve-shape-assessment');
+        const patternElement = document.getElementById('curve-pattern-type');
+        const qualityElement = document.getElementById('visual-quality-score');
+        const characteristicsElement = document.getElementById('curve-characteristics');
+
+        if (shapeElement) shapeElement.textContent = analysis.shape;
+        if (patternElement) patternElement.textContent = analysis.pattern;
+        if (qualityElement) qualityElement.textContent = analysis.quality;
+        
+        // Update characteristics tags
+        if (characteristicsElement) {
+            characteristicsElement.innerHTML = analysis.characteristics
+                .map(char => `<span class="characteristic-tag">${char}</span>`)
+                .join('');
+        }
+
+        // Show the visual analysis section
+        const visualDisplay = document.getElementById('visual-curve-display');
+        if (visualDisplay) {
+            visualDisplay.style.display = 'block';
+        }
+    }
+
+    // ===== ENHANCED HYBRID FEATURE EXTRACTION =====
+    // Combines numerical and visual features for ML training
+    
+    extractHybridFeatures(wellData) {
+        if (!wellData || !wellData.rfu_data || !wellData.cycles) {
+            return null;
+        }
+
+        // Get existing 18 numerical features
+        const numericalFeatures = this.extractNumericalFeatures(wellData);
+        
+        // Extract 12 new visual pattern features
+        const visualFeatures = this.extractVisualPatternFeatures(wellData.rfu_data, wellData.cycles, wellData);
+        
+        // Combine into 30-feature vector
+        return {
+            ...numericalFeatures,
+            ...visualFeatures,
+            feature_count: 30,
+            extraction_method: 'hybrid_numerical_visual'
+        };
+    }
+
+    extractNumericalFeatures(wellData) {
+        return {
+            amplitude: wellData.amplitude || 0,
+            r2_score: wellData.r2_score || 0,
+            steepness: wellData.steepness || 0,
+            snr: wellData.snr || 0,
+            midpoint: wellData.midpoint || 0,
+            baseline: wellData.baseline || 0,
+            cq_value: wellData.cq_value || 0,
+            cqj: wellData.cqj || 0,
+            calcj: wellData.calcj || 0,
+            rmse: wellData.rmse || 0,
+            min_rfu: Math.min(...(wellData.rfu_data || [0])),
+            max_rfu: Math.max(...(wellData.rfu_data || [0])),
+            mean_rfu: (wellData.rfu_data || []).reduce((a, b) => a + b, 0) / (wellData.rfu_data || []).length || 0,
+            std_rfu: this.calculateStandardDeviation(wellData.rfu_data || []),
+            min_cycle: Math.min(...(wellData.cycles || [0])),
+            max_cycle: Math.max(...(wellData.cycles || [0])),
+            dynamic_range: (Math.max(...(wellData.rfu_data || [0])) - Math.min(...(wellData.rfu_data || [0]))),
+            efficiency: wellData.efficiency || 0
+        };
+    }
+
+    extractVisualPatternFeatures(rfuData, cycles, wellData) {
+        return {
+            // Shape classification (0-4: flat, linear, s-curve, exponential, irregular)
+            shape_class: this.classifyCurveShape(rfuData, cycles, wellData),
+            
+            // Baseline analysis
+            baseline_stability: this.calculateBaselineStability(rfuData),
+            
+            // Exponential phase quality
+            exponential_sharpness: this.calculateExponentialSharpness(rfuData, cycles),
+            
+            // Plateau characteristics
+            plateau_quality: this.calculatePlateauQuality(rfuData),
+            
+            // Curve geometry
+            curve_symmetry: this.calculateCurveSymmetry(rfuData, cycles),
+            
+            // Noise analysis
+            noise_pattern: this.analyzeNoisePattern(rfuData),
+            
+            // Trend consistency
+            trend_consistency: this.calculateTrendConsistency(rfuData),
+            
+            // Anomaly detection
+            spike_detection: this.detectSpikes(rfuData),
+            oscillation_pattern: this.detectOscillations(rfuData),
+            dropout_detection: this.detectDropouts(rfuData),
+            
+            // Comparative analysis
+            relative_amplitude: this.calculateRelativeAmplitude(rfuData, wellData),
+            background_separation: this.calculateBackgroundSeparation(rfuData)
+        };
+    }
+
+    // ===== VISUAL PATTERN DETECTION FUNCTIONS =====
+
+    classifyCurveShape(rfuData, cycles, wellData) {
+        const totalRange = Math.max(...rfuData) - Math.min(...rfuData);
+        
+        if (totalRange < 50) return 0; // Flat
+        
+        const isGoodSCurve = wellData.is_good_scurve;
+        const r2Score = wellData.r2_score || 0;
+        
+        if (isGoodSCurve && r2Score > 0.9) return 2; // S-curve
+        if (this.isLinearIncrease(rfuData)) return 1; // Linear
+        if (this.isExponentialOnly(rfuData)) return 3; // Exponential
+        return 4; // Irregular
+    }
+
+    calculateBaselineStability(rfuData) {
+        const baselineLength = Math.min(10, Math.floor(rfuData.length * 0.25));
+        const baseline = rfuData.slice(0, baselineLength);
+        const mean = baseline.reduce((a, b) => a + b) / baseline.length;
+        const variance = baseline.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / baseline.length;
+        return Math.sqrt(variance) / mean; // Coefficient of variation
+    }
+
+    calculateExponentialSharpness(rfuData, cycles) {
+        // Find the steepest section (exponential phase)
+        const derivatives = [];
+        for (let i = 1; i < rfuData.length; i++) {
+            derivatives.push((rfuData[i] - rfuData[i-1]) / (cycles[i] - cycles[i-1]));
+        }
+        return Math.max(...derivatives) / (Math.max(...rfuData) - Math.min(...rfuData));
+    }
+
+    calculatePlateauQuality(rfuData) {
+        const plateauLength = Math.min(10, Math.floor(rfuData.length * 0.25));
+        const plateau = rfuData.slice(-plateauLength);
+        const plateauStd = this.calculateStandardDeviation(plateau);
+        const plateauMean = plateau.reduce((a, b) => a + b) / plateau.length;
+        return 1 - (plateauStd / plateauMean); // Higher is better
+    }
+
+    calculateCurveSymmetry(rfuData, cycles) {
+        // Measure how symmetric the S-curve is around its midpoint
+        const midIndex = Math.floor(rfuData.length / 2);
+        const leftHalf = rfuData.slice(0, midIndex);
+        const rightHalf = rfuData.slice(midIndex).reverse();
+        
+        let correlation = 0;
+        const minLength = Math.min(leftHalf.length, rightHalf.length);
+        
+        for (let i = 0; i < minLength; i++) {
+            correlation += Math.abs(leftHalf[i] - rightHalf[i]);
+        }
+        
+        return 1 - (correlation / (minLength * Math.max(...rfuData)));
+    }
+
+    analyzeNoisePattern(rfuData) {
+        const derivatives = [];
+        for (let i = 1; i < rfuData.length; i++) {
+            derivatives.push(Math.abs(rfuData[i] - rfuData[i-1]));
+        }
+        const noiseLevel = this.calculateStandardDeviation(derivatives);
+        const signalRange = Math.max(...rfuData) - Math.min(...rfuData);
+        return noiseLevel / signalRange; // Lower is better
+    }
+
+    calculateTrendConsistency(rfuData) {
+        let consistentDirections = 0;
+        for (let i = 2; i < rfuData.length; i++) {
+            const dir1 = rfuData[i-1] - rfuData[i-2];
+            const dir2 = rfuData[i] - rfuData[i-1];
+            if ((dir1 >= 0 && dir2 >= 0) || (dir1 < 0 && dir2 < 0)) {
+                consistentDirections++;
+            }
+        }
+        return consistentDirections / (rfuData.length - 2);
+    }
+
+    detectSpikes(rfuData) {
+        const derivatives = [];
+        for (let i = 1; i < rfuData.length; i++) {
+            derivatives.push(Math.abs(rfuData[i] - rfuData[i-1]));
+        }
+        const threshold = 3 * this.calculateStandardDeviation(derivatives);
+        return derivatives.filter(d => d > threshold).length;
+    }
+
+    detectOscillations(rfuData) {
+        let oscillations = 0;
+        let lastDirection = 0;
+        let directionChanges = 0;
+        
+        for (let i = 1; i < rfuData.length; i++) {
+            const currentDirection = rfuData[i] > rfuData[i-1] ? 1 : -1;
+            if (lastDirection !== 0 && currentDirection !== lastDirection) {
+                directionChanges++;
+            }
+            lastDirection = currentDirection;
+        }
+        
+        return directionChanges / rfuData.length;
+    }
+
+    detectDropouts(rfuData) {
+        return rfuData.filter(val => isNaN(val) || val === null || val === undefined).length;
+    }
+
+    calculateRelativeAmplitude(rfuData, wellData) {
+        const amplitude = wellData.amplitude || 0;
+        // This would ideally compare to other wells in the same plate
+        // For now, return normalized amplitude
+        return Math.min(amplitude / 1000, 1.0);
+    }
+
+    calculateBackgroundSeparation(rfuData) {
+        const baseline = Math.min(...rfuData);
+        const peak = Math.max(...rfuData);
+        const separation = peak - baseline;
+        return Math.min(separation / 1000, 1.0);
+    }
+
+    // ===== HELPER FUNCTIONS =====
+
+    isLinearIncrease(rfuData) {
+        const firstThird = rfuData.slice(0, Math.floor(rfuData.length / 3));
+        const lastThird = rfuData.slice(-Math.floor(rfuData.length / 3));
+        const avgFirst = firstThird.reduce((a, b) => a + b) / firstThird.length;
+        const avgLast = lastThird.reduce((a, b) => a + b) / lastThird.length;
+        return (avgLast - avgFirst) > 100 && (avgLast - avgFirst) < 500;
+    }
+
+    isExponentialOnly(rfuData) {
+        // Check if curve has exponential growth without plateau
+        const lastQuarter = rfuData.slice(-Math.floor(rfuData.length / 4));
+        const secondLastQuarter = rfuData.slice(-Math.floor(rfuData.length / 2), -Math.floor(rfuData.length / 4));
+        
+        const lastAvg = lastQuarter.reduce((a, b) => a + b) / lastQuarter.length;
+        const secondLastAvg = secondLastQuarter.reduce((a, b) => a + b) / secondLastQuarter.length;
+        
+        return (lastAvg - secondLastAvg) > 50; // Still growing at the end
+    }
+
+    calculateStandardDeviation(values) {
+        if (values.length === 0) return 0;
+        const mean = values.reduce((a, b) => a + b) / values.length;
+        const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
+        return Math.sqrt(variance);
     }
 
     displayExistingMLClassification(mlClassification) {
@@ -1186,6 +1578,93 @@ class MLFeedbackInterface {
                     transform: translateY(0);
                     opacity: 1;
                 }
+            }
+        `;
+        
+        document.head.appendChild(styles);
+    }
+
+    addVisualAnalysisStyles() {
+        // Add visual analysis styles only once
+        if (document.getElementById('visual-analysis-styles')) {
+            return;
+        }
+        
+        const styles = document.createElement('style');
+        styles.id = 'visual-analysis-styles';
+        styles.textContent = `
+            .visual-curve-analysis {
+                background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+                border: 1px solid #dee2e6;
+                border-radius: 8px;
+                padding: 12px;
+                margin: 8px 0;
+            }
+            
+            .visual-curve-analysis h6 {
+                margin: 0 0 8px 0;
+                font-size: 14px;
+                font-weight: 600;
+                color: #495057;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            }
+            
+            .visual-metrics-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 8px;
+                margin-bottom: 10px;
+            }
+            
+            .visual-metric-item {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                font-size: 12px;
+                padding: 4px 0;
+            }
+            
+            .visual-metric-item .metric-label {
+                font-weight: 500;
+                color: #6c757d;
+            }
+            
+            .curve-characteristics {
+                border-top: 1px solid #dee2e6;
+                padding-top: 8px;
+                margin-top: 8px;
+            }
+            
+            .characteristic-tags {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 4px;
+            }
+            
+            .characteristic-tag {
+                display: inline-block;
+                padding: 2px 6px;
+                background: #007bff;
+                color: white;
+                border-radius: 12px;
+                font-size: 10px;
+                font-weight: 500;
+                white-space: nowrap;
+            }
+            
+            .characteristic-tag:nth-child(odd) {
+                background: #28a745;
+            }
+            
+            .characteristic-tag:nth-child(3n) {
+                background: #ffc107;
+                color: #212529;
+            }
+            
+            .characteristic-tag:nth-child(4n) {
+                background: #17a2b8;
             }
         `;
         
