@@ -903,6 +903,19 @@ body {
     font-size: 0.8rem;
 }
 
+/* ML Classification Specific Styles */
+.modal-parameter-item.ml-classification-section {
+    border-left: 3px solid #8e44ad;
+    background: linear-gradient(135deg, #f8f4ff, #ffffff);
+    margin-top: 8px;
+}
+
+.ml-classification-value {
+    font-weight: 600;
+    color: #8e44ad;
+    text-transform: capitalize;
+}
+
 .modal-result-badge {
     padding: 4px 12px;
     border-radius: 15px;
@@ -3537,4 +3550,241 @@ tr:hover::before {
 
 .emergency-reset-btn.reset-complete {
     animation: resetSuccess 1s ease-in-out;
+}
+
+/* ML Feedback Interface Styles */
+.ml-feedback-container {
+    margin: 15px 0;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 10px;
+    border: 1px solid #e9ecef;
+    border-left: 4px solid #007bff;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.ml-section h4 {
+    color: #2c3e50;
+    margin-bottom: 15px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ml-prediction {
+    background: white;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    border: 1px solid #dee2e6;
+}
+
+.prediction-info {
+    margin-bottom: 15px;
+}
+
+.prediction-result {
+    margin-bottom: 8px;
+}
+
+.classification-badge {
+    padding: 4px 12px;
+    border-radius: 15px;
+    font-weight: bold;
+    font-size: 0.9em;
+    margin-left: 8px;
+}
+
+.classification-badge.strong-positive { background: #d4edda; color: #155724; }
+.classification-badge.positive { background: #d1ecf1; color: #0c5460; }
+.classification-badge.weak-positive { background: #fff3cd; color: #856404; }
+.classification-badge.indeterminate { background: #f8d7da; color: #721c24; }
+.classification-badge.negative { background: #e2e3e5; color: #383d41; }
+.classification-badge.suspicious { background: #ffeaa7; color: #d63031; }
+
+.confidence-score {
+    font-size: 0.9em;
+    color: #6c757d;
+    margin-left: 5px;
+}
+
+.pathogen-context {
+    margin-top: 8px;
+    font-style: italic;
+    color: #6c757d;
+}
+
+.cqj-calcj-metrics {
+    margin-top: 15px;
+    padding: 10px;
+    background: #f1f3f4;
+    border-radius: 6px;
+}
+
+.cqj-calcj-metrics h6 {
+    margin-bottom: 10px;
+    color: #495057;
+}
+
+.metrics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.metric-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 0;
+}
+
+.metric-label {
+    font-weight: 600;
+    color: #495057;
+}
+
+.ml-actions {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+}
+
+.ml-btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.9em;
+}
+
+.ml-btn.primary {
+    background: #007bff;
+    color: white;
+}
+
+.ml-btn.primary:hover {
+    background: #0056b3;
+}
+
+.ml-btn.secondary {
+    background: #6c757d;
+    color: white;
+}
+
+.ml-btn.secondary:hover {
+    background: #545b62;
+}
+
+.ml-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.ml-feedback-form {
+    background: white;
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+    margin-bottom: 15px;
+}
+
+.ml-feedback-form h5 {
+    color: #2c3e50;
+    margin-bottom: 15px;
+}
+
+.classification-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 10px;
+    margin: 15px 0;
+}
+
+.classification-option {
+    display: flex;
+    align-items: center;
+    padding: 10px;
+    border: 2px solid #e9ecef;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.classification-option:hover {
+    border-color: #007bff;
+    background: #f8f9fa;
+}
+
+.classification-option input[type="radio"] {
+    margin-right: 8px;
+}
+
+.classification-option input[type="radio"]:checked + .classification-label {
+    font-weight: bold;
+}
+
+.classification-label {
+    font-size: 0.9em;
+}
+
+.classification-label.strong-positive { color: #155724; }
+.classification-label.positive { color: #0c5460; }
+.classification-label.weak-positive { color: #856404; }
+.classification-label.indeterminate { color: #721c24; }
+.classification-label.negative { color: #383d41; }
+.classification-label.suspicious { color: #d63031; }
+
+.feedback-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.ml-stats {
+    background: white;
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+}
+
+.ml-stats h5 {
+    color: #2c3e50;
+    margin-bottom: 15px;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 10px;
+}
+
+.stat-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+}
+
+.stat-label {
+    font-weight: 600;
+    color: #495057;
+}
+
+.status-good {
+    color: #28a745;
+    font-weight: bold;
+}
+
+.status-warning {
+    color: #ffc107;
+    font-weight: bold;
+}
+
+.status-info {
+    color: #17a2b8;
+    font-weight: bold;
 }

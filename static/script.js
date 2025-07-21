@@ -2286,12 +2286,16 @@ document.addEventListener('DOMContentLoaded', function() {
     if (fluorophoreSelect) fluorophoreSelect.value = 'all';
 });
 
-// Patch chart update functions to always re-enable features
+// Patch chart update functions to always re-enable features and trigger ML updates
 const _originalUpdateChartThresholds = window.updateChartThresholds;
 if (typeof _originalUpdateChartThresholds === 'function') {
     const patchedFunction = function() {
         _originalUpdateChartThresholds.apply(this, arguments);
         // enableDraggableThresholds(); // DISABLED - Will use test.html implementation
+        
+        // Note: Only trigger ML re-classification for actual threshold value changes
+        // Scale changes, display updates, etc. should not trigger ML re-classification
+        // ML triggers should come from specific threshold modification events in modal
     };
     window.updateChartThresholds = patchedFunction;
 } else {
@@ -2534,6 +2538,9 @@ function onSliderChange(e) {
         
         // console.log(`🔍 SLIDER - Updated ${currentScaleMode} scale view with multiplier: ${currentScaleMultiplier}x`);
     }
+    
+    // Note: Main chart slider only affects display scale, not thresholds
+    // ML re-classification should only be triggered by actual threshold changes in modal
 }
 
 function onPresetClick(e) {
@@ -2631,6 +2638,9 @@ function onScaleToggle() {
         // console.log(`🔍 TOGGLE - Updating all threshold lines for ${newScale} scale`);
         window.updateAllChannelThresholds();
     }
+    
+    // Note: Main chart scale toggle only affects display mode, not thresholds  
+    // ML re-classification should only be triggered by actual threshold changes in modal
     
     // console.log(`🔍 TOGGLE - Switched to ${newScale} scale via state management`);
 }
@@ -4280,6 +4290,18 @@ async function displayAnalysisResults(results) {
     // Ensure global is set before any UI/chart calls
     window.currentAnalysisResults = results;
     
+    // Check for automatic ML analysis (for future runs with trained models)
+    if (window.mlFeedbackInterface && results && results.individual_results) {
+        // Small delay to allow analysis results to be fully processed
+        setTimeout(async () => {
+            try {
+                await window.mlFeedbackInterface.checkForAutomaticMLAnalysis();
+            } catch (error) {
+                console.log('ML automatic analysis check failed:', error);
+            }
+        }, 2000);
+    }
+    
     // IMMEDIATE: Initialize thresholds as soon as analysis results are available
     if (window.initializeChannelThresholds) {
         // console.log('🔍 THRESHOLD-INIT - Initializing thresholds immediately after setting analysis results');
@@ -4451,6 +4473,18 @@ async function displayAnalysisResults(results) {
 
     // Mark this as fresh analysis to ensure validation display shows
     currentAnalysisResults.freshAnalysis = true;
+
+    // Check for automatic ML analysis for loaded sessions too
+    if (window.mlFeedbackInterface && results && results.individual_results) {
+        // Small delay to allow session to be fully processed
+        setTimeout(async () => {
+            try {
+                await window.mlFeedbackInterface.checkForAutomaticMLAnalysis();
+            } catch (error) {
+                console.log('ML automatic analysis check failed for loaded session:', error);
+            }
+        }, 3000);
+    }
 
     // Update pathogen channel validation status for fresh analysis
     await updatePathogenChannelStatusInBreakdown();
@@ -5267,6 +5301,164 @@ function populateWellSelector(individualResults) {
     if (showAllBtn) showAllBtn.classList.add('active');
 }
 
+// Automatically enhance all results with ML classification (curve-focused, change-responsive)
+async function enhanceResultsWithMLClassification(individualResults, force = false) {
+    if (!individualResults || typeof individualResults !== 'object') {
+        return;
+    }
+
+    const resultsKeys = Object.keys(individualResults);
+    if (resultsKeys.length === 0) return;
+    
+    // Skip if already processed and not forced (force = true for parameter changes)
+    if (!force) {
+        const hasMLClassification = resultsKeys.some(key => 
+            individualResults[key].ml_classification
+        );
+        
+        if (hasMLClassification) {
+            console.log('ML classification already exists, skipping enhancement');
+            return;
+        }
+    }
+
+    // Run ML enhancement in background without blocking UI
+    setTimeout(async () => {
+        try {
+            console.log('Starting ML curve-based enhancement for', resultsKeys.length, 'wells', force ? '(forced update)' : '');
+            
+            // Process each well for ML classification
+            for (const [wellKey, result] of Object.entries(individualResults)) {
+                try {
+                    // Prepare well data for pathogen detection
+                    const wellData = {
+                        well: result.well_id || wellKey.split('_')[0],
+                        target: result.target || '',
+                        sample: result.sample || result.sample_name || '',
+                        classification: result.classification || 'UNKNOWN'
+                    };
+
+                    // Call ML API for classification
+                    const response = await fetch('/api/ml-analyze-curve', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            rfu_data: result.raw_rfu,
+                            cycles: result.raw_cycles,
+                            well_data: wellData,
+                            existing_metrics: {
+                                r2: result.r2_score || 0,
+                                steepness: result.steepness || 0,
+                                snr: result.snr || 0,
+                                midpoint: result.midpoint || 0,
+                                baseline: result.baseline || 0,
+                                amplitude: result.amplitude || 0,
+                                classification: result.classification || 'UNKNOWN'
+                            }
+                        })
+                    });
+
+                    if (response.ok) {
+                        const mlResult = await response.json();
+                        if (mlResult.success && mlResult.prediction) {
+                            // Add ML classification to the result
+                            result.ml_classification = {
+                                classification: mlResult.prediction.classification,
+                                confidence: mlResult.prediction.confidence,
+                                method: mlResult.prediction.method,
+                                pathogen: mlResult.prediction.pathogen,
+                                cqj_calcj_metrics: mlResult.prediction.cqj_calcj_metrics
+                            };
+                            
+                            // Update the curve class cell in the table if it exists
+                            updateCurveClassCell(wellKey, mlResult.prediction);
+                        }
+                    }
+                } catch (error) {
+                    console.log(`ML classification failed for ${wellKey}:`, error.message);
+                    // Continue with other wells even if one fails
+                }
+            }
+            console.log('ML enhancement completed');
+        } catch (error) {
+            console.log('ML enhancement batch failed:', error.message);
+        }
+    }, 100); // Small delay to ensure UI rendering completes first
+}
+
+// Helper function to update curve class cell with ML results
+function updateCurveClassCell(wellKey, mlPrediction) {
+    try {
+        // Find the table row for this well
+        const rows = document.querySelectorAll('#resultsTableBody tr[data-well-key="' + wellKey + '"]');
+        if (rows.length > 0) {
+            const row = rows[0];
+            const curveClassCell = row.cells[4]; // Curve Class column is index 4
+            
+            if (curveClassCell && mlPrediction) {
+                const classMap = {
+                    'STRONG_POSITIVE': 'curve-strong-pos',
+                    'POSITIVE': 'curve-pos', 
+                    'WEAK_POSITIVE': 'curve-weak-pos',
+                    'NEGATIVE': 'curve-neg',
+                    'INDETERMINATE': 'curve-indet',
+                    'SUSPICIOUS': 'curve-suspicious'
+                };
+                
+                const badgeClass = classMap[mlPrediction.classification] || 'curve-other';
+                const confidence = (mlPrediction.confidence * 100).toFixed(1);
+                const pathogenText = mlPrediction.pathogen ? ` (${mlPrediction.pathogen})` : '';
+                
+                curveClassCell.innerHTML = `<span class="curve-badge ${badgeClass}" title="ML: ${confidence}% confidence${pathogenText}">${mlPrediction.classification.replace('_', ' ')}</span>`;
+            }
+        }
+    } catch (error) {
+        console.log('Failed to update curve class cell:', error.message);
+    }
+}
+
+// Trigger ML re-classification when parameters change (curve-focused)
+// NOTE: ML re-classification is now triggered ONLY by actual threshold VALUE changes
+// that happen in the modal (via setChannelThreshold in threshold_frontend.js).
+// Main chart scale/slider changes do NOT trigger ML updates as they only affect display.
+function triggerMLReClassification(reason = 'parameter change') {
+    if (!currentAnalysisResults || !currentAnalysisResults.individual_results) {
+        return;
+    }
+    
+    console.log('Triggering ML re-classification due to:', reason);
+    
+    // Force re-classification with current analysis results
+    enhanceResultsWithMLClassification(currentAnalysisResults.individual_results, true);
+}
+
+// Hook into threshold value changes to trigger ML updates (ONLY for actual threshold value changes)
+function onThresholdChange(channel, scale, value) {
+    // Update thresholds first
+    if (typeof updateChartThresholds === 'function') {
+        updateChartThresholds();
+    }
+    
+    // Trigger ML re-classification after actual threshold value change
+    setTimeout(() => {
+        triggerMLReClassification(`threshold value change: ${channel} ${scale} = ${value}`);
+    }, 500); // Small delay to allow threshold processing to complete
+}
+
+// Expose onThresholdChange globally for threshold_frontend.js
+window.onThresholdChange = onThresholdChange;
+
+// Hook into scale changes to trigger ML updates (only for threshold-affecting changes)
+function onScaleChange(newScale) {
+    // Note: This should only be called when scale changes affect actual threshold values,
+    // not when scale toggle affects display mode only
+    setTimeout(() => {
+        triggerMLReClassification(`threshold scale change: ${newScale}`);
+    }, 300);
+}
+
 function populateResultsTable(individualResults) {
     try {
         // console.log('🔍 TABLE-DEBUG - Populating results table with:', {
@@ -5539,6 +5731,11 @@ function populateResultsTable(individualResults) {
         if (typeof filterTable === 'function') {
             filterTable();
         }
+        
+        // Start ML enhancement in background after table is populated
+        enhanceResultsWithMLClassification(individualResults).catch(error => {
+            console.log('ML enhancement failed (non-blocking):', error.message);
+        });
     
 
     } catch (mainError) {
@@ -5590,6 +5787,19 @@ function showWellDetails(wellKey) {
         filteredSamplesHtml = generateFilteredSamplesHtml(effectiveFilterMode);
     }
     
+    // Get ML classification if available
+    const mlClassification = wellResult.ml_classification;
+    let mlClassificationHtml = '';
+    if (mlClassification) {
+        const confidence = (mlClassification.confidence * 100).toFixed(1);
+        const pathogenText = mlClassification.pathogen ? ` (${mlClassification.pathogen})` : '';
+        mlClassificationHtml = `
+            <div class="metric">
+                <span class="metric-label">ML Classification:</span>
+                <span class="metric-value">${mlClassification.classification.replace('_', ' ')} (${confidence}% confidence${pathogenText})</span>
+            </div>`;
+    }
+    
     const detailsHtml = `
         <h3>${wellId}: ${sampleName} (${fluorophore})</h3>
         <div class="quality-status ${wellResult.is_good_scurve ? 'good' : 'poor'}">
@@ -5616,11 +5826,17 @@ function showWellDetails(wellKey) {
                 <span class="metric-label">Curve Classification:</span>
                 <span class="metric-value">${wellResult.curve_classification && (wellResult.curve_classification.classification || wellResult.curve_classification.type) ? (wellResult.curve_classification.classification || wellResult.curve_classification.type) : (typeof wellResult.curve_classification === 'string' ? wellResult.curve_classification : 'N/A')}</span>
             </div>
+            ${mlClassificationHtml}
         </div>
         ${filteredSamplesHtml}
     `;
     
     document.getElementById('curveDetails').innerHTML = detailsHtml;
+    
+    // Notify ML feedback interface about the selected well
+    if (window.mlFeedbackInterface) {
+        window.mlFeedbackInterface.setCurrentWell(wellKey, wellResult);
+    }
 }
 
 function updateSelectedCurveDetails() {
@@ -12293,12 +12509,27 @@ function updateModalDetails(wellResult) {
     const testCode = extractTestCode(experimentPattern);
     const pathogenTarget = getPathogenTarget(testCode, fluorophore);
     
+    // Create automatic pathogen detection display
+    let pathogenDisplayText = '';
+    let pathogenDisplayClass = '';
+    
+    if (pathogenTarget && pathogenTarget !== 'Unknown' && pathogenTarget !== fluorophore) {
+        // Specific pathogen detected
+        pathogenDisplayText = `🔬 Detected: ${pathogenTarget} in ${fluorophore} channel`;
+        pathogenDisplayClass = 'pathogen-detected';
+    } else {
+        // No specific pathogen mapping available
+        pathogenDisplayText = `📡 Channel: ${fluorophore} (Pathogen mapping not available)`;
+        pathogenDisplayClass = 'pathogen-unknown';
+    }
+    
     // console.log('Modal details debug:', {
         // wellId,
         // fluorophore,
         // testCode,
         // pathogenTarget,
-        // experimentPattern
+        // experimentPattern,
+        // pathogenDisplayText
     // });
     
     // Determine result classification
@@ -12321,13 +12552,19 @@ function updateModalDetails(wellResult) {
     // POS/NEG/REDO strict criteria (match table):
     const isGoodSCurve = wellResult.is_good_scurve || false;
     const cqValue = wellResult.cq_value;
-    if (amplitude < 400 || !isGoodSCurve || isNaN(Number(cqValue))) {
-        resultClass = 'modal-result-neg';
-        resultText = 'NEG';
-    } else if (isGoodSCurve && amplitude > 500 && !hasAnomalies) {
+    
+    // Check for POS first (all criteria must be met)
+    if (isGoodSCurve && amplitude >= 400 && !hasAnomalies && !isNaN(Number(cqValue))) {
         resultClass = 'modal-result-pos';
         resultText = 'POS';
-    } else {
+    } 
+    // Check for NEG (fails amplitude or other critical criteria)
+    else if (amplitude < 400 || !isGoodSCurve || isNaN(Number(cqValue))) {
+        resultClass = 'modal-result-neg';
+        resultText = 'NEG';
+    } 
+    // Everything else is REDO
+    else {
         resultClass = 'modal-result-redo';
         resultText = 'REDO';
     }
@@ -12379,8 +12616,43 @@ function updateModalDetails(wellResult) {
                 <span class="modal-parameter-label">Cq Value:</span>
                 <span class="modal-parameter-value">${wellResult.cq_value ? wellResult.cq_value.toFixed(2) : 'N/A'}</span>
             </div>
+            <div class="modal-parameter-item">
+                <span class="modal-parameter-label">CQJ:</span>
+                <span class="modal-parameter-value">${wellResult.cqj && wellResult.cqj[fluorophore] ? wellResult.cqj[fluorophore].toFixed(2) : 'N/A'}</span>
+            </div>
+            <div class="modal-parameter-item">
+                <span class="modal-parameter-label">CalcJ:</span>
+                <span class="modal-parameter-value">${wellResult.calcj && wellResult.calcj[fluorophore] ? wellResult.calcj[fluorophore].toExponential(2) : (wellResult.calcj_value && !isNaN(Number(wellResult.calcj_value)) ? Number(wellResult.calcj_value).toExponential(2) : 'N/A')}</span>
+            </div>
         </div>
     `;
+    
+    // Update ML feedback interface with current well data
+    if (window.mlFeedbackInterface) {
+        // Prepare well data for ML interface
+        const mlWellData = {
+            well_id: wellId,
+            target: pathogenTarget,
+            sample: sampleName,
+            sample_name: sampleName,
+            classification: resultText,
+            raw_rfu: wellResult.raw_rfu,
+            raw_cycles: wellResult.raw_cycles,
+            r2_score: wellResult.r2_score || 0,
+            steepness: wellResult.steepness || 0,
+            snr: wellResult.snr || 0,
+            midpoint: wellResult.midpoint || 0,
+            baseline: wellResult.baseline || 0,
+            amplitude: amplitude,
+            fluorophore: fluorophore,
+            cqj: wellResult.cqj && wellResult.cqj[fluorophore] ? wellResult.cqj[fluorophore] : 0,
+            calcj: wellResult.calcj && wellResult.calcj[fluorophore] ? wellResult.calcj[fluorophore] : (wellResult.calcj_value ? Number(wellResult.calcj_value) : 0),
+            ml_classification: wellResult.ml_classification
+        };
+        
+        // Use the correct method name and pass wellKey as first parameter
+        window.mlFeedbackInterface.setCurrentWell(window.currentModalWellKey || wellKey, mlWellData);
+    }
 }
 
 function createModalChart(wellKey, wellData) {

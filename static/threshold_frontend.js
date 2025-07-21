@@ -245,6 +245,11 @@ function setChannelThreshold(channel, scale, value) {
     if (!window.stableChannelThresholds[channel]) {
         window.stableChannelThresholds[channel] = {};
     }
+    
+    // Check if value actually changed to avoid unnecessary ML triggers
+    const previousValue = window.stableChannelThresholds[channel][scale];
+    const hasChanged = previousValue !== value;
+    
     window.stableChannelThresholds[channel][scale] = value;
     
     // Also update the legacy system for compatibility
@@ -254,6 +259,11 @@ function setChannelThreshold(channel, scale, value) {
     // Persist both systems in sessionStorage
     safeSetItem(sessionStorage, 'stableChannelThresholds', JSON.stringify(window.stableChannelThresholds));
     safeSetItem(sessionStorage, 'channelThresholds', JSON.stringify(channelThresholds));
+    
+    // Trigger ML re-classification only when threshold value actually changes
+    if (hasChanged && typeof window.onThresholdChange === 'function') {
+        window.onThresholdChange(channel, scale, value);
+    }
 }
 function getChannelThreshold(channel, scale) {
       if (channelThresholds[channel] && channelThresholds[channel][scale] != null) {

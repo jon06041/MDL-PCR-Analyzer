@@ -1548,6 +1548,121 @@ def simple_delete_session(session_id):
         print(f"[SIMPLE DELETE ERROR] {e}")
         return jsonify({'error': f'Simple delete failed: {str(e)}'}), 500
 
+# ===== ML CURVE CLASSIFIER ENDPOINTS =====
+
+try:
+    from ml_curve_classifier import ml_classifier
+    ML_AVAILABLE = True
+except ImportError:
+    print("ML classifier not available - scikit-learn may not be installed")
+    ML_AVAILABLE = False
+    ml_classifier = None
+
+@app.route('/api/ml-analyze-curve', methods=['POST'])
+def ml_analyze_curve():
+    """Get ML analysis and prediction for a curve"""
+    if not ML_AVAILABLE:
+        return jsonify({'error': 'ML classifier not available'}), 503
+    
+    try:
+        data = request.json
+        rfu_data = data.get('rfu_data', [])
+        cycles = data.get('cycles', [])
+        existing_metrics = data.get('existing_metrics', {})
+        well_data = data.get('well_data', {})
+        
+        # Extract pathogen information from well data
+        from ml_curve_classifier import extract_pathogen_from_well_data
+        pathogen = extract_pathogen_from_well_data(well_data)
+        
+        # Get ML prediction with pathogen context
+        prediction = ml_classifier.predict_classification(rfu_data, cycles, existing_metrics, pathogen)
+        
+        return jsonify({
+            'success': True,
+            'prediction': prediction,
+            'pathogen': pathogen,
+            'model_stats': ml_classifier.get_model_stats()
+        })
+        
+    except Exception as e:
+        print(f"ML analysis error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-submit-feedback', methods=['POST'])
+def ml_submit_feedback():
+    """Submit expert feedback for ML training"""
+    if not ML_AVAILABLE:
+        return jsonify({'error': 'ML classifier not available'}), 503
+    
+    try:
+        data = request.json
+        rfu_data = data.get('rfu_data', [])
+        cycles = data.get('cycles', [])
+        existing_metrics = data.get('existing_metrics', {})
+        expert_classification = data.get('expert_classification')
+        well_id = data.get('well_id', 'unknown')
+        well_data = data.get('well_data', {})
+        
+        # Extract pathogen information from well data
+        from ml_curve_classifier import extract_pathogen_from_well_data
+        pathogen = extract_pathogen_from_well_data(well_data)
+        
+        # Add training sample with pathogen context
+        ml_classifier.add_training_sample(
+            rfu_data, cycles, existing_metrics, 
+            expert_classification, well_id, pathogen
+        )
+        
+        return jsonify({
+            'success': True,
+            'message': 'Feedback submitted successfully',
+            'pathogen': pathogen,
+            'training_samples': len(ml_classifier.training_data)
+        })
+        
+    except Exception as e:
+        print(f"ML feedback error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-retrain', methods=['POST'])
+def ml_retrain():
+    """Manually trigger ML model retraining"""
+    if not ML_AVAILABLE:
+        return jsonify({'error': 'ML classifier not available'}), 503
+    
+    try:
+        success = ml_classifier.retrain_model()
+        
+        return jsonify({
+            'success': success,
+            'model_stats': ml_classifier.get_model_stats(),
+            'message': 'Model retrained successfully' if success else 'Insufficient training data'
+        })
+        
+    except Exception as e:
+        print(f"ML retrain error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-stats', methods=['GET'])
+def ml_stats():
+    """Get ML model statistics"""
+    if not ML_AVAILABLE:
+        return jsonify({'error': 'ML classifier not available'}), 503
+    
+    try:
+        stats = ml_classifier.get_model_stats()
+        return jsonify({
+            'success': True,
+            'stats': stats
+        })
+        
+    except Exception as e:
+        print(f"ML stats error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ===== END ML ENDPOINTS =====
+
 if __name__ == '__main__':
     # Get port from environment variable or use default
     port = int(os.environ.get('PORT', 5000))

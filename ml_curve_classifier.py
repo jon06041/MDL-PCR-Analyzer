@@ -1,0 +1,429 @@
+# ml_curve_classifier.py
+"""
+Machine Learning Curve Classifier with Modal-based Training Interface
+Uses the curve modal visualization for expert feedback and training data collection
+"""
+
+import numpy as np
+import pandas as pd
+import json
+from datetime import datetime
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, confusion_matrix
+import joblib
+import os
+
+class MLCurveClassifier:
+    def __init__(self):
+        self.model = RandomForestClassifier(
+            n_estimators=100,
+            random_state=42,
+            class_weight='balanced'
+        )
+        self.scaler = StandardScaler()
+        self.feature_names = [
+            'r2', 'steepness', 'snr', 'midpoint', 'baseline', 'amplitude',
+            'max_slope', 'max_slope_cycle', 'baseline_std', 'curve_auc',
+            'early_cycles_mean', 'late_cycles_mean', 'plateau_detection',
+            'curve_efficiency', 'derivative_peak', 'second_derivative_max',
+            'cqj', 'calcj'  # Added CQJ and CalcJ features
+        ]
+        self.classes = [
+            'STRONG_POSITIVE', 'POSITIVE', 'WEAK_POSITIVE', 
+            'INDETERMINATE', 'NEGATIVE', 'SUSPICIOUS'
+        ]
+        self.training_data = []
+        self.model_trained = False
+        self.pathogen_models = {}  # Separate models per pathogen
+        self.pathogen_scalers = {}  # Separate scalers per pathogen
+        
+    def extract_advanced_features(self, rfu_data, cycles, existing_metrics):
+        """Extract comprehensive features from curve data"""
+        features = {}
+        
+        # Use existing metrics
+        features['r2'] = existing_metrics.get('r2', 0)
+        features['steepness'] = existing_metrics.get('steepness', 0)
+        features['snr'] = existing_metrics.get('snr', 0)
+        features['midpoint'] = existing_metrics.get('midpoint', 0)
+        features['baseline'] = existing_metrics.get('baseline', 0)
+        features['amplitude'] = existing_metrics.get('amplitude', 0)
+        
+        # Add CQJ and CalcJ features
+        features['cqj'] = existing_metrics.get('cqj', 0)
+        features['calcj'] = existing_metrics.get('calcj', 0)
+        
+        # Advanced curve analysis
+        if len(rfu_data) > 5:
+            # Derivative analysis
+            first_deriv = np.gradient(rfu_data)
+            second_deriv = np.gradient(first_deriv)
+            
+            features['max_slope'] = np.max(first_deriv)
+            features['max_slope_cycle'] = cycles[np.argmax(first_deriv)] if len(cycles) == len(rfu_data) else 0
+            features['baseline_std'] = np.std(rfu_data[:5])
+            features['curve_auc'] = np.trapz(rfu_data, cycles) if len(cycles) == len(rfu_data) else 0
+            
+            # Early vs late cycle analysis
+            mid_point = len(rfu_data) // 2
+            features['early_cycles_mean'] = np.mean(rfu_data[:mid_point])
+            features['late_cycles_mean'] = np.mean(rfu_data[mid_point:])
+            
+            # Plateau detection
+            last_10_values = rfu_data[-10:] if len(rfu_data) >= 10 else rfu_data
+            features['plateau_detection'] = np.std(last_10_values)
+            
+            # PCR efficiency estimation
+            log_phase = self.detect_log_phase(rfu_data)
+            features['curve_efficiency'] = self.calculate_efficiency(rfu_data, log_phase)
+            
+            # Peak characteristics
+            features['derivative_peak'] = np.max(first_deriv)
+            features['second_derivative_max'] = np.max(second_deriv)
+        else:
+            # Default values for short curves
+            for key in ['max_slope', 'max_slope_cycle', 'baseline_std', 'curve_auc',
+                       'early_cycles_mean', 'late_cycles_mean', 'plateau_detection',
+                       'curve_efficiency', 'derivative_peak', 'second_derivative_max']:
+                features[key] = 0
+                
+        return features
+    
+    def detect_log_phase(self, rfu_data):
+        """Detect the exponential/log phase of amplification"""
+        if len(rfu_data) < 10:
+            return range(len(rfu_data))
+            
+        # Find the steepest continuous section
+        first_deriv = np.gradient(rfu_data)
+        window_size = 5
+        max_avg_slope = 0
+        best_window = range(len(rfu_data))
+        
+        for i in range(len(first_deriv) - window_size):
+            window_slope = np.mean(first_deriv[i:i+window_size])
+            if window_slope > max_avg_slope:
+                max_avg_slope = window_slope
+                best_window = range(i, i+window_size)
+                
+        return best_window
+    
+    def calculate_efficiency(self, rfu_data, log_phase):
+        """Calculate PCR efficiency from log phase"""
+        if len(log_phase) < 3:
+            return 0
+            
+        try:
+            log_rfu = np.log10(np.array(rfu_data)[log_phase])
+            cycles = np.array(range(len(log_phase)))
+            
+            # Linear regression on log phase
+            slope = np.polyfit(cycles, log_rfu, 1)[0]
+            efficiency = (10**(-1/slope) - 1) * 100
+            
+            # Clamp to reasonable range
+            return max(0, min(200, efficiency))
+        except:
+            return 0
+    
+    def predict_classification(self, rfu_data, cycles, existing_metrics, pathogen=None):
+        """Predict curve classification using ML model"""
+        # Try pathogen-specific model first
+        if pathogen and pathogen in self.pathogen_models:
+            model = self.pathogen_models[pathogen]
+            scaler = self.pathogen_scalers[pathogen]
+        elif self.model_trained:
+            model = self.model
+            scaler = self.scaler
+        else:
+            return self.fallback_classification(existing_metrics)
+            
+        features = self.extract_advanced_features(rfu_data, cycles, existing_metrics)
+        feature_vector = np.array([features[name] for name in self.feature_names]).reshape(1, -1)
+        
+        try:
+            feature_vector_scaled = scaler.transform(feature_vector)
+            prediction = model.predict(feature_vector_scaled)[0]
+            confidence = np.max(model.predict_proba(feature_vector_scaled))
+            
+            # Convert numpy values to Python native types for JSON serialization
+            return {
+                'classification': str(prediction),
+                'confidence': float(confidence),
+                'method': f'ML{"_" + pathogen if pathogen else ""}',
+                'features_used': {k: float(v) if isinstance(v, (np.integer, np.floating)) else v 
+                                for k, v in features.items()},
+                'pathogen': pathogen
+            }
+        except Exception as e:
+            print(f"ML prediction failed: {e}")
+            return self.fallback_classification(existing_metrics)
+    
+    def fallback_classification(self, existing_metrics):
+        """Fallback to rule-based classification"""
+        from curve_classification import classify_curve
+        
+        result = classify_curve(
+            existing_metrics.get('r2', 0),
+            existing_metrics.get('steepness', 0),
+            existing_metrics.get('snr', 0),
+            existing_metrics.get('midpoint', 0),
+            existing_metrics.get('baseline', 0),
+            existing_metrics.get('amplitude', 0)
+        )
+        
+        # Ensure all values are JSON serializable
+        result['method'] = 'Rule-based'
+        result['confidence'] = float(1.0 - result.get('confidence_penalty', 0))
+        
+        # Convert any numpy types to Python types
+        for key, value in result.items():
+            if isinstance(value, (np.integer, np.floating)):
+                result[key] = float(value)
+            elif isinstance(value, np.ndarray):
+                result[key] = value.tolist()
+                
+        return result
+    
+    def add_training_sample(self, rfu_data, cycles, existing_metrics, expert_classification, well_id, pathogen=None):
+        """Add a training sample from expert feedback"""
+        features = self.extract_advanced_features(rfu_data, cycles, existing_metrics)
+        
+        training_sample = {
+            'timestamp': datetime.now().isoformat(),
+            'well_id': well_id,
+            'pathogen': pathogen,
+            'features': features,
+            'expert_classification': expert_classification,
+            'existing_classification': existing_metrics.get('classification', 'UNKNOWN'),
+            'ml_classification': self.predict_classification(rfu_data, cycles, existing_metrics, pathogen).get('classification', 'UNKNOWN')
+        }
+        
+        self.training_data.append(training_sample)
+        self.save_training_data()
+        
+        # Retrain if we have enough samples
+        if len(self.training_data) >= 20 and len(self.training_data) % 10 == 0:
+            self.retrain_model()
+            
+        # Also retrain pathogen-specific model if we have enough samples
+        if pathogen:
+            pathogen_samples = [s for s in self.training_data if s.get('pathogen') == pathogen]
+            if len(pathogen_samples) >= 10 and len(pathogen_samples) % 5 == 0:
+                self.retrain_pathogen_model(pathogen)
+    
+    def save_training_data(self):
+        """Save training data to file"""
+        with open('ml_training_data.json', 'w') as f:
+            json.dump(self.training_data, f, indent=2)
+    
+    def load_training_data(self):
+        """Load existing training data"""
+        try:
+            with open('ml_training_data.json', 'r') as f:
+                self.training_data = json.load(f)
+        except FileNotFoundError:
+            self.training_data = []
+    
+    def retrain_model(self):
+        """Retrain the ML model with current training data"""
+        if len(self.training_data) < 10:
+            print("Insufficient training data for ML model")
+            return False
+            
+        # Prepare training data
+        X = []
+        y = []
+        
+        for sample in self.training_data:
+            feature_vector = [sample['features'][name] for name in self.feature_names]
+            X.append(feature_vector)
+            y.append(sample['expert_classification'])
+        
+        X = np.array(X)
+        y = np.array(y)
+        
+        # Handle missing classes
+        unique_classes = np.unique(y)
+        print(f"Training with {len(X)} samples, {len(unique_classes)} classes: {unique_classes}")
+        
+        # Split data
+        if len(X) > 20:
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        else:
+            X_train, X_test, y_train, y_test = X, X, y, y
+        
+        # Scale features
+        self.scaler.fit(X_train)
+        X_train_scaled = self.scaler.transform(X_train)
+        X_test_scaled = self.scaler.transform(X_test)
+        
+        # Train model
+        self.model.fit(X_train_scaled, y_train)
+        self.model_trained = True
+        
+        # Evaluate
+        if len(X_test) > 0:
+            predictions = self.model.predict(X_test_scaled)
+            accuracy = np.mean(predictions == y_test)
+            print(f"Model retrained. Accuracy: {accuracy:.2f}")
+            
+            # Save model
+            self.save_model()
+        
+        return True
+    
+    def retrain_pathogen_model(self, pathogen):
+        """Retrain pathogen-specific ML model"""
+        pathogen_samples = [s for s in self.training_data if s.get('pathogen') == pathogen]
+        
+        if len(pathogen_samples) < 5:
+            print(f"Insufficient training data for {pathogen} model")
+            return False
+            
+        # Prepare training data
+        X = []
+        y = []
+        
+        for sample in pathogen_samples:
+            feature_vector = [sample['features'][name] for name in self.feature_names]
+            X.append(feature_vector)
+            y.append(sample['expert_classification'])
+        
+        X = np.array(X)
+        y = np.array(y)
+        
+        # Create pathogen-specific model
+        pathogen_model = RandomForestClassifier(
+            n_estimators=50,  # Smaller for pathogen-specific
+            random_state=42,
+            class_weight='balanced'
+        )
+        pathogen_scaler = StandardScaler()
+        
+        # Scale features
+        X_scaled = pathogen_scaler.fit_transform(X)
+        
+        # Train model
+        pathogen_model.fit(X_scaled, y)
+        
+        # Store pathogen-specific model
+        self.pathogen_models[pathogen] = pathogen_model
+        self.pathogen_scalers[pathogen] = pathogen_scaler
+        
+        print(f"Pathogen-specific model trained for {pathogen} with {len(X)} samples")
+        
+        # Save pathogen models
+        self.save_pathogen_models()
+        
+        return True
+    
+    def save_model(self):
+        """Save trained model to disk"""
+        joblib.dump({
+            'model': self.model,
+            'scaler': self.scaler,
+            'feature_names': self.feature_names,
+            'classes': self.classes
+        }, 'ml_curve_classifier.pkl')
+    
+    def save_pathogen_models(self):
+        """Save pathogen-specific models to disk"""
+        pathogen_data = {
+            'pathogen_models': self.pathogen_models,
+            'pathogen_scalers': self.pathogen_scalers
+        }
+        joblib.dump(pathogen_data, 'ml_pathogen_models.pkl')
+    
+    def load_model(self):
+        """Load trained model from disk"""
+        try:
+            saved_data = joblib.load('ml_curve_classifier.pkl')
+            self.model = saved_data['model']
+            self.scaler = saved_data['scaler']
+            self.feature_names = saved_data['feature_names']
+            self.classes = saved_data['classes']
+            self.model_trained = True
+            return True
+        except FileNotFoundError:
+            print("No saved model found")
+            return False
+    
+    def load_pathogen_models(self):
+        """Load pathogen-specific models from disk"""
+        try:
+            pathogen_data = joblib.load('ml_pathogen_models.pkl')
+            self.pathogen_models = pathogen_data['pathogen_models']
+            self.pathogen_scalers = pathogen_data['pathogen_scalers']
+            print(f"Loaded {len(self.pathogen_models)} pathogen-specific models")
+            return True
+        except FileNotFoundError:
+            print("No saved pathogen models found")
+            return False
+    
+    def get_model_stats(self):
+        """Get statistics about the current model"""
+        stats = {
+            'training_samples': len(self.training_data),
+            'model_trained': self.model_trained,
+            'feature_count': len(self.feature_names),
+            'class_count': len(self.classes)
+        }
+        
+        if self.training_data:
+            # Class distribution
+            classifications = [sample['expert_classification'] for sample in self.training_data]
+            unique, counts = np.unique(classifications, return_counts=True)
+            # Convert numpy int64 to regular Python ints for JSON serialization
+            stats['class_distribution'] = dict(zip(unique, [int(count) for count in counts]))
+        
+        # Add pathogen models info
+        if self.pathogen_models:
+            stats['pathogen_models'] = list(self.pathogen_models.keys())
+        
+        return stats
+
+def extract_pathogen_from_well_data(well_data):
+    """Extract pathogen information from well data using pathogen library"""
+    # Try to get pathogen from test code or experiment pattern
+    test_code = None
+    
+    # Check various fields that might contain the test code
+    for field in ['test_code', 'experiment_pattern', 'sample_name', 'pathogen']:
+        if field in well_data and well_data[field]:
+            test_code = well_data[field]
+            break
+    
+    if not test_code:
+        return None
+    
+    # Extract pathogen code from test code
+    # Common patterns: "BVPanelPCR1", "Lacto", etc.
+    test_code = str(test_code).strip()
+    
+    # List of known pathogen codes from pathogen library
+    known_pathogens = [
+        'Lacto', 'Calb', 'Ctrach', 'Ngon', 'Tvag', 'Cglab', 'Cpara', 'Ctrop',
+        'Gvag', 'BVAB2', 'CHVIC', 'AtopVag', 'Megasphaera', 'BVAB', 'BVPanelPCR1',
+        'BVPanelPCR2', 'MYC', 'UU', 'UP', 'HSV1', 'HSV2', 'CMV', 'VZV',
+        'Group B Strep', 'Saureus', 'NOV'
+    ]
+    
+    # Try exact match first
+    if test_code in known_pathogens:
+        return test_code
+    
+    # Try partial matches
+    for pathogen in known_pathogens:
+        if pathogen.lower() in test_code.lower() or test_code.lower() in pathogen.lower():
+            return pathogen
+    
+    return test_code  # Return as-is if no match found
+
+# Global instance
+ml_classifier = MLCurveClassifier()
+ml_classifier.load_training_data()
+ml_classifier.load_model()
+ml_classifier.load_pathogen_models()
