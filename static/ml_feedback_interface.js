@@ -673,6 +673,42 @@ class MLFeedbackInterface {
         return Math.sqrt(variance);
     }
 
+    // ===== CHANNEL-SPECIFIC PATHOGEN EXTRACTION =====
+    
+    extractChannelSpecificPathogen() {
+        // Extract channel-specific pathogen information for multichannel experiments
+        const currentExperimentPattern = (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null;
+        const testCode = (typeof extractTestCode === 'function' && currentExperimentPattern) ? 
+            extractTestCode(currentExperimentPattern) : null;
+        
+        // Get channel from current well data
+        const channel = this.currentWellData.channel || this.currentWellData.fluorophore || '';
+        
+        // Try to get specific pathogen for this channel
+        let specificPathogen = null;
+        
+        if (testCode && channel && typeof getPathogenTarget === 'function') {
+            try {
+                specificPathogen = getPathogenTarget(testCode, channel);
+                console.log(`🧬 Channel-specific pathogen: ${testCode} + ${channel} = ${specificPathogen}`);
+            } catch (error) {
+                console.log(`⚠️ Could not get pathogen target for ${testCode}/${channel}:`, error);
+            }
+        }
+        
+        // Fallback to target field or experiment pattern
+        if (!specificPathogen) {
+            specificPathogen = this.currentWellData.target || testCode;
+        }
+        
+        return {
+            experimentPattern: currentExperimentPattern,
+            testCode: testCode,
+            channel: channel,
+            pathogen: specificPathogen
+        };
+    }
+
     displayExistingMLClassification(mlClassification) {
         const predictionDisplay = document.getElementById('ml-prediction-display');
         const classElement = document.getElementById('ml-prediction-class');
@@ -721,12 +757,18 @@ class MLFeedbackInterface {
         try {
             console.log('Analyzing curve with ML for well:', this.currentWellKey);
             
+            // Get channel-specific pathogen information
+            const channelData = this.extractChannelSpecificPathogen();
+            
             // Prepare well data for pathogen detection
             const wellData = {
                 well: this.currentWellData.well_id || this.currentWellKey.split('_')[0],
                 target: this.currentWellData.target || '',
                 sample: this.currentWellData.sample || this.currentWellData.sample_name || '',
-                classification: this.currentWellData.classification || 'UNKNOWN'
+                classification: this.currentWellData.classification || 'UNKNOWN',
+                channel: channelData.channel,
+                specific_pathogen: channelData.pathogen,
+                experiment_pattern: channelData.experimentPattern
             };
 
             const response = await fetch('/api/ml-analyze-curve', {
@@ -905,15 +947,17 @@ class MLFeedbackInterface {
         }
 
         try {
-            // Get current experiment pattern for pathogen extraction
-            const currentExperimentPattern = (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null;
+            // Get channel-specific pathogen information
+            const channelData = this.extractChannelSpecificPathogen();
             
             const wellData = {
                 well: this.currentWellData.well_id || this.currentWellKey.split('_')[0],
                 target: this.currentWellData.target || '',
                 sample: this.currentWellData.sample || this.currentWellData.sample_name || '',
                 classification: this.currentWellData.classification || 'UNKNOWN',
-                experiment_pattern: currentExperimentPattern  // Add experiment pattern for pathogen extraction
+                channel: channelData.channel,
+                specific_pathogen: channelData.pathogen,
+                experiment_pattern: channelData.experimentPattern
             };
 
             const response = await fetch('/api/ml-submit-feedback', {

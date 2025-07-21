@@ -415,49 +415,40 @@ class MLCurveClassifier:
 
 def extract_pathogen_from_well_data(well_data):
     """Extract pathogen information from well data using pathogen library"""
-    # Try to get pathogen from test code or experiment pattern
+    
+    # Priority 1: Use channel-specific pathogen if available (for multichannel experiments)
+    if 'specific_pathogen' in well_data and well_data['specific_pathogen']:
+        pathogen = str(well_data['specific_pathogen']).strip()
+        if pathogen and pathogen != 'Unknown':
+            print(f"ML: Using channel-specific pathogen: {pathogen}")
+            return pathogen
+    
+    # Priority 2: Use target field (specific pathogen for this channel)
+    if 'target' in well_data and well_data['target']:
+        target = str(well_data['target']).strip()
+        if target and target != 'Unknown':
+            print(f"ML: Using target field pathogen: {target}")
+            return target
+    
+    # Priority 3: Extract from experiment pattern (fallback for single-channel experiments)
     test_code = None
     
     # Check various fields that might contain the test code
-    for field in ['test_code', 'experiment_pattern', 'sample_name', 'pathogen', 'target']:
+    for field in ['test_code', 'experiment_pattern', 'sample_name', 'pathogen']:
         if field in well_data and well_data[field]:
             test_code = well_data[field]
             break
     
     if not test_code:
+        print("ML: No pathogen information found in well data")
         return None
     
     # Extract pathogen code from test code using same logic as frontend
     # Mimic the extractTestCode function from script.js
     test_code = str(test_code).strip()
     
-    # Handle experiment patterns like "AcBVAB_2578825_CFX367393"
-    if '_' in test_code:
-        base_pattern = test_code.split('_')[0]
-        # Remove 'Ac' prefix if present (like frontend extractTestCode function)
-        if base_pattern.startswith('Ac'):
-            test_code = base_pattern[2:]  # Remove 'Ac' prefix
-        else:
-            test_code = base_pattern
-    
-    # List of known pathogen codes from pathogen library
-    known_pathogens = [
-        'Lacto', 'Calb', 'Ctrach', 'Ngon', 'Tvag', 'Cglab', 'Cpara', 'Ctrop',
-        'Gvag', 'BVAB2', 'CHVIC', 'AtopVag', 'Megasphaera', 'BVAB', 'BVPanelPCR1',
-        'BVPanelPCR2', 'MYC', 'UU', 'UP', 'HSV1', 'HSV2', 'CMV', 'VZV',
-        'Group B Strep', 'Saureus', 'NOV'
-    ]
-    
-    # Try exact match first
-    if test_code in known_pathogens:
-        return test_code
-    
-    # Try partial matches (case insensitive)
-    for pathogen in known_pathogens:
-        if pathogen.lower() in test_code.lower() or test_code.lower() in pathogen.lower():
-            return pathogen
-    
-    return test_code  # Return as-is if no match found
+    print(f"ML: Using experiment-level pathogen: {test_code}")
+    return test_code
 
 # Global instance
 ml_classifier = MLCurveClassifier()
