@@ -513,11 +513,15 @@ class MLFeedbackInterface {
         }
 
         try {
+            // Get current experiment pattern for pathogen extraction
+            const currentExperimentPattern = (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null;
+            
             const wellData = {
                 well: this.currentWellData.well_id || this.currentWellKey.split('_')[0],
                 target: this.currentWellData.target || '',
                 sample: this.currentWellData.sample || this.currentWellData.sample_name || '',
-                classification: this.currentWellData.classification || 'UNKNOWN'
+                classification: this.currentWellData.classification || 'UNKNOWN',
+                experiment_pattern: currentExperimentPattern  // Add experiment pattern for pathogen extraction
             };
 
             const response = await fetch('/api/ml-submit-feedback', {
@@ -670,11 +674,34 @@ class MLFeedbackInterface {
             
             // Complete batch analysis
             this.showBatchAnalysisProgress(false, trainingCount, analysisType);
-            this.showTrainingNotification(
-                'Batch Analysis Complete!',
-                `🎉 Successfully re-analyzed ${wellKeys.length} wells with ${trainingCount}-sample trained model.`,
-                'success'
-            );
+            
+            // Show appropriate completion message based on analysis type
+            let completionTitle = '';
+            let completionMessage = '';
+            
+            switch (analysisType) {
+                case 'automatic':
+                    completionTitle = 'Automatic Analysis Complete!';
+                    completionMessage = `🎉 Successfully analyzed ${wellKeys.length} wells with pathogen-specific ${trainingCount}-sample model.`;
+                    break;
+                case 'cross-pathogen':
+                    completionTitle = 'Cross-Pathogen Analysis Complete!';
+                    completionMessage = `⚠️ Analyzed ${wellKeys.length} wells with general ${trainingCount}-sample model. Results may need manual review for accuracy.`;
+                    break;
+                case 'initial':
+                    completionTitle = 'Initial Batch Analysis Complete!';
+                    completionMessage = `🎉 Successfully re-analyzed ${wellKeys.length} wells with ${trainingCount}-sample trained model.`;
+                    break;
+                case 'milestone':
+                    completionTitle = 'Milestone Analysis Complete!';
+                    completionMessage = `📈 Successfully re-analyzed ${wellKeys.length} wells with updated ${trainingCount}-sample model.`;
+                    break;
+                default:
+                    completionTitle = 'Batch Analysis Complete!';
+                    completionMessage = `🎉 Successfully analyzed ${wellKeys.length} wells with ${trainingCount}-sample trained model.`;
+            }
+            
+            this.showTrainingNotification(completionTitle, completionMessage, 'success');
             
             console.log(`✅ Batch ML analysis complete: ${wellKeys.length} wells processed`);
             
@@ -765,10 +792,36 @@ class MLFeedbackInterface {
                 }
             }
             
+            // Get analysis type specific messaging
+            let analysisTitle = '';
+            let analysisDescription = '';
+            
+            switch (analysisType) {
+                case 'automatic':
+                    analysisTitle = '🤖 Automatic ML Analysis';
+                    analysisDescription = `Processing with pathogen-specific model (${trainingCount} samples)...`;
+                    break;
+                case 'cross-pathogen':
+                    analysisTitle = '🔄 Cross-Pathogen ML Analysis';
+                    analysisDescription = `Processing with general model (${trainingCount} samples from different pathogen)...`;
+                    break;
+                case 'initial':
+                    analysisTitle = '🎯 Initial Batch ML Analysis';
+                    analysisDescription = `Processing with ${trainingCount}-sample trained model...`;
+                    break;
+                case 'milestone':
+                    analysisTitle = '📈 Milestone Batch ML Analysis';
+                    analysisDescription = `Processing with updated ${trainingCount}-sample model...`;
+                    break;
+                default:
+                    analysisTitle = '🔄 Batch ML Analysis';
+                    analysisDescription = `Processing with ${trainingCount}-sample trained model...`;
+            }
+            
             progressDiv.innerHTML = `
                 <div class="batch-progress-header">
-                    <h6>🔄 ${analysisType === 'initial' ? 'Initial' : 'Milestone'} Batch ML Analysis</h6>
-                    <p>Processing with ${trainingCount}-sample trained model...</p>
+                    <h6>${analysisTitle}</h6>
+                    <p>${analysisDescription}</p>
                 </div>
                 <div class="progress-bar-container">
                     <div class="progress-bar" id="ml-batch-progress-bar">0%</div>
@@ -835,30 +888,69 @@ class MLFeedbackInterface {
         // This is called when new analysis results are loaded
         
         try {
+            // Get current test code from the uploaded experiment
+            const currentExperimentPattern = (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null;
+            const currentTestCode = (typeof extractTestCode === 'function' && currentExperimentPattern) ? 
+                extractTestCode(currentExperimentPattern) : null;
+                
+            console.log(`🧬 Auto-ML: Current test code: ${currentTestCode} (from pattern: ${currentExperimentPattern})`);
+            
             const response = await fetch('/api/ml-stats');
             if (response.ok) {
                 const result = await response.json();
                 if (result.success && result.stats) {
-                    const trainingCount = result.stats.training_samples || 0;
+                    const totalTrainingCount = result.stats.training_samples || 0;
+                    const pathogenModels = result.stats.pathogen_models || [];
                     
-                    if (trainingCount >= 20) {
-                        console.log(`🤖 Auto-ML: Model has ${trainingCount} training samples, offering automatic analysis`);
+                    // Check if we have a trained model for this specific pathogen
+                    const currentPathogenModel = pathogenModels.find(model => 
+                        model.pathogen_code === currentTestCode || 
+                        model.test_code === currentTestCode
+                    );
+                    
+                    if (currentPathogenModel && currentPathogenModel.training_samples >= 20) {
+                        // Model is trained on this specific pathogen with sufficient samples
+                        console.log(`🎯 Auto-ML: Found pathogen-specific model for ${currentTestCode} with ${currentPathogenModel.training_samples} samples`);
                         
-                        // Show automatic analysis option for well-trained models
-                        const shouldAutoAnalyze = confirm(
-                            `🤖 Automatic ML Analysis Available!\n\n` +
-                            `✅ ML model trained with ${trainingCount} samples\n` +
-                            `🚀 Would you like to automatically analyze all samples with ML?\n\n` +
-                            `This will provide instant ML predictions for the entire dataset.`
-                        );
-                        
-                        if (shouldAutoAnalyze) {
-                            await this.performBatchMLAnalysis(trainingCount, 'automatic');
-                        }
+                        // Show non-blocking notification instead of blocking popup
+                        this.showMLAvailableNotification({
+                            type: 'pathogen-specific',
+                            pathogen: currentTestCode,
+                            samples: currentPathogenModel.training_samples,
+                            onAccept: () => this.performBatchMLAnalysis(currentPathogenModel.training_samples, 'automatic'),
+                            onDecline: () => console.log('User declined automatic ML analysis')
+                        });
                         
                         return true; // Model is ready for automatic analysis
+                    } else if (totalTrainingCount >= 20) {
+                        // Model is trained but not on this specific pathogen
+                        console.log(`⚠️ Auto-ML: Model has ${totalTrainingCount} total samples but none for pathogen ${currentTestCode}`);
+                        
+                        // Show non-blocking notification for cross-pathogen analysis
+                        this.showMLAvailableNotification({
+                            type: 'cross-pathogen',
+                            pathogen: currentTestCode,
+                            samples: totalTrainingCount,
+                            onAccept: () => this.performBatchMLAnalysis(totalTrainingCount, 'cross-pathogen'),
+                            onDecline: () => console.log('User declined cross-pathogen ML analysis')
+                        });
+                        
+                        return false; // Cross-pathogen analysis
                     } else {
-                        console.log(`📚 Auto-ML: Model needs more training (${trainingCount}/20 samples)`);
+                        // No sufficient training data
+                        console.log(`📚 Auto-ML: Insufficient training data (${totalTrainingCount}/20 samples total, 0 for ${currentTestCode})`);
+                        
+                        // Show non-blocking informational notification for new pathogen
+                        if (currentTestCode) {
+                            this.showMLAvailableNotification({
+                                type: 'new-pathogen',
+                                pathogen: currentTestCode,
+                                samples: totalTrainingCount,
+                                onAccept: null, // No action available
+                                onDecline: null
+                            });
+                        }
+                        
                         return false; // Model needs more training
                     }
                 }
@@ -868,6 +960,236 @@ class MLFeedbackInterface {
         }
         
         return false;
+    }
+
+    showMLAvailableNotification(options) {
+        // Create non-blocking notification banner instead of blocking popup
+        const { type, pathogen, samples, onAccept, onDecline } = options;
+        
+        // Remove any existing ML notifications
+        const existingNotification = document.getElementById('ml-available-notification');
+        if (existingNotification) {
+            existingNotification.remove();
+        }
+        
+        // Create notification container
+        const notification = document.createElement('div');
+        notification.id = 'ml-available-notification';
+        notification.className = 'ml-notification-banner';
+        
+        let notificationContent = '';
+        let notificationClass = '';
+        
+        switch (type) {
+            case 'pathogen-specific':
+                notificationClass = 'ml-notification-success';
+                notificationContent = `
+                    <div class="ml-notification-content">
+                        <div class="ml-notification-icon">🤖</div>
+                        <div class="ml-notification-text">
+                            <strong>Automatic ML Analysis Available!</strong><br>
+                            🧬 Pathogen: <strong>${pathogen}</strong> | 
+                            ✅ ML model trained with <strong>${samples}</strong> samples for this pathogen<br>
+                            <small>Instant ML predictions tailored to ${pathogen} are ready</small>
+                        </div>
+                        <div class="ml-notification-actions">
+                            <button class="ml-notification-btn primary" onclick="this.parentElement.parentElement.parentElement.acceptAction()">
+                                🚀 Analyze with ML
+                            </button>
+                            <button class="ml-notification-btn secondary" onclick="this.parentElement.parentElement.parentElement.declineAction()">
+                                ❌ Skip
+                            </button>
+                        </div>
+                    </div>
+                `;
+                break;
+                
+            case 'cross-pathogen':
+                notificationClass = 'ml-notification-warning';
+                notificationContent = `
+                    <div class="ml-notification-content">
+                        <div class="ml-notification-icon">⚠️</div>
+                        <div class="ml-notification-text">
+                            <strong>ML Analysis Available (Different Pathogen)</strong><br>
+                            🧬 Current test: <strong>${pathogen}</strong> | 
+                            📚 ML model trained with <strong>${samples}</strong> samples from different pathogen(s)<br>
+                            <small>General curve patterns may apply (results may be less accurate)</small>
+                        </div>
+                        <div class="ml-notification-actions">
+                            <button class="ml-notification-btn primary" onclick="this.parentElement.parentElement.parentElement.acceptAction()">
+                                🔄 Try ML Analysis
+                            </button>
+                            <button class="ml-notification-btn secondary" onclick="this.parentElement.parentElement.parentElement.declineAction()">
+                                ❌ Skip
+                            </button>
+                        </div>
+                    </div>
+                `;
+                break;
+                
+            case 'new-pathogen':
+                notificationClass = 'ml-notification-info';
+                notificationContent = `
+                    <div class="ml-notification-content">
+                        <div class="ml-notification-icon">🧬</div>
+                        <div class="ml-notification-text">
+                            <strong>New Pathogen Detected: ${pathogen}</strong><br>
+                            📚 ML model needs training for this pathogen (${samples}/20 total samples)<br>
+                            <small>💡 Use the ML feedback interface to classify curves and train the model</small>
+                        </div>
+                        <div class="ml-notification-actions">
+                            <button class="ml-notification-btn secondary" onclick="this.parentElement.parentElement.parentElement.declineAction()">
+                                ✅ Got it
+                            </button>
+                        </div>
+                    </div>
+                `;
+                break;
+        }
+        
+        notification.innerHTML = notificationContent;
+        notification.className += ` ${notificationClass}`;
+        
+        // Add action handlers
+        notification.acceptAction = () => {
+            if (onAccept) onAccept();
+            notification.remove();
+        };
+        
+        notification.declineAction = () => {
+            if (onDecline) onDecline();
+            notification.remove();
+        };
+        
+        // Add styles
+        this.addNotificationStyles();
+        
+        // Insert at top of page
+        document.body.insertBefore(notification, document.body.firstChild);
+        
+        // Auto-dismiss after 30 seconds for info notifications
+        if (type === 'new-pathogen') {
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.remove();
+                }
+            }, 30000);
+        }
+    }
+
+    addNotificationStyles() {
+        // Add styles only once
+        if (document.getElementById('ml-notification-styles')) {
+            return;
+        }
+        
+        const styles = document.createElement('style');
+        styles.id = 'ml-notification-styles';
+        styles.textContent = `
+            .ml-notification-banner {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                z-index: 10000;
+                padding: 15px 20px;
+                font-family: Arial, sans-serif;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+                animation: slideDown 0.3s ease-out;
+            }
+            
+            .ml-notification-success {
+                background: linear-gradient(135deg, #4CAF50, #45a049);
+                color: white;
+            }
+            
+            .ml-notification-warning {
+                background: linear-gradient(135deg, #FF9800, #f57c00);
+                color: white;
+            }
+            
+            .ml-notification-info {
+                background: linear-gradient(135deg, #2196F3, #1976d2);
+                color: white;
+            }
+            
+            .ml-notification-content {
+                display: flex;
+                align-items: center;
+                max-width: 1200px;
+                margin: 0 auto;
+                gap: 15px;
+            }
+            
+            .ml-notification-icon {
+                font-size: 24px;
+                flex-shrink: 0;
+            }
+            
+            .ml-notification-text {
+                flex: 1;
+                line-height: 1.4;
+            }
+            
+            .ml-notification-text strong {
+                font-weight: bold;
+            }
+            
+            .ml-notification-text small {
+                opacity: 0.9;
+                font-size: 0.9em;
+            }
+            
+            .ml-notification-actions {
+                display: flex;
+                gap: 10px;
+                flex-shrink: 0;
+            }
+            
+            .ml-notification-btn {
+                padding: 8px 16px;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-weight: bold;
+                transition: all 0.2s ease;
+                font-size: 14px;
+            }
+            
+            .ml-notification-btn.primary {
+                background: rgba(255,255,255,0.2);
+                color: white;
+                border: 2px solid rgba(255,255,255,0.3);
+            }
+            
+            .ml-notification-btn.primary:hover {
+                background: rgba(255,255,255,0.3);
+                transform: translateY(-1px);
+            }
+            
+            .ml-notification-btn.secondary {
+                background: rgba(0,0,0,0.1);
+                color: white;
+                border: 2px solid rgba(255,255,255,0.2);
+            }
+            
+            .ml-notification-btn.secondary:hover {
+                background: rgba(0,0,0,0.2);
+            }
+            
+            @keyframes slideDown {
+                from {
+                    transform: translateY(-100%);
+                    opacity: 0;
+                }
+                to {
+                    transform: translateY(0);
+                    opacity: 1;
+                }
+            }
+        `;
+        
+        document.head.appendChild(styles);
     }
 
     async updateMLStats() {

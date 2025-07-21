@@ -378,10 +378,38 @@ class MLCurveClassifier:
             unique, counts = np.unique(classifications, return_counts=True)
             # Convert numpy int64 to regular Python ints for JSON serialization
             stats['class_distribution'] = dict(zip(unique, [int(count) for count in counts]))
-        
-        # Add pathogen models info
-        if self.pathogen_models:
-            stats['pathogen_models'] = list(self.pathogen_models.keys())
+            
+            # Pathogen-specific training sample counts
+            pathogen_training_counts = {}
+            for sample in self.training_data:
+                pathogen = sample.get('pathogen', 'unknown')
+                if pathogen not in pathogen_training_counts:
+                    pathogen_training_counts[pathogen] = 0
+                pathogen_training_counts[pathogen] += 1
+            
+            # Create detailed pathogen models info with training counts
+            stats['pathogen_models'] = []
+            for pathogen in self.pathogen_models.keys():
+                training_count = pathogen_training_counts.get(pathogen, 0)
+                stats['pathogen_models'].append({
+                    'pathogen_code': pathogen,
+                    'test_code': pathogen,  # For compatibility
+                    'training_samples': training_count,
+                    'model_trained': True
+                })
+            
+            # Add any pathogens with training data but no model yet
+            for pathogen, count in pathogen_training_counts.items():
+                if pathogen not in self.pathogen_models:
+                    stats['pathogen_models'].append({
+                        'pathogen_code': pathogen,
+                        'test_code': pathogen,  # For compatibility
+                        'training_samples': count,
+                        'model_trained': False
+                    })
+        else:
+            # No training data yet
+            stats['pathogen_models'] = []
         
         return stats
 
@@ -391,7 +419,7 @@ def extract_pathogen_from_well_data(well_data):
     test_code = None
     
     # Check various fields that might contain the test code
-    for field in ['test_code', 'experiment_pattern', 'sample_name', 'pathogen']:
+    for field in ['test_code', 'experiment_pattern', 'sample_name', 'pathogen', 'target']:
         if field in well_data and well_data[field]:
             test_code = well_data[field]
             break
@@ -399,9 +427,18 @@ def extract_pathogen_from_well_data(well_data):
     if not test_code:
         return None
     
-    # Extract pathogen code from test code
-    # Common patterns: "BVPanelPCR1", "Lacto", etc.
+    # Extract pathogen code from test code using same logic as frontend
+    # Mimic the extractTestCode function from script.js
     test_code = str(test_code).strip()
+    
+    # Handle experiment patterns like "AcBVAB_2578825_CFX367393"
+    if '_' in test_code:
+        base_pattern = test_code.split('_')[0]
+        # Remove 'Ac' prefix if present (like frontend extractTestCode function)
+        if base_pattern.startswith('Ac'):
+            test_code = base_pattern[2:]  # Remove 'Ac' prefix
+        else:
+            test_code = base_pattern
     
     # List of known pathogen codes from pathogen library
     known_pathogens = [
@@ -415,7 +452,7 @@ def extract_pathogen_from_well_data(well_data):
     if test_code in known_pathogens:
         return test_code
     
-    # Try partial matches
+    # Try partial matches (case insensitive)
     for pathogen in known_pathogens:
         if pathogen.lower() in test_code.lower() or test_code.lower() in pathogen.lower():
             return pathogen

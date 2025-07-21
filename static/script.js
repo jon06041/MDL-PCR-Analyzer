@@ -4051,6 +4051,9 @@ async function performAnalysis() {
     // Activate fresh analysis mode
     window.freshAnalysisMode = true;
     
+    // Reset ML analysis check flag for new analysis
+    window.mlAnalysisChecked = false;
+    
     // console.log('🧹 [PRE-ANALYSIS] Data clearing complete - ready for fresh analysis');
     
     if (Object.keys(amplificationFiles).length === 0) {
@@ -4291,7 +4294,9 @@ async function displayAnalysisResults(results) {
     window.currentAnalysisResults = results;
     
     // Check for automatic ML analysis (for future runs with trained models)
-    if (window.mlFeedbackInterface && results && results.individual_results) {
+    // Only check once per analysis session to prevent duplicate popups
+    if (window.mlFeedbackInterface && results && results.individual_results && !window.mlAnalysisChecked) {
+        window.mlAnalysisChecked = true; // Set flag to prevent duplicate checks
         // Small delay to allow analysis results to be fully processed
         setTimeout(async () => {
             try {
@@ -4474,8 +4479,9 @@ async function displayAnalysisResults(results) {
     // Mark this as fresh analysis to ensure validation display shows
     currentAnalysisResults.freshAnalysis = true;
 
-    // Check for automatic ML analysis for loaded sessions too
-    if (window.mlFeedbackInterface && results && results.individual_results) {
+    // Check for automatic ML analysis for loaded sessions too (only if not already checked)
+    if (window.mlFeedbackInterface && results && results.individual_results && !window.mlAnalysisChecked) {
+        window.mlAnalysisChecked = true; // Set flag to prevent duplicate checks
         // Small delay to allow session to be fully processed
         setTimeout(async () => {
             try {
