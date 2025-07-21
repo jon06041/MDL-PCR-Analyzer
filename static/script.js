@@ -207,7 +207,7 @@ window.appState = {
     currentSortOrder: 'default',      // Legacy sort order
     thresholds: {},
     manualThresholds: {},
-    currentThresholdStrategy: 'fixed',     // Current threshold strategy (start with fixed)
+    currentThresholdStrategy: 'log_fixed',     // Current threshold strategy (start with log_fixed)
     currentThresholdValue: null,      // Current manual threshold value
     isManualThresholdMode: false,     // Whether user is in manual threshold mode
     exportState: {                    // Export button state management
@@ -558,14 +558,16 @@ function initializeStateManagement() {
         sessionStorage.setItem('chartScale', 'log');
     }
     
-    // Load saved threshold strategy from session storage, default to fixed
+    // Load saved threshold strategy from session storage, default to log_fixed
     const savedThresholdStrategy = sessionStorage.getItem('thresholdStrategy');
     if (savedThresholdStrategy) {
         window.appState.currentThresholdStrategy = savedThresholdStrategy;
+        window.selectedThresholdStrategy = savedThresholdStrategy;
     } else {
-        // Default to fixed strategy for new sessions
-        window.appState.currentThresholdStrategy = 'fixed';
-        sessionStorage.setItem('thresholdStrategy', 'fixed');
+        // Default to log_fixed strategy for new sessions
+        window.appState.currentThresholdStrategy = 'log_fixed';
+        window.selectedThresholdStrategy = 'log_fixed';
+        sessionStorage.setItem('thresholdStrategy', 'log_fixed');
     }
     
     // Initialize threshold event handlers
