@@ -197,7 +197,7 @@ function updateExportState(options = {}) {
 // Global application state - single source of truth
 window.appState = {
     currentFluorophore: 'all',
-    currentScaleMode: 'linear',
+    currentScaleMode: 'log',
     currentChartMode: 'all',          // 'all', 'pos', 'neg', 'redo' - controls both chart and table view
     currentWellSelection: 'ALL_WELLS',
     currentFilter: 'all',             // Table filter: 'all', 'POS', 'NEG', 'REDO'
@@ -207,7 +207,7 @@ window.appState = {
     currentSortOrder: 'default',      // Legacy sort order
     thresholds: {},
     manualThresholds: {},
-    currentThresholdStrategy: 'default',     // Current threshold strategy (start with default)
+    currentThresholdStrategy: 'fixed',     // Current threshold strategy (start with fixed)
     currentThresholdValue: null,      // Current manual threshold value
     isManualThresholdMode: false,     // Whether user is in manual threshold mode
     exportState: {                    // Export button state management
@@ -544,12 +544,28 @@ function updateThresholdInputFromState() {
 
 // Initialize state management
 function initializeStateManagement() {
-    // Load saved state from session storage
+    // Load saved state from session storage, default to log scale
     const savedScale = sessionStorage.getItem('chartScale');
     if (savedScale) {
         window.appState.currentScaleMode = savedScale;
         window.currentScaleMode = savedScale;
         currentScaleMode = savedScale;
+    } else {
+        // Default to log scale for new sessions
+        window.appState.currentScaleMode = 'log';
+        window.currentScaleMode = 'log';
+        currentScaleMode = 'log';
+        sessionStorage.setItem('chartScale', 'log');
+    }
+    
+    // Load saved threshold strategy from session storage, default to fixed
+    const savedThresholdStrategy = sessionStorage.getItem('thresholdStrategy');
+    if (savedThresholdStrategy) {
+        window.appState.currentThresholdStrategy = savedThresholdStrategy;
+    } else {
+        // Default to fixed strategy for new sessions
+        window.appState.currentThresholdStrategy = 'fixed';
+        sessionStorage.setItem('thresholdStrategy', 'fixed');
     }
     
     // Initialize threshold event handlers
@@ -571,6 +587,9 @@ function initializeThresholdStateHandlers() {
                 currentThresholdStrategy: newStrategy,
                 isManualThresholdMode: newStrategy === 'manual'
             });
+            
+            // Save to session storage
+            sessionStorage.setItem('thresholdStrategy', newStrategy);
             
             // Trigger threshold recalculation
             if (typeof handleThresholdStrategyChange === 'function') {
@@ -843,7 +862,7 @@ if (!window.userSetThresholds) window.userSetThresholds = {}; // { channel: { sc
 // Store per-channel, per-scale thresholds: { [channel]: { linear: value, log: value } }
 // Removed duplicate declaration of channelThresholds
 // Store current scale mode: 'linear' or 'log'
-let currentScaleMode = 'linear';
+let currentScaleMode = 'log';
 window.currentScaleMode = currentScaleMode;  // Ensure window variable is accessible globally
 // Store current scale multiplier (slider value) - affects chart view only, not threshold values
 let currentScaleMultiplier = 1.0;
