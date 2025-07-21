@@ -2,9 +2,13 @@
 
 ## Overview
 
-The MDL PCR Analyzer includes an advanced Machine Learning (ML) curve classification system that can learn from expert feedback to improve qPCR result classification accuracy. This system uses a RandomForestClassifier trained on 18 curve-focused features to predict POS/NEG/REDO classifications.
+The MDL PCR Analyzer includes an advanced Machine Learning (ML) curve classification system that can learn from expert feedback to improve qPCR result classification accuracy. This system uses a RandomForestClassifier trained on **30 hybrid features** (18 numerical + 12 visual pattern features) to predict POS/NEG/REDO classifications.
 
-This document serves as a comprehensive reference for both ML classification and traditional rule-based qPCR curve analysis logic.
+This document serves as a comprehensive### ML Model Updates
+- **Feature Changes**: Update feature extraction in both backend and frontend for 30-feature hybrid system
+- **Model Retraining**: Clear existing model and retrain with new hybrid feature set
+- **Version Control**: Update training data format version when making breaking changes (v2.0 for hybrid features)
+- **Visual Pattern Validation**: Ensure visual feature extraction consistency across different curve typeserence for both ML classification and traditional rule-based qPCR curve analysis logic.
 
 ## System Architecture
 
@@ -12,17 +16,31 @@ This document serves as a comprehensive reference for both ML classification and
 ┌─────────────────────────────────────────────────────────────────┐
 │                    qPCR Analysis Pipeline                       │
 ├─────────────────────────────────────────────────────────────────┤
-│  Raw qPCR Data  →  Curve Fitting  →  Feature Extraction       │
+│  Raw qPCR Data  →  Curve Fitting  →  Hybrid Feature Extraction │
 │                                                                 │
 │  ┌─────────────────┐    ┌─────────────────┐                   │
-│  │  Rule-Based     │    │  ML Classifier  │                   │
-│  │  Classification │    │  (if trained)   │                   │
-│  │  (Fallback)     │    │                 │                   │
+│  │  Rule-Based     │    │  Hybrid ML      │                   │
+│  │  Classification │    │  Classifier     │                   │
+│  │  (Fallback)     │    │  (30 features)  │                   │
 │  └─────────────────┘    └─────────────────┘                   │
-│                                                                 │
-│                    ↓                                           │
-│              Final Classification                               │
-│              (POS / NEG / REDO)                                │
+│           │                       │                           │
+│           │              ┌─────────────────┐                  │
+│           │              │  Visual Pattern │                  │
+│           │              │  Recognition    │                  │
+│           │              │  (12 features)  │                  │
+│           │              └─────────────────┘                  │
+│           │                       │                           │
+│           │              ┌─────────────────┐                  │
+│           │              │  Numerical      │                  │
+│           │              │  Metrics        │                  │
+│           │              │  (18 features)  │                  │
+│           │              └─────────────────┘                  │
+│           └─────────────────┬─────────────────┘                │
+│                            ↓                                  │
+│                   Final Classification                         │
+│                   (POS / NEG / REDO)                          │
+│                   + Confidence Score                          │
+│                   + Visual Reasoning                          │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -69,13 +87,18 @@ When no trained ML model is available, the system uses threshold-based logic:
 **REDO Criteria:**
 - ⚠️ Everything else (e.g., has anomalies but meets other POS criteria)
 
-### 2. ML Classification (When Trained)
-After sufficient expert feedback is provided, the system switches to ML-based classification using 18 numerical features extracted from the amplification curves.
+### 2. Hybrid ML Classification (When Trained)
+After sufficient expert feedback is provided, the system switches to hybrid ML-based classification using **30 features** extracted from the amplification curves:
+- **18 Numerical Features**: Statistical and mathematical curve properties
+- **12 Visual Pattern Features**: Shape, baseline, noise, and curve progression patterns
 
-## ML Feature Set (18 Features)
+This hybrid approach combines the precision of numerical analysis with visual pattern recognition that experts use naturally.
 
-The ML classifier analyzes these curve characteristics:
+## Hybrid ML Feature Set (30 Features)
 
+The hybrid ML classifier analyzes both numerical metrics and visual patterns:
+
+### Numerical Features (18)
 | Feature Category | Features | Description |
 |-----------------|----------|-------------|
 | **Curve Quality** | R² Score, RMSE | Goodness of fit metrics |
@@ -83,23 +106,45 @@ The ML classifier analyzes these curve characteristics:
 | **Curve Shape** | Steepness, Midpoint, Baseline | S-curve geometry parameters |
 | **Cycle Metrics** | Cq Value, CQJ, CalcJ | Quantification cycle measurements |
 | **Raw Data Stats** | Min/Max/Mean/Std RFU, Min/Max Cycles | Statistical properties of raw data |
-| **Advanced Metrics** | Dynamic Range, Efficiency, Plateau Level | Derived curve characteristics |
+| **Advanced Metrics** | Dynamic Range, Efficiency | Derived curve characteristics |
+
+### Visual Pattern Features (12)
+| Feature Category | Features | Description |
+|-----------------|----------|-------------|
+| **Shape Classification** | Shape Class | Curve type (flat, linear, s-curve, exponential, irregular) |
+| **Baseline Analysis** | Baseline Stability | Variance and consistency of baseline region |
+| **Exponential Phase** | Exponential Sharpness | Steepness and quality of exponential transition |
+| **Plateau Analysis** | Plateau Quality | Consistency and flatness of plateau region |
+| **Curve Geometry** | Curve Symmetry | S-curve symmetry around midpoint |
+| **Noise Detection** | Noise Pattern | High-frequency noise characteristics |
+| **Trend Analysis** | Trend Consistency | Directional consistency throughout curve |
+| **Anomaly Detection** | Spike Detection, Oscillation Pattern, Dropout Detection | Various curve anomalies and artifacts |
+| **Comparative Metrics** | Relative Amplitude, Background Separation | Signal quality relative to background |
 
 ### Visual Feature Representation
 
 ```
 RFU
  ↑
- │     ┌─── Plateau Level
+ │     ┌─── Plateau Level & Quality
  │    ╱│
- │   ╱ │ ← Amplitude
+ │   ╱ │ ← Amplitude & Exponential Sharpness
  │  ╱  │
- │ ╱   │ ← Steepness
- │╱    │
+ │ ╱   │ ← Steepness & Curve Symmetry
+ │╱    │   ← Noise Pattern Detection
  └──────────────→ Cycles
    ↑    ↑
-Baseline Midpoint (Cq)
+Baseline   Midpoint (Cq)
+Stability  
 ```
+
+**Visual Pattern Analysis:**
+- **Shape Classification**: Identifies curve type (flat, linear, S-curve, exponential, irregular)
+- **Baseline Stability**: Measures consistency of early cycles for noise detection
+- **Exponential Sharpness**: Analyzes steepness of amplification phase
+- **Plateau Quality**: Evaluates flatness and consistency of saturation phase
+- **Curve Symmetry**: Assesses S-curve symmetry around inflection point
+- **Anomaly Detection**: Identifies spikes, oscillations, and data dropouts
 
 ## User Interface Components
 
@@ -119,12 +164,27 @@ The ML feedback interface appears **after** the sample details in the modal:
 │  • Amplitude: 1250.32             │
 │  • etc...                         │
 ├─────────────────────────────────────┤
-│      🤖 ML Curve Classification     │  ← Appears here
+│      🤖 Hybrid ML Analysis          │  ← Enhanced interface
 │                                     │
 │  Current Analysis:                  │
-│  Method: Rule-based                 │
+│  Method: Hybrid ML (30 features)   │
 │  Prediction: POS                    │
-│  Confidence: N/A                    │
+│  Confidence: 87%                    │
+│                                     │
+│  📈 Visual Pattern Analysis:        │
+│  • Shape: Classic S-curve          │
+│  • Baseline: Stable                │
+│  • Noise: Low level                │
+│  • Anomalies: None detected        │
+│                                     │
+│  📊 Key Numerical Metrics:         │
+│  • Amplitude: 1,250 RFU            │
+│  • R² Score: 0.986                 │
+│  • SNR: 15.2                       │
+│                                     │
+│  🧠 ML Reasoning:                   │
+│  Classic S-curve with stable       │
+│  baseline and strong signal        │
 │                                     │
 │  Expert Feedback:                   │
 │  ○ Positive  ○ Negative  ○ Redo     │
@@ -137,8 +197,8 @@ The ML feedback interface appears **after** the sample details in the modal:
 ### Phase 1: Data Collection
 1. **Expert Review**: Users open sample modals and review automated classifications
 2. **Feedback Submission**: When automation is incorrect, experts provide correct classification
-3. **Feature Extraction**: System automatically extracts 18 numerical features from curve data
-4. **Data Storage**: Training examples are saved to `ml_training_data.json`
+3. **Hybrid Feature Extraction**: System automatically extracts 30 features (18 numerical + 12 visual) from curve data
+4. **Data Storage**: Training examples are saved to `ml_training_data.json` with enhanced feature set
 
 ### Phase 2: Model Training
 Training occurs automatically when sufficient data is available:
@@ -149,25 +209,36 @@ Training occurs automatically when sufficient data is available:
 
 ### Phase 3: ML Activation
 Once a model is trained successfully:
-- **Method Display**: Changes from "Rule-based" to "ML"
+- **Method Display**: Changes from "Rule-based" to "Hybrid ML"
 - **Confidence Scores**: Shows prediction confidence (0-100%)
+- **Visual Reasoning**: Displays curve pattern analysis alongside numerical metrics
 - **Fallback Protection**: Rule-based classification remains as backup
 
-## Training Data Structure
+## Enhanced Training Data Structure
 
 ```json
 {
-  "version": "1.0",
-  "feature_names": [
-    "amplitude", "r2_score", "steepness", "snr", "midpoint",
-    "baseline", "cq_value", "cqj", "calcj", "rmse",
-    "min_rfu", "max_rfu", "mean_rfu", "std_rfu",
-    "min_cycle", "max_cycle", "dynamic_range", "efficiency"
-  ],
+  "version": "2.0",
+  "feature_set": "hybrid_numerical_visual",
+  "feature_names": {
+    "numerical": [
+      "amplitude", "r2_score", "steepness", "snr", "midpoint", "baseline",
+      "cq_value", "cqj", "calcj", "rmse", "min_rfu", "max_rfu", "mean_rfu", 
+      "std_rfu", "min_cycle", "max_cycle", "dynamic_range", "efficiency"
+    ],
+    "visual": [
+      "shape_class", "baseline_stability", "exponential_sharpness", 
+      "plateau_quality", "curve_symmetry", "noise_pattern", "trend_consistency",
+      "spike_detection", "oscillation_pattern", "dropout_detection", 
+      "relative_amplitude", "background_separation"
+    ]
+  },
   "training_examples": [
     {
-      "features": [1250.32, 0.9856, 0.245, 15.2, 18.5, ...],
+      "numerical_features": [1250.32, 0.9856, 0.245, 15.2, 18.5, 102.1, 18.3, 18.1, 17.9, 0.023, 95.2, 1355.6, 542.3, 287.1, 1, 40, 1260.4, 0.92],
+      "visual_features": [2, 0.087, 0.82, 0.91, 0.78, 0.15, 0.94, 0, 0.02, 0, 0.85, 0.73],
       "label": "POS",
+      "visual_reasoning": "Classic S-curve with stable baseline and strong signal",
       "metadata": {
         "well_id": "A1",
         "sample": "Patient-001",
@@ -328,11 +399,12 @@ Status: Collecting training data (X/10 examples)
 Action: Continue providing feedback
 ```
 
-### State 3: ML Active
+### State 3: Hybrid ML Active
 ```
-Method: ML
+Method: Hybrid ML (30 features)
 Status: Model trained with X examples
 Confidence: XX% (for current prediction)
+Visual Analysis: Shape, baseline, noise patterns
 Action: Continue feedback for model improvement
 ```
 
@@ -435,13 +507,16 @@ def classify_curve(r2_score, steepness, snr, midpoint, baseline, amplitude):
 
 ### Database Schema
 ```sql
--- ML Training Data
+-- Enhanced ML Training Data (v2.0)
 CREATE TABLE ml_training_data (
     id INTEGER PRIMARY KEY,
-    features TEXT,  -- JSON array of 18 features
-    label TEXT,     -- Expert classification (POS/NEG/REDO)
-    metadata TEXT,  -- Well information (JSON)
-    created_at TIMESTAMP
+    numerical_features TEXT,  -- JSON array of 18 numerical features
+    visual_features TEXT,     -- JSON array of 12 visual pattern features
+    label TEXT,              -- Expert classification (POS/NEG/REDO)
+    visual_reasoning TEXT,   -- Expert explanation of visual patterns
+    metadata TEXT,           -- Well information (JSON)
+    created_at TIMESTAMP,
+    feature_version TEXT DEFAULT '2.0'  -- Track feature set version
 );
 
 -- Analysis Sessions
@@ -460,22 +535,79 @@ CREATE TABLE analysis_sessions (
 └─────────────┘    └─────────────┘    └─────────────┘
 ```
 
-## Benefits of ML Classification
+## Benefits of Hybrid ML Classification
 
-### Accuracy Improvements
-- **Learning from Experts**: Captures nuanced decision-making patterns
-- **Complex Pattern Recognition**: Identifies subtle curve characteristics
-- **Reduced Subjectivity**: Consistent application of learned patterns
+### Enhanced Accuracy
+- **Multi-Modal Learning**: Combines numerical precision with visual pattern recognition
+- **Expert Knowledge Capture**: Learns both statistical and visual patterns that experts use
+- **Robust Feature Set**: 30 features provide comprehensive curve analysis
+- **Edge Case Handling**: Visual features catch patterns that numerical analysis might miss
+
+### Improved Explainability
+- **Visual Reasoning**: "Classic S-curve shape with stable baseline AND high amplitude"
+- **Pattern Validation**: Visual and numerical features can validate each other
+- **Expert-Friendly**: Analysis mirrors how technicians naturally evaluate curves
+- **Confidence Indicators**: Higher confidence when visual and numerical features agree
 
 ### Operational Benefits  
-- **Faster Review**: Automatic classification of routine cases
-- **Quality Assurance**: Confidence scores highlight uncertain cases
-- **Continuous Improvement**: Model accuracy increases with more feedback
+- **Faster Review**: Automatic classification with visual pattern context
+- **Quality Assurance**: Multi-modal confidence scores highlight uncertain cases
+- **Teaching Tool**: Visual analysis helps train new technicians
+- **Continuous Improvement**: Model learns from both statistical and visual feedback
 
 ### Laboratory Efficiency
 - **Reduced Manual Review**: Focus expert time on borderline cases
 - **Standardization**: Consistent classification across different technicians
 - **Audit Trail**: Complete history of training decisions and model evolution
+
+## Hybrid Visual Learning Implementation
+
+### Visual Pattern Detection Functions
+
+The system includes comprehensive visual pattern analysis:
+
+```javascript
+// Enhanced hybrid feature extraction
+function extractHybridFeatures(wellData) {
+    const numericalFeatures = extractNumericalFeatures(wellData);
+    const visualFeatures = extractVisualPatternFeatures(wellData.rfu_data, wellData.cycles, wellData);
+    
+    return {
+        ...numericalFeatures,
+        ...visualFeatures,
+        feature_count: 30,
+        extraction_method: 'hybrid_numerical_visual'
+    };
+}
+
+// Key visual pattern functions
+function classifyCurveShape(rfuData, cycles, wellData) {
+    // Returns: 0=flat, 1=linear, 2=s-curve, 3=exponential, 4=irregular
+}
+
+function calculateBaselineStability(rfuData) {
+    // Measures coefficient of variation for baseline consistency
+}
+
+function detectSpikes(rfuData) {
+    // Counts anomalous spikes above 3-sigma threshold
+}
+```
+
+### Visual Feature Categories
+
+1. **Shape Analysis**: Curve type classification and geometry
+2. **Quality Metrics**: Baseline stability, plateau consistency
+3. **Pattern Detection**: Noise analysis, trend consistency
+4. **Anomaly Identification**: Spikes, oscillations, dropouts
+5. **Comparative Analysis**: Relative amplitude, background separation
+
+### Integration with Existing System
+
+- **Backward Compatibility**: System falls back to 18-feature analysis if visual extraction fails
+- **Progressive Enhancement**: Visual features supplement existing numerical analysis
+- **Expert Validation**: Visual reasoning displayed alongside numerical metrics
+- **Training Data Migration**: Supports both v1.0 (18 features) and v2.0 (30 features) formats
 
 ## Best Practices
 
