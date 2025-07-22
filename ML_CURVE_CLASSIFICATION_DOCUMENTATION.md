@@ -665,6 +665,39 @@ function detectSpikes(rfuData) {
 - Add more balanced examples across all classification types
 - Review feature extraction for data quality issues
 
+### ⚠️ **CRITICAL ISSUE: Classification Inconsistency After Feedback** (July 22, 2025)
+
+**Problem**: A sample corrected via feedback (NEGATIVE → INDETERMINATE) was later classified as POSITIVE when re-analyzed with the updated model.
+
+**Symptoms**:
+- Expert provides feedback correcting a sample classification
+- Model trains successfully on the feedback
+- Re-analysis of the same sample produces a different classification than the expert feedback
+- Classification "drift" from expert correction (INDETERMINATE) to automated prediction (POSITIVE)
+
+**Potential Causes**:
+1. **Feature Extraction Variance**: Slight differences in feature calculation between feedback submission and re-analysis
+2. **Training Data Corruption**: Expert feedback not properly stored or retrieved during model training
+3. **Model Overfitting**: Limited training data causing unstable decision boundaries
+4. **Cross-Sample Influence**: Training on similar samples affecting classification of the corrected sample
+5. **Threshold Boundary Issues**: Sample falling near classification boundaries with shifting decision criteria
+
+**Investigation Steps**:
+1. Verify feature consistency by logging extracted features during both feedback and re-analysis
+2. Check SQLite database to ensure expert feedback is properly stored with correct classifications
+3. Analyze model decision boundaries and confidence scores around the problematic sample
+4. Test model stability by re-training multiple times with the same data
+5. Implement feature extraction validation to ensure consistency across analysis runs
+
+**Immediate Recommendation**: Samples showing classification inconsistency after expert feedback should be marked as **REDO** until the root cause is identified and resolved.
+
+**Status**: 🚨 **Under Investigation** - This issue undermines ML system reliability and requires immediate attention.
+
+**Workaround**: Until resolved, users should:
+- Document any observed classification drift after providing feedback
+- Re-check samples that were manually corrected in subsequent analyses
+- Use the feedback interface to re-correct any samples that drift from expert classifications
+
 ## Data Analysis Features
 
 ### Training Progress Monitoring

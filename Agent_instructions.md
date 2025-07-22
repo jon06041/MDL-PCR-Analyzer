@@ -1,6 +1,60 @@
 # MDL-PCR-Analyzer: Comprehensive Agent Instructions & Progress Log
 
-## 🎯 **CURRENT STATUS: Multichannel CalcJ Debugging & Backend Cleanup** (July 20, 2025)
+## 🎯 **CURRENT STATUS: ML Feedback System Enhancement & Notification UX** (July 22, 2025)
+
+### 🔄 **RECENT COMPLETION: ML Notification System Overhaul** (July 22, 2025)
+
+**Major Achievements**:
+- ✅ **Fixed Auto-Running Banner Issue**: Changed notification banners from auto-starting analysis to user-controlled action buttons
+- ✅ **Enhanced Cross-Pathogen Messaging**: Updated cross-pathogen notifications to emphasize training diversity benefits rather than showing warnings
+- ✅ **Eliminated Double Popup Problem**: Replaced alert() calls with elegant notification system in feedback submission
+- ✅ **Improved User Experience**: All ML notifications now require explicit user action and provide clear information about model training status
+
+**Notification Types Implemented**:
+1. **Pathogen-Specific Analysis**: Green banner for models trained specifically on current pathogen (20+ samples)
+2. **Cross-Pathogen Analysis**: Blue informational banner for models with diverse training including current pathogen and General PCR
+3. **New Pathogen Detection**: Blue informational banner for pathogens needing initial training
+4. **Running Analysis Progress**: Real-time progress bar with detailed well processing status
+
+**Technical Changes**:
+- Updated `showMLAvailableNotification()` to use action buttons instead of auto-execution
+- Modified cross-pathogen notification from warning (orange) to informational (blue) styling
+- Added `showRunningAnalysisNotification()` for actual progress display during analysis
+- Enhanced `submitFeedback()` with elegant notification system replacing alert() popups
+- Implemented setTimeout delays to prevent popup timing conflicts
+
+### ⚠️ **CRITICAL ISSUE IDENTIFIED: ML Feedback Classification Inconsistency** (July 22, 2025)
+
+**Problem Description**: 
+A sample was manually corrected from NEGATIVE → INDETERMINATE via ML feedback, but when re-analyzed with the updated model, it was classified as POSITIVE. This suggests potential inconsistency in the ML training or prediction logic.
+
+**Issue Details**:
+- **Initial Classification**: NEGATIVE (automated)
+- **Expert Feedback**: Corrected to INDETERMINATE  
+- **Post-Training Re-analysis**: Classified as POSITIVE
+- **Expected Behavior**: Should classify as INDETERMINATE or show improved confidence in INDETERMINATE classification
+
+**Potential Root Causes**:
+1. **Feature Extraction Inconsistency**: Different features extracted during feedback vs. re-analysis
+2. **Training Data Corruption**: Expert feedback not properly stored or used in model training
+3. **Model Overfitting**: Model learning incorrect patterns from limited training data
+4. **Classification Threshold Issues**: Boundary decisions changing unpredictably with new training data
+5. **Cross-Sample Contamination**: Training affecting classification of similar samples unexpectedly
+
+**Investigation Required**:
+- Verify feature extraction consistency between feedback submission and re-analysis
+- Check training data storage and retrieval in SQLite database
+- Analyze model decision boundaries and confidence scores
+- Implement logging for feature comparison during training vs. prediction
+- Add validation checks for classification consistency post-training
+
+**Recommendation**: This sample should be marked as "REDO" due to classification inconsistency until root cause is identified and resolved.
+
+**Status**: 🚨 **CRITICAL** - Requires immediate investigation to maintain ML system reliability.
+
+---
+
+## 🎯 **PREVIOUS STATUS: Multichannel CalcJ Debugging & Backend Cleanup** (July 20, 2025)
 
 ### � **CRITICAL PRODUCTION ISSUE DISCOVERED: Backend Processing Requires VS Code Focus** (July 20, 2025)
 
