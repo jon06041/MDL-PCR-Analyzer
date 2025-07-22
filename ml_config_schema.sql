@@ -32,7 +32,8 @@ INSERT OR IGNORE INTO ml_system_config (config_key, config_value, description, r
 ('training_data_version', '2.0', 'Current training data format version', 0),
 ('min_training_examples', '10', 'Minimum examples required for training', 1),
 ('reset_protection_enabled', 'true', 'Require confirmation for data reset', 1),
-('auto_training_enabled', 'true', 'Automatically retrain after feedback', 0);
+('auto_training_enabled', 'true', 'Automatically retrain after feedback', 0),
+('show_learning_messages', 'true', 'Show ML learning progress messages to users', 0);
 
 -- Insert default pathogen configurations for known test types
 INSERT OR IGNORE INTO ml_pathogen_config (pathogen_code, fluorophore, ml_enabled, min_confidence) VALUES

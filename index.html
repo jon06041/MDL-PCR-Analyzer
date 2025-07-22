@@ -349,6 +349,130 @@
                     <div class="modal-details" id="modalDetails">
                         <!-- Sample details will be populated here -->
                     </div>
+                    
+                    <!-- ML Feedback Section -->
+                    <div id="ml-feedback-section" class="ml-feedback-container">
+                        <div class="ml-section">
+                            <h4>🤖 ML Curve Classification</h4>
+                            
+                            <!-- ML Prediction Display -->
+                            <div class="ml-prediction" id="ml-prediction-display" style="display: none;">
+                                <div class="prediction-info">
+                                    <div class="prediction-result">
+                                        <strong>ML Prediction:</strong> 
+                                        <span id="ml-prediction-class" class="classification-badge">-</span>
+                                        <span id="ml-prediction-confidence" class="confidence-score">-</span>
+                                    </div>
+                                    <div class="prediction-method">
+                                        <small>Method: <span id="ml-prediction-method">-</span></small>
+                                    </div>
+                                    <div class="pathogen-context" id="pathogen-context" style="display: none;">
+                                        <small>🧬 Pathogen: <span id="detected-pathogen">-</span></small>
+                                    </div>
+                                </div>
+                                
+                                <!-- Visual Curve Analysis Display -->
+                                <div class="visual-curve-analysis" id="visual-curve-display" style="display: none;">
+                                    <h6>👁️ Visual Curve Analysis</h6>
+                                    <div class="visual-metrics-grid">
+                                        <div class="visual-metric-item">
+                                            <span class="metric-label">Curve Shape:</span>
+                                            <span id="curve-shape-assessment">-</span>
+                                        </div>
+                                        <div class="visual-metric-item">
+                                            <span class="metric-label">Pattern Type:</span>
+                                            <span id="curve-pattern-type">-</span>
+                                        </div>
+                                        <div class="visual-metric-item">
+                                            <span class="metric-label">Visual Quality:</span>
+                                            <span id="visual-quality-score">-</span>
+                                        </div>
+                                        <div class="visual-metric-item">
+                                            <span class="metric-label">Similar Patterns:</span>
+                                            <span id="similar-patterns-count">-</span>
+                                        </div>
+                                    </div>
+                                    <div class="curve-characteristics">
+                                        <div class="characteristic-tags" id="curve-characteristics">
+                                            <!-- Dynamic tags for curve characteristics -->
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Analysis Buttons -->
+                            <div class="ml-actions">
+                                <button id="ml-analyze-btn" class="ml-btn primary">
+                                    🔍 Analyze with ML
+                                </button>
+                                <button id="ml-feedback-btn" class="ml-btn secondary" style="display: none;">
+                                    📝 Provide Feedback
+                                </button>
+                            </div>
+
+                            <!-- Feedback Form -->
+                            <div class="ml-feedback-form" id="ml-feedback-form" style="display: none;">
+                                <h5>Expert Classification Feedback</h5>
+                                <p>Current classification: <span id="current-classification">-</span></p>
+                                <p>Help improve the ML model by providing the correct classification:</p>
+                                
+                                <div class="classification-options">
+                                    <label class="classification-option">
+                                        <input type="radio" name="expert-classification" value="STRONG_POSITIVE">
+                                        <span class="classification-label strong-positive">Strong Positive</span>
+                                    </label>
+                                    <label class="classification-option">
+                                        <input type="radio" name="expert-classification" value="POSITIVE">
+                                        <span class="classification-label positive">Positive</span>
+                                    </label>
+                                    <label class="classification-option">
+                                        <input type="radio" name="expert-classification" value="WEAK_POSITIVE">
+                                        <span class="classification-label weak-positive">Weak Positive</span>
+                                    </label>
+                                    <label class="classification-option">
+                                        <input type="radio" name="expert-classification" value="INDETERMINATE">
+                                        <span class="classification-label indeterminate">Indeterminate</span>
+                                    </label>
+                                    <label class="classification-option">
+                                        <input type="radio" name="expert-classification" value="NEGATIVE">
+                                        <span class="classification-label negative">Negative</span>
+                                    </label>
+                                    <label class="classification-option">
+                                        <input type="radio" name="expert-classification" value="SUSPICIOUS">
+                                        <span class="classification-label suspicious">Suspicious</span>
+                                    </label>
+                                </div>
+
+                                <div class="feedback-actions">
+                                    <button id="submit-feedback-btn" class="ml-btn primary">
+                                        ✅ Submit Feedback
+                                    </button>
+                                    <button id="cancel-feedback-btn" class="ml-btn secondary">
+                                        ❌ Cancel
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- ML Statistics -->
+                            <div class="ml-stats" id="ml-stats-display">
+                                <h5>ML Model Status</h5>
+                                <div class="stats-grid">
+                                    <div class="stat-item">
+                                        <span class="stat-label">Training Samples:</span>
+                                        <span id="stat-training-samples">-</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-label">Model Trained:</span>
+                                        <span id="stat-model-trained">-</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-label">Pathogen Models:</span>
+                                        <span id="stat-pathogen-models">-</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -371,5 +495,19 @@
     <!-- ML Feedback Interface for Curve Classification -->
     <script src="/static/ml_feedback_interface.js?v=20250118-pathogen-ml" defer></script>
     <script src="/static/script.js?v=20250718-cycle-fix" defer></script>
+    
+    <!-- Initialize ML Feedback Interface -->
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Initialize ML Feedback Interface after DOM is loaded
+        if (typeof MLFeedbackInterface !== 'undefined') {
+            console.log('Initializing ML Feedback Interface...');
+            window.mlFeedbackInterface = new MLFeedbackInterface();
+            console.log('ML Feedback Interface initialized successfully');
+        } else {
+            console.error('MLFeedbackInterface class not found');
+        }
+    });
+    </script>
 </body>
 </html>

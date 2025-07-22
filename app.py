@@ -1587,19 +1587,58 @@ def ml_analyze_curve():
         cycles = data.get('cycles', [])
         existing_metrics = data.get('existing_metrics', {})
         well_data = data.get('well_data', {})
+        check_recent_feedback = data.get('check_recent_feedback', True)
         
         # Extract pathogen information from well data
         from ml_curve_classifier import extract_pathogen_from_well_data
         pathogen = extract_pathogen_from_well_data(well_data)
         
-        # Get ML prediction with pathogen context
-        prediction = ml_classifier.predict_classification(rfu_data, cycles, existing_metrics, pathogen)
+        # Check if there's recent expert feedback for this exact well/sample
+        well_id = well_data.get('well', 'unknown')
+        recent_feedback = None
+        
+        if check_recent_feedback and ml_classifier.training_data:
+            # Look for recent feedback (within last 5 minutes) for this well
+            from datetime import datetime, timedelta
+            cutoff_time = datetime.now() - timedelta(minutes=5)
+            
+            for sample in reversed(ml_classifier.training_data):  # Check most recent first
+                sample_time = datetime.fromisoformat(sample.get('timestamp', ''))
+                sample_well = sample.get('well_id', '')
+                
+                if (sample_time > cutoff_time and 
+                    (sample_well == well_id or sample_well == well_data.get('sample', ''))):
+                    recent_feedback = sample
+                    break
+        
+        # If recent feedback exists, return that as the prediction
+        if recent_feedback:
+            prediction = {
+                'classification': recent_feedback['expert_classification'],
+                'confidence': 1.0,
+                'method': 'Recent Expert Feedback',
+                'pathogen': pathogen,
+                'feedback_timestamp': recent_feedback['timestamp']
+            }
+        else:
+            # Get ML prediction with pathogen context
+            prediction = ml_classifier.predict_classification(rfu_data, cycles, existing_metrics, pathogen)
+        
+        # Get training stats breakdown
+        general_samples = len([s for s in ml_classifier.training_data if not s.get('pathogen')])
+        pathogen_samples = len([s for s in ml_classifier.training_data if s.get('pathogen') == pathogen]) if pathogen else 0
+        total_samples = len(ml_classifier.training_data)
         
         return jsonify({
             'success': True,
             'prediction': prediction,
             'pathogen': pathogen,
-            'model_stats': ml_classifier.get_model_stats()
+            'model_stats': ml_classifier.get_model_stats(),
+            'training_breakdown': {
+                'total_samples': total_samples,
+                'general_pcr_samples': general_samples,
+                'pathogen_specific_samples': pathogen_samples
+            }
         })
         
     except Exception as e:
@@ -1634,11 +1673,24 @@ def ml_submit_feedback():
             expert_classification, well_id, pathogen
         )
         
+        # Get training stats breakdown
+        general_samples = len([s for s in ml_classifier.training_data if not s.get('pathogen')])
+        pathogen_samples = len([s for s in ml_classifier.training_data if s.get('pathogen') == pathogen]) if pathogen else 0
+        total_samples = len(ml_classifier.training_data)
+        
         return jsonify({
             'success': True,
             'message': 'Feedback submitted successfully',
             'pathogen': pathogen,
-            'training_samples': len(ml_classifier.training_data)
+            'training_samples': total_samples,
+            'general_pcr_samples': general_samples,
+            'pathogen_specific_samples': pathogen_samples,
+            'immediate_prediction': {
+                'classification': expert_classification,
+                'confidence': 1.0,
+                'method': 'Expert Feedback',
+                'pathogen': pathogen
+            }
         })
         
     except Exception as e:
@@ -1760,7 +1812,8 @@ def get_system_ml_config():
             'training_data_version': ml_config_manager.get_system_config('training_data_version'),
             'min_training_examples': int(ml_config_manager.get_system_config('min_training_examples') or 10),
             'reset_protection_enabled': ml_config_manager.get_system_config('reset_protection_enabled') == 'true',
-            'auto_training_enabled': ml_config_manager.get_system_config('auto_training_enabled') == 'true'
+            'auto_training_enabled': ml_config_manager.get_system_config('auto_training_enabled') == 'true',
+            'show_learning_messages': ml_config_manager.get_system_config('show_learning_messages') == 'true'
         }
         
         return jsonify({
@@ -1889,6 +1942,40 @@ def check_ml_enabled(pathogen_code, fluorophore):
         
     except Exception as e:
         app.logger.error(f"Failed to check ML enabled status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-config/enabled-pathogens', methods=['GET'])
+def get_enabled_pathogens():
+    """Get list of all enabled pathogen configurations for UI filtering"""
+    try:
+        # Import the ML config manager locally to ensure it's available
+        from ml_config_manager import MLConfigManager
+        import os
+        
+        # Create a fresh instance to ensure we have the latest methods
+        sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
+        local_ml_config_manager = MLConfigManager(sqlite_path)
+        
+        # Get all pathogen configs where ML is enabled
+        enabled_configs = local_ml_config_manager.get_enabled_pathogen_configs()
+        
+        # Format for frontend use
+        enabled_pathogens = {}
+        for config in enabled_configs:
+            pathogen = config['pathogen_code']
+            fluorophore = config['fluorophore']
+            
+            if pathogen not in enabled_pathogens:
+                enabled_pathogens[pathogen] = []
+            enabled_pathogens[pathogen].append(fluorophore)
+        
+        return jsonify({
+            'success': True,
+            'enabled_pathogens': enabled_pathogens
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Failed to get enabled pathogens: {e}")
         return jsonify({'error': str(e)}), 500
 
 # ===== END ML ENDPOINTS =====

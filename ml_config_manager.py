@@ -226,6 +226,22 @@ class MLConfigManager:
             logger.error(f"Failed to get all pathogen configs: {e}")
             return []
     
+    def get_enabled_pathogen_configs(self):
+        """Get only enabled pathogen ML configurations for UI filtering"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute("""
+                    SELECT pathogen_code, fluorophore, ml_enabled, min_confidence
+                    FROM ml_pathogen_config 
+                    WHERE ml_enabled = 1
+                    ORDER BY pathogen_code, fluorophore
+                """)
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Failed to get enabled pathogen configs: {e}")
+            return []
+    
     def get_audit_log(self, limit=50):
         """Get recent audit log entries"""
         try:

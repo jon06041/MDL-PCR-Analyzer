@@ -17,33 +17,23 @@ class MLFeedbackInterface {
     }
 
     async initializeInterface() {
-        console.log('ML Feedback Interface: Starting initialization...');
-        
         // Wait for modal body to be available (retry up to 10 times)
         let attempts = 0;
         while (attempts < 10) {
             const modalBody = document.querySelector('.modal-body');
             if (modalBody) {
-                console.log('ML Feedback Interface: Modal body found, adding ML section');
                 this.addMLSectionToModal();
                 this.isInitialized = true;
                 break;
             }
-            console.log(`ML Feedback Interface: Modal body not found, attempt ${attempts + 1}/10`);
             await new Promise(resolve => setTimeout(resolve, 500));
             attempts++;
-        }
-        
-        if (attempts >= 10) {
-            console.log('ML Feedback Interface: Modal body not found after 10 attempts, will add ML section when modal is opened');
         }
         
         // Get initial ML statistics (with error handling)
         try {
             await this.updateMLStats();
-            console.log('ML Feedback Interface: Initial ML stats loaded');
         } catch (error) {
-            console.log('ML Feedback Interface: Failed to load initial ML stats:', error);
             // Set default stats display if loading fails
             this.displayMLStats({
                 training_samples: 0,
@@ -54,7 +44,18 @@ class MLFeedbackInterface {
     }
 
     addMLSectionToModal() {
-        console.log('ML Feedback Interface: Adding ML section below chart...');
+        console.log('ML Feedback Interface: Checking for existing ML section...');
+        
+        // Check if ML section already exists in HTML
+        const existingSection = document.getElementById('ml-feedback-section');
+        if (existingSection) {
+            console.log('ML Feedback Interface: ML section already exists in HTML');
+            this.showMLSection();
+            this.attachEventListeners();
+            return;
+        }
+
+        console.log('ML Feedback Interface: ML section not found in HTML, creating dynamically...');
         
         // Look for the modal body to insert ML section between chart and details
         const modalBody = document.querySelector('.modal-body');
@@ -64,13 +65,6 @@ class MLFeedbackInterface {
         if (!modalBody) {
             console.log('ML Feedback Interface: Modal body not found');
             return;
-        }
-
-        // Remove existing ML section if present
-        const existingSection = document.getElementById('ml-feedback-section');
-        if (existingSection) {
-            existingSection.remove();
-            console.log('ML Feedback Interface: Removed existing ML section');
         }
 
         console.log('ML Feedback Interface: Modal body found, creating ML section');
@@ -235,6 +229,17 @@ class MLFeedbackInterface {
         this.attachEventListeners();
     }
 
+    showMLSection() {
+        console.log('ML Feedback Interface: Ensuring ML section is visible');
+        const mlSection = document.getElementById('ml-feedback-section');
+        if (mlSection) {
+            mlSection.style.display = 'block';
+            console.log('ML Feedback Interface: ML section made visible');
+        } else {
+            console.log('ML Feedback Interface: ML section not found');
+        }
+    }
+
     attachEventListeners() {
         // Analyze button
         const analyzeBtn = document.getElementById('ml-analyze-btn');
@@ -262,19 +267,20 @@ class MLFeedbackInterface {
     }
 
     setCurrentWell(wellKey, wellData) {
+        // Ensure we have valid data before setting
+        if (!wellKey || !wellData) {
+            return;
+        }
+        
         this.currentWellKey = wellKey;
         this.currentWellData = wellData;
         
-        console.log('ML Feedback Interface: Set current well:', wellKey);
-        
         // Always ensure ML section exists when a well is selected
-        // This handles cases where the modal wasn't ready during initialization
         const existingSection = document.getElementById('ml-feedback-section');
         if (!existingSection) {
-            console.log('ML Feedback Interface: ML section not found, adding it now');
             this.addMLSectionToModal();
         } else {
-            console.log('ML Feedback Interface: ML section already exists');
+            this.showMLSection();
         }
         
         // Reset prediction display when switching wells
@@ -413,6 +419,24 @@ class MLFeedbackInterface {
         else characteristics.push('Poor Fit');
 
         return characteristics;
+    }
+
+    async checkLearningMessagesEnabled() {
+        try {
+            const response = await fetch('/api/ml-config/system');
+            const data = await response.json();
+            
+            if (data.success && data.config) {
+                return data.config.show_learning_messages !== false;
+            }
+            
+            // Default to enabled if we can't check
+            return true;
+        } catch (error) {
+            console.error('Failed to check learning messages setting:', error);
+            // Default to enabled if we can't check
+            return true;
+        }
     }
 
     // Update the display with visual analysis
@@ -676,12 +700,24 @@ class MLFeedbackInterface {
     // ===== CHANNEL-SPECIFIC PATHOGEN EXTRACTION =====
     
     extractChannelSpecificPathogen() {
+        // Check if currentWellData is available
+        if (!this.currentWellData) {
+            console.warn('ML Feedback Interface: No current well data available');
+            return {
+                experimentPattern: null,
+                test_code: null,
+                testCode: null,
+                channel: '',
+                pathogen: null
+            };
+        }
+        
         // Extract channel-specific pathogen information for multichannel experiments
         const currentExperimentPattern = (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null;
         const testCode = (typeof extractTestCode === 'function' && currentExperimentPattern) ? 
             extractTestCode(currentExperimentPattern) : null;
         
-        // Get channel from current well data
+        // Get channel from current well data with null safety
         const channel = this.currentWellData.channel || this.currentWellData.fluorophore || '';
         
         // Try to get specific pathogen for this channel
@@ -697,19 +733,39 @@ class MLFeedbackInterface {
         }
         
         // Fallback to target field or experiment pattern
-        if (!specificPathogen) {
-            specificPathogen = this.currentWellData.target || testCode;
+        if (!specificPathogen || specificPathogen === 'Unknown') {
+            specificPathogen = this.currentWellData.target || testCode || 'Unknown';
         }
+        
+        // If still no pathogen, try to construct from fluorophore and test code
+        if (!specificPathogen || specificPathogen === 'Unknown') {
+            if (testCode && channel) {
+                specificPathogen = `${testCode}_${channel}`;
+            } else if (channel) {
+                specificPathogen = channel;
+            } else {
+                specificPathogen = 'Unknown';
+            }
+        }
+        
+        console.log(`🧬 Final pathogen for ML: ${specificPathogen}`);
         
         return {
             experimentPattern: currentExperimentPattern,
-            testCode: testCode,
+            test_code: testCode,
+            testCode: testCode,  // Keep both for compatibility
             channel: channel,
             pathogen: specificPathogen
         };
     }
 
     displayExistingMLClassification(mlClassification) {
+        // Add validation for ML classification data
+        if (!mlClassification || !mlClassification.classification || mlClassification.confidence === undefined) {
+            console.warn('ML Feedback Interface: Invalid ML classification data:', mlClassification);
+            return;
+        }
+        
         const predictionDisplay = document.getElementById('ml-prediction-display');
         const classElement = document.getElementById('ml-prediction-class');
         const confidenceElement = document.getElementById('ml-prediction-confidence');
@@ -760,16 +816,25 @@ class MLFeedbackInterface {
             // Get channel-specific pathogen information
             const channelData = this.extractChannelSpecificPathogen();
             
+            // Ensure we have valid pathogen information
+            if (!channelData.pathogen || channelData.pathogen === 'Unknown') {
+                console.warn('ML Analysis: No valid pathogen found, using fluorophore as fallback');
+                channelData.pathogen = channelData.channel || 'Unknown';
+            }
+            
             // Prepare well data for pathogen detection
             const wellData = {
                 well: this.currentWellData.well_id || this.currentWellKey.split('_')[0],
-                target: this.currentWellData.target || '',
+                target: channelData.pathogen, // Use the resolved pathogen as target
                 sample: this.currentWellData.sample || this.currentWellData.sample_name || '',
                 classification: this.currentWellData.classification || 'UNKNOWN',
                 channel: channelData.channel,
                 specific_pathogen: channelData.pathogen,
-                experiment_pattern: channelData.experimentPattern
+                experiment_pattern: channelData.experimentPattern,
+                fluorophore: channelData.channel // Add fluorophore explicitly
             };
+            
+            console.log('ML Analysis: Sending well data:', wellData);
 
             const response = await fetch('/api/ml-analyze-curve', {
                 method: 'POST',
@@ -826,6 +891,13 @@ class MLFeedbackInterface {
 
     displayMLResults(result) {
         const prediction = result.prediction;
+        
+        // Add validation for prediction data
+        if (!prediction || !prediction.classification || prediction.confidence === undefined) {
+            console.error('ML Feedback Interface: Invalid prediction data received:', prediction);
+            return;
+        }
+        
         const predictionDisplay = document.getElementById('ml-prediction-display');
         const classElement = document.getElementById('ml-prediction-class');
         const confidenceElement = document.getElementById('ml-prediction-confidence');
@@ -938,6 +1010,12 @@ class MLFeedbackInterface {
             return;
         }
 
+        // Check if we have current well data
+        if (!this.currentWellData || !this.currentWellKey) {
+            alert('No well data available for feedback submission. Please select a well first.');
+            return;
+        }
+
         const expertClassification = selectedRadio.value;
         const submitBtn = document.getElementById('submit-feedback-btn');
         
@@ -950,15 +1028,32 @@ class MLFeedbackInterface {
             // Get channel-specific pathogen information
             const channelData = this.extractChannelSpecificPathogen();
             
+            // Ensure we have valid pathogen information for feedback
+            if (!channelData.pathogen || channelData.pathogen === 'Unknown') {
+                console.warn('ML Feedback: No valid pathogen found, using fluorophore as fallback');
+                channelData.pathogen = channelData.channel || 'Unknown';
+            }
+            
+            // Check if we have the required raw data
+            const rawRfu = this.currentWellData.raw_rfu || this.currentWellData.rfu_data;
+            const rawCycles = this.currentWellData.raw_cycles || this.currentWellData.cycles;
+            
+            if (!rawRfu || !rawCycles) {
+                throw new Error('Missing raw RFU or cycle data for feedback submission');
+            }
+            
             const wellData = {
                 well: this.currentWellData.well_id || this.currentWellKey.split('_')[0],
-                target: this.currentWellData.target || '',
+                target: channelData.pathogen, // Use the resolved pathogen as target
                 sample: this.currentWellData.sample || this.currentWellData.sample_name || '',
                 classification: this.currentWellData.classification || 'UNKNOWN',
                 channel: channelData.channel,
                 specific_pathogen: channelData.pathogen,
-                experiment_pattern: channelData.experimentPattern
+                experiment_pattern: channelData.experimentPattern,
+                fluorophore: channelData.channel // Add fluorophore explicitly
             };
+            
+            console.log('ML Feedback: Sending well data:', wellData);
 
             const response = await fetch('/api/ml-submit-feedback', {
                 method: 'POST',
@@ -966,8 +1061,8 @@ class MLFeedbackInterface {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    rfu_data: this.currentWellData.raw_rfu,
-                    cycles: this.currentWellData.raw_cycles,
+                    rfu_data: rawRfu,
+                    cycles: rawCycles,
                     well_data: wellData,
                     expert_classification: expertClassification,
                     well_id: this.currentWellKey,
@@ -1010,7 +1105,6 @@ class MLFeedbackInterface {
             }
 
         } catch (error) {
-            console.error('Feedback submission error:', error);
             alert(`Feedback submission failed: ${error.message}`);
         } finally {
             if (submitBtn) {
@@ -1022,6 +1116,13 @@ class MLFeedbackInterface {
 
     async handleTrainingMilestone(trainingCount) {
         console.log(`🎯 ML Training Milestone: ${trainingCount} samples`);
+        
+        // Check if learning messages are enabled before showing alerts
+        const showMessages = await this.checkLearningMessagesEnabled();
+        if (!showMessages) {
+            console.log('ML learning messages disabled, skipping milestone notifications');
+            return;
+        }
         
         const isInitialTraining = trainingCount === 20;
         const isBatchMilestone = trainingCount > 20 && trainingCount % 20 === 0;
@@ -1154,15 +1255,39 @@ class MLFeedbackInterface {
 
     async analyzeSingleWellWithML(wellKey, wellData) {
         try {
+            // Extract pathogen information for this well
+            const fluorophore = wellData.fluorophore || wellData.channel || '';
+            const currentExperimentPattern = (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null;
+            const testCode = (typeof extractTestCode === 'function' && currentExperimentPattern) ? 
+                extractTestCode(currentExperimentPattern) : null;
+            
+            let specificPathogen = null;
+            if (testCode && fluorophore && typeof getPathogenTarget === 'function') {
+                try {
+                    specificPathogen = getPathogenTarget(testCode, fluorophore);
+                } catch (error) {
+                    console.log(`⚠️ Could not get pathogen target for ${testCode}/${fluorophore}:`, error);
+                }
+            }
+            
+            // Fallback pathogen detection
+            if (!specificPathogen || specificPathogen === 'Unknown') {
+                specificPathogen = wellData.target || fluorophore || 'Unknown';
+            }
+            
             // Prepare well data for ML analysis
             const analysisData = {
                 rfu_data: wellData.raw_rfu,
                 cycles: wellData.raw_cycles,
                 well_data: {
                     well: wellData.well_id || wellKey.split('_')[0],
-                    target: wellData.target || '',
+                    target: specificPathogen, // Use resolved pathogen
                     sample: wellData.sample || wellData.sample_name || '',
-                    classification: wellData.classification || 'UNKNOWN'
+                    classification: wellData.classification || 'UNKNOWN',
+                    channel: fluorophore,
+                    specific_pathogen: specificPathogen,
+                    experiment_pattern: currentExperimentPattern,
+                    fluorophore: fluorophore
                 },
                 existing_metrics: {
                     r2: wellData.r2_score || 0,
@@ -1185,13 +1310,12 @@ class MLFeedbackInterface {
             
             if (response.ok) {
                 const result = await response.json();
-                if (result.success) {
+                if (result.success && result.prediction) {
                     // Update the well data with ML predictions
-                    wellData.ml_classification = result.classification;
-                    wellData.ml_confidence = result.confidence;
-                    console.log(`✅ ML analysis for ${wellKey}: ${result.classification} (${result.confidence}%)`);
+                    wellData.ml_classification = result.prediction;
+                    console.log(`✅ ML analysis for ${wellKey}: ${result.prediction.classification} (${(result.prediction.confidence * 100).toFixed(1)}%)`);
                 } else {
-                    console.error(`ML analysis failed for ${wellKey}:`, result.error);
+                    console.error(`ML analysis failed for ${wellKey}:`, result.error || 'No prediction returned');
                 }
             }
             
@@ -1742,7 +1866,22 @@ class MLFeedbackInterface {
 
         if (trainingSamplesElement) {
             const trainingCount = stats.training_samples || 0;
-            trainingSamplesElement.textContent = trainingCount;
+            
+            // Show breakdown if available
+            if (stats.training_breakdown) {
+                const breakdown = stats.training_breakdown;
+                const generalPCR = breakdown.general_pcr_samples || 0;
+                const pathogenSpecific = breakdown.pathogen_specific_samples || 0;
+                
+                trainingSamplesElement.innerHTML = `
+                    ${trainingCount} total
+                    <small style="display: block; color: #666; font-size: 0.8em;">
+                        ${generalPCR} General PCR | ${pathogenSpecific} Pathogen-specific
+                    </small>
+                `;
+            } else {
+                trainingSamplesElement.textContent = trainingCount;
+            }
             console.log('Updated training samples display to:', trainingCount);
         } else {
             console.error('Training samples element not found');

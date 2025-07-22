@@ -220,6 +220,14 @@ class MLConfigManager {
                     </div>
                     <div class="config-item">
                         <label>
+                            <input type="checkbox" 
+                                   ${this.systemConfig.show_learning_messages ? 'checked' : ''}
+                                   onchange="window.mlConfigManager.toggleLearningMessages(this.checked)">
+                            Show ML Learning Messages
+                        </label>
+                    </div>
+                    <div class="config-item">
+                        <label>
                             Minimum Training Examples: 
                             <input type="number" 
                                    value="${this.systemConfig.min_training_examples || 10}"
@@ -371,6 +379,35 @@ class MLConfigManager {
             
         } catch (error) {
             console.error('Failed to update min training examples:', error);
+            this.showNotification('Network error occurred', 'error');
+        }
+    }
+
+    async toggleLearningMessages(enabled) {
+        try {
+            const response = await fetch('/api/ml-config/system/show_learning_messages', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-User-ID': 'current_user'
+                },
+                body: JSON.stringify({
+                    value: enabled.toString(),
+                    notes: `ML learning messages ${enabled ? 'enabled' : 'disabled'}`
+                })
+            });
+
+            const data = await response.json();
+            
+            if (data.success) {
+                this.systemConfig.show_learning_messages = enabled;
+                this.showNotification(`ML learning messages ${enabled ? 'enabled' : 'disabled'}`, 'success');
+            } else {
+                this.showNotification(`Failed to update learning messages setting: ${data.error}`, 'error');
+            }
+            
+        } catch (error) {
+            console.error('Failed to toggle learning messages:', error);
             this.showNotification('Network error occurred', 'error');
         }
     }
