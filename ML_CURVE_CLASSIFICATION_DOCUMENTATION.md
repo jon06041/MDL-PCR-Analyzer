@@ -1,14 +1,50 @@
-# ML Curve Classification & qPCR Logic Reference
+# ML Curve Classification & qPCR Logic Reference - Updated January 2025
 
 ## Overview
 
-The MDL PCR Analyzer includes an advanced Machine Learning (ML) curve classification system that can learn from expert feedback to improve qPCR result classification accuracy. This system uses a RandomForestClassifier trained on **30 hybrid features** (18 numerical + 12 visual pattern features) to predict POS/NEG/REDO classifications.
+The MDL PCR Analyzer includes an advanced Machine Learning (ML) curve classification system that can learn from expert feedback to improve qPCR result classification accuracy. This system uses a RandomForestClassifier trained on **30 hybrid features** (18 numerical + 12 visual pattern features) to predict classifications across **7 distinct classes**.
 
-This document serves as a comprehensive### ML Model Updates
-- **Feature Changes**: Update feature extraction in both backend and frontend for 30-feature hybrid system
-- **Model Retraining**: Clear existing model and retrain with new hybrid feature set
-- **Version Control**: Update training data format version when making breaking changes (v2.0 for hybrid features)
-- **Visual Pattern Validation**: Ensure visual feature extraction consistency across different curve typeserence for both ML classification and traditional rule-based qPCR curve analysis logic.
+## Classification System (7 Classes)
+
+### Complete Classification Categories:
+1. **STRONG_POSITIVE** - High amplitude, excellent S-curve characteristics
+2. **POSITIVE** - Clear positive amplification signal  
+3. **WEAK_POSITIVE** - Low but detectable positive signal
+4. **INDETERMINATE** - Unclear biological result, ambiguous signal that cannot be confidently classified
+5. **REDO** - Technical issues or borderline amplitude (400-500 RFU), repeat test recommended
+6. **SUSPICIOUS** - Questionable result that may need further investigation or expert review
+7. **NEGATIVE** - No significant amplification signal
+
+### Key Distinctions:
+- **INDETERMINATE vs SUSPICIOUS**: INDETERMINATE is for biologically unclear results; SUSPICIOUS is for technically questionable results
+- **REDO vs SUSPICIOUS**: REDO is for specific technical issues (borderline amplitude); SUSPICIOUS is for broader quality concerns
+- **All classes serve distinct diagnostic purposes** and should be preserved in training data
+
+## Recent System Enhancements (January 2025)
+
+### Multichannel ML Support
+- **Fixed**: ML warning banners and progress notifications now appear for multichannel experiments
+- **Enhancement**: Added `checkForAutomaticMLAnalysis()` call to `displayMultiFluorophoreResults()` function
+- **Impact**: ML notifications now trigger properly for multi-fluorophore uploads (Cy5, FAM, HEX, Texas Red)
+
+### Duplicate Submission Prevention
+- **Fixed**: Aggressive triple-layer protection against duplicate ML feedback submissions
+- **Implementation**: Event prevention + local flags + button state management
+- **Result**: Single-click submissions only, prevents server overload and data corruption
+
+### Visual Curve Analysis Improvements
+- **Enhanced**: Robust field detection for RFU data across different naming conventions
+- **Added**: Metrics-based analysis fallback when raw curve data unavailable
+- **Improved**: Debug logging and error handling for SUSPICIOUS samples
+- **Support**: Multiple field names (`rfu_data`, `raw_rfu`, `rfu`, `fluorescence_data`)
+
+### Expert Review System Safeguards
+- **Threshold Protection**: Expert review conflicts only appear after 50+ training samples
+- **Confidence Requirements**: ML must have ≥70% confidence to suggest conflicts
+- **Visual Indicators**: Training progress bar shows progress toward expert review threshold
+- **User Experience**: Clear status updates and tooltips explain requirements
+
+This document serves as a comprehensive reference for both ML classification and traditional rule-based qPCR curve analysis logic.
 
 ## System Architecture
 

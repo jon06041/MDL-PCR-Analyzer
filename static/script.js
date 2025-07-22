@@ -4794,6 +4794,20 @@ async function displayMultiFluorophoreResults(results) {
         }
     }, 400);
     
+    // Check for automatic ML analysis (for multichannel runs with trained models)
+    // Only check once per analysis session to prevent duplicate popups
+    if (window.mlFeedbackInterface && results && results.individual_results && !window.mlAnalysisChecked) {
+        window.mlAnalysisChecked = true; // Set flag to prevent duplicate checks
+        // Small delay to allow analysis results to be fully processed
+        setTimeout(async () => {
+            try {
+                await window.mlFeedbackInterface.checkForAutomaticMLAnalysis();
+            } catch (error) {
+                console.log('ML automatic analysis check failed for multichannel:', error);
+            }
+        }, 2000);
+    }
+    
     document.getElementById('analysisSection').scrollIntoView({ behavior: 'smooth' });
 }
 
