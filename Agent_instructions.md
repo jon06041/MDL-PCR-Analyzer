@@ -158,6 +158,12 @@ The analyzer provides comprehensive quality assessment:
 - `POST /api/ml-analyze-curve` - ML curve analysis
 - `POST /api/ml-submit-feedback` - ML training feedback
 - `GET /api/ml-stats` - ML model statistics
+- `GET /api/ml-config` - ML configuration management interface
+- `GET /api/ml-config/pathogens` - Get pathogen-specific ML configuration
+- `POST /api/ml-config/pathogens` - Update pathogen ML settings
+- `GET /api/ml-config/system` - Get system ML configuration
+- `POST /api/ml-config/system` - Update system ML settings
+- `POST /api/ml-config/reset-training` - Reset ML training data (with audit)
 
 ### **Laboratory Integration**
 Designed for qPCR laboratory workflows:
@@ -202,6 +208,20 @@ python app.py
 
 ### 🎯 **Recent Major Accomplishments**
 
+#### ✅ **Enhanced ML Feedback Interface** (July 22, 2025)
+- **Fixed**: "No well data available" error in ML feedback submission
+- **Enhanced**: Robust well data recovery from multiple sources (modal state, global results)
+- **Improved**: Pathogen extraction with comprehensive fallback strategies
+- **Added**: Deep cloning of well data to prevent reference issues
+- **Result**: Reliable ML feedback submission even with timing issues or data clearing
+
+#### ✅ **ML Configuration Management System** (July 22, 2025)
+- **Implemented**: Pathogen-specific ML enable/disable flags with audit trail
+- **Added**: Safe ML training data reset with user confirmation
+- **Created**: Admin interface for ML configuration management
+- **Features**: Per-pathogen training control, system-wide learning message toggle
+- **Database**: SQL schema for ML configuration persistence and audit logging
+
 #### ✅ **Single-Channel CalcJ Display Fix** (July 20, 2025)
 - **Fixed**: CalcJ values now display correctly for positive wells in single-channel runs
 - **Root Cause**: Display layer issue in `populateResultsTable` function
@@ -240,12 +260,21 @@ python app.py
 - `qpcr_analyzer.py` - Core qPCR analysis logic
 - `cqj_calcj_utils.py` - Backend calculation utilities (parallel to JS)
 - `sql_integration.py` - Database operations
+- `ml_config_manager.py` - ML configuration and audit management
+- `ml_curve_classifier.py` - Machine learning curve classification
+
+#### **ML Configuration System**:
+- `static/ml_feedback_interface.js` - Enhanced ML feedback with robust data recovery
+- `static/ml_config.html` - ML configuration admin interface
+- `static/ml_config_manager.js` - Frontend ML configuration management
+- `ml_config_schema.sql` - SQL schema for ML pathogen configuration and audit logs
 
 #### **Key Data Structures**:
 - `window.currentAnalysisResults.individual_results` - Main results container
 - `window.stableChannelThresholds` - Per-channel threshold storage
 - `CONCENTRATION_CONTROLS` - Standard curve control definitions
 - Multichannel wells: `result.cqj[result.fluorophore]` and `result.calcj[result.fluorophore]`
+- ML pathogen configuration: per-pathogen enable/disable flags with audit trail
 
 ### 🚧 **Active Issues & Current Work**
 
@@ -374,6 +403,38 @@ For debugging threshold/CQJ issues, use these browser console commands:
 - `window.currentAnalysisResults` - View current frontend data
 - `window.stableChannelThresholds` - View current threshold values
 - `recalculateCQJValues()` - Force recalculation of all CQJ values
+
+## 🤖 ML FEEDBACK INTERFACE ROBUSTNESS (July 22, 2025)
+
+### ✅ **Enhanced ML Feedback Data Recovery**
+The ML feedback interface has been enhanced with robust well data recovery to prevent "No well data available" errors:
+
+#### **Recovery Mechanism**:
+1. **Primary**: Uses stored `this.currentWellData` and `this.currentWellKey`
+2. **Fallback 1**: Attempts recovery from `window.currentModalWellKey`
+3. **Fallback 2**: Retrieves from `window.currentAnalysisResults.individual_results`
+4. **Deep Clone**: Prevents reference issues by cloning recovered data
+
+#### **Pathogen Extraction Robustness**:
+- **5-Strategy Fallback**: Pathogen library lookup → well data fields → test code → constructed → channel → general PCR
+- **Multiple Data Sources**: Works with both stored and recovered well data
+- **Comprehensive Logging**: Detailed console output for debugging pathogen detection
+
+#### **Key Functions Enhanced**:
+- `submitFeedback()` - Enhanced with well data recovery and comprehensive error handling
+- `extractChannelSpecificPathogen(fallbackWellData)` - Accepts fallback data parameter
+- `setCurrentWell()` - Deep clones data to prevent reference issues
+
+#### **Error Prevention**:
+- Validates data availability at multiple checkpoints
+- Provides detailed error messages with available data sources
+- Maintains backward compatibility while adding robustness
+
+### 🔧 **ML Configuration Management**:
+- **Admin Interface**: `/api/ml-config` for pathogen-specific ML control
+- **Per-Pathogen Settings**: Enable/disable ML learning per pathogen with audit trail
+- **Safe Reset**: ML training data reset with user confirmation and audit logging
+- **System Settings**: Global ML learning message control
 
 ---
 

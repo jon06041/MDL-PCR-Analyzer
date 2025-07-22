@@ -267,13 +267,17 @@ class MLFeedbackInterface {
     }
 
     setCurrentWell(wellKey, wellData) {
-        // Ensure we have valid data before setting
+        // Enhanced validation to ensure we have valid data before setting
         if (!wellKey || !wellData) {
+            console.warn('ML Feedback: Invalid well data provided - wellKey:', wellKey, 'wellData:', wellData);
             return;
         }
         
+        // Deep clone wellData to avoid reference issues
         this.currentWellKey = wellKey;
-        this.currentWellData = wellData;
+        this.currentWellData = JSON.parse(JSON.stringify(wellData));
+        
+        console.log('ML Feedback: Set current well:', wellKey, 'with data keys:', Object.keys(this.currentWellData));
         
         // Always ensure ML section exists when a well is selected
         const existingSection = document.getElementById('ml-feedback-section');
@@ -699,16 +703,18 @@ class MLFeedbackInterface {
 
     // ===== CHANNEL-SPECIFIC PATHOGEN EXTRACTION =====
     
-    extractChannelSpecificPathogen() {
-        // Check if currentWellData is available
-        if (!this.currentWellData) {
+    extractChannelSpecificPathogen(fallbackWellData = null) {
+        // Enhanced robustness for pathogen extraction with fallback data support
+        const wellData = this.currentWellData || fallbackWellData;
+        
+        if (!wellData) {
             console.warn('ML Feedback Interface: No current well data available');
             return {
                 experimentPattern: null,
                 test_code: null,
                 testCode: null,
-                channel: '',
-                pathogen: null
+                channel: 'Unknown',
+                pathogen: 'Unknown'
             };
         }
         
@@ -717,35 +723,67 @@ class MLFeedbackInterface {
         const testCode = (typeof extractTestCode === 'function' && currentExperimentPattern) ? 
             extractTestCode(currentExperimentPattern) : null;
         
-        // Get channel from current well data with null safety
-        const channel = this.currentWellData.channel || this.currentWellData.fluorophore || '';
+        // Get channel from current well data with multiple fallback options
+        const channel = wellData.channel || 
+                       wellData.fluorophore || 
+                       wellData.fluorescent_channel ||
+                       '';
         
-        // Try to get specific pathogen for this channel
+        // Try to get specific pathogen for this channel using multiple strategies
         let specificPathogen = null;
         
+        // Strategy 1: Use pathogen library lookup
         if (testCode && channel && typeof getPathogenTarget === 'function') {
             try {
                 specificPathogen = getPathogenTarget(testCode, channel);
-                console.log(`🧬 Channel-specific pathogen: ${testCode} + ${channel} = ${specificPathogen}`);
+                if (specificPathogen && specificPathogen !== 'Unknown') {
+                    console.log(`🧬 Pathogen Library lookup: ${testCode} + ${channel} = ${specificPathogen}`);
+                }
             } catch (error) {
-                console.log(`⚠️ Could not get pathogen target for ${testCode}/${channel}:`, error);
+                console.log(`⚠️ Pathogen library lookup failed for ${testCode}/${channel}:`, error);
             }
         }
         
-        // Fallback to target field or experiment pattern
+        // Strategy 2: Use existing pathogen fields from well data
         if (!specificPathogen || specificPathogen === 'Unknown') {
-            specificPathogen = this.currentWellData.target || testCode || 'Unknown';
+            specificPathogen = wellData.target || 
+                             wellData.specific_pathogen ||
+                             wellData.pathogen ||
+                             null;
+            
+            if (specificPathogen && specificPathogen !== 'Unknown') {
+                console.log(`🧬 Well data pathogen: ${specificPathogen}`);
+            }
         }
         
-        // If still no pathogen, try to construct from fluorophore and test code
+        // Strategy 3: Use test code as pathogen
+        if (!specificPathogen || specificPathogen === 'Unknown') {
+            specificPathogen = testCode || wellData.test_code || null;
+            if (specificPathogen && specificPathogen !== 'Unknown') {
+                console.log(`🧬 Test code as pathogen: ${specificPathogen}`);
+            }
+        }
+        
+        // Strategy 4: Construct from test code + channel
         if (!specificPathogen || specificPathogen === 'Unknown') {
             if (testCode && channel) {
                 specificPathogen = `${testCode}_${channel}`;
-            } else if (channel) {
-                specificPathogen = channel;
-            } else {
-                specificPathogen = 'Unknown';
+                console.log(`🧬 Constructed pathogen: ${specificPathogen}`);
             }
+        }
+        
+        // Strategy 5: Use channel/fluorophore alone
+        if (!specificPathogen || specificPathogen === 'Unknown') {
+            if (channel) {
+                specificPathogen = channel;
+                console.log(`🧬 Channel as pathogen: ${specificPathogen}`);
+            }
+        }
+        
+        // Final fallback
+        if (!specificPathogen || specificPathogen === 'Unknown') {
+            specificPathogen = 'General_PCR';
+            console.log(`🧬 Final fallback pathogen: ${specificPathogen}`);
         }
         
         console.log(`🧬 Final pathogen for ML: ${specificPathogen}`);
@@ -754,7 +792,7 @@ class MLFeedbackInterface {
             experimentPattern: currentExperimentPattern,
             test_code: testCode,
             testCode: testCode,  // Keep both for compatibility
-            channel: channel,
+            channel: channel || 'Unknown',
             pathogen: specificPathogen
         };
     }
@@ -796,6 +834,7 @@ class MLFeedbackInterface {
 
     async analyzeCurveWithML() {
         if (!this.currentWellData) {
+            console.error('ML Analysis: No curve data available for analysis');
             alert('No curve data available for analysis');
             return;
         }
@@ -811,30 +850,54 @@ class MLFeedbackInterface {
         }
 
         try {
-            console.log('Analyzing curve with ML for well:', this.currentWellKey);
-            
-            // Get channel-specific pathogen information
+            // Get channel-specific pathogen information with enhanced validation
             const channelData = this.extractChannelSpecificPathogen();
             
-            // Ensure we have valid pathogen information
-            if (!channelData.pathogen || channelData.pathogen === 'Unknown') {
-                console.warn('ML Analysis: No valid pathogen found, using fluorophore as fallback');
-                channelData.pathogen = channelData.channel || 'Unknown';
+            // Multiple fallback strategies for pathogen detection
+            let finalPathogen = channelData.pathogen;
+            
+            if (!finalPathogen || finalPathogen === 'Unknown') {
+                // Try alternative pathogen sources
+                finalPathogen = this.currentWellData.target || 
+                               this.currentWellData.specific_pathogen ||
+                               this.currentWellData.pathogen ||
+                               channelData.testCode ||
+                               channelData.channel ||
+                               'General_PCR';
+                
+                console.warn('ML Analysis: Using fallback pathogen:', finalPathogen);
             }
             
-            // Prepare well data for pathogen detection
+            // Validate we have the required raw data
+            const rawRfu = this.currentWellData.raw_rfu || 
+                          this.currentWellData.rfu_data || 
+                          this.currentWellData.rfu ||
+                          [];
+            const rawCycles = this.currentWellData.raw_cycles || 
+                             this.currentWellData.cycles || 
+                             this.currentWellData.cycle_data ||
+                             [];
+            
+            if (!rawRfu || !rawCycles || rawRfu.length === 0 || rawCycles.length === 0) {
+                console.error('ML Analysis: Missing or empty raw data - RFU:', rawRfu, 'Cycles:', rawCycles);
+                throw new Error('Missing raw curve data for ML analysis');
+            }
+            
+            // Comprehensive well data for analysis
             const wellData = {
-                well: this.currentWellData.well_id || this.currentWellKey.split('_')[0],
-                target: channelData.pathogen, // Use the resolved pathogen as target
-                sample: this.currentWellData.sample || this.currentWellData.sample_name || '',
+                well: this.currentWellData.well_id || this.currentWellKey.split('_')[0] || this.currentWellKey,
+                target: finalPathogen, // Primary pathogen field
+                specific_pathogen: finalPathogen, // Channel-specific pathogen
+                pathogen: finalPathogen, // General pathogen field
+                sample: this.currentWellData.sample || this.currentWellData.sample_name || 'Unknown_Sample',
                 classification: this.currentWellData.classification || 'UNKNOWN',
-                channel: channelData.channel,
-                specific_pathogen: channelData.pathogen,
-                experiment_pattern: channelData.experimentPattern,
-                fluorophore: channelData.channel // Add fluorophore explicitly
+                channel: channelData.channel || this.currentWellData.channel || this.currentWellData.fluorophore || 'Unknown_Channel',
+                fluorophore: channelData.channel || this.currentWellData.fluorophore || this.currentWellData.channel || 'Unknown_Fluorophore',
+                experiment_pattern: channelData.experimentPattern || channelData.testCode || this.currentWellData.experiment_pattern || '',
+                test_code: channelData.testCode || this.currentWellData.test_code || ''
             };
             
-            console.log('ML Analysis: Sending well data:', wellData);
+            console.log('ML Analysis: Comprehensive well data:', wellData);
 
             const response = await fetch('/api/ml-analyze-curve', {
                 method: 'POST',
@@ -842,8 +905,8 @@ class MLFeedbackInterface {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    rfu_data: this.currentWellData.raw_rfu,
-                    cycles: this.currentWellData.raw_cycles,
+                    rfu_data: rawRfu,
+                    cycles: rawCycles,
                     well_data: wellData,
                     existing_metrics: {
                         r2: this.currentWellData.r2_score || 0,
@@ -1010,9 +1073,38 @@ class MLFeedbackInterface {
             return;
         }
 
-        // Check if we have current well data
-        if (!this.currentWellData || !this.currentWellKey) {
-            alert('No well data available for feedback submission. Please select a well first.');
+        // Enhanced well data recovery - try multiple sources
+        let wellKey = this.currentWellKey;
+        let wellData = this.currentWellData;
+        
+        // If our stored data is null, try to recover from DOM or global state
+        if (!wellData || !wellKey) {
+            console.warn('ML Feedback: Current well data is null, attempting recovery...');
+            
+            // Try to get well key from modal or global state
+            wellKey = wellKey || window.currentModalWellKey || window.currentWellKey;
+            
+            // Try to get well data from global analysis results
+            if (wellKey && window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+                wellData = window.currentAnalysisResults.individual_results[wellKey];
+                if (wellData) {
+                    console.log('ML Feedback: Successfully recovered well data from global state');
+                    // Update our instance variables
+                    this.currentWellKey = wellKey;
+                    this.currentWellData = JSON.parse(JSON.stringify(wellData));
+                }
+            }
+        }
+
+        // Final validation
+        if (!wellData || !wellKey) {
+            console.error('ML Feedback: Unable to recover well data - wellData:', wellData, 'wellKey:', wellKey);
+            console.error('ML Feedback: Available global data:', {
+                currentModalWellKey: window.currentModalWellKey,
+                currentWellKey: window.currentWellKey,
+                hasAnalysisResults: !!(window.currentAnalysisResults && window.currentAnalysisResults.individual_results)
+            });
+            alert('No well data available for feedback submission. Please select a well first and try again.');
             return;
         }
 
@@ -1025,35 +1117,54 @@ class MLFeedbackInterface {
         }
 
         try {
-            // Get channel-specific pathogen information
-            const channelData = this.extractChannelSpecificPathogen();
+            // Get channel-specific pathogen information with enhanced validation
+            const channelData = this.extractChannelSpecificPathogen(wellData);
             
-            // Ensure we have valid pathogen information for feedback
-            if (!channelData.pathogen || channelData.pathogen === 'Unknown') {
-                console.warn('ML Feedback: No valid pathogen found, using fluorophore as fallback');
-                channelData.pathogen = channelData.channel || 'Unknown';
+            // Multiple fallback strategies for pathogen detection
+            let finalPathogen = channelData.pathogen;
+            
+            if (!finalPathogen || finalPathogen === 'Unknown') {
+                // Try alternative pathogen sources from recovered well data
+                finalPathogen = wellData.target || 
+                               wellData.specific_pathogen ||
+                               wellData.pathogen ||
+                               channelData.testCode ||
+                               channelData.channel ||
+                               'General_PCR';
+                
+                console.warn('ML Feedback: Using fallback pathogen:', finalPathogen);
             }
             
-            // Check if we have the required raw data
-            const rawRfu = this.currentWellData.raw_rfu || this.currentWellData.rfu_data;
-            const rawCycles = this.currentWellData.raw_cycles || this.currentWellData.cycles;
+            // Validate we have the required raw data with multiple field names
+            const rawRfu = wellData.raw_rfu || 
+                          wellData.rfu_data || 
+                          wellData.rfu ||
+                          [];
+            const rawCycles = wellData.raw_cycles || 
+                             wellData.cycles || 
+                             wellData.cycle_data ||
+                             [];
             
-            if (!rawRfu || !rawCycles) {
+            if (!rawRfu || !rawCycles || rawRfu.length === 0 || rawCycles.length === 0) {
+                console.error('ML Feedback: Missing or empty raw data - RFU:', rawRfu, 'Cycles:', rawCycles);
                 throw new Error('Missing raw RFU or cycle data for feedback submission');
             }
             
-            const wellData = {
-                well: this.currentWellData.well_id || this.currentWellKey.split('_')[0],
-                target: channelData.pathogen, // Use the resolved pathogen as target
-                sample: this.currentWellData.sample || this.currentWellData.sample_name || '',
-                classification: this.currentWellData.classification || 'UNKNOWN',
-                channel: channelData.channel,
-                specific_pathogen: channelData.pathogen,
-                experiment_pattern: channelData.experimentPattern,
-                fluorophore: channelData.channel // Add fluorophore explicitly
+            // Construct comprehensive well data object with all possible fields
+            const submissionWellData = {
+                well: wellData.well_id || wellKey.split('_')[0] || wellKey,
+                target: finalPathogen, // Primary pathogen field
+                specific_pathogen: finalPathogen, // Channel-specific pathogen
+                pathogen: finalPathogen, // General pathogen field
+                sample: wellData.sample || wellData.sample_name || 'Unknown_Sample',
+                classification: wellData.classification || 'UNKNOWN',
+                channel: channelData.channel || wellData.channel || wellData.fluorophore || 'Unknown_Channel',
+                fluorophore: channelData.channel || wellData.fluorophore || wellData.channel || 'Unknown_Fluorophore',
+                experiment_pattern: channelData.experimentPattern || channelData.testCode || wellData.experiment_pattern || '',
+                test_code: channelData.testCode || wellData.test_code || ''
             };
             
-            console.log('ML Feedback: Sending well data:', wellData);
+            console.log('ML Feedback: Comprehensive well data:', submissionWellData);
 
             const response = await fetch('/api/ml-submit-feedback', {
                 method: 'POST',
@@ -1063,19 +1174,19 @@ class MLFeedbackInterface {
                 body: JSON.stringify({
                     rfu_data: rawRfu,
                     cycles: rawCycles,
-                    well_data: wellData,
+                    well_data: submissionWellData,
                     expert_classification: expertClassification,
-                    well_id: this.currentWellKey,
+                    well_id: wellKey,
                     existing_metrics: {
-                        r2: this.currentWellData.r2_score || 0,
-                        steepness: this.currentWellData.steepness || 0,
-                        snr: this.currentWellData.snr || 0,
-                        midpoint: this.currentWellData.midpoint || 0,
-                        baseline: this.currentWellData.baseline || 0,
-                        amplitude: this.currentWellData.amplitude || 0,
-                        cqj: this.currentWellData.cqj || 0,
-                        calcj: this.currentWellData.calcj || 0,
-                        classification: this.currentWellData.classification || 'UNKNOWN'
+                        r2: wellData.r2_score || 0,
+                        steepness: wellData.steepness || 0,
+                        snr: wellData.snr || 0,
+                        midpoint: wellData.midpoint || 0,
+                        baseline: wellData.baseline || 0,
+                        amplitude: wellData.amplitude || 0,
+                        cqj: wellData.cqj || 0,
+                        calcj: wellData.calcj || 0,
+                        classification: wellData.classification || 'UNKNOWN'
                     }
                 })
             });

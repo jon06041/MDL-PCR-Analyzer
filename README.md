@@ -8,6 +8,7 @@ A web-based qPCR S-Curve analyzer with ML-enhanced curve classification for labo
 
 📖 **[Complete Documentation](./Agent_instructions.md)** - Comprehensive project information, status, and technical details  
 🤖 **[ML Classification Guide](./ML_CURVE_CLASSIFICATION_DOCUMENTATION.md)** - Machine learning system documentation  
+🔧 **[ML Configuration](./ML_CONFIG_README.md)** - ML pathogen configuration and management system  
 🎯 **[Threshold Strategies](./THRESHOLD_STRATEGIES.md)** - qPCR threshold calculation methods  
 
 ## Quick Start
@@ -28,9 +29,11 @@ python app.py
 ### For Users
 1. Upload CFX Manager CSV files
 2. Add Quantification Summary CSV
-3. Analyze qPCR curves
-4. Review results and adjust thresholds
-5. Export analysis data
+3. Analyze qPCR curves with ML-enhanced classification
+4. Provide expert feedback for ML training (robust data handling)
+5. Configure pathogen-specific ML settings (admin interface)
+6. Review results and adjust thresholds
+7. Export analysis data
 
 ## License
 MIT License - Open for laboratory and research use.

@@ -192,6 +192,29 @@ The ML feedback interface appears **after** the sample details in the modal:
 └─────────────────────────────────────┘
 ```
 
+### Enhanced Feedback Interface Robustness (July 2025)
+
+The ML feedback interface has been significantly enhanced with robust data handling to prevent submission errors:
+
+#### **Multi-Level Data Recovery**
+- **Primary**: Uses stored well data (`currentWellData`, `currentWellKey`)
+- **Recovery 1**: Attempts recovery from modal state (`window.currentModalWellKey`)
+- **Recovery 2**: Retrieves from global analysis results (`window.currentAnalysisResults`)
+- **Deep Cloning**: Prevents reference corruption and timing issues
+
+#### **Enhanced Pathogen Detection**
+- **5-Strategy Fallback**: Library lookup → well fields → test code → constructed → general PCR
+- **Multiple Data Sources**: Works with both stored and recovered data
+- **Comprehensive Logging**: Detailed pathogen extraction debugging
+
+#### **Error Prevention**
+- **Data Validation**: Multiple checkpoints throughout submission
+- **Graceful Degradation**: Continues working with partial data
+- **Clear Error Messages**: Indicates available recovery sources
+- **Backward Compatibility**: All existing features preserved
+
+**Result**: Eliminates "No well data available" errors while maintaining all ML feedback functionality.
+
 ## Training Process
 
 ### Phase 1: Data Collection

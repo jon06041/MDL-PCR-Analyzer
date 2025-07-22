@@ -1258,5 +1258,122 @@
     "expert_classification": "NEGATIVE",
     "existing_classification": "NEG",
     "ml_classification": "NEGATIVE"
+  },
+  {
+    "timestamp": "2025-07-22T12:06:31.630244",
+    "well_id": "F24_FAM",
+    "pathogen": "Chlamydia trachomatis",
+    "features": {
+      "r2": 0.9643244184088269,
+      "steepness": 1.1550147902939083,
+      "snr": 0,
+      "midpoint": 2.5029453759701457,
+      "baseline": -224.87000567161286,
+      "amplitude": 227.96359615940068,
+      "cqj": 0,
+      "calcj": 0,
+      "max_slope": 67.7886194164,
+      "max_slope_cycle": 1,
+      "baseline_std": 68.07274488089496,
+      "curve_auc": -257.89211521791464,
+      "early_cycles_mean": -25.252177486544564,
+      "late_cycles_mean": 6.200119360076596,
+      "plateau_detection": 4.499989231884726,
+      "curve_efficiency": 200,
+      "derivative_peak": 67.7886194164,
+      "second_derivative_max": 5.13470025141123
+    },
+    "expert_classification": "NEGATIVE",
+    "existing_classification": "NEG",
+    "ml_classification": "NEGATIVE"
+  },
+  {
+    "timestamp": "2025-07-22T12:31:50.234005",
+    "well_id": "A7_FAM",
+    "pathogen": "Chlamydia trachomatis",
+    "features": {
+      "r2": -0.012349127218104883,
+      "steepness": 0.010000000003892055,
+      "snr": 0,
+      "midpoint": 37.99999999991377,
+      "baseline": -1.768469760301226,
+      "amplitude": 35.4962849355218,
+      "cqj": 0,
+      "calcj": 0,
+      "max_slope": 3.5520878786796852,
+      "max_slope_cycle": 30,
+      "baseline_std": 129.69611887891978,
+      "curve_auc": 369.69922123264877,
+      "early_cycles_mean": 27.01725044146405,
+      "late_cycles_mean": 1.6777555941217588,
+      "plateau_detection": 3.5020647038144843,
+      "curve_efficiency": 200,
+      "derivative_peak": 3.5520878786796852,
+      "second_derivative_max": 96.96311607186286
+    },
+    "expert_classification": "NEGATIVE",
+    "existing_classification": "NEG",
+    "ml_classification": "NEGATIVE"
+  },
+  {
+    "timestamp": "2025-07-22T12:38:10.639488",
+    "well_id": "P17_HEX",
+    "pathogen": "Neisseria gonhorrea",
+    "features": {
+      "r2": 0.9292688673456267,
+      "steepness": 1.2430453058552322,
+      "snr": 0,
+      "midpoint": 2.312851248372274,
+      "baseline": -408.8368753896104,
+      "amplitude": 417.1991096956952,
+      "cqj": 0,
+      "calcj": 0,
+      "max_slope": 152.185694427535,
+      "max_slope_cycle": 1,
+      "baseline_std": 128.88217756880053,
+      "curve_auc": -312.62920600443124,
+      "early_cycles_mean": -26.386508027446638,
+      "late_cycles_mean": 1.0735467789121342,
+      "plateau_detection": 15.60246045251435,
+      "curve_efficiency": 200,
+      "derivative_peak": 152.185694427535,
+      "second_derivative_max": 17.767545699101873
+    },
+    "expert_classification": "NEGATIVE",
+    "existing_classification": "NEG",
+    "ml_classification": "NEGATIVE"
+  },
+  {
+    "timestamp": "2025-07-22T12:38:10.651232",
+    "well_id": "P17_HEX",
+    "pathogen": "Neisseria gonhorrea",
+    "features": {
+      "r2": 0.9292688673456267,
+      "steepness": 1.2430453058552322,
+      "snr": 0,
+      "midpoint": 2.312851248372274,
+      "baseline": -408.8368753896104,
+      "amplitude": 417.1991096956952,
+      "cqj": {
+        "FAM": null,
+        "HEX": null
+      },
+      "calcj": {
+        "HEX": null
+      },
+      "max_slope": 152.185694427535,
+      "max_slope_cycle": 1,
+      "baseline_std": 128.88217756880053,
+      "curve_auc": -312.62920600443124,
+      "early_cycles_mean": -26.386508027446638,
+      "late_cycles_mean": 1.0735467789121342,
+      "plateau_detection": 15.60246045251435,
+      "curve_efficiency": 200,
+      "derivative_peak": 152.185694427535,
+      "second_derivative_max": 17.767545699101873
+    },
+    "expert_classification": "NEGATIVE",
+    "existing_classification": "UNKNOWN",
+    "ml_classification": "SUSPICIOUS"
   }
 ]
