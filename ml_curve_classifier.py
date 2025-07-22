@@ -32,7 +32,7 @@ class MLCurveClassifier:
         ]
         self.classes = [
             'STRONG_POSITIVE', 'POSITIVE', 'WEAK_POSITIVE', 
-            'INDETERMINATE', 'NEGATIVE', 'SUSPICIOUS'
+            'INDETERMINATE', 'REDO', 'SUSPICIOUS', 'NEGATIVE'
         ]
         self.training_data = []
         self.model_trained = False
@@ -130,23 +130,42 @@ class MLCurveClassifier:
     
     def predict_classification(self, rfu_data, cycles, existing_metrics, pathogen=None):
         """Predict curve classification using ML model"""
+        # Ensure pathogen is a valid string or None
+        if pathogen is not None:
+            pathogen = str(pathogen).strip()
+            if pathogen == '' or pathogen == 'Unknown':
+                pathogen = None
+        
         # Try pathogen-specific model first
         if pathogen and pathogen in self.pathogen_models:
             model = self.pathogen_models[pathogen]
             scaler = self.pathogen_scalers[pathogen]
+            model_type = f"pathogen-specific ({pathogen})"
         elif self.model_trained:
             model = self.model
             scaler = self.scaler
+            model_type = "general ML"
         else:
+            print(f"🔍 ML Debug: No trained model available, using fallback classification")
             return self.fallback_classification(existing_metrics)
             
         features = self.extract_advanced_features(rfu_data, cycles, existing_metrics)
         feature_vector = np.array([features[name] for name in self.feature_names]).reshape(1, -1)
         
+        # Debug logging for feature extraction consistency
+        print(f"🔍 ML Debug: Feature extraction for prediction ({model_type})")
+        print(f"   Pathogen: {pathogen}")
+        print(f"   Key features: amplitude={features.get('amplitude', 'N/A'):.2f}, "
+              f"r2={features.get('r2', 'N/A'):.3f}, snr={features.get('snr', 'N/A'):.2f}")
+        print(f"   CQJ/CalcJ: cqj={features.get('cqj', 'N/A')}, calcj={features.get('calcj', 'N/A')}")
+        
         try:
             feature_vector_scaled = scaler.transform(feature_vector)
             prediction = model.predict(feature_vector_scaled)[0]
             confidence = np.max(model.predict_proba(feature_vector_scaled))
+            
+            # Additional debug logging for prediction
+            print(f"🔍 ML Debug: Prediction result: {prediction} (confidence: {confidence:.3f})")
             
             # Convert numpy values to Python native types for JSON serialization
             return {
@@ -191,6 +210,15 @@ class MLCurveClassifier:
         """Add a training sample from expert feedback"""
         features = self.extract_advanced_features(rfu_data, cycles, existing_metrics)
         
+        # Debug logging for feature extraction consistency 
+        print(f"🔍 ML Debug: Adding training sample for feedback")
+        print(f"   Well ID: {well_id}")
+        print(f"   Expert classification: {expert_classification}")
+        print(f"   Pathogen: {pathogen}")
+        print(f"   Key features: amplitude={features.get('amplitude', 'N/A'):.2f}, "
+              f"r2={features.get('r2', 'N/A'):.3f}, snr={features.get('snr', 'N/A'):.2f}")
+        print(f"   CQJ/CalcJ: cqj={features.get('cqj', 'N/A')}, calcj={features.get('calcj', 'N/A')}")
+        
         training_sample = {
             'timestamp': datetime.now().isoformat(),
             'well_id': well_id,
@@ -201,17 +229,27 @@ class MLCurveClassifier:
             'ml_classification': self.predict_classification(rfu_data, cycles, existing_metrics, pathogen).get('classification', 'UNKNOWN')
         }
         
+        print(f"🔍 ML Debug: Training sample created with ML classification: {training_sample['ml_classification']}")
+        
         self.training_data.append(training_sample)
         self.save_training_data()
         
         # Retrain if we have enough samples
         if len(self.training_data) >= 20 and len(self.training_data) % 10 == 0:
+            print(f"🔄 ML Debug: Triggering general model retrain with {len(self.training_data)} samples")
             self.retrain_model()
             
         # Also retrain pathogen-specific model if we have enough samples
         if pathogen:
-            pathogen_samples = [s for s in self.training_data if s.get('pathogen') == pathogen]
+            # Safely filter training data with pathogen validation
+            pathogen_samples = []
+            for s in self.training_data:
+                sample_pathogen = s.get('pathogen')
+                if sample_pathogen is not None and str(sample_pathogen) == str(pathogen):
+                    pathogen_samples.append(s)
+            
             if len(pathogen_samples) >= 10 and len(pathogen_samples) % 5 == 0:
+                print(f"🔄 ML Debug: Triggering pathogen-specific model retrain for {pathogen} with {len(pathogen_samples)} samples")
                 self.retrain_pathogen_model(pathogen)
     
     def save_training_data(self):
@@ -277,7 +315,12 @@ class MLCurveClassifier:
     
     def retrain_pathogen_model(self, pathogen):
         """Retrain pathogen-specific ML model"""
-        pathogen_samples = [s for s in self.training_data if s.get('pathogen') == pathogen]
+        # Safely filter training data with pathogen validation
+        pathogen_samples = []
+        for s in self.training_data:
+            sample_pathogen = s.get('pathogen')
+            if sample_pathogen is not None and str(sample_pathogen) == str(pathogen):
+                pathogen_samples.append(s)
         
         if len(pathogen_samples) < 5:
             print(f"Insufficient training data for {pathogen} model")
@@ -416,36 +459,42 @@ class MLCurveClassifier:
 def extract_pathogen_from_well_data(well_data):
     """Extract pathogen information from well data using pathogen library"""
     
+    print(f"ML: Extracting pathogen from well_data: {well_data}")
+    
     # Priority 1: Use channel-specific pathogen if available (for multichannel experiments)
     if 'specific_pathogen' in well_data and well_data['specific_pathogen']:
         pathogen = str(well_data['specific_pathogen']).strip()
-        if pathogen and pathogen != 'Unknown':
+        if pathogen and pathogen != 'Unknown' and pathogen != '':
             print(f"ML: Using channel-specific pathogen: {pathogen}")
             return pathogen
     
     # Priority 2: Use target field (specific pathogen for this channel)
     if 'target' in well_data and well_data['target']:
         target = str(well_data['target']).strip()
-        if target and target != 'Unknown':
+        if target and target != 'Unknown' and target != '':
             print(f"ML: Using target field pathogen: {target}")
             return target
     
-    # Priority 3: Extract from experiment pattern (fallback for single-channel experiments)
+    # Priority 3: Use pathogen field directly
+    if 'pathogen' in well_data and well_data['pathogen']:
+        pathogen = str(well_data['pathogen']).strip()
+        if pathogen and pathogen != 'Unknown' and pathogen != '':
+            print(f"ML: Using pathogen field: {pathogen}")
+            return pathogen
+    
+    # Priority 4: Extract from experiment pattern (fallback for single-channel experiments)
     test_code = None
     
     # Check various fields that might contain the test code
-    for field in ['test_code', 'experiment_pattern', 'sample_name', 'pathogen']:
+    for field in ['test_code', 'experiment_pattern', 'sample_name']:
         if field in well_data and well_data[field]:
-            test_code = well_data[field]
-            break
+            test_code = str(well_data[field]).strip()
+            if test_code and test_code != '':
+                break
     
     if not test_code:
         print("ML: No pathogen information found in well data")
-        return None
-    
-    # Extract pathogen code from test code using same logic as frontend
-    # Mimic the extractTestCode function from script.js
-    test_code = str(test_code).strip()
+        return "General_PCR"  # Return fallback instead of None
     
     print(f"ML: Using experiment-level pathogen: {test_code}")
     return test_code

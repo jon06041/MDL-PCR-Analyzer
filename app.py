@@ -1624,9 +1624,26 @@ def ml_analyze_curve():
             # Get ML prediction with pathogen context
             prediction = ml_classifier.predict_classification(rfu_data, cycles, existing_metrics, pathogen)
         
-        # Get training stats breakdown
-        general_samples = len([s for s in ml_classifier.training_data if not s.get('pathogen')])
-        pathogen_samples = len([s for s in ml_classifier.training_data if s.get('pathogen') == pathogen]) if pathogen else 0
+        # Get enhanced training stats breakdown with detailed pathogen information
+        general_samples = len([s for s in ml_classifier.training_data if not s.get('pathogen') or s.get('pathogen') == 'General_PCR'])
+        
+        # Create detailed pathogen breakdown
+        pathogen_breakdown = {}
+        current_test_samples = 0
+        
+        for sample in ml_classifier.training_data:
+            sample_pathogen = sample.get('pathogen', 'General_PCR')
+            # Ensure pathogen is a string for safe comparison
+            sample_pathogen = str(sample_pathogen) if sample_pathogen is not None else 'General_PCR'
+            
+            if sample_pathogen not in pathogen_breakdown:
+                pathogen_breakdown[sample_pathogen] = 0
+            pathogen_breakdown[sample_pathogen] += 1
+            
+            # Count samples for current test with safe string comparison
+            if pathogen and str(sample_pathogen) == str(pathogen):
+                current_test_samples += 1
+        
         total_samples = len(ml_classifier.training_data)
         
         return jsonify({
@@ -1637,7 +1654,10 @@ def ml_analyze_curve():
             'training_breakdown': {
                 'total_samples': total_samples,
                 'general_pcr_samples': general_samples,
-                'pathogen_specific_samples': pathogen_samples
+                'current_test_samples': current_test_samples,
+                'current_test_pathogen': pathogen,
+                'pathogen_breakdown': pathogen_breakdown,
+                'pathogen_specific_samples': sum(v for k, v in pathogen_breakdown.items() if k != 'General_PCR')
             }
         })
         
@@ -1673,18 +1693,41 @@ def ml_submit_feedback():
             expert_classification, well_id, pathogen
         )
         
-        # Get training stats breakdown
-        general_samples = len([s for s in ml_classifier.training_data if not s.get('pathogen')])
-        pathogen_samples = len([s for s in ml_classifier.training_data if s.get('pathogen') == pathogen]) if pathogen else 0
+        # Get enhanced training stats breakdown with detailed pathogen information
+        general_samples = len([s for s in ml_classifier.training_data if not s.get('pathogen') or s.get('pathogen') == 'General_PCR'])
+        
+        # Create detailed pathogen breakdown
+        pathogen_breakdown = {}
+        current_test_samples = 0
+        
+        for sample in ml_classifier.training_data:
+            sample_pathogen = sample.get('pathogen', 'General_PCR')
+            # Ensure pathogen is a string for safe comparison
+            sample_pathogen = str(sample_pathogen) if sample_pathogen is not None else 'General_PCR'
+            
+            if sample_pathogen not in pathogen_breakdown:
+                pathogen_breakdown[sample_pathogen] = 0
+            pathogen_breakdown[sample_pathogen] += 1
+            
+            # Count samples for current test with safe string comparison
+            if pathogen and str(sample_pathogen) == str(pathogen):
+                current_test_samples += 1
+        
         total_samples = len(ml_classifier.training_data)
         
         return jsonify({
             'success': True,
             'message': 'Feedback submitted successfully',
-            'pathogen': pathogen,
             'training_samples': total_samples,
-            'general_pcr_samples': general_samples,
-            'pathogen_specific_samples': pathogen_samples,
+            'pathogen': pathogen,
+            'training_breakdown': {
+                'total_samples': total_samples,
+                'general_pcr_samples': general_samples,
+                'current_test_samples': current_test_samples,
+                'current_test_pathogen': pathogen,
+                'pathogen_breakdown': pathogen_breakdown,
+                'pathogen_specific_samples': sum(v for k, v in pathogen_breakdown.items() if k != 'General_PCR')
+            },
             'immediate_prediction': {
                 'classification': expert_classification,
                 'confidence': 1.0,

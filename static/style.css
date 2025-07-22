@@ -3599,6 +3599,7 @@ tr:hover::before {
 .classification-badge.positive { background: #d1ecf1; color: #0c5460; }
 .classification-badge.weak-positive { background: #fff3cd; color: #856404; }
 .classification-badge.indeterminate { background: #f8d7da; color: #721c24; }
+.classification-badge.redo { background: #ffc9d4; color: #8b1538; }
 .classification-badge.negative { background: #e2e3e5; color: #383d41; }
 .classification-badge.suspicious { background: #ffeaa7; color: #d63031; }
 
@@ -3606,6 +3607,104 @@ tr:hover::before {
     font-size: 0.9em;
     color: #6c757d;
     margin-left: 5px;
+}
+
+/* ML Training Progress */
+.training-progress {
+    margin-top: 10px;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 8px;
+    background-color: #e9ecef;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 5px;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #ffc107, #28a745);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+    width: 0%;
+}
+
+.progress-info {
+    font-size: 0.8em;
+    color: #666;
+    margin-bottom: 5px;
+}
+
+/* Classification Conflict Styling */
+.classification-conflict {
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    border-radius: 8px;
+    padding: 15px;
+    margin: 10px 0;
+}
+
+.conflict-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    color: #856404;
+}
+
+.conflict-icon {
+    font-size: 1.2em;
+}
+
+.conflict-comparison {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 10px 0;
+}
+
+.conflict-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+}
+
+.conflict-label {
+    font-size: 0.8em;
+    color: #666;
+    font-weight: 500;
+}
+
+.conflict-vs {
+    color: #856404;
+    font-weight: bold;
+    font-size: 1.1em;
+}
+
+.conflict-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+}
+
+.ml-btn.small {
+    padding: 6px 12px;
+    font-size: 0.8em;
+}
+
+.ml-btn.warning {
+    background-color: #ffc107;
+    border-color: #ffc107;
+    color: #212529;
+}
+
+.ml-btn.warning:hover {
+    background-color: #e0a800;
+    border-color: #d39e00;
 }
 
 .pathogen-context {
@@ -3735,6 +3834,7 @@ tr:hover::before {
 .classification-label.positive { color: #0c5460; }
 .classification-label.weak-positive { color: #856404; }
 .classification-label.indeterminate { color: #721c24; }
+.classification-label.redo { color: #8b1538; }
 .classification-label.negative { color: #383d41; }
 .classification-label.suspicious { color: #d63031; }
 
