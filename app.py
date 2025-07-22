@@ -1687,9 +1687,19 @@ def ml_submit_feedback():
         from ml_curve_classifier import extract_pathogen_from_well_data
         pathogen = extract_pathogen_from_well_data(well_data)
         
-        # Add training sample with pathogen context
+        # Extract full sample name for duplicate prevention
+        full_sample_name = well_data.get('sample', 'Unknown_Sample')
+        channel = well_data.get('channel', well_data.get('fluorophore', 'Unknown_Channel'))
+        
+        # Create enhanced existing metrics that include sample identification
+        enhanced_metrics = existing_metrics.copy()
+        enhanced_metrics['sample'] = full_sample_name
+        enhanced_metrics['channel'] = channel
+        enhanced_metrics['fluorophore'] = channel
+        
+        # Add training sample with pathogen context and sample identification
         ml_classifier.add_training_sample(
-            rfu_data, cycles, existing_metrics, 
+            rfu_data, cycles, enhanced_metrics, 
             expert_classification, well_id, pathogen
         )
         
@@ -1740,6 +1750,62 @@ def ml_submit_feedback():
         print(f"ML feedback error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/ml-check-trained-sample', methods=['POST'])
+def ml_check_trained_sample():
+    """Check if a sample has already been used for training"""
+    if not ML_AVAILABLE or ml_classifier is None:
+        return jsonify({'error': 'ML classifier not available'}), 503
+    
+    try:
+        data = request.json
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+            
+        sample_identifier = data.get('sample_identifier')
+        full_sample_name = data.get('full_sample_name', '')
+        pathogen = data.get('pathogen', '')
+        channel = data.get('channel', '')
+        
+        if not sample_identifier:
+            return jsonify({'error': 'Sample identifier required'}), 400
+        
+        # Check if this sample identifier already exists in training data
+        already_trained = ml_classifier.check_sample_already_trained(
+            sample_identifier, full_sample_name, pathogen, channel
+        )
+        
+        return jsonify({
+            'success': True,
+            'already_trained': already_trained,
+            'sample_identifier': sample_identifier,
+            'full_sample_name': full_sample_name,
+            'pathogen': pathogen,
+            'channel': channel
+        })
+        
+    except Exception as e:
+        print(f"ML sample check error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-get-trained-samples', methods=['GET'])
+def ml_get_trained_samples():
+    """Get list of all trained sample identifiers for duplicate prevention"""
+    if not ML_AVAILABLE or ml_classifier is None:
+        return jsonify({'error': 'ML classifier not available'}), 503
+    
+    try:
+        trained_identifiers = ml_classifier.get_trained_sample_identifiers()
+        
+        return jsonify({
+            'success': True,
+            'trained_sample_identifiers': trained_identifiers,
+            'total_count': len(trained_identifiers)
+        })
+        
+    except Exception as e:
+        print(f"ML get trained samples error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/ml-retrain', methods=['POST'])
 def ml_retrain():
     """Manually trigger ML model retraining"""
@@ -1747,12 +1813,23 @@ def ml_retrain():
         return jsonify({'error': 'ML classifier not available'}), 503
     
     try:
+        data = request.json or {}
+        manual_trigger = data.get('manual_trigger', False)
+        training_samples = data.get('training_samples', 0)
+        
+        print(f"🔄 Manual retrain triggered with {training_samples} training samples")
+        
         success = ml_classifier.retrain_model()
+        model_stats = ml_classifier.get_model_stats()
         
         return jsonify({
             'success': success,
-            'model_stats': ml_classifier.get_model_stats(),
-            'message': 'Model retrained successfully' if success else 'Insufficient training data'
+            'message': f'Model retrained with {len(ml_classifier.training_data)} samples' if success else 'Retraining failed',
+            'training_samples': len(ml_classifier.training_data),
+            'model_trained': ml_classifier.model_trained,
+            'accuracy': model_stats.get('accuracy', 0.0) if success else 0.0,
+            'model_stats': model_stats,
+            'manual_trigger': manual_trigger
         })
         
     except Exception as e:

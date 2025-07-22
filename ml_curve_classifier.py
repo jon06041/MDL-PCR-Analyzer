@@ -36,6 +36,7 @@ class MLCurveClassifier:
         ]
         self.training_data = []
         self.model_trained = False
+        self.last_accuracy = 0.0  # Track last training accuracy
         self.pathogen_models = {}  # Separate models per pathogen
         self.pathogen_scalers = {}  # Separate scalers per pathogen
         
@@ -210,18 +211,38 @@ class MLCurveClassifier:
         """Add a training sample from expert feedback"""
         features = self.extract_advanced_features(rfu_data, cycles, existing_metrics)
         
+        # Create unique sample identifier for duplicate prevention
+        # This should match the frontend logic: full_sample_name||pathogen||channel
+        sample_name = existing_metrics.get('sample', 'Unknown_Sample')
+        channel = existing_metrics.get('channel', existing_metrics.get('fluorophore', 'Unknown_Channel'))
+        pathogen_safe = pathogen or 'General_PCR'
+        sample_identifier = f"{sample_name}||{pathogen_safe}||{channel}"
+        
         # Debug logging for feature extraction consistency 
         print(f"🔍 ML Debug: Adding training sample for feedback")
         print(f"   Well ID: {well_id}")
+        print(f"   Sample Identifier: {sample_identifier}")
         print(f"   Expert classification: {expert_classification}")
         print(f"   Pathogen: {pathogen}")
         print(f"   Key features: amplitude={features.get('amplitude', 'N/A'):.2f}, "
               f"r2={features.get('r2', 'N/A'):.3f}, snr={features.get('snr', 'N/A'):.2f}")
         print(f"   CQJ/CalcJ: cqj={features.get('cqj', 'N/A')}, calcj={features.get('calcj', 'N/A')}")
         
+        # Check if this sample identifier already exists and remove it (for retraining)
+        self.training_data = [
+            sample for sample in self.training_data 
+            if sample.get('sample_identifier') != sample_identifier
+        ]
+        
+        if len(self.training_data) != len([s for s in self.training_data if s.get('sample_identifier') != sample_identifier]):
+            print(f"🔄 ML Debug: Removed previous training data for sample: {sample_identifier}")
+        
         training_sample = {
             'timestamp': datetime.now().isoformat(),
             'well_id': well_id,
+            'sample_identifier': sample_identifier,  # Add unique identifier
+            'sample_name': sample_name,              # Store sample name
+            'channel': channel,                      # Store channel
             'pathogen': pathogen,
             'features': features,
             'expert_classification': expert_classification,
@@ -234,10 +255,37 @@ class MLCurveClassifier:
         self.training_data.append(training_sample)
         self.save_training_data()
         
-        # Retrain if we have enough samples
-        if len(self.training_data) >= 20 and len(self.training_data) % 10 == 0:
-            print(f"🔄 ML Debug: Triggering general model retrain with {len(self.training_data)} samples")
-            self.retrain_model()
+        total_samples = len(self.training_data)
+        
+        # Enhanced retraining logic - retrain at key milestones and regularly
+        should_retrain = False
+        retrain_reason = ""
+        
+        # Initial training thresholds
+        if total_samples == 10:
+            should_retrain = True
+            retrain_reason = "initial training (10 samples)"
+        elif total_samples == 20:
+            should_retrain = True
+            retrain_reason = "production ready (20 samples)"
+        # Regular retraining every 5 samples after 20
+        elif total_samples > 20 and (total_samples - 20) % 5 == 0:
+            should_retrain = True
+            retrain_reason = f"regular update ({total_samples} samples)"
+        # Force retrain if we haven't retrained in a while (every 15 samples after 20)
+        elif total_samples > 20 and (total_samples - 20) % 15 == 0:
+            should_retrain = True
+            retrain_reason = f"periodic refresh ({total_samples} samples)"
+        
+        if should_retrain:
+            print(f"🔄 ML Debug: Triggering general model retrain - {retrain_reason}")
+            success = self.retrain_model()
+            if success:
+                print(f"✅ ML Debug: Model successfully retrained with {total_samples} samples")
+            else:
+                print(f"❌ ML Debug: Model retraining failed with {total_samples} samples")
+        else:
+            print(f"📊 ML Debug: No retraining needed yet ({total_samples} samples, next at {self._get_next_retrain_threshold(total_samples)})")
             
         # Also retrain pathogen-specific model if we have enough samples
         if pathogen:
@@ -248,9 +296,43 @@ class MLCurveClassifier:
                 if sample_pathogen is not None and str(sample_pathogen) == str(pathogen):
                     pathogen_samples.append(s)
             
-            if len(pathogen_samples) >= 10 and len(pathogen_samples) % 5 == 0:
-                print(f"🔄 ML Debug: Triggering pathogen-specific model retrain for {pathogen} with {len(pathogen_samples)} samples")
+            pathogen_count = len(pathogen_samples)
+            # More frequent pathogen-specific retraining
+            if pathogen_count >= 5 and (pathogen_count == 5 or pathogen_count % 3 == 0):
+                print(f"🔄 ML Debug: Triggering pathogen-specific model retrain for {pathogen} with {pathogen_count} samples")
                 self.retrain_pathogen_model(pathogen)
+                
+    def _get_next_retrain_threshold(self, current_samples):
+        """Calculate when the next retraining will occur"""
+        if current_samples < 10:
+            return 10
+        elif current_samples < 20:
+            return 20
+        else:
+            # Next multiple of 5 after 20
+            return 20 + ((current_samples - 20) // 5 + 1) * 5
+                
+    def check_sample_already_trained(self, sample_identifier, full_sample_name, pathogen, channel):
+        """Check if a sample has already been used for training"""
+        # Check if the sample identifier exists in training data
+        for sample in self.training_data:
+            if sample.get('sample_identifier') == sample_identifier:
+                print(f"🚫 ML Duplicate Check: Sample already trained - {sample_identifier}")
+                return True
+        
+        print(f"✅ ML Duplicate Check: Sample not previously trained - {sample_identifier}")
+        return False
+        
+    def get_trained_sample_identifiers(self):
+        """Get list of all trained sample identifiers"""
+        identifiers = []
+        for sample in self.training_data:
+            sample_id = sample.get('sample_identifier')
+            if sample_id:
+                identifiers.append(sample_id)
+        
+        print(f"📚 ML Training Data: Retrieved {len(identifiers)} trained sample identifiers")
+        return identifiers
     
     def save_training_data(self):
         """Save training data to file"""
@@ -302,6 +384,8 @@ class MLCurveClassifier:
         self.model.fit(X_train_scaled, y_train)
         self.model_trained = True
         
+        accuracy = 0.0
+        
         # Evaluate
         if len(X_test) > 0:
             predictions = self.model.predict(X_test_scaled)
@@ -310,6 +394,9 @@ class MLCurveClassifier:
             
             # Save model
             self.save_model()
+        
+        # Store accuracy in model stats
+        self.last_accuracy = accuracy
         
         return True
     
@@ -411,6 +498,7 @@ class MLCurveClassifier:
         stats = {
             'training_samples': len(self.training_data),
             'model_trained': self.model_trained,
+            'accuracy': self.last_accuracy,  # Add accuracy to stats
             'feature_count': len(self.feature_names),
             'class_count': len(self.classes)
         }

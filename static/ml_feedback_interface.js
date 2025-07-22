@@ -8,6 +8,7 @@ class MLFeedbackInterface {
         this.isInitialized = false;
         this.mlStats = null;
         this.submissionInProgress = false; // Flag to prevent duplicate submissions
+        this.trainedSamples = new Set(); // Track samples that have already been trained
         
         // Initialize when DOM is ready
         if (document.readyState === 'loading') {
@@ -34,6 +35,8 @@ class MLFeedbackInterface {
         // Get initial ML statistics (with error handling)
         try {
             await this.updateMLStats();
+            // Load existing trained samples to prevent duplicates
+            await this.loadTrainedSamplesCache();
         } catch (error) {
             // Set default stats display if loading fails
             this.displayMLStats({
@@ -241,6 +244,14 @@ class MLFeedbackInterface {
                             <span id="stat-expert-review-status">-</span>
                         </div>
                     </div>
+                    
+                    <!-- Manual Retrain Button -->
+                    <div class="ml-actions" style="margin-top: 15px;">
+                        <button id="manual-retrain-btn" class="ml-btn secondary small" style="font-size: 0.9em;">
+                            🔄 Manual Retrain
+                        </button>
+                    </div>
+                    
                     <div class="training-progress" id="training-progress" style="display: none;">
                         <div class="progress-info">
                             <small>Expert review available after 50+ training samples</small>
@@ -315,33 +326,31 @@ class MLFeedbackInterface {
             const newSubmitBtn = submitBtn.cloneNode(true);
             submitBtn.parentNode.replaceChild(newSubmitBtn, submitBtn);
             
-            // Add single event listener to the new button with aggressive duplicate prevention
+            // Add single event listener to the new button with duplicate prevention
             let isSubmitting = false;
             newSubmitBtn.addEventListener('click', async (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 e.stopImmediatePropagation();
                 
-                // Triple-check for duplicates
-                if (isSubmitting || this.submissionInProgress || newSubmitBtn.disabled) {
+                // Check for duplicates without disabling button
+                if (isSubmitting || this.submissionInProgress) {
                     console.warn('ML Feedback: Blocking duplicate submission attempt');
                     return false;
                 }
                 
                 isSubmitting = true;
-                newSubmitBtn.disabled = true;
                 
                 try {
                     await this.submitFeedback();
                 } finally {
                     isSubmitting = false;
-                    // Don't re-enable here - let submitFeedback handle it
                 }
                 
                 return false;
             }, { once: false, passive: false });
             
-            console.log('Submit button event listener attached (clean, aggressive duplicate prevention)');
+            console.log('Submit button event listener attached (duplicate prevention without button disabling)');
         }
 
         // Cancel feedback button
@@ -364,6 +373,12 @@ class MLFeedbackInterface {
         const expertReviewBtn = document.getElementById('expert-review-btn');
         if (expertReviewBtn) {
             expertReviewBtn.addEventListener('click', () => this.flagForExpertReview());
+        }
+        
+        // Manual retrain button
+        const manualRetrainBtn = document.getElementById('manual-retrain-btn');
+        if (manualRetrainBtn) {
+            manualRetrainBtn.addEventListener('click', () => this.manualRetrain());
         }
     }
 
@@ -927,6 +942,200 @@ class MLFeedbackInterface {
         const mean = values.reduce((a, b) => a + b) / values.length;
         const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
         return Math.sqrt(variance);
+    }
+
+    // ===== DUPLICATE TRAINING PREVENTION =====
+    
+    extractFullSampleName() {
+        // Try to get the full sample name from the modal details
+        const modalDetails = document.getElementById('modalDetails');
+        if (modalDetails) {
+            // Look for the sample name in the modal parameter grid
+            const parameterItems = modalDetails.querySelectorAll('.modal-parameter-item');
+            for (let item of parameterItems) {
+                const label = item.querySelector('.modal-parameter-label');
+                const value = item.querySelector('.modal-parameter-value');
+                if (label && value && label.textContent.toLowerCase().includes('sample')) {
+                    const sampleName = value.textContent.trim();
+                    if (sampleName && sampleName !== 'Unknown' && sampleName !== '') {
+                        console.log('🔍 Sample Extraction: Found full sample name in modal:', sampleName);
+                        return sampleName;
+                    }
+                }
+            }
+            
+            // Alternative approach: look for sample info in any text content
+            const modalText = modalDetails.textContent;
+            const sampleMatch = modalText.match(/Sample:\s*([^\n\r]+)/i);
+            if (sampleMatch && sampleMatch[1]) {
+                const sampleName = sampleMatch[1].trim();
+                console.log('🔍 Sample Extraction: Found sample name via text match:', sampleName);
+                return sampleName;
+            }
+        }
+        
+        // Final fallback: use well data
+        const fallbackName = this.currentWellData?.sample || this.currentWellData?.sample_name || 'Unknown_Sample';
+        console.log('🔍 Sample Extraction: Using fallback sample name:', fallbackName);
+        return fallbackName;
+    }
+    
+    createUniqueSampleIdentifier() {
+        // Create a unique identifier using full sample name + pathogen + channel
+        const fullSampleName = this.extractFullSampleName();
+        const channelData = this.extractChannelSpecificPathogen();
+        const pathogen = channelData.pathogen || 'General_PCR';
+        const channel = channelData.channel || 'Unknown_Channel';
+        
+        // Create unique identifier that includes:
+        // 1. Full sample name (from modal)
+        // 2. Pathogen/test code
+        // 3. Channel/fluorophore
+        const uniqueId = `${fullSampleName}||${pathogen}||${channel}`;
+        
+        console.log('🔍 Sample ID Debug: Created unique identifier:', uniqueId);
+        console.log('   Full Sample Name:', fullSampleName);
+        console.log('   Pathogen:', pathogen);
+        console.log('   Channel:', channel);
+        
+        return uniqueId;
+    }
+    
+    async checkIfSampleAlreadyTrained() {
+        // Check if this exact sample has already been trained
+        const sampleId = this.createUniqueSampleIdentifier();
+        
+        // Check local cache first
+        if (this.trainedSamples.has(sampleId)) {
+            console.log('🚫 Sample Training Check: Sample already trained (local cache):', sampleId);
+            return true;
+        }
+        
+        // Check backend for existing training data
+        try {
+            const response = await fetch('/api/ml-check-trained-sample', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    sample_identifier: sampleId,
+                    full_sample_name: this.extractFullSampleName(),
+                    pathogen: this.extractChannelSpecificPathogen().pathogen,
+                    channel: this.extractChannelSpecificPathogen().channel
+                })
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                const alreadyTrained = result.already_trained || false;
+                
+                if (alreadyTrained) {
+                    // Add to local cache
+                    this.trainedSamples.add(sampleId);
+                    console.log('🚫 Sample Training Check: Sample already trained (backend check):', sampleId);
+                    return true;
+                }
+            }
+        } catch (error) {
+            console.warn('⚠️ Sample Training Check: Failed to check backend, allowing training:', error);
+        }
+        
+        return false;
+    }
+    
+    markSampleAsTrained() {
+        const sampleId = this.createUniqueSampleIdentifier();
+        this.trainedSamples.add(sampleId);
+        console.log('✅ Sample Training: Marked sample as trained:', sampleId);
+    }
+    
+    async loadTrainedSamplesCache() {
+        // Load existing trained sample identifiers from the backend
+        try {
+            const response = await fetch('/api/ml-get-trained-samples');
+            if (response.ok) {
+                const result = await response.json();
+                if (result.success && result.trained_sample_identifiers) {
+                    // Populate the local cache
+                    this.trainedSamples = new Set(result.trained_sample_identifiers);
+                    console.log(`📚 Trained Samples Cache: Loaded ${this.trainedSamples.size} previously trained samples`);
+                }
+            }
+        } catch (error) {
+            console.warn('⚠️ Trained Samples Cache: Failed to load cache from backend:', error);
+        }
+    }
+    
+    async manualRetrain() {
+        const retrainBtn = document.getElementById('manual-retrain-btn');
+        
+        // Check if we have enough training samples
+        if (!this.mlStats || this.mlStats.training_samples < 10) {
+            alert(`Need at least 10 training samples for manual retrain. Currently have: ${this.mlStats?.training_samples || 0}`);
+            return;
+        }
+        
+        const shouldRetrain = confirm(
+            `🔄 Manual Model Retrain\n\n` +
+            `Current training samples: ${this.mlStats.training_samples}\n\n` +
+            `This will retrain the ML model with all current training data.\n` +
+            `This may improve model accuracy with your recent feedback.\n\n` +
+            `Continue with manual retrain?`
+        );
+        
+        if (!shouldRetrain) {
+            return;
+        }
+        
+        if (retrainBtn) {
+            retrainBtn.disabled = true;
+            retrainBtn.textContent = '⏳ Retraining...';
+        }
+        
+        try {
+            const response = await fetch('/api/ml-retrain', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    manual_trigger: true,
+                    training_samples: this.mlStats.training_samples
+                })
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                if (result.success) {
+                    this.showTrainingNotification(
+                        'Model Retrained!',
+                        `🎯 Model successfully retrained with ${this.mlStats.training_samples} samples. Accuracy: ${(result.accuracy || 0).toFixed(2)}`,
+                        'success'
+                    );
+                    
+                    // Update ML stats to reflect the retrain
+                    await this.updateMLStats();
+                } else {
+                    throw new Error(result.error || 'Retrain failed');
+                }
+            } else {
+                throw new Error(`Server error: ${response.status}`);
+            }
+            
+        } catch (error) {
+            console.error('Manual retrain error:', error);
+            this.showTrainingNotification(
+                'Retrain Failed',
+                `❌ Manual retrain failed: ${error.message}`,
+                'error'
+            );
+        } finally {
+            if (retrainBtn) {
+                retrainBtn.disabled = false;
+                retrainBtn.textContent = '🔄 Manual Retrain';
+            }
+        }
     }
 
     // ===== CHANNEL-SPECIFIC PATHOGEN EXTRACTION =====
@@ -1638,6 +1847,33 @@ class MLFeedbackInterface {
             return;
         }
 
+        // Check if this sample has already been trained
+        const alreadyTrained = await this.checkIfSampleAlreadyTrained();
+        if (alreadyTrained) {
+            const fullSampleName = this.extractFullSampleName();
+            const pathogen = this.extractChannelSpecificPathogen().pathogen;
+            const channel = this.extractChannelSpecificPathogen().channel;
+            
+            const shouldRetrain = confirm(
+                `🚫 Duplicate Training Detected\n\n` +
+                `This sample has already been used for ML training:\n\n` +
+                `Sample: ${fullSampleName}\n` +
+                `Pathogen: ${pathogen}\n` +
+                `Channel: ${channel}\n\n` +
+                `Training the same sample multiple times can reduce model accuracy.\n\n` +
+                `Would you like to retrain anyway?\n` +
+                `(Note: This will overwrite the previous training for this sample)`
+            );
+            
+            if (!shouldRetrain) {
+                console.log('🚫 ML Feedback: User cancelled duplicate sample training');
+                this.submissionInProgress = false; // Reset flag
+                return;
+            }
+            
+            console.log('⚠️ ML Feedback: User approved retraining duplicate sample');
+        }
+
         // Set submission flag
         this.submissionInProgress = true;
 
@@ -1679,8 +1915,8 @@ class MLFeedbackInterface {
         const expertClassification = selectedRadio.value;
         const submitBtn = document.getElementById('submit-feedback-btn');
         
+        // Show loading state but don't disable button (duplicate check popup is sufficient)
         if (submitBtn) {
-            submitBtn.disabled = true;
             submitBtn.textContent = '⏳ Submitting...';
         }
 
@@ -1724,7 +1960,7 @@ class MLFeedbackInterface {
                 target: finalPathogen, // Primary pathogen field
                 specific_pathogen: finalPathogen, // Channel-specific pathogen
                 pathogen: finalPathogen, // General pathogen field
-                sample: wellData.sample || wellData.sample_name || 'Unknown_Sample',
+                sample: this.extractFullSampleName(), // Use the full sample name from modal
                 classification: wellData.classification || 'UNKNOWN',
                 channel: channelData.channel || wellData.channel || wellData.fluorophore || 'Unknown_Channel',
                 fluorophore: channelData.channel || wellData.fluorophore || wellData.channel || 'Unknown_Fluorophore',
@@ -1762,6 +1998,9 @@ class MLFeedbackInterface {
             if (response.ok) {
                 const result = await response.json();
                 if (result.success) {
+                    // Mark this sample as trained to prevent future duplicates
+                    this.markSampleAsTrained();
+                    
                     // Use non-blocking notification instead of alert
                     this.showTrainingNotification(
                         'Feedback Submitted!',
@@ -1802,9 +2041,10 @@ class MLFeedbackInterface {
             // Reset submission flag
             this.submissionInProgress = false;
             
+            // Reset button text without disabling it
             if (submitBtn) {
-                submitBtn.disabled = false;
                 submitBtn.textContent = '✅ Submit Feedback';
+                // Don't disable the button - let user submit again if needed
             }
         }
     }
