@@ -13,6 +13,7 @@ from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.exc import OperationalError, IntegrityError, DatabaseError
 from threshold_backend import create_threshold_routes
 from cqj_calcj_utils import calculate_cqj_calcj_for_well
+from ml_config_manager import MLConfigManager
 
 def safe_json_dumps(value, default=None):
     """Helper function to safely serialize to JSON, avoiding double-encoding"""
@@ -531,12 +532,25 @@ with app.app_context():
     else:
         print("MySQL database tables initialized")
 
+# Initialize ML configuration manager
+try:
+    sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
+    ml_config_manager = MLConfigManager(sqlite_path)
+    print("ML Configuration Manager initialized")
+except Exception as e:
+    print(f"Warning: Could not initialize ML Configuration Manager: {e}")
+    ml_config_manager = None
+
 # Initialize threshold routes
 create_threshold_routes(app)
 
 @app.route('/')
 def index():
     return send_from_directory('.', 'index.html')
+
+@app.route('/ml-config')
+def ml_config():
+    return send_from_directory('.', 'ml_config.html')
 
 @app.route('/static/<path:filename>')
 def static_files(filename):
@@ -1228,7 +1242,7 @@ def delete_all_sessions():
             print("[DEBUG] Deleting all sessions...")
             if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
                 result = db.session.execute(sql_text('DELETE FROM analysis_sessions'))
-                num_sessions_deleted = result.rowcount if hasattr(result, 'rowcount') else 0
+                num_sessions_deleted = result.rowcount if hasattr(result, 'rowcount') else 0  # type: ignore
             else:
                 num_sessions_deleted = AnalysisSession.query.delete()
             print(f"[DEBUG] Deleted {num_sessions_deleted} sessions")
@@ -1271,14 +1285,14 @@ def delete_session(session_id):
             print(f"[DEBUG] Deleting {well_count} well results for session {session_id}...")
             if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
                 result = db.session.execute(sql_text('DELETE FROM well_results WHERE session_id = :session_id'), {'session_id': session_id})
-                num_wells_deleted = result.rowcount if hasattr(result, 'rowcount') else 0
+                num_wells_deleted = result.rowcount if hasattr(result, 'rowcount') else 0  # type: ignore
             else:
                 num_wells_deleted = WellResult.query.filter_by(session_id=session_id).delete()
             print(f"[DEBUG] Actually deleted {num_wells_deleted} well results")
             print(f"[DEBUG] Deleting session {session_id}...")
             if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
                 result = db.session.execute(sql_text('DELETE FROM analysis_sessions WHERE id = :session_id'), {'session_id': session_id})
-                sessions_deleted = result.rowcount if hasattr(result, 'rowcount') else 0
+                sessions_deleted = result.rowcount if hasattr(result, 'rowcount') else 0  # type: ignore
             else:
                 db.session.delete(session)
                 sessions_deleted = 1
@@ -1350,7 +1364,7 @@ def force_delete_session(session_id):
                     sql_text('DELETE FROM well_results WHERE session_id = :session_id'),
                     {'session_id': session_id}
                 )
-                wells_deleted = result.rowcount if hasattr(result, 'rowcount') else 0
+                wells_deleted = result.rowcount if hasattr(result, 'rowcount') else 0  # type: ignore
                 print(f"[FORCE DELETE] Raw SQL deleted {wells_deleted} wells")
                 db.session.commit()
             except Exception as sql_error:
@@ -1561,11 +1575,14 @@ except ImportError:
 @app.route('/api/ml-analyze-curve', methods=['POST'])
 def ml_analyze_curve():
     """Get ML analysis and prediction for a curve"""
-    if not ML_AVAILABLE:
+    if not ML_AVAILABLE or ml_classifier is None:
         return jsonify({'error': 'ML classifier not available'}), 503
     
     try:
         data = request.json
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+            
         rfu_data = data.get('rfu_data', [])
         cycles = data.get('cycles', [])
         existing_metrics = data.get('existing_metrics', {})
@@ -1592,11 +1609,14 @@ def ml_analyze_curve():
 @app.route('/api/ml-submit-feedback', methods=['POST'])
 def ml_submit_feedback():
     """Submit expert feedback for ML training"""
-    if not ML_AVAILABLE:
+    if not ML_AVAILABLE or ml_classifier is None:
         return jsonify({'error': 'ML classifier not available'}), 503
     
     try:
         data = request.json
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+            
         rfu_data = data.get('rfu_data', [])
         cycles = data.get('cycles', [])
         existing_metrics = data.get('existing_metrics', {})
@@ -1628,7 +1648,7 @@ def ml_submit_feedback():
 @app.route('/api/ml-retrain', methods=['POST'])
 def ml_retrain():
     """Manually trigger ML model retraining"""
-    if not ML_AVAILABLE:
+    if not ML_AVAILABLE or ml_classifier is None:
         return jsonify({'error': 'ML classifier not available'}), 503
     
     try:
@@ -1647,7 +1667,7 @@ def ml_retrain():
 @app.route('/api/ml-stats', methods=['GET'])
 def ml_stats():
     """Get ML model statistics"""
-    if not ML_AVAILABLE:
+    if not ML_AVAILABLE or ml_classifier is None:
         return jsonify({'error': 'ML classifier not available'}), 503
     
     try:
@@ -1659,6 +1679,216 @@ def ml_stats():
         
     except Exception as e:
         print(f"ML stats error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ===== ML CONFIGURATION ENDPOINTS =====
+
+@app.route('/api/ml-config/pathogen', methods=['GET'])
+def get_pathogen_ml_configs():
+    """Get all pathogen ML configurations"""
+    try:
+        from ml_config_manager import ml_config_manager
+        configs = ml_config_manager.get_all_pathogen_configs()
+        
+        return jsonify({
+            'success': True,
+            'configs': configs
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Failed to get pathogen ML configs: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-config/pathogen/<pathogen_code>/<fluorophore>', methods=['PUT'])
+def update_pathogen_ml_config(pathogen_code, fluorophore):
+    """Enable/disable ML for specific pathogen+fluorophore"""
+    try:
+        from ml_config_manager import ml_config_manager
+        
+        data = request.get_json()
+        enabled = data.get('enabled', True)
+        
+        # Get user info from request (for future role-based access)
+        user_info = {
+            'user_id': request.headers.get('X-User-ID', 'anonymous'),
+            'ip': request.remote_addr,
+            'notes': data.get('notes', '')
+        }
+        
+        success = ml_config_manager.set_pathogen_ml_enabled(
+            pathogen_code, fluorophore, enabled, user_info
+        )
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': f"ML {'enabled' if enabled else 'disabled'} for {pathogen_code}/{fluorophore}"
+            })
+        else:
+            return jsonify({'error': 'Failed to update configuration'}), 500
+            
+    except Exception as e:
+        app.logger.error(f"Failed to update pathogen ML config: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-config/pathogen/<pathogen_code>', methods=['GET'])
+def get_pathogen_ml_config(pathogen_code):
+    """Get ML configuration for specific pathogen"""
+    try:
+        from ml_config_manager import ml_config_manager
+        
+        fluorophore = request.args.get('fluorophore')
+        configs = ml_config_manager.get_pathogen_ml_config(pathogen_code, fluorophore)
+        
+        return jsonify({
+            'success': True,
+            'configs': configs
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Failed to get pathogen ML config: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-config/system', methods=['GET'])
+def get_system_ml_config():
+    """Get system-wide ML configuration"""
+    try:
+        from ml_config_manager import ml_config_manager
+        
+        config = {
+            'ml_global_enabled': ml_config_manager.get_system_config('ml_global_enabled') == 'true',
+            'training_data_version': ml_config_manager.get_system_config('training_data_version'),
+            'min_training_examples': int(ml_config_manager.get_system_config('min_training_examples') or 10),
+            'reset_protection_enabled': ml_config_manager.get_system_config('reset_protection_enabled') == 'true',
+            'auto_training_enabled': ml_config_manager.get_system_config('auto_training_enabled') == 'true'
+        }
+        
+        return jsonify({
+            'success': True,
+            'config': config
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Failed to get system ML config: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-config/system/<config_key>', methods=['PUT'])
+def update_system_ml_config(config_key):
+    """Update system-wide ML configuration (ADMIN ONLY - future role check)"""
+    try:
+        from ml_config_manager import ml_config_manager
+        
+        data = request.get_json()
+        value = str(data.get('value', ''))
+        
+        # Get user info for audit
+        user_info = {
+            'user_id': request.headers.get('X-User-ID', 'anonymous'),
+            'ip': request.remote_addr,
+            'notes': data.get('notes', '')
+        }
+        
+        # TODO: Add role-based access check here
+        # if not user_has_admin_role(user_info['user_id']):
+        #     return jsonify({'error': 'Admin access required'}), 403
+        
+        success = ml_config_manager.set_system_config(config_key, value, user_info)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': f"System config '{config_key}' updated to '{value}'"
+            })
+        else:
+            return jsonify({'error': 'Failed to update system configuration'}), 500
+            
+    except Exception as e:
+        app.logger.error(f"Failed to update system ML config: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-config/reset-training-data', methods=['POST'])
+def reset_ml_training_data():
+    """Reset ML training data (DANGEROUS - ADMIN ONLY)"""
+    try:
+        from ml_config_manager import ml_config_manager
+        
+        data = request.get_json()
+        pathogen_code = data.get('pathogen_code')
+        fluorophore = data.get('fluorophore')
+        confirmation = data.get('confirmation', '')
+        
+        # Require explicit confirmation
+        if confirmation != 'RESET_TRAINING_DATA':
+            return jsonify({
+                'error': 'Missing or invalid confirmation. Use "RESET_TRAINING_DATA"'
+            }), 400
+        
+        # Get user info for audit
+        user_info = {
+            'user_id': request.headers.get('X-User-ID', 'anonymous'),
+            'ip': request.remote_addr,
+            'notes': data.get('notes', 'Manual training data reset')
+        }
+        
+        # TODO: Add role-based access check here
+        # if not user_has_admin_role(user_info['user_id']):
+        #     return jsonify({'error': 'Admin access required'}), 403
+        
+        success, backup_path = ml_config_manager.reset_training_data(
+            pathogen_code, fluorophore, user_info
+        )
+        
+        if success:
+            target = f"{pathogen_code}/{fluorophore}" if pathogen_code and fluorophore else \
+                    pathogen_code if pathogen_code else "ALL"
+            
+            return jsonify({
+                'success': True,
+                'message': f"Training data reset for {target}",
+                'backup_path': backup_path
+            })
+        else:
+            return jsonify({'error': 'Failed to reset training data'}), 500
+            
+    except Exception as e:
+        app.logger.error(f"Failed to reset training data: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-config/audit-log', methods=['GET'])
+def get_ml_audit_log():
+    """Get ML configuration audit log"""
+    try:
+        from ml_config_manager import ml_config_manager
+        
+        limit = int(request.args.get('limit', 50))
+        log_entries = ml_config_manager.get_audit_log(limit)
+        
+        return jsonify({
+            'success': True,
+            'log_entries': log_entries
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Failed to get audit log: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-config/check-enabled/<pathogen_code>/<fluorophore>', methods=['GET'])
+def check_ml_enabled(pathogen_code, fluorophore):
+    """Check if ML is enabled for specific pathogen+fluorophore"""
+    try:
+        from ml_config_manager import ml_config_manager
+        
+        enabled = ml_config_manager.is_ml_enabled_for_pathogen(pathogen_code, fluorophore)
+        
+        return jsonify({
+            'success': True,
+            'enabled': enabled,
+            'pathogen_code': pathogen_code,
+            'fluorophore': fluorophore
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Failed to check ML enabled status: {e}")
         return jsonify({'error': str(e)}), 500
 
 # ===== END ML ENDPOINTS =====

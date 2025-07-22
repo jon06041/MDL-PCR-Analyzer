@@ -1,0 +1,541 @@
+/* ML Configuration Management Styles */
+
+.ml-config-panel {
+    max-width: 1200px;
+    margin: 20px auto;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.ml-config-panel h3 {
+    margin-top: 0;
+    color: #333;
+    border-bottom: 2px solid #007bff;
+    padding-bottom: 10px;
+}
+
+.ml-config-panel h4 {
+    margin: 25px 0 15px 0;
+    color: #495057;
+    font-size: 1.2em;
+}
+
+.ml-config-panel h5 {
+    margin: 15px 0 10px 0;
+    color: #6c757d;
+    font-size: 1.1em;
+    font-weight: 600;
+}
+
+/* System Configuration Section */
+.system-config-section {
+    background: white;
+    padding: 20px;
+    border-radius: 6px;
+    margin-bottom: 25px;
+    border-left: 4px solid #007bff;
+}
+
+.config-item {
+    margin: 15px 0;
+}
+
+.config-item label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 500;
+    color: #495057;
+}
+
+.config-item input[type="checkbox"] {
+    transform: scale(1.2);
+    cursor: pointer;
+}
+
+.config-item input[type="number"] {
+    padding: 6px 10px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    width: 80px;
+}
+
+/* Pathogen Configuration Section */
+.pathogen-config-section {
+    background: white;
+    padding: 20px;
+    border-radius: 6px;
+    margin-bottom: 25px;
+    border-left: 4px solid #28a745;
+}
+
+.pathogen-group {
+    margin: 15px 0;
+    padding: 12px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    border: 1px solid #e9ecef;
+}
+
+.pathogen-title {
+    margin: 0 0 12px 0;
+    color: #333;
+    font-size: 1em;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pathogen-code {
+    font-size: 0.85em;
+    color: #6c757d;
+    font-weight: 400;
+}
+
+.fluorophore-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.fluorophore-config {
+    padding: 6px 8px;
+    background: white;
+    border-radius: 4px;
+    border: 1px solid #e9ecef;
+    transition: all 0.2s ease;
+    font-size: 0.8em;
+    min-height: 60px;
+}
+
+.fluorophore-config:hover {
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.fluorophore-config.enabled {
+    border-left: 3px solid #28a745;
+}
+
+.fluorophore-config.disabled {
+    border-left: 3px solid #dc3545;
+    background: #f8f9fa;
+}
+
+.fluorophore-info {
+    margin-bottom: 6px;
+}
+
+.fluorophore-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 3px;
+}
+
+.fluorophore-name {
+    font-weight: 600;
+    color: #495057;
+    font-size: 0.9em;
+}
+
+.target-name {
+    font-size: 0.75em;
+    color: #6c757d;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+.ml-status {
+    padding: 2px 6px;
+    border-radius: 8px;
+    font-size: 0.7em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.ml-status.enabled {
+    background: #d4edda;
+    color: #155724;
+}
+
+.ml-status.disabled {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.fluorophore-controls {
+    display: flex;
+    gap: 4px;
+}
+
+/* Button Styles - Smaller and more compact */
+.toggle-btn, .reset-btn, .reset-pathogen-btn, .reset-all-btn {
+    padding: 3px 6px;
+    border: none;
+    border-radius: 3px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.7em;
+    line-height: 1.2;
+}
+
+.toggle-btn.enabled {
+    background: #28a745;
+    color: white;
+}
+
+.toggle-btn.enabled:hover {
+    background: #218838;
+}
+
+.toggle-btn.disabled {
+    background: #6c757d;
+    color: white;
+}
+
+.toggle-btn.disabled:hover {
+    background: #5a6268;
+}
+
+.reset-btn, .reset-pathogen-btn, .reset-all-btn {
+    background: #dc3545;
+    color: white;
+}
+
+.reset-btn:hover, .reset-pathogen-btn:hover, .reset-all-btn:hover {
+    background: #c82333;
+}
+
+.danger {
+    position: relative;
+}
+
+.danger::before {
+    content: "⚠️";
+    margin-right: 3px;
+    font-size: 0.8em;
+}
+
+/* Pathogen Actions - More compact */
+.pathogen-actions {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #dee2e6;
+    text-align: center;
+}
+
+.reset-pathogen-btn {
+    padding: 6px 12px;
+    font-size: 0.8em;
+}
+
+/* Danger Zone */
+.danger-zone {
+    background: #f8d7da;
+    padding: 20px;
+    border-radius: 6px;
+    margin-bottom: 25px;
+    border-left: 4px solid #dc3545;
+}
+
+.danger-zone h4 {
+    color: #721c24;
+    margin-top: 0;
+}
+
+.reset-all-btn {
+    padding: 12px 24px;
+    font-size: 1em;
+    margin-bottom: 10px;
+}
+
+.warning-text {
+    color: #721c24;
+    font-size: 0.9em;
+    margin: 10px 0 0 0;
+    font-style: italic;
+}
+
+/* Audit Log Section */
+.audit-log-section {
+    background: white;
+    padding: 20px;
+    border-radius: 6px;
+    border-left: 4px solid #6c757d;
+}
+
+.audit-log-section button {
+    background: #6c757d;
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.audit-log-section button:hover {
+    background: #5a6268;
+}
+
+/* Audit Log Modal */
+.audit-log-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+}
+
+.modal-content {
+    background: white;
+    border-radius: 8px;
+    max-width: 800px;
+    width: 90%;
+    max-height: 80%;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: #333;
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    color: #6c757d;
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.close-btn:hover {
+    color: #343a40;
+}
+
+.modal-body {
+    padding: 20px;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.audit-log-entries {
+    display: grid;
+    gap: 15px;
+}
+
+.audit-entry {
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    border-left: 4px solid #007bff;
+}
+
+.audit-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.audit-header .action {
+    font-weight: 600;
+    color: #495057;
+}
+
+.audit-header .timestamp {
+    color: #6c757d;
+    font-size: 0.9em;
+}
+
+.audit-details {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    margin-bottom: 10px;
+    font-size: 0.9em;
+}
+
+.audit-details span {
+    color: #6c757d;
+}
+
+.audit-details .pathogen {
+    color: #28a745;
+    font-weight: 500;
+}
+
+.audit-details .fluorophore {
+    color: #007bff;
+    font-weight: 500;
+}
+
+.audit-change {
+    display: flex;
+    gap: 15px;
+    font-size: 0.9em;
+}
+
+.old-value, .new-value {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-family: monospace;
+}
+
+.old-value {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.new-value {
+    background: #d4edda;
+    color: #155724;
+}
+
+/* Notification Styles */
+.notification {
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .ml-config-panel {
+        margin: 10px;
+        padding: 15px;
+    }
+    
+    .fluorophore-grid {
+        grid-template-columns: 1fr;
+        gap: 6px;
+    }
+    
+    .fluorophore-config {
+        padding: 6px 8px;
+    }
+    
+    .fluorophore-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+    }
+    
+    .ml-status {
+        align-self: flex-end;
+    }
+    
+    .fluorophore-controls {
+        justify-content: center;
+        gap: 6px;
+    }
+    
+    .toggle-btn, .reset-btn {
+        padding: 6px 10px;
+        font-size: 0.8em;
+    }
+    
+    .modal-content {
+        width: 95%;
+        max-height: 90%;
+    }
+    
+    .audit-details {
+        flex-direction: column;
+        gap: 5px;
+    }
+    
+    .audit-change {
+        flex-direction: column;
+        gap: 5px;
+    }
+    
+    .pathogen-title {
+        font-size: 0.95em;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+    
+    .pathogen-code {
+        font-size: 0.8em;
+    }
+}
+
+@media (max-width: 480px) {
+    .fluorophore-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .fluorophore-controls {
+        flex-direction: column;
+        gap: 4px;
+    }
+    
+    .toggle-btn, .reset-btn {
+        width: 100%;
+        text-align: center;
+    }
+}
+
+/* Loading States */
+.loading {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.loading::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 20px;
+    height: 20px;
+    margin: -10px 0 0 -10px;
+    border: 2px solid #007bff;
+    border-radius: 50%;
+    border-top-color: transparent;
+    animation: spin 1s ease-in-out infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}

@@ -38,9 +38,6 @@ const PATHOGEN_LIBRARY = {
     "Gvag": {
         "FAM": "Gardnerella vaginalis"
     },
-    "BVAB2": {
-        "FAM": "BVAB2"
-    },
     "CHVIC": {
         "FAM": "CHVIC"
     },
@@ -62,9 +59,6 @@ const PATHOGEN_LIBRARY = {
     },
     "AtopVagNY": {
         "FAM": "Atopobium vaginae"
-    },
-    "BVAB2NY": {
-        "FAM": "BVAB2"
     },
     "GvagNY": {
         "FAM": "Gardnerella vaginalis"
@@ -176,12 +170,6 @@ const PATHOGEN_LIBRARY = {
         "Cy5": "Megasphaera type 1"
     },
     "BVPanelPCR3": {
-        "FAM": "Gardnerella vaginalis",
-        "HEX": "Lactobacillus acidophilus",
-        "Texas Red": "Prevotella bivia",
-        "Cy5": "Bifidobacterium breve"
-    },
-    "BVPanelPCR4": {
         "FAM": "Gardnerella vaginalis",
         "HEX": "Lactobacillus acidophilus",
         "Texas Red": "Prevotella bivia",
@@ -560,7 +548,7 @@ function getPathogenName(testCode) {
         'Cpara': 'Candida parapsilosis',
         'Ctrop': 'Candida tropicalis',
         'Gvag': 'Gardnerella vaginalis',
-        'BVAB2': 'BVAB-2',
+        'BVAB': 'BVAB Panel',
         'CHVIC': 'CHVIC',
         'AtopVag': 'Atopobium vaginae',
         'Megasphaera': 'Megasphaera Type 1',

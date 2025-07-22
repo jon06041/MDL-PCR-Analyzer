@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ML Configuration Management - qPCR Analyzer</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/ml_config_styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🤖 ML Configuration Management</h1>
+            <p>Manage machine learning settings for pathogen-specific analysis</p>
+            <nav>
+                <a href="/" class="back-link">← Back to Main Analysis</a>
+            </nav>
+        </header>
+
+        <main>
+            <!-- Important Note Section -->
+            <div class="important-note">
+                <h3>🤔 Should This Page Exist?</h3>
+                <p>
+                    This ML configuration interface provides granular control over machine learning settings. 
+                    Consider whether this level of control is needed in your production environment:
+                </p>
+                <ul>
+                    <li><strong>✅ Useful for:</strong> Development, testing, troubleshooting specific pathogen ML issues</li>
+                    <li><strong>⚠️ Consider hiding for:</strong> Production environments with non-technical users</li>
+                    <li><strong>🔒 Future plan:</strong> Lock this behind admin-only access when login system is added</li>
+                </ul>
+                <p class="access-note">
+                    <em>Currently accessible to all users. Future role-based access will restrict this to administrators only.</em>
+                </p>
+            </div>
+
+            <!-- ML Configuration Container -->
+            <div id="mlConfigContainer">
+                <div class="loading-message">
+                    <p>Loading ML configuration settings...</p>
+                </div>
+            </div>
+
+            <!-- Documentation Section -->
+            <section class="documentation-section">
+                <h3>📚 ML Configuration Guide</h3>
+                
+                <div class="doc-grid">
+                    <div class="doc-card">
+                        <h4>🎯 Pathogen-Specific Toggle</h4>
+                        <p>Enable or disable ML classification for specific pathogen/fluorophore combinations while preserving all training data.</p>
+                        <ul>
+                            <li>Toggle preserves learning data</li>
+                            <li>Instant enable/disable per pathogen</li>
+                            <li>Audit trail for all changes</li>
+                        </ul>
+                    </div>
+
+                    <div class="doc-card">
+                        <h4>⚠️ Training Data Reset</h4>
+                        <p>Safely reset ML training data with automatic backup creation and audit logging.</p>
+                        <ul>
+                            <li>Automatic backup before reset</li>
+                            <li>Confirmation required</li>
+                            <li>Granular reset options</li>
+                        </ul>
+                    </div>
+
+                    <div class="doc-card">
+                        <h4>🔒 Security Features</h4>
+                        <p>Built-in protection and auditing for all sensitive ML operations.</p>
+                        <ul>
+                            <li>Comprehensive audit logging</li>
+                            <li>Multi-step confirmation</li>
+                            <li>Role-based access (coming soon)</li>
+                        </ul>
+                    </div>
+
+                    <div class="doc-card">
+                        <h4>📊 System Settings</h4>
+                        <p>Global ML configuration and system-wide controls.</p>
+                        <ul>
+                            <li>Global ML enable/disable</li>
+                            <li>Minimum training thresholds</li>
+                            <li>Performance monitoring</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Current ML Status Overview -->
+            <section class="status-overview">
+                <h3>📈 Current ML Status</h3>
+                <div id="mlStatusOverview">
+                    <div class="status-loading">Loading status overview...</div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>&copy; 2025 qPCR Analyzer - ML Configuration Management</p>
+            <p>
+                <small>
+                    ⚠️ This interface provides advanced ML configuration options. 
+                    Use caution when resetting training data as this action cannot be undone.
+                </small>
+            </p>
+        </footer>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/static/pathogen_library.js"></script>
+    <script src="/static/ml_config_manager.js"></script>
+    
+    <script>
+        // Initialize ML status overview
+        async function loadMLStatusOverview() {
+            try {
+                const response = await fetch('/api/ml-config/pathogen');
+                const data = await response.json();
+                
+                if (data.success) {
+                    const overview = document.getElementById('mlStatusOverview');
+                    
+                    const totalConfigs = data.configs.length;
+                    const enabledConfigs = data.configs.filter(c => c.ml_enabled).length;
+                    const disabledConfigs = totalConfigs - enabledConfigs;
+                    
+                    // Group by pathogen
+                    const pathogenGroups = {};
+                    data.configs.forEach(config => {
+                        if (!pathogenGroups[config.pathogen_code]) {
+                            pathogenGroups[config.pathogen_code] = { enabled: 0, total: 0 };
+                        }
+                        pathogenGroups[config.pathogen_code].total++;
+                        if (config.ml_enabled) {
+                            pathogenGroups[config.pathogen_code].enabled++;
+                        }
+                    });
+                    
+                    overview.innerHTML = `
+                        <div class="status-grid">
+                            <div class="status-card total">
+                                <h4>Total Configurations</h4>
+                                <div class="status-number">${totalConfigs}</div>
+                                <div class="status-label">Pathogen/Fluorophore pairs</div>
+                            </div>
+                            <div class="status-card enabled">
+                                <h4>ML Enabled</h4>
+                                <div class="status-number">${enabledConfigs}</div>
+                                <div class="status-label">Currently active</div>
+                            </div>
+                            <div class="status-card disabled">
+                                <h4>ML Disabled</h4>
+                                <div class="status-number">${disabledConfigs}</div>
+                                <div class="status-label">Currently inactive</div>
+                            </div>
+                            <div class="status-card pathogens">
+                                <h4>Pathogen Types</h4>
+                                <div class="status-number">${Object.keys(pathogenGroups).length}</div>
+                                <div class="status-label">Unique pathogens</div>
+                            </div>
+                        </div>
+                        
+                        <div class="pathogen-status-list">
+                            <h4>Pathogen Overview</h4>
+                            ${Object.entries(pathogenGroups).map(([pathogen, stats]) => `
+                                <div class="pathogen-status-item">
+                                    <span class="pathogen-name">${pathogen}</span>
+                                    <span class="pathogen-stats">
+                                        ${stats.enabled}/${stats.total} enabled
+                                        <span class="status-indicator ${stats.enabled === stats.total ? 'all-enabled' : stats.enabled === 0 ? 'all-disabled' : 'partial'}"></span>
+                                    </span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                } else {
+                    throw new Error(data.error || 'Failed to load status');
+                }
+            } catch (error) {
+                console.error('Failed to load ML status overview:', error);
+                document.getElementById('mlStatusOverview').innerHTML = `
+                    <div class="status-error">
+                        <p>Failed to load ML status overview</p>
+                        <button onclick="loadMLStatusOverview()">Retry</button>
+                    </div>
+                `;
+            }
+        }
+
+        // Load status overview when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            loadMLStatusOverview();
+            
+            // Refresh status overview every 30 seconds
+            setInterval(loadMLStatusOverview, 30000);
+        });
+    </script>
+
+    <style>
+        /* Additional styles for the admin page */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        header h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .back-link {
+            color: #007bff;
+            text-decoration: none;
+            font-weight: 500;
+            padding: 8px 16px;
+            border: 1px solid #007bff;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+
+        .back-link:hover {
+            background: #007bff;
+            color: white;
+        }
+
+        /* Important Note Section */
+        .important-note {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-left: 4px solid #ffc107;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+
+        .important-note h3 {
+            margin-top: 0;
+            color: #856404;
+        }
+
+        .important-note p {
+            color: #856404;
+            margin-bottom: 10px;
+        }
+
+        .important-note ul {
+            color: #856404;
+            margin: 15px 0;
+            padding-left: 20px;
+        }
+
+        .important-note li {
+            margin: 8px 0;
+        }
+
+        .access-note {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 4px;
+            padding: 10px;
+            margin-top: 15px;
+            color: #721c24 !important;
+            font-style: italic;
+        }
+
+        .documentation-section {
+            margin: 40px 0;
+        }
+
+        .doc-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .doc-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #007bff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .doc-card h4 {
+            margin-top: 0;
+            color: #333;
+        }
+
+        .doc-card ul {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+
+        .doc-card li {
+            margin: 5px 0;
+            color: #6c757d;
+        }
+
+        .status-overview {
+            margin: 40px 0;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .status-card {
+            text-align: center;
+            padding: 20px;
+            border-radius: 6px;
+            border: 1px solid #e9ecef;
+        }
+
+        .status-card.total {
+            background: #f8f9fa;
+            border-left: 4px solid #6c757d;
+        }
+
+        .status-card.enabled {
+            background: #d4edda;
+            border-left: 4px solid #28a745;
+        }
+
+        .status-card.disabled {
+            background: #f8d7da;
+            border-left: 4px solid #dc3545;
+        }
+
+        .status-card.pathogens {
+            background: #d1ecf1;
+            border-left: 4px solid #17a2b8;
+        }
+
+        .status-number {
+            font-size: 2em;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+
+        .status-label {
+            color: #6c757d;
+            font-size: 0.9em;
+        }
+
+        .pathogen-status-list {
+            margin-top: 20px;
+        }
+
+        .pathogen-status-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            margin: 5px 0;
+        }
+
+        .pathogen-name {
+            font-weight: 600;
+            color: #495057;
+        }
+
+        .pathogen-stats {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #6c757d;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .status-indicator.all-enabled {
+            background: #28a745;
+        }
+
+        .status-indicator.all-disabled {
+            background: #dc3545;
+        }
+
+        .status-indicator.partial {
+            background: #ffc107;
+        }
+
+        .loading-message, .status-loading {
+            text-align: center;
+            padding: 40px;
+            color: #6c757d;
+        }
+
+        .status-error {
+            text-align: center;
+            padding: 20px;
+            color: #dc3545;
+        }
+
+        .status-error button {
+            margin-top: 10px;
+            padding: 8px 16px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #e9ecef;
+            color: #6c757d;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+
+            .doc-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .status-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</body>
+</html>
