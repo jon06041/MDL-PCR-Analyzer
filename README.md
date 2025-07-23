@@ -1,39 +1,28 @@
-# MDL-PCR-Analyzer
+# MDL PCR Analyzer
 
-🚨 **FOR COMPLETE PROJECT INFORMATION: READ [`Agent_instructions.md`](./Agent_instructions.md)** 🚨
+A qPCR analysis tool with ML-powered curve classification and automated reporting.
 
-A web-based qPCR S-Curve analyzer with ML-enhanced curve classification for laboratory workflows.
+## Project Structure
 
-## Quick Links
+This project uses consolidated documentation for maintainability:
 
-📖 **[Complete Documentation](./Agent_instructions.md)** - Comprehensive project information, status, and technical details  
-🤖 **[ML Classification Guide](./ML_CURVE_CLASSIFICATION_DOCUMENTATION.md)** - Machine learning system documentation  
-🔧 **[ML Configuration](./ML_CONFIG_README.md)** - ML pathogen configuration and management system  
-🎯 **[Threshold Strategies](./THRESHOLD_STRATEGIES.md)** - qPCR threshold calculation methods  
+- **Agent_instructions.md** - Main project documentation, development history, and AI agent instructions
+- **ML_CURVE_CLASSIFICATION_DOCUMENTATION.md** - Machine learning algorithms, hybrid features, and classification logic  
+- **THRESHOLD_STRATEGIES.md** - Threshold detection and curve analysis strategies
 
 ## Quick Start
 
-### For Developers/Agents
-1. **READ FIRST**: [`Agent_instructions.md`](./Agent_instructions.md)
-2. Understand current status and technical context
-3. Follow safety procedures and development guidelines
+1. Install dependencies: `pip install -r requirements.txt`
+2. Run the application: `python app.py`
+3. Access the web interface at `http://localhost:5000`
 
-### For Production Deployment
-```bash
-# Railway/Cloud deployment - automatic detection
-# Local development
-pip install -r requirements.txt
-python app.py
-```
+## Features
 
-### For Users
-1. Upload CFX Manager CSV files
-2. Add Quantification Summary CSV
-3. Analyze qPCR curves with ML-enhanced classification
-4. Provide expert feedback for ML training (robust data handling)
-5. Configure pathogen-specific ML settings (admin interface)
-6. Review results and adjust thresholds
-7. Export analysis data
+- qPCR curve analysis and Cq calculation
+- ML-powered curve classification (S-curve, exponential, linear, noise)
+- Pathogen-specific configuration and thresholds
+- Real-time feedback and learning system
+- Administrative controls for ML training data
+- Automated report generation
 
-## License
-MIT License - Open for laboratory and research use.
+For detailed documentation, see the consolidated markdown files listed above.

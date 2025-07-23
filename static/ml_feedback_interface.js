@@ -47,8 +47,16 @@ class MLFeedbackInterface {
         }
     }
 
-    addMLSectionToModal() {
+    async addMLSectionToModal() {
         console.log('ML Feedback Interface: Checking for existing ML section...');
+        
+        // Check if ML feedback should be hidden based on configuration
+        const shouldHideMLFeedback = await this.shouldHideMLFeedback();
+        if (shouldHideMLFeedback) {
+            console.log('ML Feedback Interface: ML feedback disabled - hiding section');
+            this.hideMLSection();
+            return;
+        }
         
         // Check if ML section already exists in HTML
         const existingSection = document.getElementById('ml-feedback-section');
@@ -304,6 +312,68 @@ class MLFeedbackInterface {
         } else {
             console.log('ML Feedback Interface: ML section not found');
         }
+        
+        // Also show individual ML components when section becomes visible
+        const mlStatsDisplay = document.getElementById('ml-stats-display');
+        const mlAnalyzeBtn = document.getElementById('ml-analyze-btn');
+        
+        if (mlStatsDisplay) {
+            mlStatsDisplay.style.display = 'block';
+            console.log('ML Feedback Interface: ML stats display made visible');
+        }
+        if (mlAnalyzeBtn) {
+            mlAnalyzeBtn.style.display = 'inline-block';
+            mlAnalyzeBtn.disabled = false; // Ensure button is enabled
+            mlAnalyzeBtn.textContent = '🔍 Analyze with ML';
+            console.log('ML Feedback Interface: ML analyze button made visible and enabled');
+        }
+    }
+
+    hideMLSection() {
+        console.log('ML Feedback Interface: Hiding ML section due to configuration');
+        const mlSection = document.getElementById('ml-feedback-section');
+        if (mlSection) {
+            mlSection.style.display = 'none';
+            console.log('ML Feedback Interface: ML section hidden');
+        } else {
+            console.log('ML Feedback Interface: ML section not found to hide');
+        }
+        
+        // Also hide individual ML components if they exist separately
+        const mlStatsDisplay = document.getElementById('ml-stats-display');
+        const mlAnalyzeBtn = document.getElementById('ml-analyze-btn');
+        const mlFeedbackBtn = document.getElementById('ml-feedback-btn');
+        const mlFeedbackForm = document.getElementById('ml-feedback-form');
+        const mlPredictionDisplay = document.getElementById('ml-prediction-display');
+        
+        if (mlStatsDisplay) mlStatsDisplay.style.display = 'none';
+        if (mlAnalyzeBtn) mlAnalyzeBtn.style.display = 'none';
+        if (mlFeedbackBtn) mlFeedbackBtn.style.display = 'none';
+        if (mlFeedbackForm) mlFeedbackForm.style.display = 'none';
+        if (mlPredictionDisplay) mlPredictionDisplay.style.display = 'none';
+    }
+
+    async refreshMLSectionConfiguration() {
+        /**
+         * Refresh the ML section visibility based on current configuration
+         * Useful when configuration changes while a modal is open
+         */
+        console.log('ML Feedback Interface: Refreshing ML section configuration');
+        
+        // Check if we should hide ML feedback
+        const shouldHide = await this.shouldHideMLFeedback();
+        
+        if (shouldHide) {
+            this.hideMLSection();
+        } else {
+            // Ensure ML section is shown and properly initialized
+            const existingSection = document.getElementById('ml-feedback-section');
+            if (existingSection) {
+                this.showMLSection();
+            } else {
+                this.addMLSectionToModal();
+            }
+        }
     }
 
     attachEventListeners() {
@@ -395,13 +465,8 @@ class MLFeedbackInterface {
         
         console.log('ML Feedback: Set current well:', wellKey, 'with data keys:', Object.keys(this.currentWellData));
         
-        // Always ensure ML section exists when a well is selected
-        const existingSection = document.getElementById('ml-feedback-section');
-        if (!existingSection) {
-            this.addMLSectionToModal();
-        } else {
-            this.showMLSection();
-        }
+        // Check ML configuration for current well before showing section
+        this.refreshMLSectionConfiguration();
         
         // Reset prediction display when switching wells
         const predictionDisplay = document.getElementById('ml-prediction-display');
@@ -412,15 +477,91 @@ class MLFeedbackInterface {
         if (feedbackBtn) feedbackBtn.style.display = 'none';
         if (feedbackForm) feedbackForm.style.display = 'none';
         
-        // Auto-analyze the curve if ML classification doesn't exist
+        // Auto-analyze the curve if ML classification doesn't exist (only if ML is enabled)
         if (!wellData.ml_classification) {
-            setTimeout(() => this.analyzeCurveWithML(), 100);
+            setTimeout(async () => {
+                // Check if ML feedback should be hidden before auto-analysis
+                const shouldHide = await this.shouldHideMLFeedback();
+                if (shouldHide) {
+                    console.log('ML Analysis: Skipping auto-analysis - ML feedback disabled');
+                    return;
+                }
+                
+                if (this.currentWellData && this.currentWellKey) {
+                    this.analyzeCurveWithML();
+                } else {
+                    console.warn('ML Analysis: Well data not ready for auto-analysis, skipping');
+                }
+            }, 300);
         } else {
-            this.displayExistingMLClassification(wellData.ml_classification);
+            // Only display existing classification if ML section is visible
+            setTimeout(async () => {
+                const shouldHide = await this.shouldHideMLFeedback();
+                if (!shouldHide) {
+                    this.displayExistingMLClassification(wellData.ml_classification);
+                }
+            }, 100);
         }
         
         // Update visual curve analysis
         this.updateVisualCurveDisplay(wellData);
+    }
+
+    async shouldHideMLFeedback() {
+        /**
+         * Determine if ML feedback should be hidden based on:
+         * Pathogen-specific ML enabled setting for current test
+         * Hide when ML is disabled for this specific pathogen/test
+         */
+        try {
+            // Get current pathogen information
+            const pathogenInfo = this.extractChannelSpecificPathogen();
+            if (!pathogenInfo.pathogen || pathogenInfo.pathogen === 'Unknown') {
+                console.log('ML Config Check: No pathogen detected, showing ML feedback');
+                return false; // Show ML feedback if we can't determine pathogen
+            }
+
+            // Get pathogen-specific ML configuration
+            const pathogenResponse = await fetch(`/api/ml_config/pathogen/${pathogenInfo.pathogen}`);
+            if (!pathogenResponse.ok) {
+                console.log('ML Config Check: Failed to get pathogen config, showing ML feedback');
+                return false; // Show ML feedback if we can't get pathogen config
+            }
+            const pathogenConfigResponse = await pathogenResponse.json();
+            
+            // Find config for current fluorophore or general config
+            let pathogenMLEnabled = true; // Default to enabled
+            if (pathogenConfigResponse.success && pathogenConfigResponse.data?.length > 0) {
+                const configs = pathogenConfigResponse.data;
+                
+                // Look for specific fluorophore config first
+                let config = configs.find(c => c.fluorophore === pathogenInfo.fluorophore);
+                // Fall back to general config (null fluorophore)
+                if (!config) {
+                    config = configs.find(c => !c.fluorophore);
+                }
+                
+                if (config) {
+                    pathogenMLEnabled = config.ml_enabled;
+                }
+            }
+
+            // Hide ML feedback when ML is disabled for this pathogen
+            const shouldHide = !pathogenMLEnabled;
+            
+            console.log('ML Config Check:', {
+                pathogen: pathogenInfo.pathogen,
+                fluorophore: pathogenInfo.fluorophore,
+                pathogenMLEnabled,
+                shouldHide
+            });
+            
+            return shouldHide;
+            
+        } catch (error) {
+            console.error('ML Config Check: Error checking ML feedback visibility:', error);
+            return false; // Show ML feedback on error to be safe
+        }
     }
 
     // Visual curve analysis functions
@@ -1270,23 +1411,48 @@ class MLFeedbackInterface {
     }
 
     async analyzeCurveWithML() {
-        if (!this.currentWellData) {
-            console.error('ML Analysis: No curve data available for analysis');
-            alert('No curve data available for analysis');
-            return;
-        }
-
-        console.log('ML Analysis: Starting analysis for well:', this.currentWellKey);
-        console.log('ML Analysis: Current well CQJ value:', this.currentWellData.cqj, 'Type:', typeof this.currentWellData.cqj);
-        console.log('ML Analysis: Current well CalcJ value:', this.currentWellData.calcj, 'Type:', typeof this.currentWellData.calcj);
-
+        console.log('ML Analysis: Starting analysis...');
+        
         const analyzeBtn = document.getElementById('ml-analyze-btn');
+        let originalButtonState = null;
+        
+        // Store original button state and set to analyzing FIRST
         if (analyzeBtn) {
+            originalButtonState = {
+                disabled: analyzeBtn.disabled,
+                textContent: analyzeBtn.textContent
+            };
             analyzeBtn.disabled = true;
             analyzeBtn.textContent = '🔄 Analyzing...';
         }
-
+        
         try {
+            // Enhanced validation with fallback recovery
+            if (!this.currentWellData) {
+                console.warn('ML Analysis: No current well data available, attempting recovery...');
+                
+                // Try to recover well data from modal context
+                const modalWellKey = window.currentModalWellKey;
+                if (modalWellKey && currentAnalysisResults && currentAnalysisResults.individual_results) {
+                    const wellResult = currentAnalysisResults.individual_results[modalWellKey];
+                    if (wellResult) {
+                        console.log('ML Analysis: Recovered well data from modal context');
+                        this.setCurrentWell(modalWellKey, wellResult);
+                        // Wait a moment for the data to be set properly
+                        await new Promise(resolve => setTimeout(resolve, 50));
+                    }
+                }
+                
+                // Final check - if still no data, give up
+                if (!this.currentWellData) {
+                    console.error('ML Analysis: No curve data available for analysis');
+                    alert('No curve data available for analysis. Please select a well and try again.');
+                    return;
+                }
+            }
+
+            console.log('ML Analysis: Starting analysis for well:', this.currentWellKey);
+            console.log('ML Analysis: Current well data keys:', Object.keys(this.currentWellData));
             // Get channel-specific pathogen information with enhanced validation
             const channelData = this.extractChannelSpecificPathogen();
             
@@ -1305,7 +1471,7 @@ class MLFeedbackInterface {
                 console.warn('ML Analysis: Using fallback pathogen:', finalPathogen);
             }
             
-            // Validate we have the required raw data
+            // Validate we have the required raw data - RFU and Cycles are essential for ML analysis
             const rawRfu = this.currentWellData.raw_rfu || 
                           this.currentWellData.rfu_data || 
                           this.currentWellData.rfu ||
@@ -1316,16 +1482,24 @@ class MLFeedbackInterface {
                              [];
             
             if (!rawRfu || !rawCycles || rawRfu.length === 0 || rawCycles.length === 0) {
-                console.error('ML Analysis: Missing or empty raw data - RFU:', rawRfu, 'Cycles:', rawCycles);
+                console.error('ML Analysis: Missing or empty raw curve data');
+                console.error('ML Analysis: Available well data keys:', Object.keys(this.currentWellData));
+                console.error('ML Analysis: RFU data:', rawRfu ? `Array length ${rawRfu.length}` : 'null/undefined');
+                console.error('ML Analysis: Cycles data:', rawCycles ? `Array length ${rawCycles.length}` : 'null/undefined');
+                
+                // Show more helpful error message for missing curve data
+                alert('No raw curve data available for ML analysis. This might be a data loading issue - please try selecting the well again.');
                 throw new Error('Missing raw curve data for ML analysis');
             }
+            
+            console.log('ML Analysis: Raw data validation passed - RFU points:', rawRfu.length, 'Cycles:', rawCycles.length);
             
             // Comprehensive well data for analysis
             const wellData = {
                 well: this.currentWellData.well_id || this.currentWellKey.split('_')[0] || this.currentWellKey,
-                target: finalPathogen, // Primary pathogen field
-                specific_pathogen: finalPathogen, // Channel-specific pathogen
-                pathogen: finalPathogen, // General pathogen field
+                target: finalPathogen,
+                specific_pathogen: finalPathogen,
+                pathogen: finalPathogen,
                 sample: this.currentWellData.sample || this.currentWellData.sample_name || 'Unknown_Sample',
                 classification: this.currentWellData.classification || 'UNKNOWN',
                 channel: channelData.channel || this.currentWellData.channel || this.currentWellData.fluorophore || 'Unknown_Channel',
@@ -1382,9 +1556,15 @@ class MLFeedbackInterface {
             console.error('ML analysis error:', error);
             alert(`ML analysis failed: ${error.message}`);
         } finally {
+            // Restore button state properly
             if (analyzeBtn) {
-                analyzeBtn.disabled = false;
-                analyzeBtn.textContent = '🔍 Analyze with ML';
+                if (originalButtonState) {
+                    analyzeBtn.disabled = originalButtonState.disabled;
+                    analyzeBtn.textContent = originalButtonState.textContent;
+                } else {
+                    analyzeBtn.disabled = false;
+                    analyzeBtn.textContent = '🔍 Analyze with ML';
+                }
             }
         }
     }
