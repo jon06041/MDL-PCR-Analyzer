@@ -174,7 +174,7 @@ window.PATHOGEN_FIXED_THRESHOLDS = {
     "FAM": { linear: 500, log: 500 }
   },
   "Ngon": { 
-    "FAM": { linear: 200, log: 200 }
+    "HEX": { linear: 200, log: 200 }
   },
   "NOV": { 
     "FAM": { linear: 500, log: 500 }
@@ -400,3 +400,157 @@ function calculateThresholdForStrategy(strategy, analysisResults, currentScale =
 
 // Expose the main function
 window.calculateThresholdForStrategy = calculateThresholdForStrategy;
+
+/**
+ * Initialize channel thresholds after analysis results are loaded
+ * This function is called after fresh analysis to set up proper thresholds
+ * based on pathogen configuration and experimental patterns
+ */
+function initializeChannelThresholds() {
+    console.log('🔍 THRESHOLD-INIT - Initializing channel thresholds after analysis');
+    
+    // Check if we have analysis results to work with
+    if (!window.currentAnalysisResults && !window.analysisResults) {
+        console.warn('⚠️ THRESHOLD-INIT - No analysis results available for threshold initialization');
+        return;
+    }
+    
+    const results = window.currentAnalysisResults || window.analysisResults;
+    if (!results || !results.individual_results) {
+        console.warn('⚠️ THRESHOLD-INIT - No individual results available for threshold initialization');
+        return;
+    }
+    
+    try {
+        // Get current experiment pattern for pathogen detection
+        const experimentPattern = window.getCurrentFullPattern ? window.getCurrentFullPattern() : null;
+        const testCode = experimentPattern && window.extractTestCode ? window.extractTestCode(experimentPattern) : null;
+        
+        console.log('🔍 THRESHOLD-INIT - Experiment context:', {
+            pattern: experimentPattern,
+            testCode: testCode
+        });
+        
+        // Get available channels from analysis results
+        const channels = new Set();
+        Object.values(results.individual_results).forEach(well => {
+            if (well.channel || well.fluorophore) {
+                channels.add(well.channel || well.fluorophore);
+            }
+        });
+        
+        console.log('🔍 THRESHOLD-INIT - Available channels:', Array.from(channels));
+        
+        // For each channel, determine the appropriate pathogen and set fixed threshold if available
+        channels.forEach(channel => {
+            let pathogen = null;
+            
+            // Try to get pathogen from test code + channel
+            if (testCode && window.getPathogenTarget) {
+                try {
+                    pathogen = window.getPathogenTarget(testCode, channel);
+                    console.log(`🔍 THRESHOLD-INIT - ${channel}: Pathogen from library: "${pathogen}"`);
+                } catch (error) {
+                    console.warn(`⚠️ THRESHOLD-INIT - ${channel}: Error getting pathogen from library:`, error);
+                }
+            }
+            
+            // If no pathogen found, try to extract from first well in this channel
+            if (!pathogen || pathogen === 'Unknown') {
+                const channelWells = Object.values(results.individual_results).filter(well => 
+                    (well.channel || well.fluorophore) === channel
+                );
+                
+                if (channelWells.length > 0) {
+                    const firstWell = channelWells[0];
+                    pathogen = firstWell.pathogen || firstWell.target || firstWell.specific_pathogen || testCode;
+                    console.log(`🔍 THRESHOLD-INIT - ${channel}: Pathogen from well data: "${pathogen}"`);
+                }
+            }
+            
+            // Check if this pathogen has a fixed threshold configuration
+            if (pathogen && window.PATHOGEN_FIXED_THRESHOLDS && window.PATHOGEN_FIXED_THRESHOLDS[pathogen]) {
+                const pathogenThresholds = window.PATHOGEN_FIXED_THRESHOLDS[pathogen];
+                const channelConfig = pathogenThresholds[channel];
+                
+                if (channelConfig) {
+                    console.log(`✅ THRESHOLD-INIT - ${channel}: Found fixed threshold config for ${pathogen}:`, channelConfig);
+                    
+                    // Apply the fixed threshold for both linear and log scales
+                    const fixedValue = channelConfig.threshold || channelConfig.value || channelConfig;
+                    
+                    if (typeof fixedValue === 'number' && fixedValue > 0) {
+                        // Set the threshold using the global threshold system
+                        if (window.setChannelThreshold) {
+                            window.setChannelThreshold(channel, 'linear', fixedValue);
+                            window.setChannelThreshold(channel, 'log', fixedValue);
+                            console.log(`✅ THRESHOLD-INIT - ${channel}: Set fixed threshold ${fixedValue} for ${pathogen}`);
+                        } else {
+                            console.warn(`⚠️ THRESHOLD-INIT - ${channel}: setChannelThreshold function not available`);
+                        }
+                        
+                        // Also store in the channel thresholds object if it exists
+                        if (window.channelThresholds) {
+                            if (!window.channelThresholds[channel]) {
+                                window.channelThresholds[channel] = {};
+                            }
+                            window.channelThresholds[channel]['linear'] = fixedValue;
+                            window.channelThresholds[channel]['log'] = fixedValue;
+                        }
+                    } else {
+                        console.warn(`⚠️ THRESHOLD-INIT - ${channel}: Invalid fixed threshold value for ${pathogen}:`, fixedValue);
+                    }
+                } else {
+                    console.log(`ℹ️ THRESHOLD-INIT - ${channel}: No threshold config for ${pathogen} in channel ${channel}`);
+                }
+            } else {
+                console.log(`ℹ️ THRESHOLD-INIT - ${channel}: No fixed threshold found for pathogen "${pathogen}"`);
+            }
+        });
+        
+        console.log('✅ THRESHOLD-INIT - Channel threshold initialization complete');
+        
+    } catch (error) {
+        console.error('❌ THRESHOLD-INIT - Error during threshold initialization:', error);
+    }
+}
+
+// Expose the initialization function
+window.initializeChannelThresholds = initializeChannelThresholds;
+
+/**
+ * Get fixed threshold value for a specific pathogen and channel
+ * @param {string} pathogen - The pathogen name
+ * @param {string} channel - The fluorophore channel (FAM, HEX, Cy5, etc.)
+ * @returns {number|null} - The fixed threshold value or null if not found
+ */
+function getPathogenThreshold(pathogen, channel) {
+    if (!pathogen || !channel) {
+        return null;
+    }
+    
+    if (!window.PATHOGEN_FIXED_THRESHOLDS || !window.PATHOGEN_FIXED_THRESHOLDS[pathogen]) {
+        return null;
+    }
+    
+    const pathogenConfig = window.PATHOGEN_FIXED_THRESHOLDS[pathogen];
+    const channelConfig = pathogenConfig[channel];
+    
+    if (!channelConfig) {
+        return null;
+    }
+    
+    // Handle different configuration formats
+    if (typeof channelConfig === 'number') {
+        return channelConfig;
+    }
+    
+    if (typeof channelConfig === 'object') {
+        return channelConfig.threshold || channelConfig.value || null;
+    }
+    
+    return null;
+}
+
+// Expose the pathogen threshold function
+window.getPathogenThreshold = getPathogenThreshold;
