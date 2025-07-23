@@ -1464,6 +1464,38 @@ class MLFeedbackInterface {
                 }
             }
         }
+        
+        // CRITICAL: Update the main results table with existing ML classification
+        // This ensures the table shows ML results even when they're loaded from existing data
+        if (this.currentWellKey && this.currentWellData && mlClassification) {
+            // Update the curve classification to show ML result in table
+            this.currentWellData.curve_classification = {
+                classification: mlClassification.classification,
+                reason: mlClassification.method === 'expert_review' ? 'Expert Review' : 'ML Analysis',
+                confidence: mlClassification.confidence,
+                method: mlClassification.method || 'ML'
+            };
+            
+            // Update the main results table to reflect the existing ML classification
+            this.updateTableWithMLResult(this.currentWellKey, this.currentWellData, mlClassification);
+            
+            // Update global analysis results if available
+            if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results && window.currentAnalysisResults.individual_results[this.currentWellKey]) {
+                window.currentAnalysisResults.individual_results[this.currentWellKey].ml_classification = mlClassification;
+                window.currentAnalysisResults.individual_results[this.currentWellKey].curve_classification = {
+                    classification: mlClassification.classification,
+                    reason: mlClassification.method === 'expert_review' ? 'Expert Review' : 'ML Analysis',
+                    confidence: mlClassification.confidence,
+                    method: mlClassification.method || 'ML'
+                };
+            }
+            
+            // Reinitialize thresholds to ensure proper threshold application after displaying existing ML results
+            if (typeof window.initializeChannelThresholds === 'function') {
+                console.log('🔄 ML-EXISTING - Reinitializing channel thresholds after displaying existing ML classification');
+                window.initializeChannelThresholds();
+            }
+        }
     }
 
     async analyzeCurveWithML() {
@@ -1566,7 +1598,10 @@ class MLFeedbackInterface {
                 channel: channelData.channel || this.currentWellData.channel || this.currentWellData.fluorophore || 'Unknown_Channel',
                 fluorophore: channelData.channel || this.currentWellData.fluorophore || this.currentWellData.channel || 'Unknown_Fluorophore',
                 experiment_pattern: channelData.experimentPattern || channelData.testCode || this.currentWellData.experiment_pattern || '',
-                test_code: channelData.testCode || this.currentWellData.test_code || ''
+                test_code: channelData.testCode || this.currentWellData.test_code || '',
+                // Add explicit experiment context for better pathogen detection
+                current_experiment_pattern: (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null,
+                extracted_test_code: (typeof extractTestCode === 'function') ? extractTestCode(channelData.experimentPattern || '') : null
             };
             
 
@@ -1602,6 +1637,37 @@ class MLFeedbackInterface {
                     
                     // Store ML classification in well data
                     this.currentWellData.ml_classification = result.prediction;
+                    
+                    // Update the curve classification to show ML result in table
+                    if (result.prediction.classification) {
+                        this.currentWellData.curve_classification = {
+                            classification: result.prediction.classification,
+                            reason: 'ML Analysis',
+                            confidence: result.prediction.confidence,
+                            method: result.prediction.method || 'ML'
+                        };
+                    }
+                    
+                    // Update the main results table to reflect the ML classification
+                    this.updateTableWithMLResult(this.currentWellKey, this.currentWellData, result.prediction);
+                    
+                    // Update global analysis results if available
+                    if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results && window.currentAnalysisResults.individual_results[this.currentWellKey]) {
+                        window.currentAnalysisResults.individual_results[this.currentWellKey].ml_classification = result.prediction;
+                        window.currentAnalysisResults.individual_results[this.currentWellKey].curve_classification = {
+                            classification: result.prediction.classification,
+                            reason: 'ML Analysis',
+                            confidence: result.prediction.confidence,
+                            method: result.prediction.method || 'ML'
+                        };
+                    }
+                    
+                    // Reinitialize thresholds for this specific well/channel after ML analysis
+                    if (typeof window.initializeChannelThresholds === 'function') {
+                        console.log('🔄 ML-INDIVIDUAL - Reinitializing channel thresholds after individual ML analysis');
+                        window.initializeChannelThresholds();
+                    }
+                    
                 } else {
                     throw new Error(result.error || 'ML analysis failed');
                 }
@@ -2237,6 +2303,22 @@ class MLFeedbackInterface {
                             source: displaySource,
                             expert_trained: true // Flag to indicate this was expert-trained
                         };
+                        
+                        // Update the curve classification to show expert decision in table
+                        this.currentWellData.curve_classification = {
+                            classification: expertClassification,
+                            reason: displayMethod === 'expert_review' ? 'Expert Review' : 'ML Analysis',
+                            confidence: displayMethod === 'expert_review' ? 1.0 : (result.ml_confidence || 0.95),
+                            method: displayMethod
+                        };
+                        
+                        // Update the main results table to reflect the expert decision
+                        this.updateTableWithMLResult(this.currentWellKey, this.currentWellData, this.currentWellData.ml_classification);
+                        
+                        // Re-initialize thresholds after expert feedback to ensure fixed thresholds are applied
+                        if (typeof window.initializeChannelThresholds === 'function') {
+                            window.initializeChannelThresholds();
+                        }
                     }
                     
                     // Use non-blocking notification instead of alert
@@ -2357,39 +2439,96 @@ class MLFeedbackInterface {
             if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
                 throw new Error('No current analysis results available for batch processing');
             }
-            
+
             const individualResults = window.currentAnalysisResults.individual_results;
             const wellKeys = Object.keys(individualResults);
             
+            // For multichannel experiments, count unique physical wells instead of total channel entries
+            // This gives more accurate progress tracking for multichannel plates
+            const uniquePhysicalWells = new Set();
+            wellKeys.forEach(wellKey => {
+                // Extract physical well position (e.g., "A1_FAM" -> "A1", "B2_Cy5" -> "B2")
+                const physicalWell = wellKey.split('_')[0];
+                uniquePhysicalWells.add(physicalWell);
+            });
             
-            // Process wells in chunks to avoid overwhelming the server
-            const chunkSize = 10;
+            const totalPhysicalWells = uniquePhysicalWells.size;
+            const isMultichannel = wellKeys.length > totalPhysicalWells;
+            
+            // Initialize progress with accurate total count
+            this.updateBatchProgress(0, 0, wellKeys.length);
+            
+            // Small delay to ensure progress bar renders before starting processing
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // Process wells sequentially to give true progress tracking and immediate table updates
             let processedCount = 0;
+            const startTime = Date.now();
+            let lastProgressUpdate = startTime;
+            const progressUpdateInterval = 1000; // Update timing every second
             
-            for (let i = 0; i < wellKeys.length; i += chunkSize) {
-                const chunk = wellKeys.slice(i, i + chunkSize);
+            for (const wellKey of wellKeys) {
+                const wellData = individualResults[wellKey];
                 
-                // Process chunk of wells
-                const promises = chunk.map(async (wellKey) => {
-                    const wellData = individualResults[wellKey];
-                    return this.analyzeSingleWellWithML(wellKey, wellData);
-                });
+                // Process individual well and track timing - wait for actual server response
+                const wellStartTime = Date.now();
+                await this.analyzeSingleWellWithML(wellKey, wellData);
+                const wellEndTime = Date.now();
+                const wellProcessingTime = wellEndTime - wellStartTime;
                 
-                await Promise.all(promises);
-                processedCount += chunk.length;
+                processedCount++;
                 
-                // Update progress
+                // Calculate timing statistics
+                const currentTime = Date.now();
+                const totalElapsed = (currentTime - startTime) / 1000; // seconds
+                const averageTimePerWell = totalElapsed / processedCount;
+                const remainingWells = wellKeys.length - processedCount;
+                const estimatedTimeRemaining = remainingWells * averageTimePerWell;
+                
+                // Update progress after each individual well completes on server
                 const progress = Math.round((processedCount / wellKeys.length) * 100);
-                this.updateBatchProgress(progress, processedCount, wellKeys.length);
                 
-                // Small delay between chunks to prevent server overload
-                if (i + chunkSize < wellKeys.length) {
-                    await new Promise(resolve => setTimeout(resolve, 500));
+                // Enhanced progress update with timing information
+                if (currentTime - lastProgressUpdate >= progressUpdateInterval || processedCount === wellKeys.length) {
+                    this.updateBatchProgressWithTiming(
+                        progress, 
+                        processedCount, 
+                        wellKeys.length,
+                        totalElapsed,
+                        estimatedTimeRemaining,
+                        averageTimePerWell,
+                        wellProcessingTime
+                    );
+                    lastProgressUpdate = currentTime;
+                } else {
+                    // Quick progress update without timing recalculation
+                    this.updateBatchProgress(progress, processedCount, wellKeys.length);
                 }
+                
+                // Refresh the table immediately after each well is processed
+                // This ensures users see results appearing in real-time
+                if (typeof window.populateResultsTable === 'function' && window.currentAnalysisResults) {
+                    window.populateResultsTable(window.currentAnalysisResults.individual_results);
+                }
+                
+                // No artificial delay - let the real server response time drive the progress
             }
             
-            // Complete batch analysis
+            const totalTime = (Date.now() - startTime) / 1000;
+            
+            // Complete batch analysis - all server requests have completed
             this.showBatchAnalysisProgress(false, trainingCount, analysisType);
+            
+            // CRITICAL: Reinitialize thresholds after ML analysis completes
+            // This ensures fixed thresholds are applied correctly for multichannel experiments
+            if (typeof window.initializeChannelThresholds === 'function') {
+                window.initializeChannelThresholds();
+            }
+            
+            // Final table refresh to ensure everything is properly displayed
+            if (typeof window.populateResultsTable === 'function' && window.currentAnalysisResults) {
+                window.populateResultsTable(window.currentAnalysisResults.individual_results);
+            }
             
             // Show appropriate completion message based on analysis type
             let completionTitle = '';
@@ -2490,11 +2629,71 @@ class MLFeedbackInterface {
                 if (result.success && result.prediction) {
                     // Update the well data with ML predictions
                     wellData.ml_classification = result.prediction;
+                    
+                    // Update the curve classification to show ML result in table
+                    if (result.prediction.classification) {
+                        wellData.curve_classification = {
+                            classification: result.prediction.classification,
+                            reason: 'ML Analysis',
+                            confidence: result.prediction.confidence,
+                            method: result.prediction.method || 'ML'
+                        };
+                    }
+                    
+                    // Update the main results table to reflect the ML classification
+                    this.updateTableWithMLResult(wellKey, wellData, result.prediction);
                 } else {
                 }
             }
             
         } catch (error) {
+        }
+    }
+
+    updateTableWithMLResult(wellKey, wellData, mlPrediction) {
+        // Update the main results table with ML classification in the Curve Class column
+        try {
+            // Find the table row for this well
+            const tableBody = document.getElementById('resultsTableBody');
+            if (!tableBody) return;
+            
+            const rows = tableBody.querySelectorAll('tr');
+            for (const row of rows) {
+                const wellCell = row.querySelector('td:first-child strong');
+                if (wellCell && wellCell.textContent === (wellData.well_id || wellKey.split('_')[0])) {
+                    // Found the correct row - update the Curve Class column (5th column, index 4)
+                    const curveClassCell = row.children[4]; // 0-indexed: Well, Sample, Fluorophore, Results, Curve Class
+                    if (curveClassCell) {
+                        const classMap = {
+                            'STRONG_POSITIVE': 'curve-strong-pos',
+                            'POSITIVE': 'curve-pos',
+                            'WEAK_POSITIVE': 'curve-weak-pos',
+                            'NEGATIVE': 'curve-neg',
+                            'INDETERMINATE': 'curve-indet',
+                            'SUSPICIOUS': 'curve-suspicious'
+                        };
+                        const badgeClass = classMap[mlPrediction.classification] || 'curve-other';
+                        const confidenceText = mlPrediction.confidence ? 
+                            ` (${(mlPrediction.confidence * 100).toFixed(1)}% ML)` : '';
+                        
+                        curveClassCell.innerHTML = `<span class="curve-badge ${badgeClass}" title="ML Analysis${confidenceText}">${mlPrediction.classification.replace('_', ' ')}</span>`;
+                    }
+                    break;
+                }
+            }
+            
+            // Also update global analysis results if available
+            if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results && window.currentAnalysisResults.individual_results[wellKey]) {
+                window.currentAnalysisResults.individual_results[wellKey].curve_classification = {
+                    classification: mlPrediction.classification,
+                    reason: 'ML Analysis',
+                    confidence: mlPrediction.confidence,
+                    method: mlPrediction.method || 'ML'
+                };
+            }
+            
+        } catch (error) {
+            console.error('Error updating table with ML result:', error);
         }
     }
 
@@ -2637,6 +2836,56 @@ class MLFeedbackInterface {
         
         if (progressDetails) {
             progressDetails.textContent = `Processed ${processed}/${total} wells`;
+        }
+    }
+
+    updateBatchProgressWithTiming(percentage, processed, total, elapsedSeconds, estimatedRemaining, avgTimePerWell, lastWellTime) {
+        // Enhanced progress update with timing information for large batches
+        const notificationProgressBar = document.getElementById('ml-progress-fill');
+        const notificationProgressText = document.getElementById('ml-progress-text');
+        
+        if (notificationProgressBar) {
+            notificationProgressBar.style.width = `${percentage}%`;
+        }
+        
+        // Format timing information for display
+        const formatTime = (seconds) => {
+            if (seconds < 60) return `${Math.round(seconds)}s`;
+            if (seconds < 3600) return `${Math.round(seconds/60)}m ${Math.round(seconds%60)}s`;
+            return `${Math.round(seconds/3600)}h ${Math.round((seconds%3600)/60)}m`;
+        };
+        
+        if (notificationProgressText) {
+            let timingText = '';
+            if (total > 100) {
+                // Show detailed timing for large batches (like 384-well plates)
+                timingText = ` • ${formatTime(elapsedSeconds)} elapsed • ETA: ${formatTime(estimatedRemaining)} • ${avgTimePerWell.toFixed(1)}s/well`;
+            } else {
+                // Simpler timing for smaller batches
+                timingText = ` • ${formatTime(elapsedSeconds)} elapsed • ETA: ${formatTime(estimatedRemaining)}`;
+            }
+            
+            notificationProgressText.textContent = `Processing ${processed}/${total} wells (${percentage}%)${timingText}`;
+        }
+        
+        // Also update legacy progress bar if it exists
+        const progressBar = document.getElementById('ml-batch-progress-bar');
+        const progressDetails = document.getElementById('ml-batch-progress-details');
+        
+        if (progressBar) {
+            progressBar.style.width = `${percentage}%`;
+            progressBar.textContent = `${percentage}%`;
+        }
+        
+        if (progressDetails) {
+            let detailText = `Processed ${processed}/${total} wells`;
+            if (total > 50) {
+                detailText += ` • Avg: ${avgTimePerWell.toFixed(1)}s/well • Last: ${(lastWellTime/1000).toFixed(1)}s`;
+                if (estimatedRemaining > 60) {
+                    detailText += ` • ETA: ${formatTime(estimatedRemaining)}`;
+                }
+            }
+            progressDetails.textContent = detailText;
         }
     }
 

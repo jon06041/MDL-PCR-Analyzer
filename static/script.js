@@ -5762,7 +5762,7 @@ function populateResultsTable(individualResults) {
                 
                 // Create a minimal error row
                 const errorRow = document.createElement('tr');
-                errorRow.innerHTML = `<td colspan="15"><strong>Error loading ${wellKey}:</strong> ${rowError.message}</td>`;
+                errorRow.innerHTML = `<td colspan="16"><strong>Error loading ${wellKey}:</strong> ${rowError.message}</td>`;
                 tableBody.appendChild(errorRow);
             }
         });
@@ -5786,7 +5786,7 @@ function populateResultsTable(individualResults) {
         // Still try to populate basic table without advanced features
         const tableBody = document.getElementById('resultsTableBody');
         if (tableBody) {
-            tableBody.innerHTML = '<tr><td colspan="10">Error loading results. Check console for details.</td></tr>';
+            tableBody.innerHTML = '<tr><td colspan="17">Error loading results. Check console for details.</td></tr>';
         }
     }
 }

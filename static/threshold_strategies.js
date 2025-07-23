@@ -463,7 +463,13 @@ function initializeChannelThresholds() {
                 
                 if (channelWells.length > 0) {
                     const firstWell = channelWells[0];
-                    pathogen = firstWell.pathogen || firstWell.target || firstWell.specific_pathogen || testCode;
+                    // Try multiple pathogen detection strategies for ML-updated wells
+                    pathogen = firstWell.pathogen || 
+                              firstWell.target || 
+                              firstWell.specific_pathogen ||
+                              (firstWell.curve_classification && firstWell.curve_classification.pathogen) ||
+                              (firstWell.ml_classification && firstWell.ml_classification.pathogen) ||
+                              testCode;
                     console.log(`🔍 THRESHOLD-INIT - ${channel}: Pathogen from well data: "${pathogen}"`);
                 }
             }

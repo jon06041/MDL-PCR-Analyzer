@@ -622,15 +622,35 @@ def extract_pathogen_from_well_data(well_data):
             print(f"ML: Using pathogen field: {pathogen}")
             return pathogen
     
-    # Priority 4: Extract from experiment pattern (fallback for single-channel experiments)
+    # Priority 4: Use current experiment pattern from frontend (NEW - enhanced approach)
+    current_pattern = well_data.get('current_experiment_pattern')
+    extracted_test_code = well_data.get('extracted_test_code')
+    channel = well_data.get('channel') or well_data.get('fluorophore', '')
+    
+    if current_pattern and extracted_test_code and channel:
+        print(f"ML: Trying current experiment pattern: {current_pattern} -> test_code: {extracted_test_code} + channel: {channel}")
+        # Try to get pathogen using the extracted test code and channel
+        # This would require importing pathogen library functions, but we can construct the pathogen name
+        constructed_pathogen = f"{extracted_test_code}_{channel}"
+        if constructed_pathogen and constructed_pathogen != 'Unknown_':
+            print(f"ML: Using constructed pathogen from experiment: {constructed_pathogen}")
+            return constructed_pathogen
+    
+    # Priority 5: Extract from experiment pattern (fallback for single-channel experiments)
     test_code = None
     
     # Check various fields that might contain the test code
-    for field in ['test_code', 'experiment_pattern', 'sample_name']:
+    for field in ['test_code', 'experiment_pattern', 'sample_name', 'extracted_test_code']:
         if field in well_data and well_data[field]:
             test_code = str(well_data[field]).strip()
             if test_code and test_code != '':
+                print(f"ML: Found test code '{test_code}' from field '{field}'")
                 break
+    
+    # Priority 6: Use channel alone as pathogen for multichannel (fallback)
+    if not test_code and channel:
+        print(f"ML: Using channel as pathogen fallback: {channel}")
+        return channel
     
     if not test_code:
         print("ML: No pathogen information found in well data")
