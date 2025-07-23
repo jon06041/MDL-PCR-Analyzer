@@ -1,10 +1,30 @@
-# ML Curve Classification & qPCR Logic Reference - Updated January 2025
+# ML Curve Classification & qPCR Logic Reference - Updated July 23, 2025
 
 ## Overview
 
 The MDL PCR Analyzer includes an advanced Machine Learning (ML) curve classification system that can learn from expert feedback to improve qPCR result classification accuracy. This system uses a RandomForestClassifier trained on **30 hybrid features** (18 numerical + 12 visual pattern features) to predict classifications across **7 distinct classes**.
 
-## Classification System (7 Classes)
+## Development Branches (July 2025)
+
+### Current Branch Structure:
+- **`main`** - Default production branch
+- **`ml-curve-classifier-training`** - Production ML system (37 training samples, active models)
+- **`ml-curve-classifier-training-threshold-fixes`** - Current development branch for threshold-specific fixes
+
+### Branch Focus: Threshold Issues Investigation (July 23, 2025)
+**Purpose**: Address test-specific threshold problems while maintaining the robust ML training system from the parent branch.
+
+**Key Areas of Investigation**:
+- Integration of ML predictions with traditional threshold-based classification rules
+- Test-specific threshold calibration for improved accuracy
+- Borderline amplitude handling improvements (400-500 RFU range)
+- Channel-specific thresholding for multi-fluorophore experiments
+
+**Current Context**: Working from a production ML system with 37 training samples and functional models, now focusing on threshold-related classification issues that affect accuracy for specific test types.
+- Channel-specific thresholding for multi-fluorophore experiments
+- Consistency between ML-based and rule-based classifications
+
+## Classification System (7 Classes + Expert Decisions)
 
 ### Complete Classification Categories:
 1. **STRONG_POSITIVE** - High amplitude, excellent S-curve characteristics
@@ -14,6 +34,12 @@ The MDL PCR Analyzer includes an advanced Machine Learning (ML) curve classifica
 5. **REDO** - Technical issues or borderline amplitude (400-500 RFU), repeat test recommended
 6. **SUSPICIOUS** - Questionable result that may need further investigation or expert review
 7. **NEGATIVE** - No significant amplification signal
+
+### Expert Decision System:
+- **Expert Review Method**: When experts provide feedback, their decision overrides both ML and rule-based classifications
+- **Expert Decision Display**: Shows "👨‍⚕️ Expert Review" with "(Expert Decision)" confidence indicator
+- **Expert Decision Priority**: Expert classifications take precedence and are displayed immediately without re-analysis
+- **Expert Feedback Storage**: Expert decisions are stored with `expert_classification`, `expert_review_method`, and timestamp
 
 ### Key Distinctions:
 - **INDETERMINATE vs SUSPICIOUS**: INDETERMINATE is for biologically unclear results; SUSPICIOUS is for technically questionable results
@@ -135,7 +161,15 @@ After sufficient expert feedback is provided, the system switches to hybrid ML-b
 - **18 Numerical Features**: Statistical and mathematical curve properties
 - **12 Visual Pattern Features**: Shape, baseline, noise, and curve progression patterns
 
-This hybrid approach combines the precision of numerical analysis with visual pattern recognition that experts use naturally.
+### 3. Expert Review System (Override Method)
+When experts provide feedback through the ML interface:
+- **Immediate Override**: Expert decisions immediately override ML and rule-based classifications
+- **Persistent Storage**: Expert classifications are stored and displayed on subsequent views
+- **Visual Indicators**: Expert decisions show special UI styling with "👨‍⚕️ Expert Review" method
+- **Clear Functionality**: Experts can clear their previous decisions to get fresh ML predictions
+- **Training Integration**: Expert feedback is used to train and improve the ML model
+
+This hybrid approach combines automated analysis with expert oversight, ensuring both efficiency and accuracy.
 
 ## Hybrid ML Feature Set (30 Features)
 
@@ -210,9 +244,9 @@ The ML feedback interface appears **after** the sample details in the modal:
 │      🤖 Hybrid ML Analysis          │  ← Enhanced interface
 │                                     │
 │  Current Analysis:                  │
-│  Method: Hybrid ML (30 features)   │
-│  Prediction: POS                    │
-│  Confidence: 87%                    │
+│  Method: 👨‍⚕️ Expert Review         │  ← Expert decision display
+│  Classification: INDETERMINATE      │
+│  Confidence: (Expert Decision)      │
 │                                     │
 │  📈 Visual Pattern Analysis:        │
 │  • Shape: Classic S-curve          │
@@ -225,13 +259,11 @@ The ML feedback interface appears **after** the sample details in the modal:
 │  • R² Score: 0.986                 │
 │  • SNR: 15.2                       │
 │                                     │
-│  🧠 ML Reasoning:                   │
-│  Classic S-curve with stable       │
-│  baseline and strong signal        │
+│  🧠 Expert Review Available:        │
+│  [🔄 Clear Expert Feedback]        │  ← Clear expert decision
 │                                     │
-│  Expert Feedback:                   │
-│  ○ Positive  ○ Negative  ○ Redo     │
-│  [Submit Feedback]                  │
+│  (ML prediction would show if       │
+│   expert feedback is cleared)      │
 └─────────────────────────────────────┘
 ```
 
@@ -273,6 +305,14 @@ Training occurs automatically when sufficient data is available:
 - **Algorithm**: RandomForestClassifier (scikit-learn)
 - **Parameters**: 100 estimators, max_depth=10, random_state=42
 
+### Phase 2.5: Expert Decision System
+Expert decisions provide immediate classification override:
+- **Immediate Effect**: Expert classifications displayed instantly without waiting for ML
+- **Persistent Storage**: Expert decisions stored with `expert_classification` field in well data
+- **Visual Indicators**: Special UI styling with "👨‍⚕️ Expert Review" method display
+- **Feedback Integration**: Expert decisions contribute to ML training data for model improvement
+- **Clear Functionality**: Experts can clear their decisions to get fresh ML predictions
+
 ### Phase 3: ML Activation
 Once a model is trained successfully:
 - **Method Display**: Changes from "Rule-based" to "Hybrid ML"
@@ -310,7 +350,10 @@ Once a model is trained successfully:
         "sample": "Patient-001",
         "target": "BVAB1",
         "fluorophore": "HEX",
-        "timestamp": "2025-01-15T10:30:00Z"
+        "timestamp": "2025-01-15T10:30:00Z",
+        "expert_classification": "INDETERMINATE",
+        "expert_review_method": "expert_review",
+        "expert_feedback_timestamp": "2025-01-15T10:35:00Z"
       }
     }
   ]
@@ -474,6 +517,15 @@ Visual Analysis: Shape, baseline, noise patterns
 Action: Continue feedback for model improvement
 ```
 
+### State 4: Expert Decision Override
+```
+Method: 👨‍⚕️ Expert Review
+Status: Expert classification stored
+Confidence: (Expert Decision)
+Visual Analysis: Available but overridden by expert
+Action: [Clear Expert Feedback] to get fresh ML prediction
+```
+
 ## Visual Workflow
 
 ```
@@ -484,10 +536,25 @@ Action: Continue feedback for model improvement
                                              │
                                              ▼
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│   Improve   │ ← │   Train ML  │ ← │   Provide   │
-│   Future    │    │   Model     │    │  Feedback   │
-│   Results   │    │             │    │   (Expert)  │
+│   Expert    │ ←  │   Provide   │ ←  │  Disagree   │
+│  Decision   │    │  Feedback   │    │ with Auto   │
+│  Override   │    │   (Expert)  │    │ Classification│
 └─────────────┘    └─────────────┘    └─────────────┘
+       │                  │
+       ▼                  ▼
+┌─────────────┐    ┌─────────────┐
+│  Immediate  │    │   Train ML  │
+│   Display   │    │   Model     │
+│ (No Wait)   │    │             │
+└─────────────┘    └─────────────┘
+       │                  │
+       ▼                  ▼
+┌─────────────┐    ┌─────────────┐
+│[Clear Expert│    │   Improve   │
+│ Feedback]   │    │   Future    │
+│ for Fresh   │    │   Results   │
+│ ML Analysis │    │             │
+└─────────────┘    └─────────────┘
 ```
 
 ## Guidance for Updates

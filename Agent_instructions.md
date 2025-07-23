@@ -1,8 +1,23 @@
 # MDL-PCR-Analyzer: Comprehensive Agent Instructions & Progress Log
 
-## 🎯 **CURRENT STATUS: ML Pathogen Library Sync & Modal Timing Fix** (July 23, 2025)
+## 🎯 **CURRENT STATUS: Threshold Issues Investigation Branch** (July 23, 2025)
 
-### 🔄 **RECENT COMPLETION: Comprehensive ML Configuration & Modal Bug Fixes** (July 23, 2025)
+### 🔧 **NEW BRANCH: ml-curve-classifier-training-threshold-fixes** (July 23, 2025)
+
+**Branch Purpose**: Created dedicated branch for investigating and fixing threshold-related issues with specific tests while preserving the production ML curve classifier training system.
+
+**Branch Hierarchy**:
+- `main` (default branch)
+- `ml-curve-classifier-training` (production ML system - 37 training samples, working models)
+- `ml-curve-classifier-training-threshold-fixes` (current branch - threshold fixes based on ML training work)
+
+**Threshold Issues to Address**:
+- Test-specific threshold problems affecting classification accuracy
+- Integration of ML predictions with traditional threshold-based rules
+- Borderline amplitude handling (400-500 RFU range)
+- Channel-specific thresholding for multi-fluorophore experiments
+
+### 🔄 **COMPLETED: Comprehensive ML Configuration & Modal Bug Fixes** (July 23, 2025)
 
 **Major Achievements**:
 - ✅ **All Pathogen Library Tests in ML Config**: Successfully synchronized ALL 123 test/fluorophore combinations from pathogen_library.js to ML configuration database
