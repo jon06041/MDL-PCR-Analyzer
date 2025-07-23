@@ -358,7 +358,33 @@ class MLCurveClassifier:
         y = []
         
         for sample in self.training_data:
-            feature_vector = [sample['features'][name] for name in self.feature_names]
+            feature_vector = []
+            for name in self.feature_names:
+                value = sample['features'][name]
+                # Handle dictionary features (like cqj/calcj) by extracting numeric value
+                if isinstance(value, dict):
+                    # Try to get a numeric value from the dict
+                    numeric_value = None
+                    for key, val in value.items():
+                        if val is not None and (isinstance(val, (int, float)) or (isinstance(val, str) and val.replace('.', '').replace('-', '').isdigit())):
+                            numeric_value = float(val)
+                            break
+                    # Use 0 if no numeric value found
+                    feature_vector.append(numeric_value if numeric_value is not None else 0.0)
+                elif value is None:
+                    feature_vector.append(0.0)
+                elif isinstance(value, (int, float)):
+                    feature_vector.append(float(value))
+                elif isinstance(value, str):
+                    # Try to convert string to float
+                    try:
+                        feature_vector.append(float(value))
+                    except ValueError:
+                        feature_vector.append(0.0)
+                else:
+                    # Fallback for any other type
+                    feature_vector.append(0.0)
+            
             X.append(feature_vector)
             y.append(sample['expert_classification'])
         
@@ -418,7 +444,33 @@ class MLCurveClassifier:
         y = []
         
         for sample in pathogen_samples:
-            feature_vector = [sample['features'][name] for name in self.feature_names]
+            feature_vector = []
+            for name in self.feature_names:
+                value = sample['features'][name]
+                # Handle dictionary features (like cqj/calcj) by extracting numeric value
+                if isinstance(value, dict):
+                    # Try to get a numeric value from the dict
+                    numeric_value = None
+                    for key, val in value.items():
+                        if val is not None and (isinstance(val, (int, float)) or (isinstance(val, str) and val.replace('.', '').replace('-', '').isdigit())):
+                            numeric_value = float(val)
+                            break
+                    # Use 0 if no numeric value found
+                    feature_vector.append(numeric_value if numeric_value is not None else 0.0)
+                elif value is None:
+                    feature_vector.append(0.0)
+                elif isinstance(value, (int, float)):
+                    feature_vector.append(float(value))
+                elif isinstance(value, str):
+                    # Try to convert string to float
+                    try:
+                        feature_vector.append(float(value))
+                    except ValueError:
+                        feature_vector.append(0.0)
+                else:
+                    # Fallback for any other type
+                    feature_vector.append(0.0)
+            
             X.append(feature_vector)
             y.append(sample['expert_classification'])
         

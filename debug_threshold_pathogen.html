@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Threshold Pathogen Extraction</title>
+</head>
+<body>
+    <h1>Debug Threshold Pathogen Extraction</h1>
+    <div id="debug-output"></div>
+
+    <script src="static/pathogen_library.js"></script>
+    <script src="static/threshold_strategies.js"></script>
+    <script src="static/threshold_frontend.js"></script>
+    <script src="static/script.js"></script>
+
+    <script>
+        function debugPathogenExtraction() {
+            const testPatterns = [
+                'Ngon_12345_CFX.csv',
+                'Ctrach_67890_CFX.csv',
+                'AcNgon_11111_CFX.csv',
+                'AcCtrach_22222_CFX.csv'
+            ];
+
+            let html = '<h2>Pathogen Extraction Debug</h2>';
+            
+            testPatterns.forEach(pattern => {
+                html += `<h3>Pattern: ${pattern}</h3>`;
+                
+                // Test extractTestCode
+                const testCode = typeof extractTestCode === 'function' ? extractTestCode(pattern) : 'Function not available';
+                html += `<p><strong>extractTestCode:</strong> "${testCode}"</p>`;
+                
+                // Test PATHOGEN_FIXED_THRESHOLDS lookup
+                if (window.PATHOGEN_FIXED_THRESHOLDS) {
+                    const pathogenEntry = window.PATHOGEN_FIXED_THRESHOLDS[testCode];
+                    html += `<p><strong>PATHOGEN_FIXED_THRESHOLDS entry:</strong> ${pathogenEntry ? JSON.stringify(pathogenEntry) : 'Not found'}</p>`;
+                    
+                    if (pathogenEntry) {
+                        // Test FAM channel lookup
+                        const famEntry = pathogenEntry['FAM'];
+                        html += `<p><strong>FAM channel entry:</strong> ${famEntry ? JSON.stringify(famEntry) : 'Not found'}</p>`;
+                        
+                        if (famEntry) {
+                            html += `<p><strong>Linear threshold:</strong> ${famEntry.linear || 'Not found'}</p>`;
+                            html += `<p><strong>Log threshold:</strong> ${famEntry.log || 'Not found'}</p>`;
+                        }
+                    }
+                } else {
+                    html += '<p><strong>PATHOGEN_FIXED_THRESHOLDS:</strong> Not available</p>';
+                }
+                
+                html += '<hr>';
+            });
+            
+            // Test threshold calculation
+            html += '<h2>Threshold Calculation Test</h2>';
+            
+            if (typeof calculateThreshold === 'function') {
+                const testCases = [
+                    { pathogen: 'Ngon', channel: 'FAM', scale: 'linear' },
+                    { pathogen: 'Ngon', channel: 'FAM', scale: 'log' },
+                    { pathogen: 'Ctrach', channel: 'FAM', scale: 'linear' },
+                    { pathogen: 'Ctrach', channel: 'FAM', scale: 'log' }
+                ];
+                
+                testCases.forEach(testCase => {
+                    try {
+                        const threshold = calculateThreshold('linear_fixed', {
+                            pathogen: testCase.pathogen,
+                            fluorophore: testCase.channel
+                        }, testCase.scale);
+                        
+                        html += `<p><strong>${testCase.pathogen} ${testCase.channel} ${testCase.scale}:</strong> ${threshold}</p>`;
+                    } catch (error) {
+                        html += `<p><strong>${testCase.pathogen} ${testCase.channel} ${testCase.scale}:</strong> ERROR - ${error.message}</p>`;
+                    }
+                });
+            } else {
+                html += '<p>calculateThreshold function not available</p>';
+            }
+            
+            return html;
+        }
+
+        // Run debug when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(() => {
+                document.getElementById('debug-output').innerHTML = debugPathogenExtraction();
+            }, 100);
+        });
+    </script>
+</body>
+</html>
