@@ -51,10 +51,14 @@ class MLFeedbackInterface {
         console.log('ML Feedback Interface: Checking for existing ML section...');
         
         // Check if ML feedback should be hidden based on configuration
+        console.log('ML Feedback Interface: About to check if ML feedback should be hidden...');
         const shouldHideMLFeedback = await this.shouldHideMLFeedback();
+        console.log('ML Feedback Interface: shouldHideMLFeedback result:', shouldHideMLFeedback);
         if (shouldHideMLFeedback) {
             console.log('ML Feedback Interface: ML feedback disabled - hiding section');
+            console.log('ML Feedback Interface: About to call hideMLSection from addMLSectionToModal...');
             this.hideMLSection();
+            console.log('ML Feedback Interface: hideMLSection call completed from addMLSectionToModal');
             return;
         }
         
@@ -331,10 +335,14 @@ class MLFeedbackInterface {
 
     hideMLSection() {
         console.log('ML Feedback Interface: Hiding ML section due to configuration');
+        console.log('ML Feedback Interface: Looking for ml-feedback-section element...');
         const mlSection = document.getElementById('ml-feedback-section');
+        console.log('ML Feedback Interface: ml-feedback-section found:', !!mlSection);
+        
         if (mlSection) {
+            console.log('ML Feedback Interface: Setting display to none...');
             mlSection.style.display = 'none';
-            console.log('ML Feedback Interface: ML section hidden');
+            console.log('ML Feedback Interface: ML section hidden - display set to none');
         } else {
             console.log('ML Feedback Interface: ML section not found to hide');
         }
@@ -361,11 +369,18 @@ class MLFeedbackInterface {
         console.log('ML Feedback Interface: Refreshing ML section configuration');
         
         // Check if we should hide ML feedback
+        console.log('ML Feedback Interface: About to check shouldHideMLFeedback in refresh...');
         const shouldHide = await this.shouldHideMLFeedback();
+        console.log('ML Feedback Interface: shouldHide result in refresh:', shouldHide);
         
         if (shouldHide) {
+            console.log('ML Feedback Interface: Calling hideMLSection from refresh...');
+            console.log('ML Feedback Interface: About to hide ML section - shouldHide is TRUE');
             this.hideMLSection();
+            console.log('ML Feedback Interface: hideMLSection call completed');
         } else {
+            console.log('ML Feedback Interface: ML should be shown, ensuring section is visible...');
+            console.log('ML Feedback Interface: shouldHide is FALSE - showing ML section');
             // Ensure ML section is shown and properly initialized
             const existingSection = document.getElementById('ml-feedback-section');
             if (existingSection) {
@@ -466,6 +481,7 @@ class MLFeedbackInterface {
         console.log('ML Feedback: Set current well:', wellKey, 'with data keys:', Object.keys(this.currentWellData));
         
         // Check ML configuration for current well before showing section
+        console.log('ML Feedback: About to call refreshMLSectionConfiguration...');
         this.refreshMLSectionConfiguration();
         
         // Reset prediction display when switching wells
@@ -522,7 +538,7 @@ class MLFeedbackInterface {
             }
 
             // Get pathogen-specific ML configuration
-            const pathogenResponse = await fetch(`/api/ml_config/pathogen/${pathogenInfo.pathogen}`);
+            const pathogenResponse = await fetch(`/api/ml-config/pathogen/${pathogenInfo.pathogen}`);
             if (!pathogenResponse.ok) {
                 console.log('ML Config Check: Failed to get pathogen config, showing ML feedback');
                 return false; // Show ML feedback if we can't get pathogen config
@@ -531,19 +547,30 @@ class MLFeedbackInterface {
             
             // Find config for current fluorophore or general config
             let pathogenMLEnabled = true; // Default to enabled
-            if (pathogenConfigResponse.success && pathogenConfigResponse.data?.length > 0) {
-                const configs = pathogenConfigResponse.data;
+            if (pathogenConfigResponse.success && pathogenConfigResponse.configs?.length > 0) {
+                const configs = pathogenConfigResponse.configs;
+                console.log('ML Config Check: Available configs:', configs);
+                console.log('ML Config Check: Looking for fluorophore:', pathogenInfo.fluorophore);
                 
                 // Look for specific fluorophore config first
                 let config = configs.find(c => c.fluorophore === pathogenInfo.fluorophore);
+                console.log('ML Config Check: Specific fluorophore config found:', config);
+                
                 // Fall back to general config (null fluorophore)
                 if (!config) {
-                    config = configs.find(c => !c.fluorophore);
+                    config = configs.find(c => !c.fluorophore || c.fluorophore === null);
+                    console.log('ML Config Check: General config found:', config);
                 }
                 
+                console.log('ML Config Check: Selected config:', config);
                 if (config) {
                     pathogenMLEnabled = config.ml_enabled;
+                    console.log('ML Config Check: ml_enabled field value:', config.ml_enabled);
+                } else {
+                    console.log('ML Config Check: No matching config found, using default (true)');
                 }
+            } else {
+                console.log('ML Config Check: No configs in response or response not successful');
             }
 
             // Hide ML feedback when ML is disabled for this pathogen
@@ -1283,7 +1310,9 @@ class MLFeedbackInterface {
     
     extractChannelSpecificPathogen(fallbackWellData = null) {
         // Enhanced robustness for pathogen extraction with fallback data support
+        console.log('🔍 Pathogen Extraction: Starting extraction...');
         const wellData = this.currentWellData || fallbackWellData;
+        console.log('🔍 Pathogen Extraction: Well data available:', !!wellData);
         
         if (!wellData) {
             console.warn('ML Feedback Interface: No current well data available');
@@ -1300,6 +1329,9 @@ class MLFeedbackInterface {
         const currentExperimentPattern = (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null;
         const testCode = (typeof extractTestCode === 'function' && currentExperimentPattern) ? 
             extractTestCode(currentExperimentPattern) : null;
+        
+        console.log('🔍 Pathogen Extraction: Current experiment pattern:', currentExperimentPattern);
+        console.log('🔍 Pathogen Extraction: Test code:', testCode);
         
         // Get channel from current well data with multiple fallback options
         const channel = wellData.channel || 
@@ -1371,6 +1403,7 @@ class MLFeedbackInterface {
             test_code: testCode,
             testCode: testCode,  // Keep both for compatibility
             channel: channel || 'Unknown',
+            fluorophore: channel || 'Unknown', // Add fluorophore field for compatibility
             pathogen: specificPathogen
         };
     }

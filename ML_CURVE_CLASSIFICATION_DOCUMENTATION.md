@@ -44,6 +44,13 @@ The MDL PCR Analyzer includes an advanced Machine Learning (ML) curve classifica
 - **Visual Indicators**: Training progress bar shows progress toward expert review threshold
 - **User Experience**: Clear status updates and tooltips explain requirements
 
+### ML Configuration Visibility Control Fix
+- **Fixed**: ML section visibility control for pathogen-specific configurations
+- **Issue**: `extractChannelSpecificPathogen()` returned only `channel` property, but `shouldHideMLFeedback()` looked for `fluorophore` property
+- **Solution**: Added `fluorophore` property to the return object, ensuring compatibility with existing app logic
+- **Impact**: ML sections now hide correctly when `ml_enabled: false` in pathogen-specific configurations
+- **Consistency**: Maintains app-wide pattern where `fluorophore` and `channel` are treated interchangeably
+
 This document serves as a comprehensive reference for both ML classification and traditional rule-based qPCR curve analysis logic.
 
 ## System Architecture

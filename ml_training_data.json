@@ -976,5 +976,36 @@
     "expert_classification": "POSITIVE",
     "existing_classification": "POS",
     "ml_classification": "NEGATIVE"
+  },
+  {
+    "timestamp": "2025-07-23T12:50:05.768945",
+    "well_id": "A1_FAM",
+    "sample_identifier": "13987482-1-2578048||Chlamydia trachomatis||FAM",
+    "sample_name": "13987482-1-2578048",
+    "channel": "FAM",
+    "pathogen": "Chlamydia trachomatis",
+    "features": {
+      "r2": 0.9411108219191422,
+      "steepness": 1.1247229407882988,
+      "snr": 0,
+      "midpoint": 3.7228353916455386,
+      "baseline": -151.82198522749263,
+      "amplitude": 155.84512802079348,
+      "cqj": 0,
+      "calcj": 0,
+      "max_slope": 38.984493894468955,
+      "max_slope_cycle": 3,
+      "baseline_std": 43.167475557723634,
+      "curve_auc": -276.28595985765844,
+      "early_cycles_mean": -23.19048132335716,
+      "late_cycles_mean": 4.619444384645728,
+      "plateau_detection": 7.241192312462287,
+      "curve_efficiency": 200,
+      "derivative_peak": 38.984493894468955,
+      "second_derivative_max": 18.0037060117942
+    },
+    "expert_classification": "NEGATIVE",
+    "existing_classification": "NEG",
+    "ml_classification": "SUSPICIOUS"
   }
 ]
