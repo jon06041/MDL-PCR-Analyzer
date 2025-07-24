@@ -10,6 +10,15 @@ class MLFeedbackInterface {
         this.submissionInProgress = false; // Flag to prevent duplicate submissions
         this.trainedSamples = new Set(); // Track samples that have already been trained
         
+        // Progress tracking for batch ML analysis
+        this.batchProgress = {
+            totalWells: 0,
+            processedWells: 0,
+            currentChannel: null,
+            channelWells: {},
+            startTime: null
+        };
+        
         // Initialize when DOM is ready
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => this.initializeInterface());
@@ -48,10 +57,12 @@ class MLFeedbackInterface {
     }
 
     async addMLSectionToModal() {
+        console.log('ML Feedback Interface: Checking for existing ML section...');
         
         // Check if ML feedback should be hidden based on configuration
         const shouldHideMLFeedback = await this.shouldHideMLFeedback();
         if (shouldHideMLFeedback) {
+            console.log('ML Feedback Interface: ML feedback disabled - hiding section');
             this.hideMLSection();
             return;
         }
@@ -59,11 +70,13 @@ class MLFeedbackInterface {
         // Check if ML section already exists in HTML
         const existingSection = document.getElementById('ml-feedback-section');
         if (existingSection) {
+            console.log('ML Feedback Interface: ML section already exists in HTML');
             this.showMLSection();
             this.attachEventListeners();
             return;
         }
 
+        console.log('ML Feedback Interface: ML section not found in HTML, creating dynamically...');
         
         // Look for the modal body to insert ML section between chart and details
         const modalBody = document.querySelector('.modal-body');
@@ -71,9 +84,13 @@ class MLFeedbackInterface {
         const modalDetails = document.getElementById('modalDetails');
         
         if (!modalBody) {
+            console.log('ML Feedback Interface: Modal body not found');
             return;
         }
 
+        console.log('ML Feedback Interface: Modal body found, creating ML section');
+        console.log('ML Feedback Interface: Chart container found:', !!chartContainer);
+        console.log('ML Feedback Interface: Modal details found:', !!modalDetails);
         
         // Create ML feedback section HTML
         const mlSection = document.createElement('div');
@@ -164,17 +181,16 @@ class MLFeedbackInterface {
                 </div>
 
                 <!-- Analysis Buttons -->
-                    <div class="ml-actions">
-                        <button id="ml-analyze-btn" class="ml-btn primary">
-                            🔍 Analyze with ML
-                        </button>
-                        <button id="ml-feedback-btn" class="ml-btn secondary" style="display: none;">
-                            📝 Provide Feedback
-                        </button>
-                        <button id="clear-expert-feedback-btn" class="ml-btn warning small" style="display: none;">
-                            🔄 Get Fresh ML Prediction
-                        </button>
-                    </div>                <!-- Feedback Form -->
+                <div class="ml-actions">
+                    <button id="ml-analyze-btn" class="ml-btn primary">
+                        🔍 Analyze with ML
+                    </button>
+                    <button id="ml-feedback-btn" class="ml-btn secondary" style="display: none;">
+                        📝 Provide Feedback
+                    </button>
+                </div>
+
+                <!-- Feedback Form -->
                 <div class="ml-feedback-form" id="ml-feedback-form" style="display: none;">
                     <h5>Expert Classification Feedback</h5>
                     <p>Current classification: <span id="current-classification">-</span></p>
@@ -271,20 +287,24 @@ class MLFeedbackInterface {
         // Strategy 1: Insert after modal details (sample details)
         if (modalDetails) {
             modalDetails.parentNode.insertBefore(mlSection, modalDetails.nextSibling);
+            console.log('ML Feedback Interface: ML section added after sample details');
             insertionSuccess = true;
         }
         // Strategy 2: Insert after chart container if no modal details
         else if (chartContainer) {
             chartContainer.parentNode.insertBefore(mlSection, chartContainer.nextSibling);
+            console.log('ML Feedback Interface: ML section added after chart container');
             insertionSuccess = true;
         }
         // Strategy 3: Fallback - append to modal body
         else {
             modalBody.appendChild(mlSection);
+            console.log('ML Feedback Interface: ML section appended to modal body (fallback)');
             insertionSuccess = true;
         }
         
         if (!insertionSuccess) {
+            console.error('ML Feedback Interface: Failed to insert ML section');
             return;
         }
 
@@ -293,9 +313,13 @@ class MLFeedbackInterface {
     }
 
     showMLSection() {
+        console.log('ML Feedback Interface: Ensuring ML section is visible');
         const mlSection = document.getElementById('ml-feedback-section');
         if (mlSection) {
             mlSection.style.display = 'block';
+            console.log('ML Feedback Interface: ML section made visible');
+        } else {
+            console.log('ML Feedback Interface: ML section not found');
         }
         
         // Also show individual ML components when section becomes visible
@@ -304,20 +328,24 @@ class MLFeedbackInterface {
         
         if (mlStatsDisplay) {
             mlStatsDisplay.style.display = 'block';
+            console.log('ML Feedback Interface: ML stats display made visible');
         }
         if (mlAnalyzeBtn) {
             mlAnalyzeBtn.style.display = 'inline-block';
             mlAnalyzeBtn.disabled = false; // Ensure button is enabled
             mlAnalyzeBtn.textContent = '🔍 Analyze with ML';
+            console.log('ML Feedback Interface: ML analyze button made visible and enabled');
         }
     }
 
     hideMLSection() {
+        console.log('ML Feedback Interface: Hiding ML section due to configuration');
         const mlSection = document.getElementById('ml-feedback-section');
-        
         if (mlSection) {
             mlSection.style.display = 'none';
+            console.log('ML Feedback Interface: ML section hidden');
         } else {
+            console.log('ML Feedback Interface: ML section not found to hide');
         }
         
         // Also hide individual ML components if they exist separately
@@ -339,6 +367,7 @@ class MLFeedbackInterface {
          * Refresh the ML section visibility based on current configuration
          * Useful when configuration changes while a modal is open
          */
+        console.log('ML Feedback Interface: Refreshing ML section configuration');
         
         // Check if we should hide ML feedback
         const shouldHide = await this.shouldHideMLFeedback();
@@ -385,6 +414,7 @@ class MLFeedbackInterface {
                 
                 // Check for duplicates without disabling button
                 if (isSubmitting || this.submissionInProgress) {
+                    console.warn('ML Feedback: Blocking duplicate submission attempt');
                     return false;
                 }
                 
@@ -399,6 +429,7 @@ class MLFeedbackInterface {
                 return false;
             }, { once: false, passive: false });
             
+            console.log('Submit button event listener attached (duplicate prevention without button disabling)');
         }
 
         // Cancel feedback button
@@ -428,17 +459,12 @@ class MLFeedbackInterface {
         if (manualRetrainBtn) {
             manualRetrainBtn.addEventListener('click', () => this.manualRetrain());
         }
-        
-        // Clear expert feedback button
-        const clearExpertBtn = document.getElementById('clear-expert-feedback-btn');
-        if (clearExpertBtn) {
-            clearExpertBtn.addEventListener('click', () => this.clearExpertFeedback());
-        }
     }
 
     setCurrentWell(wellKey, wellData) {
         // Enhanced validation to ensure we have valid data before setting
         if (!wellKey || !wellData) {
+            console.warn('ML Feedback: Invalid well data provided - wellKey:', wellKey, 'wellData:', wellData);
             return;
         }
         
@@ -446,6 +472,7 @@ class MLFeedbackInterface {
         this.currentWellKey = wellKey;
         this.currentWellData = JSON.parse(JSON.stringify(wellData));
         
+        console.log('ML Feedback: Set current well:', wellKey, 'with data keys:', Object.keys(this.currentWellData));
         
         // Check ML configuration for current well before showing section
         this.refreshMLSectionConfiguration();
@@ -458,19 +485,20 @@ class MLFeedbackInterface {
         if (predictionDisplay) predictionDisplay.style.display = 'none';
         if (feedbackBtn) feedbackBtn.style.display = 'none';
         if (feedbackForm) feedbackForm.style.display = 'none';
-        
         // Auto-analyze the curve if ML classification doesn't exist (only if ML is enabled)
         if (!wellData.ml_classification) {
             setTimeout(async () => {
                 // Check if ML feedback should be hidden before auto-analysis
                 const shouldHide = await this.shouldHideMLFeedback();
                 if (shouldHide) {
+                    console.log('ML Analysis: Skipping auto-analysis - ML feedback disabled');
                     return;
                 }
                 
                 if (this.currentWellData && this.currentWellKey) {
                     this.analyzeCurveWithML();
                 } else {
+                    console.warn('ML Analysis: Well data not ready for auto-analysis, skipping');
                 }
             }, 300);
         } else {
@@ -497,51 +525,59 @@ class MLFeedbackInterface {
             // Get current pathogen information
             const pathogenInfo = this.extractChannelSpecificPathogen();
             if (!pathogenInfo.pathogen || pathogenInfo.pathogen === 'Unknown') {
+                console.log('ML Config Check: No pathogen detected, showing ML feedback');
                 return false; // Show ML feedback if we can't determine pathogen
             }
 
             // Get pathogen-specific ML configuration
-            const pathogenResponse = await fetch(`/api/ml-config/pathogen/${pathogenInfo.pathogen}`);
+            const pathogenResponse = await fetch(`/api/ml_config/pathogen/${pathogenInfo.pathogen}`);
             if (!pathogenResponse.ok) {
+                console.log('ML Config Check: Failed to get pathogen config, showing ML feedback');
                 return false; // Show ML feedback if we can't get pathogen config
             }
             const pathogenConfigResponse = await pathogenResponse.json();
             
             // Find config for current fluorophore or general config
             let pathogenMLEnabled = true; // Default to enabled
-            if (pathogenConfigResponse.success && pathogenConfigResponse.configs?.length > 0) {
-                const configs = pathogenConfigResponse.configs;
+            if (pathogenConfigResponse.success && pathogenConfigResponse.data?.length > 0) {
+                const configs = pathogenConfigResponse.data;
                 
                 // Look for specific fluorophore config first
                 let config = configs.find(c => c.fluorophore === pathogenInfo.fluorophore);
-                
                 // Fall back to general config (null fluorophore)
                 if (!config) {
-                    config = configs.find(c => !c.fluorophore || c.fluorophore === null);
+                    config = configs.find(c => !c.fluorophore);
                 }
                 
                 if (config) {
                     pathogenMLEnabled = config.ml_enabled;
-                } else {
                 }
-            } else {
             }
 
             // Hide ML feedback when ML is disabled for this pathogen
             const shouldHide = !pathogenMLEnabled;
             
+            console.log('ML Config Check:', {
+                pathogen: pathogenInfo.pathogen,
+                fluorophore: pathogenInfo.fluorophore,
+                pathogenMLEnabled,
+                shouldHide
+            });
             
             return shouldHide;
             
         } catch (error) {
+            console.error('ML Config Check: Error checking ML feedback visibility:', error);
             return false; // Show ML feedback on error to be safe
         }
     }
 
     // Visual curve analysis functions
     analyzeVisualCurvePattern(wellData) {
+        console.log('🔍 Visual Analysis Debug: Analyzing well data:', Object.keys(wellData || {}));
         
         if (!wellData) {
+            console.warn('🔍 Visual Analysis Debug: No well data provided');
             return {
                 shape: 'Unknown',
                 pattern: 'No Data',
@@ -563,8 +599,13 @@ class MLFeedbackInterface {
                       wellData.cycle ||
                       [];
         
+        console.log('🔍 Visual Analysis Debug: RFU data length:', rfuData.length, 'Cycles length:', cycles.length);
+        console.log('🔍 Visual Analysis Debug: Available metrics - amplitude:', wellData.amplitude, 'r2:', wellData.r2_score, 'snr:', wellData.snr);
         
         if (!rfuData || !cycles || rfuData.length === 0 || cycles.length === 0) {
+            console.warn('🔍 Visual Analysis Debug: Missing or empty curve data');
+            console.warn('🔍 Visual Analysis Debug: RFU fields tried:', ['rfu_data', 'raw_rfu', 'rfu', 'fluorescence_data']);
+            console.warn('🔍 Visual Analysis Debug: Cycle fields tried:', ['cycles', 'raw_cycles', 'cycle_data', 'cycle']);
             return {
                 shape: 'Missing Curve Data',
                 pattern: 'No Curve Data Available',
@@ -580,6 +621,7 @@ class MLFeedbackInterface {
             characteristics: this.extractCurveCharacteristics(rfuData, wellData)
         };
         
+        console.log('🔍 Visual Analysis Debug: Analysis result:', analysis);
         return analysis;
 
         return analysis;
@@ -692,6 +734,7 @@ class MLFeedbackInterface {
             // Default to enabled if we can't check
             return true;
         } catch (error) {
+            console.error('Failed to check learning messages setting:', error);
             // Default to enabled if we can't check
             return true;
         }
@@ -699,6 +742,7 @@ class MLFeedbackInterface {
 
     // Update the display with visual analysis
     updateVisualCurveDisplay(wellData) {
+        console.log('🔍 Visual Display Debug: Updating visual curve display for well with keys:', Object.keys(wellData || {}));
         
         const analysis = this.analyzeVisualCurvePattern(wellData);
         
@@ -710,12 +754,15 @@ class MLFeedbackInterface {
 
         if (shapeElement) {
             shapeElement.textContent = analysis.shape;
+            console.log('🔍 Visual Display Debug: Set curve shape to:', analysis.shape);
         }
         if (patternElement) {
             patternElement.textContent = analysis.pattern;
+            console.log('🔍 Visual Display Debug: Set pattern type to:', analysis.pattern);
         }
         if (qualityElement) {
             qualityElement.textContent = analysis.quality;
+            console.log('🔍 Visual Display Debug: Set quality to:', analysis.quality);
         }
         
         // Update characteristics tags
@@ -723,17 +770,21 @@ class MLFeedbackInterface {
             characteristicsElement.innerHTML = analysis.characteristics
                 .map(char => `<span class="characteristic-tag">${char}</span>`)
                 .join('');
+            console.log('🔍 Visual Display Debug: Set characteristics:', analysis.characteristics);
         }
 
         // Show the visual analysis section
         const visualDisplay = document.getElementById('visual-curve-display');
         if (visualDisplay) {
             visualDisplay.style.display = 'block';
+            console.log('🔍 Visual Display Debug: Made visual analysis section visible');
         } else {
+            console.warn('🔍 Visual Display Debug: Visual display element not found');
         }
         
         // If we have basic metrics but no curve data, show what we can analyze
         if (!wellData || (!wellData.rfu_data && !wellData.raw_rfu && !wellData.rfu)) {
+            console.log('🔍 Visual Display Debug: No curve data available, showing basic metrics analysis');
             this.showBasicMetricsAnalysis(wellData);
         }
     }
@@ -809,6 +860,7 @@ class MLFeedbackInterface {
                 .join('');
         }
         
+        console.log('🔍 Basic Metrics Analysis: Shape:', inferredShape, 'Pattern:', inferredPattern, 'Quality:', qualityScore);
     }
 
     // ===== ENHANCED HYBRID FEATURE EXTRACTION =====
@@ -836,16 +888,16 @@ class MLFeedbackInterface {
 
     extractNumericalFeatures(wellData) {
         return {
-            amplitude: this.safeNumberConvert(wellData.amplitude),
-            r2_score: this.safeNumberConvert(wellData.r2_score),
-            steepness: this.safeNumberConvert(wellData.steepness),
-            snr: this.safeNumberConvert(wellData.snr),
-            midpoint: this.safeNumberConvert(wellData.midpoint),
-            baseline: this.safeNumberConvert(wellData.baseline),
-            cq_value: this.safeNumberConvert(wellData.cq_value),
-            cqj: this.safeNumberConvert(wellData.cqj),
-            calcj: this.safeNumberConvert(wellData.calcj),
-            rmse: this.safeNumberConvert(wellData.rmse),
+            amplitude: wellData.amplitude || 0,
+            r2_score: wellData.r2_score || 0,
+            steepness: wellData.steepness || 0,
+            snr: wellData.snr || 0,
+            midpoint: wellData.midpoint || 0,
+            baseline: wellData.baseline || 0,
+            cq_value: wellData.cq_value || 0,
+            cqj: wellData.cqj || 0,
+            calcj: wellData.calcj || 0,
+            rmse: wellData.rmse || 0,
             min_rfu: Math.min(...(wellData.rfu_data || [0])),
             max_rfu: Math.max(...(wellData.rfu_data || [0])),
             mean_rfu: (wellData.rfu_data || []).reduce((a, b) => a + b, 0) / (wellData.rfu_data || []).length || 0,
@@ -1041,33 +1093,6 @@ class MLFeedbackInterface {
         return Math.sqrt(variance);
     }
 
-    safeNumberConvert(value) {
-        // Safely convert any value to a number, handling objects, nulls, N/A strings, etc.
-        if (value === null || value === undefined) {
-            return 0;
-        }
-        
-        // If it's already a number, return it
-        if (typeof value === 'number' && !isNaN(value)) {
-            return value;
-        }
-        
-        // If it's a string, handle special cases
-        if (typeof value === 'string') {
-            // Handle N/A strings specifically
-            const trimmed = value.trim().toUpperCase();
-            if (trimmed === 'N/A' || trimmed === 'NA' || trimmed === '' || trimmed === 'NULL') {
-                return 0;
-            }
-            
-            const parsed = parseFloat(value);
-            return isNaN(parsed) ? 0 : parsed;
-        }
-        
-        // If it's an object or other type, return 0
-        return 0;
-    }
-
     // ===== DUPLICATE TRAINING PREVENTION =====
     
     extractFullSampleName() {
@@ -1082,6 +1107,7 @@ class MLFeedbackInterface {
                 if (label && value && label.textContent.toLowerCase().includes('sample')) {
                     const sampleName = value.textContent.trim();
                     if (sampleName && sampleName !== 'Unknown' && sampleName !== '') {
+                        console.log('🔍 Sample Extraction: Found full sample name in modal:', sampleName);
                         return sampleName;
                     }
                 }
@@ -1092,12 +1118,14 @@ class MLFeedbackInterface {
             const sampleMatch = modalText.match(/Sample:\s*([^\n\r]+)/i);
             if (sampleMatch && sampleMatch[1]) {
                 const sampleName = sampleMatch[1].trim();
+                console.log('🔍 Sample Extraction: Found sample name via text match:', sampleName);
                 return sampleName;
             }
         }
         
         // Final fallback: use well data
         const fallbackName = this.currentWellData?.sample || this.currentWellData?.sample_name || 'Unknown_Sample';
+        console.log('🔍 Sample Extraction: Using fallback sample name:', fallbackName);
         return fallbackName;
     }
     
@@ -1114,6 +1142,10 @@ class MLFeedbackInterface {
         // 3. Channel/fluorophore
         const uniqueId = `${fullSampleName}||${pathogen}||${channel}`;
         
+        console.log('🔍 Sample ID Debug: Created unique identifier:', uniqueId);
+        console.log('   Full Sample Name:', fullSampleName);
+        console.log('   Pathogen:', pathogen);
+        console.log('   Channel:', channel);
         
         return uniqueId;
     }
@@ -1124,6 +1156,7 @@ class MLFeedbackInterface {
         
         // Check local cache first
         if (this.trainedSamples.has(sampleId)) {
+            console.log('🚫 Sample Training Check: Sample already trained (local cache):', sampleId);
             return true;
         }
         
@@ -1149,10 +1182,12 @@ class MLFeedbackInterface {
                 if (alreadyTrained) {
                     // Add to local cache
                     this.trainedSamples.add(sampleId);
+                    console.log('🚫 Sample Training Check: Sample already trained (backend check):', sampleId);
                     return true;
                 }
             }
         } catch (error) {
+            console.warn('⚠️ Sample Training Check: Failed to check backend, allowing training:', error);
         }
         
         return false;
@@ -1161,6 +1196,7 @@ class MLFeedbackInterface {
     markSampleAsTrained() {
         const sampleId = this.createUniqueSampleIdentifier();
         this.trainedSamples.add(sampleId);
+        console.log('✅ Sample Training: Marked sample as trained:', sampleId);
     }
     
     async loadTrainedSamplesCache() {
@@ -1172,9 +1208,11 @@ class MLFeedbackInterface {
                 if (result.success && result.trained_sample_identifiers) {
                     // Populate the local cache
                     this.trainedSamples = new Set(result.trained_sample_identifiers);
+                    console.log(`📚 Trained Samples Cache: Loaded ${this.trainedSamples.size} previously trained samples`);
                 }
             }
         } catch (error) {
+            console.warn('⚠️ Trained Samples Cache: Failed to load cache from backend:', error);
         }
     }
     
@@ -1235,6 +1273,7 @@ class MLFeedbackInterface {
             }
             
         } catch (error) {
+            console.error('Manual retrain error:', error);
             this.showTrainingNotification(
                 'Retrain Failed',
                 `❌ Manual retrain failed: ${error.message}`,
@@ -1248,58 +1287,6 @@ class MLFeedbackInterface {
         }
     }
 
-    clearExpertFeedback() {
-        if (!this.currentWellData) {
-            return;
-        }
-        
-        const hasExpertFeedback = this.currentWellData.expert_classification;
-        if (!hasExpertFeedback) {
-            alert('No expert feedback to clear for this well.');
-            return;
-        }
-        
-        const shouldClear = confirm(
-            `🔄 Clear Expert Feedback\n\n` +
-            `This will remove the stored expert classification and allow you to get a fresh ML prediction.\n\n` +
-            `Current expert decision: ${this.currentWellData.expert_classification.replace('_', ' ')}\n\n` +
-            `Continue with clearing expert feedback?`
-        );
-        
-        if (!shouldClear) {
-            return;
-        }
-        
-        // Clear expert feedback from current well data
-        delete this.currentWellData.expert_classification;
-        delete this.currentWellData.expert_review_method;
-        delete this.currentWellData.expert_feedback_timestamp;
-        delete this.currentWellData.ml_classification;
-        
-        // Hide the clear button and show analyze button
-        const clearBtn = document.getElementById('clear-expert-feedback-btn');
-        const analyzeBtn = document.getElementById('ml-analyze-btn');
-        
-        if (clearBtn) {
-            clearBtn.style.display = 'none';
-        }
-        if (analyzeBtn) {
-            analyzeBtn.style.display = 'inline-block';
-        }
-        
-        // Hide the prediction display
-        const predictionDisplay = document.getElementById('ml-prediction-display');
-        if (predictionDisplay) {
-            predictionDisplay.style.display = 'none';
-        }
-        
-        this.showTrainingNotification(
-            'Expert Feedback Cleared',
-            '🔄 Expert feedback cleared. You can now get a fresh ML prediction.',
-            'info'
-        );
-    }
-
     // ===== CHANNEL-SPECIFIC PATHOGEN EXTRACTION =====
     
     extractChannelSpecificPathogen(fallbackWellData = null) {
@@ -1307,6 +1294,7 @@ class MLFeedbackInterface {
         const wellData = this.currentWellData || fallbackWellData;
         
         if (!wellData) {
+            console.warn('ML Feedback Interface: No current well data available');
             return {
                 experimentPattern: null,
                 test_code: null,
@@ -1320,7 +1308,6 @@ class MLFeedbackInterface {
         const currentExperimentPattern = (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null;
         const testCode = (typeof extractTestCode === 'function' && currentExperimentPattern) ? 
             extractTestCode(currentExperimentPattern) : null;
-        
         
         // Get channel from current well data with multiple fallback options
         const channel = wellData.channel || 
@@ -1336,8 +1323,10 @@ class MLFeedbackInterface {
             try {
                 specificPathogen = getPathogenTarget(testCode, channel);
                 if (specificPathogen && specificPathogen !== 'Unknown') {
+                    console.log(`🧬 Pathogen Library lookup: ${testCode} + ${channel} = ${specificPathogen}`);
                 }
             } catch (error) {
+                console.log(`⚠️ Pathogen library lookup failed for ${testCode}/${channel}:`, error);
             }
         }
         
@@ -1349,6 +1338,7 @@ class MLFeedbackInterface {
                              null;
             
             if (specificPathogen && specificPathogen !== 'Unknown') {
+                console.log(`🧬 Well data pathogen: ${specificPathogen}`);
             }
         }
         
@@ -1356,6 +1346,7 @@ class MLFeedbackInterface {
         if (!specificPathogen || specificPathogen === 'Unknown') {
             specificPathogen = testCode || wellData.test_code || null;
             if (specificPathogen && specificPathogen !== 'Unknown') {
+                console.log(`🧬 Test code as pathogen: ${specificPathogen}`);
             }
         }
         
@@ -1363,6 +1354,7 @@ class MLFeedbackInterface {
         if (!specificPathogen || specificPathogen === 'Unknown') {
             if (testCode && channel) {
                 specificPathogen = `${testCode}_${channel}`;
+                console.log(`🧬 Constructed pathogen: ${specificPathogen}`);
             }
         }
         
@@ -1370,21 +1362,23 @@ class MLFeedbackInterface {
         if (!specificPathogen || specificPathogen === 'Unknown') {
             if (channel) {
                 specificPathogen = channel;
+                console.log(`🧬 Channel as pathogen: ${specificPathogen}`);
             }
         }
         
         // Final fallback
         if (!specificPathogen || specificPathogen === 'Unknown') {
             specificPathogen = 'General_PCR';
+            console.log(`🧬 Final fallback pathogen: ${specificPathogen}`);
         }
         
+        console.log(`🧬 Final pathogen for ML: ${specificPathogen}`);
         
         return {
             experimentPattern: currentExperimentPattern,
             test_code: testCode,
             testCode: testCode,  // Keep both for compatibility
             channel: channel || 'Unknown',
-            fluorophore: channel || 'Unknown', // Add fluorophore field for compatibility
             pathogen: specificPathogen
         };
     }
@@ -1392,6 +1386,7 @@ class MLFeedbackInterface {
     displayExistingMLClassification(mlClassification) {
         // Add validation for ML classification data
         if (!mlClassification || !mlClassification.classification || mlClassification.confidence === undefined) {
+            console.warn('ML Feedback Interface: Invalid ML classification data:', mlClassification);
             return;
         }
         
@@ -1402,7 +1397,6 @@ class MLFeedbackInterface {
         const pathogenElement = document.getElementById('detected-pathogen');
         const pathogenContext = document.getElementById('pathogen-context');
         const feedbackBtn = document.getElementById('ml-feedback-btn');
-        const clearExpertBtn = document.getElementById('clear-expert-feedback-btn');
 
         if (predictionDisplay && classElement && confidenceElement && methodElement) {
             predictionDisplay.style.display = 'block';
@@ -1410,95 +1404,22 @@ class MLFeedbackInterface {
             classElement.textContent = mlClassification.classification.replace('_', ' ');
             classElement.className = `classification-badge ${this.getClassificationBadgeClass(mlClassification.classification)}`;
             
-            // Handle expert review display differently
-            if (mlClassification.method === 'expert_review') {
-                confidenceElement.textContent = `(Expert Decision)`;
-                confidenceElement.style.fontWeight = 'bold';
-                confidenceElement.style.color = '#2196F3';
-                methodElement.textContent = '👨‍⚕️ Expert Review';
-                methodElement.style.fontWeight = 'bold';
-                methodElement.style.color = '#2196F3';
-                
-                // Hide feedback button for expert decisions to prevent re-feedback
-                if (feedbackBtn) {
-                    feedbackBtn.style.display = 'none';
-                }
-            } else if (mlClassification.expert_trained) {
-                // This is ML prediction but trained with expert feedback
-                confidenceElement.textContent = `(${(mlClassification.confidence * 100).toFixed(1)}% confidence)`;
-                confidenceElement.style.fontWeight = 'normal';
-                confidenceElement.style.color = '#4CAF50'; // Green to indicate expert-trained
-                methodElement.textContent = '🤖 ML (Expert Trained)';
-                methodElement.style.fontWeight = 'normal';
-                methodElement.style.color = '#4CAF50';
-                
-                // Allow feedback for ML predictions even if expert-trained
-                if (feedbackBtn) {
-                    feedbackBtn.style.display = 'inline-block';
-                }
-            } else {
-                confidenceElement.textContent = `(${(mlClassification.confidence * 100).toFixed(1)}% confidence)`;
-                confidenceElement.style.fontWeight = 'normal';
-                confidenceElement.style.color = '';
-                methodElement.textContent = mlClassification.method || 'ML';
-                methodElement.style.fontWeight = 'normal';
-                methodElement.style.color = '';
-                
-                // Show feedback button for ML predictions
-                if (feedbackBtn) {
-                    feedbackBtn.style.display = 'inline-block';
-                }
-            }
+            confidenceElement.textContent = `(${(mlClassification.confidence * 100).toFixed(1)}% confidence)`;
+            methodElement.textContent = mlClassification.method || 'ML';
             
             if (mlClassification.pathogen && pathogenElement && pathogenContext) {
                 pathogenElement.textContent = mlClassification.pathogen;
                 pathogenContext.style.display = 'block';
             }
             
-            // Show clear expert feedback button if this is an expert decision
-            if (clearExpertBtn) {
-                if (this.currentWellData && this.currentWellData.expert_classification) {
-                    clearExpertBtn.style.display = 'inline-block';
-                } else {
-                    clearExpertBtn.style.display = 'none';
-                }
-            }
-        }
-        
-        // CRITICAL: Update the main results table with existing ML classification
-        // This ensures the table shows ML results even when they're loaded from existing data
-        if (this.currentWellKey && this.currentWellData && mlClassification) {
-            // Update the curve classification to show ML result in table
-            this.currentWellData.curve_classification = {
-                classification: mlClassification.classification,
-                reason: mlClassification.method === 'expert_review' ? 'Expert Review' : 'ML Analysis',
-                confidence: mlClassification.confidence,
-                method: mlClassification.method || 'ML'
-            };
-            
-            // Update the main results table to reflect the existing ML classification
-            this.updateTableWithMLResult(this.currentWellKey, this.currentWellData, mlClassification);
-            
-            // Update global analysis results if available
-            if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results && window.currentAnalysisResults.individual_results[this.currentWellKey]) {
-                window.currentAnalysisResults.individual_results[this.currentWellKey].ml_classification = mlClassification;
-                window.currentAnalysisResults.individual_results[this.currentWellKey].curve_classification = {
-                    classification: mlClassification.classification,
-                    reason: mlClassification.method === 'expert_review' ? 'Expert Review' : 'ML Analysis',
-                    confidence: mlClassification.confidence,
-                    method: mlClassification.method || 'ML'
-                };
-            }
-            
-            // Reinitialize thresholds to ensure proper threshold application after displaying existing ML results
-            if (typeof window.initializeChannelThresholds === 'function') {
-                console.log('🔄 ML-EXISTING - Reinitializing channel thresholds after displaying existing ML classification');
-                window.initializeChannelThresholds();
+            if (feedbackBtn) {
+                feedbackBtn.style.display = 'inline-block';
             }
         }
     }
 
     async analyzeCurveWithML() {
+        console.log('ML Analysis: Starting analysis...');
         
         const analyzeBtn = document.getElementById('ml-analyze-btn');
         let originalButtonState = null;
@@ -1511,26 +1432,19 @@ class MLFeedbackInterface {
             };
             analyzeBtn.disabled = true;
             analyzeBtn.textContent = '🔄 Analyzing...';
-            
-            // Safety timeout to prevent button getting stuck (10 seconds)
-            setTimeout(() => {
-                if (analyzeBtn && analyzeBtn.textContent === '🔄 Analyzing...') {
-                    console.warn('Analyze button timeout - restoring state');
-                    analyzeBtn.disabled = false;
-                    analyzeBtn.textContent = '🔍 Analyze with ML';
-                }
-            }, 10000);
         }
         
         try {
             // Enhanced validation with fallback recovery
             if (!this.currentWellData) {
+                console.warn('ML Analysis: No current well data available, attempting recovery...');
                 
                 // Try to recover well data from modal context
                 const modalWellKey = window.currentModalWellKey;
                 if (modalWellKey && currentAnalysisResults && currentAnalysisResults.individual_results) {
                     const wellResult = currentAnalysisResults.individual_results[modalWellKey];
                     if (wellResult) {
+                        console.log('ML Analysis: Recovered well data from modal context');
                         this.setCurrentWell(modalWellKey, wellResult);
                         // Wait a moment for the data to be set properly
                         await new Promise(resolve => setTimeout(resolve, 50));
@@ -1539,19 +1453,14 @@ class MLFeedbackInterface {
                 
                 // Final check - if still no data, give up
                 if (!this.currentWellData) {
-                    alert('No curve data available for analysis. Please select a well and try again.');
+                    console.error('ML Analysis: No curve data available for analysis');
+                    console.warn('ML Analysis: Skipping analysis - no curve data available');
                     return;
                 }
             }
 
-            // PRIORITY CHECK: If we have expert feedback, show that instead of calling server
-            if (this.currentWellData.expert_classification && this.currentWellData.ml_classification) {
-                // Display the expert decision directly
-                console.log('Showing stored expert classification:', this.currentWellData.ml_classification);
-                this.displayExistingMLClassification(this.currentWellData.ml_classification);
-                return;
-            }
-
+            console.log('ML Analysis: Starting analysis for well:', this.currentWellKey);
+            console.log('ML Analysis: Current well data keys:', Object.keys(this.currentWellData));
             // Get channel-specific pathogen information with enhanced validation
             const channelData = this.extractChannelSpecificPathogen();
             
@@ -1567,6 +1476,7 @@ class MLFeedbackInterface {
                                channelData.channel ||
                                'General_PCR';
                 
+                console.warn('ML Analysis: Using fallback pathogen:', finalPathogen);
             }
             
             // Validate we have the required raw data - RFU and Cycles are essential for ML analysis
@@ -1580,12 +1490,17 @@ class MLFeedbackInterface {
                              [];
             
             if (!rawRfu || !rawCycles || rawRfu.length === 0 || rawCycles.length === 0) {
+                console.error('ML Analysis: Missing or empty raw curve data');
+                console.error('ML Analysis: Available well data keys:', Object.keys(this.currentWellData));
+                console.error('ML Analysis: RFU data:', rawRfu ? `Array length ${rawRfu.length}` : 'null/undefined');
+                console.error('ML Analysis: Cycles data:', rawCycles ? `Array length ${rawCycles.length}` : 'null/undefined');
                 
-                // Show more helpful error message for missing curve data
-                alert('No raw curve data available for ML analysis. This might be a data loading issue - please try selecting the well again.');
-                throw new Error('Missing raw curve data for ML analysis');
+                // Log warning instead of showing alert popup
+                console.warn('ML Analysis: Skipping analysis - missing raw curve data');
+                return; // Exit gracefully without throwing error
             }
             
+            console.log('ML Analysis: Raw data validation passed - RFU points:', rawRfu.length, 'Cycles:', rawCycles.length);
             
             // Comprehensive well data for analysis
             const wellData = {
@@ -1598,12 +1513,10 @@ class MLFeedbackInterface {
                 channel: channelData.channel || this.currentWellData.channel || this.currentWellData.fluorophore || 'Unknown_Channel',
                 fluorophore: channelData.channel || this.currentWellData.fluorophore || this.currentWellData.channel || 'Unknown_Fluorophore',
                 experiment_pattern: channelData.experimentPattern || channelData.testCode || this.currentWellData.experiment_pattern || '',
-                test_code: channelData.testCode || this.currentWellData.test_code || '',
-                // Add explicit experiment context for better pathogen detection
-                current_experiment_pattern: (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null,
-                extracted_test_code: (typeof extractTestCode === 'function') ? extractTestCode(channelData.experimentPattern || '') : null
+                test_code: channelData.testCode || this.currentWellData.test_code || ''
             };
             
+            console.log('ML Analysis: Comprehensive well data:', wellData);
 
             const response = await fetch('/api/ml-analyze-curve', {
                 method: 'POST',
@@ -1615,15 +1528,15 @@ class MLFeedbackInterface {
                     cycles: rawCycles,
                     well_data: wellData,
                     existing_metrics: {
-                        r2: this.safeNumberConvert(this.currentWellData.r2_score),
-                        steepness: this.safeNumberConvert(this.currentWellData.steepness),
-                        snr: this.safeNumberConvert(this.currentWellData.snr),
-                        midpoint: this.safeNumberConvert(this.currentWellData.midpoint),
-                        baseline: this.safeNumberConvert(this.currentWellData.baseline),
-                        amplitude: this.safeNumberConvert(this.currentWellData.amplitude),
-                        cq_value: this.safeNumberConvert(this.currentWellData.cq_value),
-                        cqj: this.safeNumberConvert(this.currentWellData.cqj),
-                        calcj: this.safeNumberConvert(this.currentWellData.calcj),
+                        r2: this.currentWellData.r2_score || 0,
+                        steepness: this.currentWellData.steepness || 0,
+                        snr: this.currentWellData.snr || 0,
+                        midpoint: this.currentWellData.midpoint || 0,
+                        baseline: this.currentWellData.baseline || 0,
+                        amplitude: this.currentWellData.amplitude || 0,
+                        // Only send CQJ/CalcJ if they are valid numbers > 0, otherwise send 0
+                        cqj: (this.currentWellData.cqj && typeof this.currentWellData.cqj === 'number' && this.currentWellData.cqj > 0) ? this.currentWellData.cqj : 0,
+                        calcj: (this.currentWellData.calcj && typeof this.currentWellData.calcj === 'number' && this.currentWellData.calcj > 0) ? this.currentWellData.calcj : 0,
                         classification: this.currentWellData.classification || 'UNKNOWN'
                     }
                 })
@@ -1631,43 +1544,15 @@ class MLFeedbackInterface {
 
             if (response.ok) {
                 const result = await response.json();
+                console.log('ML Analysis: Received response:', result);
+                console.log('ML Analysis: Features used CQJ:', result.prediction?.features_used?.cqj);
+                console.log('ML Analysis: Features used CalcJ:', result.prediction?.features_used?.calcj);
                 
                 if (result.success) {
                     this.displayMLResults(result);
                     
                     // Store ML classification in well data
                     this.currentWellData.ml_classification = result.prediction;
-                    
-                    // Update the curve classification to show ML result in table
-                    if (result.prediction.classification) {
-                        this.currentWellData.curve_classification = {
-                            classification: result.prediction.classification,
-                            reason: 'ML Analysis',
-                            confidence: result.prediction.confidence,
-                            method: result.prediction.method || 'ML'
-                        };
-                    }
-                    
-                    // Update the main results table to reflect the ML classification
-                    this.updateTableWithMLResult(this.currentWellKey, this.currentWellData, result.prediction);
-                    
-                    // Update global analysis results if available
-                    if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results && window.currentAnalysisResults.individual_results[this.currentWellKey]) {
-                        window.currentAnalysisResults.individual_results[this.currentWellKey].ml_classification = result.prediction;
-                        window.currentAnalysisResults.individual_results[this.currentWellKey].curve_classification = {
-                            classification: result.prediction.classification,
-                            reason: 'ML Analysis',
-                            confidence: result.prediction.confidence,
-                            method: result.prediction.method || 'ML'
-                        };
-                    }
-                    
-                    // Reinitialize thresholds for this specific well/channel after ML analysis
-                    if (typeof window.initializeChannelThresholds === 'function') {
-                        console.log('🔄 ML-INDIVIDUAL - Reinitializing channel thresholds after individual ML analysis');
-                        window.initializeChannelThresholds();
-                    }
-                    
                 } else {
                     throw new Error(result.error || 'ML analysis failed');
                 }
@@ -1676,16 +1561,18 @@ class MLFeedbackInterface {
             }
 
         } catch (error) {
-            alert(`ML analysis failed: ${error.message}`);
+            console.error('ML analysis error:', error);
+            console.warn('ML Analysis failed:', error.message);
         } finally {
-            // CRITICAL: Always restore button state regardless of success/failure
-            if (analyzeBtn && originalButtonState) {
-                analyzeBtn.disabled = originalButtonState.disabled;
-                analyzeBtn.textContent = originalButtonState.textContent;
-            } else if (analyzeBtn) {
-                // Fallback if originalButtonState is somehow lost
-                analyzeBtn.disabled = false;
-                analyzeBtn.textContent = '🔍 Analyze with ML';
+            // Restore button state properly
+            if (analyzeBtn) {
+                if (originalButtonState) {
+                    analyzeBtn.disabled = originalButtonState.disabled;
+                    analyzeBtn.textContent = originalButtonState.textContent;
+                } else {
+                    analyzeBtn.disabled = false;
+                    analyzeBtn.textContent = '🔍 Analyze with ML';
+                }
             }
         }
     }
@@ -1695,6 +1582,7 @@ class MLFeedbackInterface {
         
         // Add validation for prediction data
         if (!prediction || !prediction.classification || prediction.confidence === undefined) {
+            console.error('ML Feedback Interface: Invalid prediction data received:', prediction);
             return;
         }
         
@@ -1735,14 +1623,11 @@ class MLFeedbackInterface {
                     let calcjValue = '-';
                     
                     // Check if the original well data has valid CQJ/CalcJ values
-                    const cqjNumValue = this.safeNumberConvert(this.currentWellData?.cqj);
-                    const calcjNumValue = this.safeNumberConvert(this.currentWellData?.calcj);
-                    
-                    if (this.currentWellData && cqjNumValue > 0) {
+                    if (this.currentWellData && this.currentWellData.cqj && this.currentWellData.cqj > 0) {
                         cqjValue = prediction.features_used.cqj ? prediction.features_used.cqj.toFixed(2) : '-';
                     }
                     
-                    if (this.currentWellData && calcjNumValue > 0) {
+                    if (this.currentWellData && this.currentWellData.calcj && this.currentWellData.calcj > 0) {
                         calcjValue = prediction.features_used.calcj ? prediction.features_used.calcj.toExponential(2) : '-';
                     }
                     
@@ -1758,6 +1643,7 @@ class MLFeedbackInterface {
         }
         
         // Force update visual curve analysis when ML results are displayed
+        console.log('🔍 ML Debug: Updating visual curve analysis for ML results display');
         this.updateVisualCurveDisplay(this.currentWellData);
         
         // Check for classification conflicts
@@ -1767,7 +1653,9 @@ class MLFeedbackInterface {
         const visualDisplay = document.getElementById('visual-curve-display');
         if (visualDisplay) {
             visualDisplay.style.display = 'block';
+            console.log('🔍 ML Debug: Visual curve analysis made visible');
         } else {
+            console.warn('🔍 ML Debug: Visual curve display element not found');
         }
     }
 
@@ -1796,6 +1684,7 @@ class MLFeedbackInterface {
         const minConfidence = 0.7; // Minimum ML confidence to suggest conflicts
         
         if (!this.mlStats || this.mlStats.training_samples < minTrainingSamples) {
+            console.log(`🔍 Conflict detection disabled: Only ${this.mlStats?.training_samples || 0} training samples (need ${minTrainingSamples})`);
             // Hide conflict display - not enough training yet
             const conflictDisplay = document.getElementById('classification-conflict');
             if (conflictDisplay) {
@@ -1806,6 +1695,7 @@ class MLFeedbackInterface {
 
         // Only show conflicts for high-confidence ML predictions
         if (mlPrediction.confidence < minConfidence) {
+            console.log(`🔍 Conflict detection skipped: ML confidence ${(mlPrediction.confidence * 100).toFixed(1)}% < ${(minConfidence * 100)}% threshold`);
             const conflictDisplay = document.getElementById('classification-conflict');
             if (conflictDisplay) {
                 conflictDisplay.style.display = 'none';
@@ -1818,6 +1708,7 @@ class MLFeedbackInterface {
         
         // Check if there's a conflict between rule-based and ML classifications
         if (ruleBasedClass && mlClass && ruleBasedClass !== mlClass) {
+            console.log(`🔍 Classification Conflict: Rule-based="${ruleBasedClass}" vs ML="${mlClass}" (${this.mlStats.training_samples} samples, ${(mlPrediction.confidence * 100).toFixed(1)}% confidence)`);
             this.showClassificationConflict(ruleBasedClass, mlPrediction);
         } else {
             // Hide conflict display if no conflict
@@ -1847,15 +1738,18 @@ class MLFeedbackInterface {
             // Show the conflict alert
             conflictDisplay.style.display = 'block';
             
+            console.log('🔍 Classification conflict display shown');
         }
     }
 
     async approveMLClassification() {
         if (!this.currentWellData || !this.currentWellData.ml_classification) {
+            console.error('No ML classification to approve');
             return;
         }
 
         const mlClass = this.currentWellData.ml_classification.classification;
+        console.log(`✅ Expert approved ML classification: ${mlClass}`);
 
         try {
             // Update the rule-based classification to match ML
@@ -1883,18 +1777,21 @@ class MLFeedbackInterface {
             }
 
         } catch (error) {
+            console.error('Error approving ML classification:', error);
             alert(`Failed to approve ML classification: ${error.message}`);
         }
     }
 
     async keepRuleBasedClassification() {
         if (!this.currentWellData) {
+            console.error('No well data available');
             return;
         }
 
         const ruleClass = this.currentWellData.classification;
         const mlClass = this.currentWellData.ml_classification?.classification;
         
+        console.log(`📋 Expert kept rule-based classification: ${ruleClass}`);
 
         try {
             // Log the expert decision to keep rule-based
@@ -1922,18 +1819,21 @@ class MLFeedbackInterface {
             }
 
         } catch (error) {
+            console.error('Error keeping rule-based classification:', error);
             alert(`Failed to keep rule-based classification: ${error.message}`);
         }
     }
 
     async flagForExpertReview() {
         if (!this.currentWellData) {
+            console.error('No well data available');
             return;
         }
 
         const ruleClass = this.currentWellData.classification;
         const mlClass = this.currentWellData.ml_classification?.classification;
         
+        console.log(`👨‍⚕️ Flagged for expert review: Rule="${ruleClass}" vs ML="${mlClass}"`);
 
         try {
             // Log the expert review request
@@ -1960,6 +1860,7 @@ class MLFeedbackInterface {
             }
 
         } catch (error) {
+            console.error('Error flagging for expert review:', error);
             alert(`Failed to flag for expert review: ${error.message}`);
         }
     }
@@ -1996,11 +1897,13 @@ class MLFeedbackInterface {
                     }
                 }
                 
+                console.log(`✅ Well classification updated to: ${newClassification}`);
             } else {
                 throw new Error(result.error || 'Failed to update classification');
             }
 
         } catch (error) {
+            console.error('Error updating well classification:', error);
             throw error;
         }
     }
@@ -2025,8 +1928,10 @@ class MLFeedbackInterface {
             }
 
             const result = await response.json();
+            console.log(`📝 Expert decision logged: ${decisionType}`, result);
 
         } catch (error) {
+            console.error('Error logging expert decision:', error);
             // Don't throw - logging failures shouldn't block the main operation
         }
     }
@@ -2039,6 +1944,7 @@ class MLFeedbackInterface {
             const rawCycles = this.currentWellData.raw_cycles || this.currentWellData.cycles || [];
 
             if (!rawRfu.length || !rawCycles.length) {
+                console.warn('Cannot submit negative feedback - missing raw data');
                 return;
             }
 
@@ -2061,21 +1967,22 @@ class MLFeedbackInterface {
                     well_id: this.currentWellKey,
                     feedback_type: 'expert_correction',
                     existing_metrics: {
-                        r2: this.safeNumberConvert(this.currentWellData.r2_score),
-                        steepness: this.safeNumberConvert(this.currentWellData.steepness),
-                        snr: this.safeNumberConvert(this.currentWellData.snr),
-                        amplitude: this.safeNumberConvert(this.currentWellData.amplitude),
-                        cq_value: this.safeNumberConvert(this.currentWellData.cq_value),
-                        cqj: this.safeNumberConvert(this.currentWellData.cqj),
-                        calcj: this.safeNumberConvert(this.currentWellData.calcj)
+                        r2: this.currentWellData.r2_score || 0,
+                        steepness: this.currentWellData.steepness || 0,
+                        snr: this.currentWellData.snr || 0,
+                        amplitude: this.currentWellData.amplitude || 0,
+                        cqj: this.currentWellData.cqj || 0,
+                        calcj: this.currentWellData.calcj || 0
                     }
                 })
             });
 
             if (response.ok) {
+                console.log(`✅ Negative feedback submitted for ML correction: ${correctClassification}`);
             }
 
         } catch (error) {
+            console.error('Error submitting negative ML feedback:', error);
         }
     }
 
@@ -2085,30 +1992,22 @@ class MLFeedbackInterface {
         
         if (feedbackForm) {
             feedbackForm.style.display = 'block';
+            console.log('ML Feedback Interface: Feedback form displayed');
         } else {
+            console.error('ML Feedback Interface: Feedback form not found!');
             // Try to re-add the ML section if the form is missing
             this.addMLSectionToModal();
             setTimeout(() => {
                 const retryForm = document.getElementById('ml-feedback-form');
                 if (retryForm) {
                     retryForm.style.display = 'block';
+                    console.log('ML Feedback Interface: Feedback form displayed after retry');
                 }
             }, 100);
         }
         
         if (currentClassElement && this.currentWellData && this.currentWellData.ml_classification) {
-            const currentClass = this.currentWellData.ml_classification.classification;
-            const isExpertDecision = this.currentWellData.expert_classification;
-            
-            if (isExpertDecision) {
-                currentClassElement.textContent = `${currentClass.replace('_', ' ')} (Expert Decision - Override?)`;
-                currentClassElement.style.color = '#2196F3';
-                currentClassElement.style.fontWeight = 'bold';
-            } else {
-                currentClassElement.textContent = currentClass.replace('_', ' ');
-                currentClassElement.style.color = '';
-                currentClassElement.style.fontWeight = 'normal';
-            }
+            currentClassElement.textContent = this.currentWellData.ml_classification.classification.replace('_', ' ');
         }
     }
 
@@ -2126,6 +2025,7 @@ class MLFeedbackInterface {
     async submitFeedback() {
         // Prevent multiple simultaneous submissions
         if (this.submissionInProgress) {
+            console.log('ML Feedback: Submission already in progress, ignoring duplicate request');
             return;
         }
         
@@ -2154,10 +2054,12 @@ class MLFeedbackInterface {
             );
             
             if (!shouldRetrain) {
+                console.log('🚫 ML Feedback: User cancelled duplicate sample training');
                 this.submissionInProgress = false; // Reset flag
                 return;
             }
             
+            console.log('⚠️ ML Feedback: User approved retraining duplicate sample');
         }
 
         // Set submission flag
@@ -2169,6 +2071,7 @@ class MLFeedbackInterface {
         
         // If our stored data is null, try to recover from DOM or global state
         if (!wellData || !wellKey) {
+            console.warn('ML Feedback: Current well data is null, attempting recovery...');
             
             // Try to get well key from modal or global state
             wellKey = wellKey || window.currentModalWellKey || window.currentWellKey;
@@ -2177,6 +2080,7 @@ class MLFeedbackInterface {
             if (wellKey && window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
                 wellData = window.currentAnalysisResults.individual_results[wellKey];
                 if (wellData) {
+                    console.log('ML Feedback: Successfully recovered well data from global state');
                     // Update our instance variables
                     this.currentWellKey = wellKey;
                     this.currentWellData = JSON.parse(JSON.stringify(wellData));
@@ -2186,6 +2090,12 @@ class MLFeedbackInterface {
 
         // Final validation
         if (!wellData || !wellKey) {
+            console.error('ML Feedback: Unable to recover well data - wellData:', wellData, 'wellKey:', wellKey);
+            console.error('ML Feedback: Available global data:', {
+                currentModalWellKey: window.currentModalWellKey,
+                currentWellKey: window.currentWellKey,
+                hasAnalysisResults: !!(window.currentAnalysisResults && window.currentAnalysisResults.individual_results)
+            });
             alert('No well data available for feedback submission. Please select a well first and try again.');
             return;
         }
@@ -2214,6 +2124,7 @@ class MLFeedbackInterface {
                                channelData.channel ||
                                'General_PCR';
                 
+                console.warn('ML Feedback: Using fallback pathogen:', finalPathogen);
             }
             
             // Validate we have the required raw data with multiple field names
@@ -2227,6 +2138,7 @@ class MLFeedbackInterface {
                              [];
             
             if (!rawRfu || !rawCycles || rawRfu.length === 0 || rawCycles.length === 0) {
+                console.error('ML Feedback: Missing or empty raw data - RFU:', rawRfu, 'Cycles:', rawCycles);
                 throw new Error('Missing raw RFU or cycle data for feedback submission');
             }
             
@@ -2244,6 +2156,7 @@ class MLFeedbackInterface {
                 test_code: channelData.testCode || wellData.test_code || ''
             };
             
+            console.log('ML Feedback: Comprehensive well data:', submissionWellData);
 
             const response = await fetch('/api/ml-submit-feedback', {
                 method: 'POST',
@@ -2257,15 +2170,14 @@ class MLFeedbackInterface {
                     expert_classification: expertClassification,
                     well_id: wellKey,
                     existing_metrics: {
-                        r2: this.safeNumberConvert(wellData.r2_score),
-                        steepness: this.safeNumberConvert(wellData.steepness),
-                        snr: this.safeNumberConvert(wellData.snr),
-                        midpoint: this.safeNumberConvert(wellData.midpoint),
-                        baseline: this.safeNumberConvert(wellData.baseline),
-                        amplitude: this.safeNumberConvert(wellData.amplitude),
-                        cq_value: this.safeNumberConvert(wellData.cq_value),
-                        cqj: this.safeNumberConvert(wellData.cqj),
-                        calcj: this.safeNumberConvert(wellData.calcj),
+                        r2: wellData.r2_score || 0,
+                        steepness: wellData.steepness || 0,
+                        snr: wellData.snr || 0,
+                        midpoint: wellData.midpoint || 0,
+                        baseline: wellData.baseline || 0,
+                        amplitude: wellData.amplitude || 0,
+                        cqj: wellData.cqj || 0,
+                        calcj: wellData.calcj || 0,
                         classification: wellData.classification || 'UNKNOWN'
                     }
                 })
@@ -2276,50 +2188,6 @@ class MLFeedbackInterface {
                 if (result.success) {
                     // Mark this sample as trained to prevent future duplicates
                     this.markSampleAsTrained();
-                    
-                    // CRITICAL: Store expert feedback in current well data for immediate re-analysis
-                    if (this.currentWellData) {
-                        this.currentWellData.expert_classification = expertClassification;
-                        this.currentWellData.expert_review_method = 'expert_feedback';
-                        this.currentWellData.expert_feedback_timestamp = new Date().toISOString();
-                        
-                        // Check if ML would have made the same prediction
-                        let displayMethod = 'expert_review';
-                        let displaySource = 'expert_feedback';
-                        
-                        // If the result includes ML agreement info, we can show it as ML instead
-                        if (result.ml_agreement && result.ml_would_predict === expertClassification) {
-                            displayMethod = 'ML';
-                            displaySource = 'ml_with_expert_training';
-                            console.log('ML model would have predicted same classification, showing as ML');
-                        }
-                        
-                        // Update the ml_classification to show expert decision (or ML agreement)
-                        this.currentWellData.ml_classification = {
-                            classification: expertClassification,
-                            confidence: displayMethod === 'expert_review' ? 1.0 : (result.ml_confidence || 0.95),
-                            method: displayMethod,
-                            timestamp: new Date().toISOString(),
-                            source: displaySource,
-                            expert_trained: true // Flag to indicate this was expert-trained
-                        };
-                        
-                        // Update the curve classification to show expert decision in table
-                        this.currentWellData.curve_classification = {
-                            classification: expertClassification,
-                            reason: displayMethod === 'expert_review' ? 'Expert Review' : 'ML Analysis',
-                            confidence: displayMethod === 'expert_review' ? 1.0 : (result.ml_confidence || 0.95),
-                            method: displayMethod
-                        };
-                        
-                        // Update the main results table to reflect the expert decision
-                        this.updateTableWithMLResult(this.currentWellKey, this.currentWellData, this.currentWellData.ml_classification);
-                        
-                        // Re-initialize thresholds after expert feedback to ensure fixed thresholds are applied
-                        if (typeof window.initializeChannelThresholds === 'function') {
-                            window.initializeChannelThresholds();
-                        }
-                    }
                     
                     // Use non-blocking notification instead of alert
                     this.showTrainingNotification(
@@ -2333,11 +2201,6 @@ class MLFeedbackInterface {
                     const trainingSamplesElement = document.getElementById('stat-training-samples');
                     if (trainingSamplesElement && result.training_samples) {
                         trainingSamplesElement.textContent = result.training_samples;
-                    }
-                    
-                    // Show the updated ML result immediately with expert review
-                    if (this.currentWellData.ml_classification) {
-                        this.displayExistingMLClassification(this.currentWellData.ml_classification);
                     }
                     
                     // Also fetch full stats to update everything else
@@ -2356,6 +2219,7 @@ class MLFeedbackInterface {
             }
 
         } catch (error) {
+            console.error('Feedback submission error:', error);
             this.showTrainingNotification(
                 'Feedback Failed',
                 `❌ Error: ${error.message}`,
@@ -2374,10 +2238,12 @@ class MLFeedbackInterface {
     }
 
     async handleTrainingMilestone(trainingCount) {
+        console.log(`🎯 ML Training Milestone: ${trainingCount} samples`);
         
         // Check if learning messages are enabled before showing alerts
         const showMessages = await this.checkLearningMessagesEnabled();
         if (!showMessages) {
+            console.log('ML learning messages disabled, skipping milestone notifications');
             return;
         }
         
@@ -2424,6 +2290,7 @@ class MLFeedbackInterface {
     }
 
     async performBatchMLAnalysis(trainingCount, analysisType) {
+        console.log(`🔄 Performing ${analysisType} batch ML analysis with ${trainingCount} training samples`);
         
         try {
             // Remove the notification that prompted this action
@@ -2436,99 +2303,128 @@ class MLFeedbackInterface {
             this.showRunningAnalysisNotification(trainingCount, analysisType);
             
             // Get current analysis results
-            if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
-                throw new Error('No current analysis results available for batch processing');
-            }
-
-            const individualResults = window.currentAnalysisResults.individual_results;
-            const wellKeys = Object.keys(individualResults);
-            
-            // For multichannel experiments, count unique physical wells instead of total channel entries
-            // This gives more accurate progress tracking for multichannel plates
-            const uniquePhysicalWells = new Set();
-            wellKeys.forEach(wellKey => {
-                // Extract physical well position (e.g., "A1_FAM" -> "A1", "B2_Cy5" -> "B2")
-                const physicalWell = wellKey.split('_')[0];
-                uniquePhysicalWells.add(physicalWell);
+            console.log('🔍 ML Batch Analysis: Checking for analysis results...', {
+                currentAnalysisResults: !!window.currentAnalysisResults,
+                hasIndividualResults: !!(window.currentAnalysisResults?.individual_results),
+                resultKeys: window.currentAnalysisResults ? Object.keys(window.currentAnalysisResults) : null,
+                wellCount: window.currentAnalysisResults?.individual_results ? Object.keys(window.currentAnalysisResults.individual_results).length : 0
             });
             
-            const totalPhysicalWells = uniquePhysicalWells.size;
-            const isMultichannel = wellKeys.length > totalPhysicalWells;
+            // Try multiple possible structures for analysis results
+            let individualResults = null;
             
-            // Initialize progress with accurate total count
-            this.updateBatchProgress(0, 0, wellKeys.length);
+            if (window.currentAnalysisResults) {
+                // Strategy 1: Standard structure with individual_results property
+                if (window.currentAnalysisResults.individual_results) {
+                    individualResults = window.currentAnalysisResults.individual_results;
+                    console.log('✅ ML Batch Analysis: Found results in individual_results');
+                }
+                // Strategy 2: Direct results property
+                else if (window.currentAnalysisResults.results) {
+                    individualResults = window.currentAnalysisResults.results;
+                    console.log('✅ ML Batch Analysis: Found results in results property');
+                }
+                // Strategy 3: Data property
+                else if (window.currentAnalysisResults.data) {
+                    individualResults = window.currentAnalysisResults.data;
+                    console.log('✅ ML Batch Analysis: Found results in data property');
+                }
+                // Strategy 4: Direct object with well keys (A1, B2, etc.)
+                else {
+                    const keys = Object.keys(window.currentAnalysisResults);
+                    const wellLikeKeys = keys.filter(k => /^[A-H]\d+$/.test(k));
+                    if (wellLikeKeys.length > 0) {
+                        individualResults = window.currentAnalysisResults;
+                        console.log('✅ ML Batch Analysis: Found well keys directly in currentAnalysisResults', wellLikeKeys.length);
+                    }
+                }
+            }
             
-            // Small delay to ensure progress bar renders before starting processing
-            await new Promise(resolve => setTimeout(resolve, 100));
-            
-            // Process wells sequentially to give true progress tracking and immediate table updates
-            let processedCount = 0;
-            const startTime = Date.now();
-            let lastProgressUpdate = startTime;
-            const progressUpdateInterval = 1000; // Update timing every second
-            
-            for (const wellKey of wellKeys) {
-                const wellData = individualResults[wellKey];
+            if (!individualResults) {
+                console.error('ML Batch Analysis: No analysis results available', {
+                    currentAnalysisResults: !!window.currentAnalysisResults,
+                    individualResults: !!(window.currentAnalysisResults?.individual_results),
+                    resultsKeys: window.currentAnalysisResults ? Object.keys(window.currentAnalysisResults) : null,
+                    totalKeys: window.currentAnalysisResults ? Object.keys(window.currentAnalysisResults).length : 0
+                });
                 
-                // Process individual well and track timing - wait for actual server response
-                const wellStartTime = Date.now();
-                await this.analyzeSingleWellWithML(wellKey, wellData);
-                const wellEndTime = Date.now();
-                const wellProcessingTime = wellEndTime - wellStartTime;
+                // Try waiting a moment for results to be available (sometimes there's a timing issue)
+                console.log('🔄 ML Batch Analysis: Waiting 2 seconds for analysis results...');
+                await new Promise(resolve => setTimeout(resolve, 2000));
                 
-                processedCount++;
+                // Check again after waiting with all strategies
+                if (window.currentAnalysisResults) {
+                    if (window.currentAnalysisResults.individual_results) {
+                        individualResults = window.currentAnalysisResults.individual_results;
+                    } else if (window.currentAnalysisResults.results) {
+                        individualResults = window.currentAnalysisResults.results;
+                    } else if (window.currentAnalysisResults.data) {
+                        individualResults = window.currentAnalysisResults.data;
+                    } else {
+                        const keys = Object.keys(window.currentAnalysisResults);
+                        const wellLikeKeys = keys.filter(k => /^[A-H]\d+$/.test(k));
+                        if (wellLikeKeys.length > 0) {
+                            individualResults = window.currentAnalysisResults;
+                        }
+                    }
+                }
                 
-                // Calculate timing statistics
-                const currentTime = Date.now();
-                const totalElapsed = (currentTime - startTime) / 1000; // seconds
-                const averageTimePerWell = totalElapsed / processedCount;
-                const remainingWells = wellKeys.length - processedCount;
-                const estimatedTimeRemaining = remainingWells * averageTimePerWell;
-                
-                // Update progress after each individual well completes on server
-                const progress = Math.round((processedCount / wellKeys.length) * 100);
-                
-                // Enhanced progress update with timing information
-                if (currentTime - lastProgressUpdate >= progressUpdateInterval || processedCount === wellKeys.length) {
-                    this.updateBatchProgressWithTiming(
-                        progress, 
-                        processedCount, 
-                        wellKeys.length,
-                        totalElapsed,
-                        estimatedTimeRemaining,
-                        averageTimePerWell,
-                        wellProcessingTime
+                if (!individualResults) {
+                    console.error('ML Batch Analysis: Still no analysis results after waiting');
+                    
+                    // Try to show a user-friendly error
+                    this.showTrainingNotification(
+                        'Analysis Required',
+                        '❌ Please run a regular qPCR analysis first before using ML batch analysis.',
+                        'error'
                     );
-                    lastProgressUpdate = currentTime;
+                    
+                    throw new Error('No current analysis results available for batch processing. Please run a regular analysis first.');
                 } else {
-                    // Quick progress update without timing recalculation
-                    this.updateBatchProgress(progress, processedCount, wellKeys.length);
+                    console.log('✅ ML Batch Analysis: Analysis results found after waiting');
                 }
-                
-                // Refresh the table immediately after each well is processed
-                // This ensures users see results appearing in real-time
-                if (typeof window.populateResultsTable === 'function' && window.currentAnalysisResults) {
-                    window.populateResultsTable(window.currentAnalysisResults.individual_results);
-                }
-                
-                // No artificial delay - let the real server response time drive the progress
+            }
+            const wellKeys = Object.keys(individualResults);
+            
+            if (wellKeys.length === 0) {
+                console.error('ML Batch Analysis: No wells found in analysis results');
+                this.showTrainingNotification(
+                    'No Wells Found',
+                    '❌ No wells found in current analysis results.',
+                    'error'
+                );
+                throw new Error('No wells found in current analysis results');
             }
             
-            const totalTime = (Date.now() - startTime) / 1000;
+            console.log(`📊 Processing ${wellKeys.length} wells for batch ML analysis`);
             
-            // Complete batch analysis - all server requests have completed
+            // Process wells sequentially to show real-time progress in result modals
+            for (let i = 0; i < wellKeys.length; i++) {
+                const wellKey = wellKeys[i];
+                const wellData = individualResults[wellKey];
+                const wellNum = i + 1;
+                
+                // Update browser title to show progress
+                document.title = `ML Analysis: ${wellNum}/${wellKeys.length} wells`;
+                
+                console.log(`🔄 ML Analysis: Processing well ${wellNum}/${wellKeys.length} (${wellKey})`);
+                
+                // Process this single well
+                await this.analyzeSingleWellWithML(wellKey, wellData);
+                
+                // Update progress
+                const progress = Math.round(((wellNum) / wellKeys.length) * 100);
+                this.updateBatchProgress(progress, wellNum, wellKeys.length, `Processing well ${wellNum}/${wellKeys.length}`);
+                
+                // Small delay between wells to allow UI updates and prevent server overload
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
+            
+            // Reset browser title
+            document.title = 'qPCR Analyzer';
+            
+            // Complete batch analysis
             this.showBatchAnalysisProgress(false, trainingCount, analysisType);
-            
-            // CRITICAL: Reinitialize thresholds after ML analysis completes
-            // This ensures fixed thresholds are applied correctly for multichannel experiments
-            if (typeof window.initializeChannelThresholds === 'function') {
-                window.initializeChannelThresholds();
-            }
-            
-            // Final table refresh to ensure everything is properly displayed
-            if (typeof window.populateResultsTable === 'function' && window.currentAnalysisResults) {
-                window.populateResultsTable(window.currentAnalysisResults.individual_results);
-            }
             
             // Show appropriate completion message based on analysis type
             let completionTitle = '';
@@ -2558,8 +2454,10 @@ class MLFeedbackInterface {
             
             this.showTrainingNotification(completionTitle, completionMessage, 'success');
             
+            console.log(`✅ Batch ML analysis complete: ${wellKeys.length} wells processed`);
             
         } catch (error) {
+            console.error('Batch ML analysis failed:', error);
             this.showBatchAnalysisProgress(false, trainingCount, analysisType);
             this.showTrainingNotification(
                 'Batch Analysis Failed',
@@ -2582,6 +2480,7 @@ class MLFeedbackInterface {
                 try {
                     specificPathogen = getPathogenTarget(testCode, fluorophore);
                 } catch (error) {
+                    console.log(`⚠️ Could not get pathogen target for ${testCode}/${fluorophore}:`, error);
                 }
             }
             
@@ -2605,15 +2504,14 @@ class MLFeedbackInterface {
                     fluorophore: fluorophore
                 },
                 existing_metrics: {
-                    r2: this.safeNumberConvert(wellData.r2_score),
-                    steepness: this.safeNumberConvert(wellData.steepness),
-                    snr: this.safeNumberConvert(wellData.snr),
-                    midpoint: this.safeNumberConvert(wellData.midpoint),
-                    baseline: this.safeNumberConvert(wellData.baseline),
-                    amplitude: this.safeNumberConvert(wellData.amplitude),
-                    cq_value: this.safeNumberConvert(wellData.cq_value),
-                    cqj: this.safeNumberConvert(wellData.cqj),
-                    calcj: this.safeNumberConvert(wellData.calcj),
+                    r2: wellData.r2_score || 0,
+                    steepness: wellData.steepness || 0,
+                    snr: wellData.snr || 0,
+                    midpoint: wellData.midpoint || 0,
+                    baseline: wellData.baseline || 0,
+                    amplitude: wellData.amplitude || 0,
+                    cqj: wellData.cqj || 0,
+                    calcj: wellData.calcj || 0,
                     classification: wellData.classification || 'UNKNOWN'
                 }
             };
@@ -2629,71 +2527,14 @@ class MLFeedbackInterface {
                 if (result.success && result.prediction) {
                     // Update the well data with ML predictions
                     wellData.ml_classification = result.prediction;
-                    
-                    // Update the curve classification to show ML result in table
-                    if (result.prediction.classification) {
-                        wellData.curve_classification = {
-                            classification: result.prediction.classification,
-                            reason: 'ML Analysis',
-                            confidence: result.prediction.confidence,
-                            method: result.prediction.method || 'ML'
-                        };
-                    }
-                    
-                    // Update the main results table to reflect the ML classification
-                    this.updateTableWithMLResult(wellKey, wellData, result.prediction);
+                    console.log(`✅ ML analysis for ${wellKey}: ${result.prediction.classification} (${(result.prediction.confidence * 100).toFixed(1)}%)`);
                 } else {
+                    console.error(`ML analysis failed for ${wellKey}:`, result.error || 'No prediction returned');
                 }
             }
             
         } catch (error) {
-        }
-    }
-
-    updateTableWithMLResult(wellKey, wellData, mlPrediction) {
-        // Update the main results table with ML classification in the Curve Class column
-        try {
-            // Find the table row for this well
-            const tableBody = document.getElementById('resultsTableBody');
-            if (!tableBody) return;
-            
-            const rows = tableBody.querySelectorAll('tr');
-            for (const row of rows) {
-                const wellCell = row.querySelector('td:first-child strong');
-                if (wellCell && wellCell.textContent === (wellData.well_id || wellKey.split('_')[0])) {
-                    // Found the correct row - update the Curve Class column (5th column, index 4)
-                    const curveClassCell = row.children[4]; // 0-indexed: Well, Sample, Fluorophore, Results, Curve Class
-                    if (curveClassCell) {
-                        const classMap = {
-                            'STRONG_POSITIVE': 'curve-strong-pos',
-                            'POSITIVE': 'curve-pos',
-                            'WEAK_POSITIVE': 'curve-weak-pos',
-                            'NEGATIVE': 'curve-neg',
-                            'INDETERMINATE': 'curve-indet',
-                            'SUSPICIOUS': 'curve-suspicious'
-                        };
-                        const badgeClass = classMap[mlPrediction.classification] || 'curve-other';
-                        const confidenceText = mlPrediction.confidence ? 
-                            ` (${(mlPrediction.confidence * 100).toFixed(1)}% ML)` : '';
-                        
-                        curveClassCell.innerHTML = `<span class="curve-badge ${badgeClass}" title="ML Analysis${confidenceText}">${mlPrediction.classification.replace('_', ' ')}</span>`;
-                    }
-                    break;
-                }
-            }
-            
-            // Also update global analysis results if available
-            if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results && window.currentAnalysisResults.individual_results[wellKey]) {
-                window.currentAnalysisResults.individual_results[wellKey].curve_classification = {
-                    classification: mlPrediction.classification,
-                    reason: 'ML Analysis',
-                    confidence: mlPrediction.confidence,
-                    method: mlPrediction.method || 'ML'
-                };
-            }
-            
-        } catch (error) {
-            console.error('Error updating table with ML result:', error);
+            console.error(`Error analyzing ${wellKey} with ML:`, error);
         }
     }
 
@@ -2812,7 +2653,7 @@ class MLFeedbackInterface {
         }
     }
 
-    updateBatchProgress(percentage, processed, total) {
+    updateBatchProgress(percentage, processed, total, statusText = null) {
         // Update notification banner progress bar if it exists
         const notificationProgressBar = document.getElementById('ml-progress-fill');
         const notificationProgressText = document.getElementById('ml-progress-text');
@@ -2822,7 +2663,8 @@ class MLFeedbackInterface {
         }
         
         if (notificationProgressText) {
-            notificationProgressText.textContent = `Processing ${processed}/${total} wells (${percentage}%)`;
+            const progressText = statusText || `Processing ${processed}/${total} channels (${percentage}%)`;
+            notificationProgressText.textContent = progressText;
         }
         
         // Also update legacy progress bar if it exists
@@ -2835,58 +2677,325 @@ class MLFeedbackInterface {
         }
         
         if (progressDetails) {
-            progressDetails.textContent = `Processed ${processed}/${total} wells`;
+            const detailsText = statusText || `Processed ${processed}/${total} channels`;
+            progressDetails.textContent = detailsText;
         }
     }
 
-    updateBatchProgressWithTiming(percentage, processed, total, elapsedSeconds, estimatedRemaining, avgTimePerWell, lastWellTime) {
-        // Enhanced progress update with timing information for large batches
-        const notificationProgressBar = document.getElementById('ml-progress-fill');
-        const notificationProgressText = document.getElementById('ml-progress-text');
-        
-        if (notificationProgressBar) {
-            notificationProgressBar.style.width = `${percentage}%`;
+    /**
+     * Display ML channel progress similar to single channel analysis
+     * Creates individual progress indicators for each channel
+     */
+    displayMLChannelProgress(channels, analysisType, trainingCount) {
+        // Remove any existing notification banner since we're showing detailed progress
+        const existingNotification = document.getElementById('ml-available-notification');
+        if (existingNotification) {
+            existingNotification.remove();
         }
         
-        // Format timing information for display
-        const formatTime = (seconds) => {
-            if (seconds < 60) return `${Math.round(seconds)}s`;
-            if (seconds < 3600) return `${Math.round(seconds/60)}m ${Math.round(seconds%60)}s`;
-            return `${Math.round(seconds/3600)}h ${Math.round((seconds%3600)/60)}m`;
-        };
-        
-        if (notificationProgressText) {
-            let timingText = '';
-            if (total > 100) {
-                // Show detailed timing for large batches (like 384-well plates)
-                timingText = ` • ${formatTime(elapsedSeconds)} elapsed • ETA: ${formatTime(estimatedRemaining)} • ${avgTimePerWell.toFixed(1)}s/well`;
-            } else {
-                // Simpler timing for smaller batches
-                timingText = ` • ${formatTime(elapsedSeconds)} elapsed • ETA: ${formatTime(estimatedRemaining)}`;
-            }
-            
-            notificationProgressText.textContent = `Processing ${processed}/${total} wells (${percentage}%)${timingText}`;
+        // Remove any existing progress container
+        const existingContainer = document.getElementById('ml-channel-progress-container');
+        if (existingContainer) {
+            existingContainer.remove();
         }
         
-        // Also update legacy progress bar if it exists
-        const progressBar = document.getElementById('ml-batch-progress-bar');
-        const progressDetails = document.getElementById('ml-batch-progress-details');
+        // Create ML channel progress container
+        const progressContainer = document.createElement('div');
+        progressContainer.id = 'ml-channel-progress-container';
+        progressContainer.className = 'ml-channel-progress-container';
         
-        if (progressBar) {
-            progressBar.style.width = `${percentage}%`;
-            progressBar.textContent = `${percentage}%`;
+        let analysisTitle = '';
+        switch (analysisType) {
+            case 'automatic':
+                analysisTitle = `ML Analysis (${trainingCount}-sample pathogen-specific model)`;
+                break;
+            case 'cross-pathogen':
+                analysisTitle = `ML Analysis (${trainingCount}-sample general model)`;
+                break;
+            case 'initial':
+                analysisTitle = `Initial Batch ML Analysis (${trainingCount} samples)`;
+                break;
+            case 'milestone':
+                analysisTitle = `Milestone ML Analysis (${trainingCount} samples)`;
+                break;
+            default:
+                analysisTitle = `Batch ML Analysis (${trainingCount} samples)`;
         }
         
-        if (progressDetails) {
-            let detailText = `Processed ${processed}/${total} wells`;
-            if (total > 50) {
-                detailText += ` • Avg: ${avgTimePerWell.toFixed(1)}s/well • Last: ${(lastWellTime/1000).toFixed(1)}s`;
-                if (estimatedRemaining > 60) {
-                    detailText += ` • ETA: ${formatTime(estimatedRemaining)}`;
+        progressContainer.innerHTML = `
+            <div class="ml-channel-progress-content">
+                <h4>🤖 ${analysisTitle}</h4>
+                <div class="ml-progress-channels">
+                    ${channels.map(channel => `
+                        <div class="ml-channel-progress-item" id="ml-progress-${channel}">
+                            <span class="ml-fluorophore-tag fluorophore-${channel.toLowerCase()}">${channel}</span>
+                            <span class="ml-progress-status" id="ml-status-text-${channel}">Pending...</span>
+                            <div class="ml-status-indicator" id="ml-status-indicator-${channel}">
+                                <div class="ml-status-spinner"></div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+                <div class="ml-overall-progress">
+                    <div class="ml-overall-progress-bar">
+                        <div class="ml-overall-progress-fill" id="ml-overall-progress-fill"></div>
+                    </div>
+                    <div class="ml-overall-progress-text" id="ml-overall-progress-text">Starting analysis...</div>
+                </div>
+            </div>
+            <style>
+                .ml-channel-progress-container {
+                    position: fixed;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    background: white;
+                    border: 2px solid #2196F3;
+                    border-radius: 8px;
+                    padding: 20px;
+                    min-width: 400px;
+                    max-width: 600px;
+                    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+                    z-index: 999999 !important;
+                    display: block !important;
+                    visibility: visible !important;
+                    opacity: 1 !important;
                 }
-            }
-            progressDetails.textContent = detailText;
+                
+                .ml-channel-progress-content h4 {
+                    margin: 0 0 15px 0;
+                    color: #2196F3;
+                    text-align: center;
+                }
+                
+                .ml-progress-channels {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 10px;
+                    margin-bottom: 20px;
+                }
+                
+                .ml-channel-progress-item {
+                    display: flex;
+                    align-items: center;
+                    padding: 8px 12px;
+                    background: #f8f9fa;
+                    border-radius: 6px;
+                    gap: 15px;
+                }
+                
+                .ml-fluorophore-tag {
+                    background: #e3f2fd;
+                    color: #1976d2;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    font-weight: bold;
+                    min-width: 60px;
+                    text-align: center;
+                    font-size: 12px;
+                }
+                
+                .ml-progress-status {
+                    flex: 1;
+                    font-weight: 500;
+                }
+                
+                .ml-status-indicator {
+                    width: 24px;
+                    height: 24px;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 14px;
+                    font-weight: bold;
+                }
+                
+                .ml-status-indicator.status-processing {
+                    background: #2196F3;
+                    color: white;
+                }
+                
+                .ml-status-indicator.status-completed {
+                    background: #4CAF50;
+                    color: white;
+                }
+                
+                .ml-status-indicator.status-failed {
+                    background: #f44336;
+                    color: white;
+                }
+                
+                .ml-status-indicator.status-waiting {
+                    background: #ddd;
+                    color: #666;
+                }
+                
+                .ml-status-spinner {
+                    width: 16px;
+                    height: 16px;
+                    border: 2px solid #fff;
+                    border-top: 2px solid transparent;
+                    border-radius: 50%;
+                    animation: spin 1s linear infinite;
+                }
+                
+                .ml-overall-progress {
+                    border-top: 1px solid #ddd;
+                    padding-top: 15px;
+                }
+                
+                .ml-overall-progress-bar {
+                    width: 100%;
+                    height: 20px;
+                    background: #e0e0e0;
+                    border-radius: 10px;
+                    overflow: hidden;
+                    margin-bottom: 8px;
+                }
+                
+                .ml-overall-progress-fill {
+                    height: 100%;
+                    background: linear-gradient(90deg, #2196F3, #4CAF50);
+                    border-radius: 10px;
+                    transition: width 0.3s ease;
+                    width: 0%;
+                }
+                
+                .ml-overall-progress-text {
+                    text-align: center;
+                    font-size: 14px;
+                    color: #666;
+                }
+                
+                @keyframes spin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                }
+            </style>
+        `;
+        
+        // Add to page (prefer notification area, fallback to body)
+        const mlSection = document.getElementById('ml-feedback-section');
+        if (mlSection) {
+            mlSection.appendChild(progressContainer);
+        } else {
+            document.body.appendChild(progressContainer);
         }
+        
+        // Force container to be visible and properly styled
+        progressContainer.style.display = 'block';
+        progressContainer.style.visibility = 'visible';
+        progressContainer.style.opacity = '1';
+    }
+
+    /**
+     * Update individual ML channel status in the UI (like updateChannelStatus)
+     */
+    updateMLChannelStatus(channel, status, progressText = null) {
+        const statusIndicator = document.getElementById(`ml-status-indicator-${channel}`);
+        const statusText = document.getElementById(`ml-status-text-${channel}`);
+        
+        if (!statusIndicator || !statusText) {
+            return;
+        }
+        
+        // Remove existing status classes
+        statusIndicator.className = 'ml-status-indicator';
+        
+        switch (status) {
+            case 'waiting':
+                statusIndicator.classList.add('status-waiting');
+                statusText.textContent = 'Waiting...';
+                statusText.style.color = '#666';
+                statusIndicator.innerHTML = '⏸️';
+                break;
+                
+            case 'processing':
+                statusIndicator.classList.add('status-processing');
+                // Use custom progress text if provided, otherwise default
+                const displayText = progressText || 'Analyzing with ML...';
+                statusText.textContent = displayText;
+                statusText.style.color = '#2196F3';
+                // Add pulsing animation to the indicator
+                statusIndicator.innerHTML = '<div class="ml-status-spinner"></div>';
+                break;
+                
+            case 'completed':
+                statusIndicator.classList.add('status-completed');
+                statusText.textContent = 'ML Analysis Complete ✓';
+                statusText.style.color = '#4CAF50';
+                statusIndicator.innerHTML = '✓';
+                this.updateMLOverallProgress();
+                break;
+                
+            case 'failed':
+                statusIndicator.classList.add('status-failed');
+                statusText.textContent = 'ML Analysis Failed ✗';
+                statusText.style.color = '#f44336';
+                statusIndicator.innerHTML = '✗';
+                this.updateMLOverallProgress();
+                break;
+        }
+        console.log(`📊 ML Channel Status: ${channel} -> ${status}`);
+    }
+
+    /**
+     * Update overall ML progress bar (like updateOverallProgress)
+     */
+    updateMLOverallProgress() {
+        const progressFill = document.getElementById('ml-overall-progress-fill');
+        const progressText = document.getElementById('ml-overall-progress-text');
+        
+        if (!progressFill || !progressText || !this.batchProgress) {
+            return;
+        }
+        
+        const { totalWells, processedWells } = this.batchProgress;
+        
+        if (totalWells > 0) {
+            const percentage = Math.round((processedWells / totalWells) * 100);
+            progressFill.style.width = `${percentage}%`;
+            
+            if (processedWells === totalWells) {
+                progressText.textContent = 'ML Analysis Complete! 🎉';
+                // Remove progress container after a delay
+                setTimeout(() => {
+                    const container = document.getElementById('ml-channel-progress-container');
+                    if (container) {
+                        container.remove();
+                    }
+                }, 3000);
+            } else {
+                const newText = `Processing wells: ${processedWells}/${totalWells} (${percentage}%)`;
+                progressText.textContent = newText;
+            }
+        }
+    }
+
+    updateChannelMLProgress(channel, channelNum, totalChannels, status) {
+        // Legacy function kept for compatibility - new progress uses updateMLChannelStatus
+        // Update overall progress percentage based on completed channels
+        const percentage = Math.round(((channelNum - 1) / totalChannels) * 100);
+        
+        let statusText = '';
+        switch (status) {
+            case 'processing':
+                statusText = `Processing channel ${channelNum}/${totalChannels}: ${channel}...`;
+                break;
+            case 'completed':
+                statusText = `Completed channel ${channelNum}/${totalChannels}: ${channel}`;
+                break;
+            case 'failed':
+                statusText = `Failed channel ${channelNum}/${totalChannels}: ${channel}`;
+                break;
+        }
+        
+        // Update any legacy progress indicators
+        this.updateBatchProgress(percentage, channelNum - 1, totalChannels, statusText);
+        
+        // Log channel progress
+        console.log(`📊 ML Channel Progress: ${statusText}`);
     }
 
     showTrainingNotification(title, message, type = 'info') {
@@ -2914,6 +3023,7 @@ class MLFeedbackInterface {
             }, 8000);
         } else {
             // Fallback: use browser notification
+            console.log(`${title}: ${message}`);
         }
     }
 
@@ -2927,14 +3037,19 @@ class MLFeedbackInterface {
             const currentTestCode = (typeof extractTestCode === 'function' && currentExperimentPattern) ? 
                 extractTestCode(currentExperimentPattern) : null;
                 
+            console.log(`🧬 Auto-ML: Current test code: ${currentTestCode} (from pattern: ${currentExperimentPattern})`);
             
             // Check if ML is enabled for this pathogen before proceeding
             if (currentTestCode) {
+                console.log(`🔍 Auto-ML: Checking ML enabled status for pathogen: "${currentTestCode}"`);
                 const mlEnabled = await this.checkMLEnabledForPathogen(currentTestCode);
                 if (!mlEnabled) {
+                    console.log(`🚫 Auto-ML: ML disabled for pathogen ${currentTestCode}, skipping analysis`);
                     return false;
                 }
+                console.log(`✅ Auto-ML: ML enabled for pathogen ${currentTestCode}, proceeding with analysis`);
             } else {
+                console.log(`⚠️ Auto-ML: No test code found, proceeding with general ML analysis`);
             }
             
             const response = await fetch('/api/ml-stats');
@@ -2952,6 +3067,7 @@ class MLFeedbackInterface {
                     
                     if (currentPathogenModel && currentPathogenModel.training_samples >= 20) {
                         // Model is trained on this specific pathogen with sufficient samples
+                        console.log(`🎯 Auto-ML: Found pathogen-specific model for ${currentTestCode} with ${currentPathogenModel.training_samples} samples`);
                         
                         // Show non-blocking notification instead of blocking popup
                         this.showMLAvailableNotification({
@@ -2959,12 +3075,13 @@ class MLFeedbackInterface {
                             pathogen: currentTestCode,
                             samples: currentPathogenModel.training_samples,
                             onAccept: () => this.performBatchMLAnalysis(currentPathogenModel.training_samples, 'automatic'),
-                            onDecline: () => {}
+                            onDecline: () => console.log('User declined automatic ML analysis')
                         });
                         
                         return true; // Model is ready for automatic analysis
                     } else if (totalTrainingCount >= 20) {
                         // Model is trained but not on this specific pathogen
+                        console.log(`⚠️ Auto-ML: Model has ${totalTrainingCount} total samples but none for pathogen ${currentTestCode}`);
                         
                         // Show non-blocking notification for cross-pathogen analysis
                         this.showMLAvailableNotification({
@@ -2973,12 +3090,13 @@ class MLFeedbackInterface {
                             samples: totalTrainingCount,
                             stats: result.stats, // Pass the stats for breakdown
                             onAccept: () => this.performBatchMLAnalysis(totalTrainingCount, 'cross-pathogen'),
-                            onDecline: () => {}
+                            onDecline: () => console.log('User declined cross-pathogen ML analysis')
                         });
                         
                         return false; // Cross-pathogen analysis
                     } else {
                         // No sufficient training data
+                        console.log(`📚 Auto-ML: Insufficient training data (${totalTrainingCount}/20 samples total, 0 for ${currentTestCode})`);
                         
                         // Show non-blocking informational notification for new pathogen
                         if (currentTestCode) {
@@ -2996,6 +3114,7 @@ class MLFeedbackInterface {
                 }
             }
         } catch (error) {
+            console.error('Failed to check automatic ML analysis capability:', error);
         }
         
         return false;
@@ -3005,6 +3124,7 @@ class MLFeedbackInterface {
         try {
             // Validate pathogen parameter
             if (!pathogen || pathogen === 'null' || pathogen === 'undefined') {
+                console.log('ML: Invalid pathogen provided, defaulting to enabled');
                 return true;
             }
             
@@ -3013,9 +3133,11 @@ class MLFeedbackInterface {
                 const result = await response.json();
                 return result.enabled;
             } else {
+                console.warn(`ML: Failed to check ML status for ${pathogen}/${fluorophore}, defaulting to enabled`);
                 return true;
             }
         } catch (error) {
+            console.error('Failed to check ML enabled status:', error);
         }
         return true; // Default to enabled if check fails
     }
@@ -3479,14 +3601,18 @@ class MLFeedbackInterface {
                 if (result.success && result.stats) {
                     this.mlStats = result.stats;
                     this.displayMLStats(result.stats);
+                    console.log('ML Stats updated:', result.stats);
                 } else {
+                    console.error('Failed to get ML stats:', result.error || 'Unknown error');
                 }
             }
         } catch (error) {
+            console.error('Failed to update ML stats:', error);
         }
     }
 
     displayMLStats(stats) {
+        console.log('Displaying ML stats:', stats);
         
         const trainingSamplesElement = document.getElementById('stat-training-samples');
         const modelTrainedElement = document.getElementById('stat-model-trained');
