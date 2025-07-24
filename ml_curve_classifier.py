@@ -366,13 +366,20 @@ class MLCurveClassifier:
                     # Try to get a numeric value from the dict
                     numeric_value = None
                     for key, val in value.items():
-                        if val is not None and (isinstance(val, (int, float)) or (isinstance(val, str) and val.replace('.', '').replace('-', '').isdigit())):
+                        if val is None:
+                            # None means no threshold crossing (negative well)
+                            numeric_value = -1.0
+                            break
+                        elif isinstance(val, (int, float)):
                             numeric_value = float(val)
                             break
-                    # Use 0 if no numeric value found
-                    feature_vector.append(numeric_value if numeric_value is not None else 0.0)
+                        elif isinstance(val, str) and val.replace('.', '').replace('-', '').isdigit():
+                            numeric_value = float(val)
+                            break
+                    # Use -1 if no numeric value found (indicates no threshold crossing)
+                    feature_vector.append(numeric_value if numeric_value is not None else -1.0)
                 elif value is None:
-                    feature_vector.append(0.0)
+                    feature_vector.append(-1.0)  # None also means no threshold crossing
                 elif isinstance(value, (int, float)):
                     feature_vector.append(float(value))
                 elif isinstance(value, str):
@@ -452,13 +459,20 @@ class MLCurveClassifier:
                     # Try to get a numeric value from the dict
                     numeric_value = None
                     for key, val in value.items():
-                        if val is not None and (isinstance(val, (int, float)) or (isinstance(val, str) and val.replace('.', '').replace('-', '').isdigit())):
+                        if val is None:
+                            # None means no threshold crossing (negative well)
+                            numeric_value = -1.0
+                            break
+                        elif isinstance(val, (int, float)):
                             numeric_value = float(val)
                             break
-                    # Use 0 if no numeric value found
-                    feature_vector.append(numeric_value if numeric_value is not None else 0.0)
+                        elif isinstance(val, str) and val.replace('.', '').replace('-', '').isdigit():
+                            numeric_value = float(val)
+                            break
+                    # Use -1 if no numeric value found (indicates no threshold crossing)
+                    feature_vector.append(numeric_value if numeric_value is not None else -1.0)
                 elif value is None:
-                    feature_vector.append(0.0)
+                    feature_vector.append(-1.0)  # None also means no threshold crossing
                 elif isinstance(value, (int, float)):
                     feature_vector.append(float(value))
                 elif isinstance(value, str):

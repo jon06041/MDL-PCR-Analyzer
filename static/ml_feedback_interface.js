@@ -1067,6 +1067,59 @@ class MLFeedbackInterface {
 
     // ===== HELPER FUNCTIONS =====
 
+    /**
+     * Extract numeric value from CQJ/CalcJ data structure
+     * Handles both simple numbers and channel-specific dictionaries like {'FAM': 21.77}
+     * Properly handles None/null values which indicate no threshold crossing (negative wells)
+     */
+    extractNumericValue(value, channelHint = null) {
+        if (value === null || value === undefined) {
+            // For CQJ/CalcJ, null/None means no threshold crossing (negative well)
+            // Use a special value that the ML can recognize as "no crossing"
+            return -1; // -1 indicates no threshold crossing
+        }
+        
+        // If it's already a number, return it (but handle negative properly)
+        if (typeof value === 'number') {
+            return value; // Keep the actual value, including negatives
+        }
+        
+        // If it's a dictionary/object, extract the numeric value
+        if (typeof value === 'object' && value !== null) {
+            // Try to use the channel hint first
+            if (channelHint && value[channelHint] !== undefined) {
+                const channelValue = value[channelHint];
+                if (channelValue === null || channelValue === undefined) {
+                    return -1; // No threshold crossing for this channel
+                }
+                return (typeof channelValue === 'number') ? channelValue : -1;
+            }
+            
+            // Otherwise, find the first valid numeric value or null
+            for (const key in value) {
+                const val = value[key];
+                if (val === null || val === undefined) {
+                    return -1; // No threshold crossing
+                }
+                if (typeof val === 'number') {
+                    return val;
+                }
+            }
+            
+            // If all values are null/undefined, return -1
+            return -1;
+        }
+        
+        // Try to parse as number
+        const parsed = parseFloat(value);
+        if (!isNaN(parsed)) {
+            return parsed;
+        }
+        
+        // Default for unparseable values
+        return -1; // Assume no threshold crossing for unparseable values
+    }
+
     isLinearIncrease(rfuData) {
         const firstThird = rfuData.slice(0, Math.floor(rfuData.length / 3));
         const lastThird = rfuData.slice(-Math.floor(rfuData.length / 3));
@@ -1534,9 +1587,9 @@ class MLFeedbackInterface {
                         midpoint: this.currentWellData.midpoint || 0,
                         baseline: this.currentWellData.baseline || 0,
                         amplitude: this.currentWellData.amplitude || 0,
-                        // Only send CQJ/CalcJ if they are valid numbers > 0, otherwise send 0
-                        cqj: (this.currentWellData.cqj && typeof this.currentWellData.cqj === 'number' && this.currentWellData.cqj > 0) ? this.currentWellData.cqj : 0,
-                        calcj: (this.currentWellData.calcj && typeof this.currentWellData.calcj === 'number' && this.currentWellData.calcj > 0) ? this.currentWellData.calcj : 0,
+                        // Extract numeric values from CQJ/CalcJ dictionaries
+                        cqj: this.extractNumericValue(this.currentWellData.cqj, channelData.channel),
+                        calcj: this.extractNumericValue(this.currentWellData.calcj, channelData.channel),
                         classification: this.currentWellData.classification || 'UNKNOWN'
                     }
                 })
@@ -1971,8 +2024,8 @@ class MLFeedbackInterface {
                         steepness: this.currentWellData.steepness || 0,
                         snr: this.currentWellData.snr || 0,
                         amplitude: this.currentWellData.amplitude || 0,
-                        cqj: this.currentWellData.cqj || 0,
-                        calcj: this.currentWellData.calcj || 0
+                        cqj: this.extractNumericValue(this.currentWellData.cqj),
+                        calcj: this.extractNumericValue(this.currentWellData.calcj)
                     }
                 })
             });
@@ -2176,8 +2229,8 @@ class MLFeedbackInterface {
                         midpoint: wellData.midpoint || 0,
                         baseline: wellData.baseline || 0,
                         amplitude: wellData.amplitude || 0,
-                        cqj: wellData.cqj || 0,
-                        calcj: wellData.calcj || 0,
+                        cqj: this.extractNumericValue(wellData.cqj),
+                        calcj: this.extractNumericValue(wellData.calcj),
                         classification: wellData.classification || 'UNKNOWN'
                     }
                 })
@@ -2542,8 +2595,8 @@ class MLFeedbackInterface {
                     midpoint: wellData.midpoint || 0,
                     baseline: wellData.baseline || 0,
                     amplitude: wellData.amplitude || 0,
-                    cqj: wellData.cqj || 0,
-                    calcj: wellData.calcj || 0,
+                    cqj: this.extractNumericValue(wellData.cqj, fluorophore),
+                    calcj: this.extractNumericValue(wellData.calcj, fluorophore),
                     classification: wellData.classification || 'UNKNOWN'
                 }
             };
