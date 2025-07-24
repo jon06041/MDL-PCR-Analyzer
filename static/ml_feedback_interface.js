@@ -2307,7 +2307,10 @@ class MLFeedbackInterface {
                 currentAnalysisResults: !!window.currentAnalysisResults,
                 hasIndividualResults: !!(window.currentAnalysisResults?.individual_results),
                 resultKeys: window.currentAnalysisResults ? Object.keys(window.currentAnalysisResults) : null,
-                wellCount: window.currentAnalysisResults?.individual_results ? Object.keys(window.currentAnalysisResults.individual_results).length : 0
+                wellCount: window.currentAnalysisResults?.individual_results ? Object.keys(window.currentAnalysisResults.individual_results).length : 0,
+                fullStructure: window.currentAnalysisResults ? JSON.stringify(Object.keys(window.currentAnalysisResults)) : 'null',
+                sampleKeys: window.currentAnalysisResults ? Object.keys(window.currentAnalysisResults).slice(0, 5) : [],
+                isMultiChannel: !!(window.currentAnalysisResults && Object.keys(window.currentAnalysisResults).some(key => key.includes('_')))
             });
             
             // Try multiple possible structures for analysis results
@@ -2329,13 +2332,42 @@ class MLFeedbackInterface {
                     individualResults = window.currentAnalysisResults.data;
                     console.log('✅ ML Batch Analysis: Found results in data property');
                 }
-                // Strategy 4: Direct object with well keys (A1, B2, etc.)
+                // Strategy 4: Direct object with well keys (A1, B2, etc.) OR multichannel keys (M14_FAM_FAM, etc.)
                 else {
                     const keys = Object.keys(window.currentAnalysisResults);
-                    const wellLikeKeys = keys.filter(k => /^[A-H]\d+$/.test(k));
+                    // Look for well keys (single channel like A1, B2) or multichannel keys (M14_FAM_FAM, etc.)
+                    const wellLikeKeys = keys.filter(k => /^[A-H]\d+$/.test(k) || /^[A-Z]\d+_[A-Z]+/.test(k));
                     if (wellLikeKeys.length > 0) {
                         individualResults = window.currentAnalysisResults;
-                        console.log('✅ ML Batch Analysis: Found well keys directly in currentAnalysisResults', wellLikeKeys.length);
+                        console.log('✅ ML Batch Analysis: Found well keys directly in currentAnalysisResults', {
+                            wellCount: wellLikeKeys.length,
+                            sampleKeys: wellLikeKeys.slice(0, 3),
+                            isMultichannel: wellLikeKeys.some(k => k.includes('_'))
+                        });
+                    } else {
+                        // Strategy 5: Check for any nested structure that might contain well data
+                        console.log('🔍 ML Batch Analysis: Exploring unknown structure:', {
+                            topLevelKeys: Object.keys(window.currentAnalysisResults),
+                            firstLevelTypes: Object.keys(window.currentAnalysisResults).map(key => ({
+                                key, 
+                                type: typeof window.currentAnalysisResults[key],
+                                isObject: typeof window.currentAnalysisResults[key] === 'object',
+                                hasSubKeys: typeof window.currentAnalysisResults[key] === 'object' ? Object.keys(window.currentAnalysisResults[key] || {}).length : 0
+                            }))
+                        });
+                        
+                        // Try to find nested well data by looking for objects with well-like properties
+                        for (const [key, value] of Object.entries(window.currentAnalysisResults)) {
+                            if (typeof value === 'object' && value !== null) {
+                                const subKeys = Object.keys(value);
+                                // Look for keys that might contain well data (well IDs like A1_FAM, M14_FAM_FAM, etc.)
+                                if (subKeys.some(k => k.match(/^[A-P]?\d+(_[A-Z]+)*$/))) {
+                                    individualResults = value;
+                                    console.log(`✅ ML Batch Analysis: Found well data in .${key} structure`);
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
             }
