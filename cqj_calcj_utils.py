@@ -270,15 +270,27 @@ def calculate_cqj_calcj_for_well(well_data, strategy, threshold):
         cqj_value = calculate_cqj(well_data, threshold)
         result['cqj_value'] = cqj_value
         
-        # Calculate CalcJ
-        calcj_value = calculate_calcj(well_data, threshold)
-        result['calcj_value'] = calcj_value
+        # For CalcJ: Check if CQJ is None (no threshold crossing) - should be N/A
+        if cqj_value is None:
+            result['calcj_value'] = 'N/A'
+            print(f"[CQJ-CALCJ-DEBUG] Well {well_id}: No threshold crossing, CalcJ = N/A")
+        else:
+            # Use basic CalcJ calculation for now (backend doesn't have access to all wells for control-based)
+            # TODO: This should be updated to use control-based calculation when all wells are available
+            calcj_value = calculate_calcj(well_data, threshold)
+            
+            # Check for negative or unreasonable values
+            if calcj_value is not None and (calcj_value < 0 or calcj_value < 1e-10):
+                result['calcj_value'] = 'N/A'
+                print(f"[CQJ-CALCJ-DEBUG] Well {well_id}: Unreasonable CalcJ value ({calcj_value}), setting to N/A")
+            else:
+                result['calcj_value'] = calcj_value
         
         # Add strategy-specific CQJ and CalcJ objects for compatibility
-        result['cqj'] = {strategy: cqj_value} if cqj_value is not None else {strategy: None}
-        result['calcj'] = {strategy: calcj_value} if calcj_value is not None else {strategy: None}
+        result['cqj'] = {strategy: result['cqj_value']} if result['cqj_value'] is not None else {strategy: None}
+        result['calcj'] = {strategy: result['calcj_value']} if result['calcj_value'] is not None else {strategy: None}
         
-        print(f"[CQJ-CALCJ-DEBUG] Final result for {well_id}: CQJ={cqj_value}, CalcJ={calcj_value}")
+        print(f"[CQJ-CALCJ-DEBUG] Final result for {well_id}: CQJ={result['cqj_value']}, CalcJ={result['calcj_value']}")
         return result
         
     except Exception as e:

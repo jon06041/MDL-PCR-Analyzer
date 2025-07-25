@@ -251,6 +251,74 @@ function getCurrentTestCode() {
 }
 
 /**
+ * Determine if a well is a control well and what type (H, M, L, NTC)
+ * @param {string} wellKey - The well identifier
+ * @param {Object} well - The well data object
+ * @returns {string|null} Control type ('H', 'M', 'L', 'NTC') or null if not a control
+ */
+function determineControlType(wellKey, well) {
+    if (!wellKey || !well) return null;
+    
+    const sampleName = well.sample_name || '';
+    const upperSampleName = sampleName.toUpperCase();
+    
+    // Check for NTC first
+    if (sampleName.includes('NTC') || upperSampleName.includes('NTC')) {
+        console.log(`[CONTROL-DETECT] Found NTC control: ${wellKey} (sample: ${sampleName})`);
+        return 'NTC';
+    }
+    
+    // VERY STRICT control detection: Only identify wells with explicit control patterns
+    // Since sample names without controls won't have letters, we can be more specific
+    
+    // Method 1: Look for H-, M-, L- patterns (most reliable)
+    if (sampleName.includes('H-')) {
+        console.log(`[CONTROL-DETECT] Found H control: ${wellKey} (H- pattern in: ${sampleName})`);
+        return 'H';
+    }
+    if (sampleName.includes('M-')) {
+        console.log(`[CONTROL-DETECT] Found M control: ${wellKey} (M- pattern in: ${sampleName})`);
+        return 'M';
+    }
+    if (sampleName.includes('L-')) {
+        console.log(`[CONTROL-DETECT] Found L control: ${wellKey} (L- pattern in: ${sampleName})`);
+        return 'L';
+    }
+    
+    // Method 2: Look for explicit concentration indicators
+    if (upperSampleName.includes('1E7') || upperSampleName.includes('10E7') || upperSampleName.includes('1E+7')) {
+        console.log(`[CONTROL-DETECT] Found H control by concentration: ${wellKey} (sample: ${sampleName})`);
+        return 'H';
+    }
+    if (upperSampleName.includes('1E5') || upperSampleName.includes('10E5') || upperSampleName.includes('1E+5')) {
+        console.log(`[CONTROL-DETECT] Found M control by concentration: ${wellKey} (sample: ${sampleName})`);
+        return 'M';
+    }
+    if (upperSampleName.includes('1E3') || upperSampleName.includes('10E3') || upperSampleName.includes('1E+3')) {
+        console.log(`[CONTROL-DETECT] Found L control by concentration: ${wellKey} (sample: ${sampleName})`);
+        return 'L';
+    }
+    
+    // Method 3: Look for explicit control words (only if very clear)
+    if (upperSampleName.includes('HIGH CONTROL') || upperSampleName.includes('POSITIVE CONTROL')) {
+        console.log(`[CONTROL-DETECT] Found H control by explicit name: ${wellKey} (sample: ${sampleName})`);
+        return 'H';
+    }
+    if (upperSampleName.includes('MEDIUM CONTROL') || upperSampleName.includes('MED CONTROL')) {
+        console.log(`[CONTROL-DETECT] Found M control by explicit name: ${wellKey} (sample: ${sampleName})`);
+        return 'M';
+    }
+    if (upperSampleName.includes('LOW CONTROL')) {
+        console.log(`[CONTROL-DETECT] Found L control by explicit name: ${wellKey} (sample: ${sampleName})`);
+        return 'L';
+    }
+    
+    // DO NOT classify as control well - be very conservative
+    console.log(`[CONTROL-DETECT] Sample well (not control): ${wellKey} (sample: ${sampleName})`);
+    return null; // Not a control well
+}
+
+/**
  * Recalculate CQJ values for all wells using current thresholds
  */
 function recalculateCQJValues() {
@@ -265,6 +333,8 @@ function recalculateCQJValues() {
     
     // Get test code for CalcJ calculations using robust extraction
     const testCode = getCurrentTestCode();
+    
+    console.log(`[CALCJ-RECALC] Starting CQJ/CalcJ recalculation for ${Object.keys(results).length} wells (testCode: ${testCode})`);
     
     // Process each well
     Object.entries(results).forEach(([wellKey, well]) => {
@@ -322,10 +392,30 @@ function recalculateCQJValues() {
             
             // CRITICAL: If CQJ is null/N/A, CalcJ must also be null/N/A
             if (newCqj === null || newCqj === undefined) {
-                calcjResult = { calcj_value: null, method: 'no_cqj_value' };
+                calcjResult = { calcj_value: 'N/A', method: 'no_threshold_crossing' };
+                console.log(`[CALCJ-FIX] Well ${wellKey}: No threshold crossing, CalcJ = N/A`);
             } else {
-                // FORCE dynamic calculation - ignore any cached values
-                calcjResult = calculateCalcjWithControls(well, threshold, results, testCode, channel);
+                // Check if this is a control well - if so, use FIXED concentration values
+                const controlType = determineControlType(wellKey, well);
+                if (controlType && ['H', 'M', 'L'].includes(controlType)) {
+                    // Control wells get FIXED concentrations from CONCENTRATION_CONTROLS
+                    const concValues = CONCENTRATION_CONTROLS[testCode]?.[channel];
+                    if (concValues && concValues[controlType]) {
+                        calcjResult = { 
+                            calcj_value: concValues[controlType], 
+                            method: `fixed_${controlType.toLowerCase()}_control` 
+                        };
+                        console.log(`[CALCJ-FIX] CONTROL Well ${wellKey} (${controlType}): Fixed CalcJ = ${concValues[controlType]} (CQJ: ${newCqj})`);
+                    } else {
+                        // Fallback to dynamic calculation if no fixed value available
+                        calcjResult = calculateCalcjWithControls(well, threshold, results, testCode, channel);
+                        console.log(`[CALCJ-FIX] CONTROL Well ${wellKey} (${controlType}): No fixed value found, using dynamic calculation`);
+                    }
+                } else {
+                    // Sample wells get dynamic calculation using control-based standard curve
+                    calcjResult = calculateCalcjWithControls(well, threshold, results, testCode, channel);
+                    console.log(`[CALCJ-FIX] SAMPLE Well ${wellKey}: Dynamic CalcJ = ${calcjResult.calcj_value} (method: ${calcjResult.method}, CQJ: ${newCqj})`);
+                }
             }
             
             // Update CalcJ in well data - FORCE null if CQJ is null
@@ -343,15 +433,18 @@ function recalculateCQJValues() {
         }
     });
     
-    // SAFETY CHECK: Ensure any well with null CQJ has null CalcJ
+    console.log(`[CALCJ-RECALC] Completed: ${updateCount} CQJ updates, ${calcjUpdateCount} CalcJ updates, ${safetyFixCount} safety fixes`);
+    
+    // SAFETY CHECK: Ensure any well with null CQJ has N/A CalcJ
     let safetyFixCount = 0;
     Object.entries(results).forEach(([wellKey, well]) => {
         if ((well.cqj_value === null || well.cqj_value === undefined) && 
-            (well.calcj_value !== null && well.calcj_value !== undefined)) {
-            well.calcj_value = null;
-            well['CalcJ'] = null;
-            well.calcj_method = 'safety_fix_null_cqj';
+            (well.calcj_value !== null && well.calcj_value !== undefined && well.calcj_value !== 'N/A')) {
+            well.calcj_value = 'N/A';
+            well['CalcJ'] = 'N/A';
+            well.calcj_method = 'safety_fix_no_threshold_crossing';
             safetyFixCount++;
+            console.log(`[CALCJ-SAFETY] Well ${wellKey}: Fixed CalcJ to N/A due to no threshold crossing`);
         }
     });
     
@@ -370,13 +463,30 @@ function recalculateCQJValues() {
  * Calculate CalcJ using H/M/L control-based standard curve
  */
 function calculateCalcjWithControls(well, threshold, allWellResults, testCode, channel) {
+    // FIRST CHECK: If this well itself is a control, don't calculate - it should get fixed values
+    const wellKey = well.wellKey || well.well_id || 'unknown';
+    const currentWellControlType = determineControlType(wellKey, well);
+    if (currentWellControlType && ['H', 'M', 'L'].includes(currentWellControlType)) {
+        // This well is a control - it should get fixed values, not calculated ones
+        const concValues = CONCENTRATION_CONTROLS[testCode]?.[channel];
+        if (concValues && concValues[currentWellControlType]) {
+            console.log(`[CALCJ-DEBUG] Control well ${wellKey} (${currentWellControlType}) getting fixed value: ${concValues[currentWellControlType]}`);
+            return { 
+                calcj_value: concValues[currentWellControlType], 
+                method: `fixed_${currentWellControlType.toLowerCase()}_control_direct` 
+            };
+        }
+    }
+    
     // Check if we have concentration controls for this test/channel
     if (typeof CONCENTRATION_CONTROLS === 'undefined') {
+        console.warn('[CALCJ-DEBUG] CONCENTRATION_CONTROLS not available');
         return { calcj_value: null, method: 'no_concentration_controls' };
     }
     
     const concValues = CONCENTRATION_CONTROLS[testCode]?.[channel];
     if (!concValues) {
+        console.warn(`[CALCJ-DEBUG] No concentration controls for ${testCode}/${channel}`);
         return { calcj_value: null, method: 'no_concentration_controls' };
     }
     
@@ -388,39 +498,8 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
             const wellData = allWellResults[wellKey];
             if (!wellKey || !wellData) return;
             
-            // Check if this is a control well using the same logic as main script
-            let controlType = null;
-            const upperKey = wellKey.toUpperCase();
-            const sampleName = wellData.sample_name || '';
-            
-            // Use the same control detection logic from script.js
-            // Check for NTC first
-            if (sampleName.includes('NTC')) {
-                controlType = 'NTC';
-            }
-            // Look for H, M, L patterns at the end of sample name like AcCglab362271N01H-2573780
-            else {
-                const controlMatch = sampleName.match(/([HML])-?\d*$/);
-                if (controlMatch) {
-                    controlType = controlMatch[1];
-                }
-                // Alternative: check if sample ends with H, M, or L after coordinates
-                else if (sampleName.includes('H-') || /[A-Z]\d+H-/.test(sampleName)) {
-                    controlType = 'H';
-                } else if (sampleName.includes('M-') || /[A-Z]\d+M-/.test(sampleName)) {
-                    controlType = 'M';
-                } else if (sampleName.includes('L-') || /[A-Z]\d+L-/.test(sampleName)) {
-                    controlType = 'L';
-                }
-                // Check wellKey patterns as backup
-                else if (upperKey.endsWith('H') || upperKey.includes('HIGH') || upperKey.includes('POS')) {
-                    controlType = 'H';
-                } else if (upperKey.endsWith('M') || upperKey.includes('MED')) {
-                    controlType = 'M';
-                } else if (upperKey.endsWith('L') || upperKey.includes('LOW')) {
-                    controlType = 'L';
-                }
-            }
+            // Use the same strict control detection logic
+            const controlType = determineControlType(wellKey, wellData);
             
             // Handle control types appropriately
             if (controlType === 'NTC') {
@@ -428,31 +507,64 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
                 if (wellData.cqj_value !== null && wellData.cqj_value !== undefined) {
                     controlCqj[controlType].push(wellData.cqj_value);
                 }
-            } else if (controlType && wellData.cqj_value !== null && wellData.cqj_value !== undefined) {
+            } else if (controlType && ['H', 'M', 'L'].includes(controlType) && 
+                      wellData.cqj_value !== null && wellData.cqj_value !== undefined) {
                 // H/M/L controls should have CQJ values
                 controlCqj[controlType].push(wellData.cqj_value);
+                console.log(`[CALCJ-DEBUG] Found ${controlType} control well ${wellKey} with CQJ: ${wellData.cqj_value}`);
             }
         });
     }
     
-    // Calculate average CQJ for each control level
+    // Calculate average CQJ for each control level with outlier detection
     const avgControlCqj = {};
     Object.keys(controlCqj).forEach(controlType => {
         const cqjList = controlCqj[controlType];
         if (cqjList.length > 0) {
-            avgControlCqj[controlType] = cqjList.reduce((sum, val) => sum + val, 0) / cqjList.length;
+            if (cqjList.length === 1) {
+                // Only one control, use it
+                avgControlCqj[controlType] = cqjList[0];
+                console.log(`[CALCJ-DEBUG] Single ${controlType} control: ${cqjList[0]}`);
+            } else if (cqjList.length === 2) {
+                // Two controls, use average
+                avgControlCqj[controlType] = cqjList.reduce((sum, val) => sum + val, 0) / cqjList.length;
+                console.log(`[CALCJ-DEBUG] Two ${controlType} controls, average: ${avgControlCqj[controlType]} from [${cqjList.join(', ')}]`);
+            } else {
+                // Three or more controls - detect outliers and use consensus
+                const sorted = [...cqjList].sort((a, b) => a - b);
+                const median = sorted[Math.floor(sorted.length / 2)];
+                const q1 = sorted[Math.floor(sorted.length / 4)];
+                const q3 = sorted[Math.floor(3 * sorted.length / 4)];
+                const iqr = q3 - q1;
+                const lowerBound = q1 - 1.5 * iqr;
+                const upperBound = q3 + 1.5 * iqr;
+                
+                // Filter out outliers
+                const consensus = cqjList.filter(val => val >= lowerBound && val <= upperBound);
+                
+                if (consensus.length > 0) {
+                    avgControlCqj[controlType] = consensus.reduce((sum, val) => sum + val, 0) / consensus.length;
+                    console.log(`[CALCJ-DEBUG] ${controlType} control consensus: ${avgControlCqj[controlType]} from [${consensus.join(', ')}] (excluded outliers: [${cqjList.filter(val => val < lowerBound || val > upperBound).join(', ')}])`);
+                } else {
+                    // All were outliers, use median as fallback
+                    avgControlCqj[controlType] = median;
+                    console.log(`[CALCJ-DEBUG] ${controlType} control all outliers, using median: ${median}`);
+                }
+            }
         }
     });
     
     // Check if we have enough controls for standard curve (REQUIRE H and L controls)
     if (!avgControlCqj.H || !avgControlCqj.L) {
-        return { calcj_value: null, method: 'missing_required_controls' };
+        console.warn(`[CALCJ-DEBUG] Missing required controls - H: ${avgControlCqj.H}, L: ${avgControlCqj.L}`);
+        return { calcj_value: 'N/A', method: 'missing_required_controls' };
     }
     
     // Get CQJ for current well
     const currentCqj = well.cqj_value;
     if (currentCqj === null || currentCqj === undefined) {
-        return { calcj_value: null, method: 'control_based_failed' };
+        console.warn(`[CALCJ-DEBUG] Current well has no CQJ value`);
+        return { calcj_value: 'N/A', method: 'no_threshold_crossing' };
     }
     
     // Check for early crossing (crossing significantly before lowest control)
@@ -516,6 +628,11 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
         // Additional check for extremely small values that might round to 0
         if (calcjResult < 1e-10) {
             return { calcj_value: 'N/A', method: 'value_too_small' };
+        }
+        
+        // CRITICAL: Check for negative e-notation results (should be N/A)
+        if (calcjResult < 1) {
+            return { calcj_value: 'N/A', method: 'negative_exponential' };
         }
         
         return { calcj_value: calcjResult, method: 'dynamic_control_based' };

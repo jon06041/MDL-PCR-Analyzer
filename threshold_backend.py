@@ -6,7 +6,7 @@ Separate from main app.py to maintain clean architecture
 
 from flask import request, jsonify
 from models import db, AnalysisSession, WellResult
-from cqj_calcj_utils import calculate_cqj_calcj_for_well
+from cqj_calcj_utils import calculate_cqj_calcj_for_well, calculate_cqj, calculate_calcj_with_controls
 import json
 import traceback
 
@@ -239,7 +239,7 @@ def recalculate_session_cqj_calcj(session_id, channel, scale, threshold_value, e
             print(f"[RECALC-CQJ] Session {session_id} not found")
             return updated_results
         
-        # Get all wells for this session
+        # Get all wells for this session and prepare them for control-based calculation
         wells = WellResult.query.filter_by(session_id=session_id).all()
         if not wells:
             print(f"[RECALC-CQJ] No wells found for session {session_id}")
@@ -247,22 +247,39 @@ def recalculate_session_cqj_calcj(session_id, channel, scale, threshold_value, e
         
         print(f"[RECALC-CQJ] Found {len(wells)} wells in session")
         
+        # Prepare all well results for control detection (similar to frontend)
+        all_well_results = {}
+        for well in wells:
+            well_data = {
+                'well_id': well.well_id,
+                'sample_name': well.sample_name or '',
+                'fluorophore': well.fluorophore,
+                'amplitude': well.amplitude,
+                'baseline': well.baseline,
+                'raw_rfu': json.loads(well.raw_rfu) if well.raw_rfu else [],
+                'raw_cycles': json.loads(well.raw_cycles) if well.raw_cycles else [],
+                'cqj_value': well.cqj_value
+            }
+            all_well_results[well.well_id] = well_data
+        
+        # Extract test code from experiment pattern (same logic as frontend)
+        test_code = 'Unknown'
+        if experiment_pattern:
+            parts = experiment_pattern.split('_')
+            if parts and parts[0].startswith('Ac'):
+                test_code = parts[0][2:]  # Remove 'Ac' prefix
+        
+        print(f"[RECALC-CQJ] Using test_code: {test_code} for control-based calculations")
+        
         # Debug: Show all wells in session
         for well in wells:
-            print(f"[RECALC-CQJ] Available well: {well.well_id}, fluorophore: {well.fluorophore}")
+            print(f"[RECALC-CQJ] Available well: {well.well_id}, fluorophore: {well.fluorophore}, sample_name: {well.sample_name or 'None'}")
         
         # Process each well
         for well in wells:
             try:
                 # Parse well data
-                well_data = {
-                    'well_id': well.well_id,
-                    'fluorophore': well.fluorophore,
-                    'amplitude': well.amplitude,
-                    'baseline': well.baseline,
-                    'raw_rfu': json.loads(well.raw_rfu) if well.raw_rfu else [],
-                    'raw_cycles': json.loads(well.raw_cycles) if well.raw_cycles else []
-                }
+                well_data = all_well_results[well.well_id]
                 
                 # Only recalculate for wells matching the channel
                 if well_data['fluorophore'] != channel:
@@ -271,10 +288,31 @@ def recalculate_session_cqj_calcj(session_id, channel, scale, threshold_value, e
                 
                 print(f"[RECALC-CQJ] Processing well {well.well_id} for channel {channel}")
                 
-                # Calculate new CQJ/CalcJ values
-                recalc_result = calculate_cqj_calcj_for_well(well_data, 'manual', threshold_value)
+                # Calculate new CQJ first
+                new_cqj = calculate_cqj(well_data, threshold_value)
                 
-                print(f"[RECALC-CQJ] Calculation result for {well.well_id}: {recalc_result}")
+                # Update CQJ in the well_data for CalcJ calculation
+                well_data['cqj_value'] = new_cqj
+                all_well_results[well.well_id]['cqj_value'] = new_cqj
+                
+                # Calculate CalcJ using control-based method (same as frontend)
+                if new_cqj is None:
+                    new_calcj_result = {'calcj_value': 'N/A', 'method': 'no_threshold_crossing'}
+                else:
+                    new_calcj_result = calculate_calcj_with_controls(
+                        well_data, threshold_value, all_well_results, test_code, channel
+                    )
+                
+                # Prepare result for database update
+                recalc_result = {
+                    'cqj_value': new_cqj,
+                    'calcj_value': new_calcj_result['calcj_value'],
+                    'calcj_method': new_calcj_result['method'],
+                    'cqj': {'manual': new_cqj},
+                    'calcj': {'manual': new_calcj_result['calcj_value']}
+                }
+                
+                print(f"[RECALC-CQJ] Calculation result for {well.well_id}: CQJ={new_cqj}, CalcJ={new_calcj_result['calcj_value']} (method: {new_calcj_result['method']})")
                 
                 if recalc_result:
                     # Update well in database
