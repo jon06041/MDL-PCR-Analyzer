@@ -552,11 +552,18 @@
                         
                         // Try to get more path information from the handle
                         let fullPath = 'Path not available (browser security)';
+                        let detectedPath = null;
+                        
                         try {
-                            // Some browsers might provide additional path information
-                            if (dirHandle.name && typeof dirHandle.name === 'string') {
-                                // Try to prompt user for full path since browser won't give us the complete path
-                                const userPath = await this.promptForFullPath(dirHandle.name);
+                            // Try various methods to detect or reconstruct the full path
+                            detectedPath = await this.attemptPathDetection(dirHandle);
+                            
+                            if (detectedPath) {
+                                console.log('Auto-detected path:', detectedPath);
+                                fullPath = detectedPath;
+                            } else {
+                                // If we can't detect it, prompt user with smart suggestions
+                                const userPath = await this.promptForFullPath(dirHandle.name, detectedPath);
                                 if (userPath) {
                                     fullPath = userPath;
                                     console.log('User provided full path:', userPath);
@@ -564,6 +571,15 @@
                             }
                         } catch (pathError) {
                             console.warn('Could not get additional path info:', pathError);
+                            // Still try to prompt user as fallback
+                            try {
+                                const userPath = await this.promptForFullPath(dirHandle.name, detectedPath);
+                                if (userPath) {
+                                    fullPath = userPath;
+                                }
+                            } catch (promptError) {
+                                console.warn('Path prompt also failed:', promptError);
+                            }
                         }
                         
                         // Test permissions immediately
@@ -603,15 +619,211 @@
             }
             
             /**
+             * Attempt to detect the full folder path using various browser techniques
+             * This tries multiple methods to reconstruct or detect the complete path
+             */
+            async attemptPathDetection(dirHandle) {
+                console.log('Attempting to detect full path for:', dirHandle.name);
+                
+                try {
+                    // Method 1: Try to get path from handle properties (some browsers expose more info)
+                    if (dirHandle.getDirectoryHandle) {
+                        // Check if we can get parent directories (experimental API)
+                        try {
+                            let currentHandle = dirHandle;
+                            const pathParts = [dirHandle.name];
+                            
+                            // Try to navigate up the directory tree (limited by browser security)
+                            for (let i = 0; i < 10; i++) { // Limit to prevent infinite loops
+                                try {
+                                    const parentHandle = await currentHandle.getDirectoryHandle('..');
+                                    if (parentHandle && parentHandle.name && parentHandle.name !== currentHandle.name) {
+                                        pathParts.unshift(parentHandle.name);
+                                        currentHandle = parentHandle;
+                                        console.log('Found parent directory:', parentHandle.name);
+                                    } else {
+                                        break;
+                                    }
+                                } catch (parentError) {
+                                    console.log('Cannot access parent directory:', parentError.message);
+                                    break;
+                                }
+                            }
+                            
+                            if (pathParts.length > 1) {
+                                const detectedPath = pathParts.join('\\'); // Windows-style path
+                                console.log('Detected path via parent navigation:', detectedPath);
+                                return detectedPath;
+                            }
+                        } catch (navError) {
+                            console.log('Parent navigation not available:', navError.message);
+                        }
+                    }
+                    
+                    // Method 2: Check for common path patterns in handle name
+                    const folderName = dirHandle.name;
+                    const commonPaths = this.generateSmartPathGuesses(folderName);
+                    
+                    if (commonPaths.length > 0) {
+                        console.log('Generated smart path guesses:', commonPaths);
+                        return commonPaths[0]; // Return the most likely path
+                    }
+                    
+                    // Method 3: Try to read a test file to get more path information
+                    try {
+                        for await (const [name, entry] of dirHandle.entries()) {
+                            if (entry.kind === 'file') {
+                                const file = await entry.getFile();
+                                
+                                // Check if the browser exposes any path information in the File object
+                                if (file.webkitRelativePath || file.path) {
+                                    const filePath = file.webkitRelativePath || file.path;
+                                    console.log('Found file path info:', filePath);
+                                    
+                                    // Extract directory path from file path
+                                    const pathParts = filePath.split(/[/\\]/);
+                                    pathParts.pop(); // Remove filename
+                                    if (pathParts.length > 0) {
+                                        return pathParts.join('\\');
+                                    }
+                                }
+                                break; // Only check first file
+                            }
+                        }
+                    } catch (fileError) {
+                        console.log('Could not read files for path detection:', fileError.message);
+                    }
+                    
+                    // Method 4: Check browser-specific APIs
+                    if (navigator.storage && navigator.storage.getDirectory) {
+                        try {
+                            const rootHandle = await navigator.storage.getDirectory();
+                            // This might give us clues about the storage path structure
+                            console.log('Found storage root handle');
+                        } catch (storageError) {
+                            console.log('Storage API not available:', storageError.message);
+                        }
+                    }
+                    
+                } catch (error) {
+                    console.warn('Path detection failed:', error);
+                }
+                
+                return null; // Could not detect path
+            }
+            
+            /**
+             * Generate smart path guesses based on folder name and system detection
+             */
+            generateSmartPathGuesses(folderName) {
+                const guesses = [];
+                
+                // Detect operating system
+                const isWindows = navigator.platform.indexOf('Win') > -1 || navigator.userAgent.includes('Windows');
+                const isMac = navigator.platform.indexOf('Mac') > -1 || navigator.userAgent.includes('Mac');
+                const isLinux = navigator.platform.indexOf('Linux') > -1 || navigator.userAgent.includes('Linux');
+                
+                // Get potential username from browser/system info
+                const possibleUsernames = this.detectPossibleUsernames();
+                
+                if (isWindows) {
+                    // Common Windows paths
+                    for (const username of possibleUsernames) {
+                        guesses.push(`C:\\Users\\${username}\\Desktop\\${folderName}`);
+                        guesses.push(`C:\\Users\\${username}\\Documents\\${folderName}`);
+                        guesses.push(`C:\\Users\\${username}\\Downloads\\${folderName}`);
+                    }
+                    
+                    // Generic Windows paths
+                    guesses.push(`C:\\Users\\[username]\\Desktop\\${folderName}`);
+                    guesses.push(`C:\\Desktop\\${folderName}`);
+                    guesses.push(`D:\\${folderName}`);
+                    
+                } else if (isMac) {
+                    // Common macOS paths
+                    for (const username of possibleUsernames) {
+                        guesses.push(`/Users/${username}/Desktop/${folderName}`);
+                        guesses.push(`/Users/${username}/Documents/${folderName}`);
+                        guesses.push(`/Users/${username}/Downloads/${folderName}`);
+                    }
+                    
+                    // Generic macOS paths
+                    guesses.push(`/Users/[username]/Desktop/${folderName}`);
+                    
+                } else if (isLinux) {
+                    // Common Linux paths
+                    for (const username of possibleUsernames) {
+                        guesses.push(`/home/${username}/Desktop/${folderName}`);
+                        guesses.push(`/home/${username}/Documents/${folderName}`);
+                        guesses.push(`/home/${username}/Downloads/${folderName}`);
+                    }
+                    
+                    // Generic Linux paths
+                    guesses.push(`/home/[username]/Desktop/${folderName}`);
+                }
+                
+                return guesses;
+            }
+            
+            /**
+             * Try to detect possible usernames from browser/system information
+             */
+            detectPossibleUsernames() {
+                const usernames = [];
+                
+                // Check various sources for username hints
+                try {
+                    // From browser storage or previous sessions
+                    const savedPattern = sessionStorage.getItem('pathPattern');
+                    if (savedPattern) {
+                        // Extract username from previous path pattern
+                        const pathMatch = savedPattern.match(/Users[/\\]([^/\\]+)/i) || savedPattern.match(/home[/\\]([^/\\]+)/i);
+                        if (pathMatch && pathMatch[1] && pathMatch[1] !== '{FOLDER_NAME}') {
+                            usernames.push(pathMatch[1]);
+                        }
+                    }
+                    
+                    // From localStorage previous paths
+                    const savedFolder = localStorage.getItem('monitoredFolder');
+                    if (savedFolder) {
+                        const folderInfo = JSON.parse(savedFolder);
+                        if (folderInfo.fullPath) {
+                            const pathMatch = folderInfo.fullPath.match(/Users[/\\]([^/\\]+)/i) || folderInfo.fullPath.match(/home[/\\]([^/\\]+)/i);
+                            if (pathMatch && pathMatch[1]) {
+                                usernames.push(pathMatch[1]);
+                            }
+                        }
+                    }
+                    
+                } catch (error) {
+                    console.log('Could not extract username from previous data:', error);
+                }
+                
+                // Add common default usernames
+                usernames.push('username', 'user', 'admin', 'Administrator');
+                
+                // Remove duplicates and return
+                return [...new Set(usernames)];
+            }
+            
+            /**
              * Prompt user to manually enter the full folder path
              * This helps us get the complete path that browsers won't provide
+             * @param {string} folderName - The name of the selected folder
+             * @param {string} detectedPath - Auto-detected path to pre-populate (optional)
              */
-            async promptForFullPath(folderName) {
+            async promptForFullPath(folderName, detectedPath = null) {
                 return new Promise((resolve) => {
+                    // Generate smart path suggestions
+                    const smartGuesses = this.generateSmartPathGuesses(folderName);
+                    const suggestionsHTML = smartGuesses.slice(0, 3).map(path => 
+                        `<button type="button" class="btn btn-outline-secondary btn-sm mb-1 mr-1 path-suggestion" data-path="${path}" style="font-family: monospace; font-size: 0.8em;">${path}</button>`
+                    ).join('');
+                    
                     // Create a modal prompt for the user to enter the full path
                     const modalHTML = `
                         <div class="modal fade" id="pathPromptModal" tabindex="-1" role="dialog" data-backdrop="static">
-                            <div class="modal-dialog" role="document">
+                            <div class="modal-dialog modal-lg" role="document">
                                 <div class="modal-content">
                                     <div class="modal-header">
                                         <h5 class="modal-title">
@@ -620,19 +832,31 @@
                                     </div>
                                     <div class="modal-body">
                                         <p>You selected folder: <strong>"${folderName}"</strong></p>
-                                        <p>For better tracking, please enter the complete folder path:</p>
+                                        ${detectedPath ? `<div class="alert alert-info"><i class="fas fa-lightbulb"></i> <strong>Auto-detected path:</strong> ${detectedPath}</div>` : ''}
+                                        <p>For better tracking, please ${detectedPath ? 'verify or edit' : 'enter'} the complete folder path:</p>
                                         <div class="form-group">
                                             <label for="fullPathInput">Full Path:</label>
                                             <input type="text" 
                                                    class="form-control" 
                                                    id="fullPathInput" 
+                                                   value="${detectedPath || ''}"
                                                    placeholder="e.g., C:\\Users\\username\\Desktop\\run files"
                                                    style="font-family: monospace;">
                                             <small class="form-text text-muted">
-                                                Optional: This helps track where your files came from. 
-                                                Leave blank if you prefer not to specify.
+                                                ${detectedPath ? 'Auto-detected path loaded above. Edit if needed.' : 'Optional: This helps track where your files came from. Leave blank if you prefer not to specify.'}
                                             </small>
                                         </div>
+                                        ${smartGuesses.length > 0 ? `
+                                        <div class="form-group">
+                                            <label class="form-label">Quick suggestions (click to use):</label>
+                                            <div class="mt-1">
+                                                ${suggestionsHTML}
+                                            </div>
+                                            <small class="form-text text-muted">
+                                                These are common folder locations based on your operating system.
+                                            </small>
+                                        </div>
+                                        ` : ''}
                                         <div class="form-group">
                                             <div class="form-check">
                                                 <input type="checkbox" class="form-check-input" id="rememberPathChoice">
@@ -683,7 +907,30 @@
                     }
                     
                     // Focus the input
-                    setTimeout(() => pathInput.focus(), 100);
+                    setTimeout(() => {
+                        pathInput.focus();
+                        // If we have a detected path, select it for easy editing
+                        if (detectedPath) {
+                            pathInput.select();
+                        }
+                    }, 100);
+                    
+                    // Handle path suggestion buttons
+                    const suggestionButtons = modal.querySelectorAll('.path-suggestion');
+                    suggestionButtons.forEach(button => {
+                        button.addEventListener('click', () => {
+                            const suggestedPath = button.getAttribute('data-path');
+                            pathInput.value = suggestedPath;
+                            pathInput.focus();
+                            pathInput.select();
+                            
+                            // Highlight the selected suggestion
+                            suggestionButtons.forEach(btn => btn.classList.remove('btn-primary', 'btn-outline-secondary'));
+                            suggestionButtons.forEach(btn => btn.classList.add('btn-outline-secondary'));
+                            button.classList.remove('btn-outline-secondary');
+                            button.classList.add('btn-primary');
+                        });
+                    });
                     
                     // Handle Enter key
                     pathInput.addEventListener('keypress', (e) => {
@@ -787,9 +1034,17 @@
                             fullPath = savedPattern.replace('{FOLDER_NAME}', folderPath);
                             console.log('Using saved path pattern:', fullPath);
                         } else if (!skipPrompt) {
-                            // Prompt user for full path
+                            // Try to detect path from file information first
+                            let detectedPath = null;
                             try {
-                                fullPath = await this.promptForFullPath(folderPath);
+                                detectedPath = await this.detectPathFromFiles(files, folderPath);
+                            } catch (error) {
+                                console.warn('Could not detect path from files:', error);
+                            }
+                            
+                            // Prompt user for full path with detection results
+                            try {
+                                fullPath = await this.promptForFullPath(folderPath, detectedPath);
                             } catch (error) {
                                 console.warn('Error prompting for path:', error);
                             }
@@ -804,6 +1059,61 @@
                 
                 document.body.appendChild(input);
                 input.click();
+            }
+            
+            /**
+             * Try to detect full path from file objects in webkitdirectory mode
+             */
+            async detectPathFromFiles(files, folderName) {
+                if (!files || files.length === 0) return null;
+                
+                try {
+                    // Check if any files have useful path information
+                    for (const file of files.slice(0, 5)) { // Check first 5 files
+                        if (file.webkitRelativePath) {
+                            const relativePath = file.webkitRelativePath;
+                            console.log('Analyzing file path:', relativePath);
+                            
+                            // Try to extract meaningful path information
+                            const pathParts = relativePath.split('/');
+                            if (pathParts.length > 1) {
+                                // We have subdirectory information
+                                const basePath = pathParts.slice(0, -1).join('/');
+                                console.log('Detected relative base path:', basePath);
+                                
+                                // Try to reconstruct full path using smart guesses
+                                const smartGuesses = this.generateSmartPathGuesses(folderName);
+                                for (const guess of smartGuesses) {
+                                    if (guess.includes(folderName)) {
+                                        console.log('Smart guess with folder context:', guess);
+                                        return guess;
+                                    }
+                                }
+                                
+                                // Fallback: use relative path info
+                                return `[Full path]/${basePath}`;
+                            }
+                        }
+                        
+                        // Check for any other path-related properties
+                        if (file.path) {
+                            console.log('Found file.path:', file.path);
+                            return file.path.replace(/[^/\\]+$/, ''); // Remove filename
+                        }
+                    }
+                    
+                    // If no path info found, use smart guessing
+                    const smartGuesses = this.generateSmartPathGuesses(folderName);
+                    if (smartGuesses.length > 0) {
+                        console.log('Using smart guess for webkitdirectory:', smartGuesses[0]);
+                        return smartGuesses[0];
+                    }
+                    
+                } catch (error) {
+                    console.warn('Error detecting path from files:', error);
+                }
+                
+                return null;
             }
             
             setMonitoredFolder(folderName, folderData, fullPath = null) {
@@ -860,31 +1170,31 @@
                     if (saved) {
                         const folderInfo = JSON.parse(saved);
                         document.getElementById('current-folder-display').textContent = folderInfo.name;
-                        document.getElementById('current-folder-display').className = 'text-warning';
+                        document.getElementById('current-folder-display').className = 'text-primary';
                         
                         // Show enhanced path information if available
                         const pathDisplay = document.getElementById('current-folder-path');
                         if (folderInfo.fullPath && folderInfo.fullPath.includes(':\\')) {
                             // We have a complete Windows-style path
                             pathDisplay.textContent = `Previous: ${folderInfo.fullPath} (click Browse to reselect and refresh)`;
-                            pathDisplay.className = 'text-warning';
+                            pathDisplay.className = 'text-primary';
                             pathDisplay.style.fontWeight = 'bold';
                         } else if (folderInfo.fullPath && !folderInfo.fullPath.includes('not available')) {
                             // We have some enhanced path information
                             pathDisplay.textContent = `Previous: ${folderInfo.fullPath} (click Browse to reselect and refresh)`;
-                            pathDisplay.className = 'text-warning';
+                            pathDisplay.className = 'text-info';
                             pathDisplay.style.fontWeight = 'normal';
                         } else if (folderInfo.type === 'handle') {
                             pathDisplay.textContent = `Previous: "${folderInfo.name}" (File System Access API - click Browse to reselect)`;
-                            pathDisplay.className = 'text-warning';
+                            pathDisplay.className = 'text-info';
                             pathDisplay.style.fontWeight = 'normal';
                         } else if (folderInfo.path && folderInfo.path !== 'Path not available') {
                             pathDisplay.textContent = `Previous: ${folderInfo.path} (click Browse to reselect and refresh)`;
-                            pathDisplay.className = 'text-warning';
+                            pathDisplay.className = 'text-info';
                             pathDisplay.style.fontWeight = 'normal';
                         } else {
                             pathDisplay.textContent = `Previously selected folder (click Browse to reselect and scan for new files)`;
-                            pathDisplay.className = 'text-warning';
+                            pathDisplay.className = 'text-secondary';
                             pathDisplay.style.fontWeight = 'normal';
                         }
                         
