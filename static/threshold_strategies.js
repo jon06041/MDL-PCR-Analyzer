@@ -132,11 +132,11 @@ window.PATHOGEN_FIXED_THRESHOLDS = {
     "CY5": { linear: 350, log: 350 }
   },
   "BVPanelPCR3": { 
-    "CY5": { linear: 250, log: 250 },      // Fixed: CY5 (uppercase)
-    "Cy5": { linear: 250, log: 250 },      // Backup: Cy5 (mixed case)
-    "FAM": { linear: 300, log: 300 },
-    "HEX": { linear: 275, log: 275 },
-    "Texas Red": { linear: 225, log: 225 }
+    "CY5": { linear: 100, log: 100 },      // Fixed: CY5 (uppercase)
+    "Cy5": { linear: 100, log: 100 },      // Backup: Cy5 (mixed case)
+    "FAM": { linear: 100, log: 100 },
+    "HEX": { linear: 100, log: 100 },
+    "Texas Red": { linear: 100, log: 100 }
   },
   "Calb": { 
     "FAM": { linear: 150, log: 150 }
