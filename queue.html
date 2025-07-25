@@ -355,7 +355,8 @@
                         
                         <select id="filter-status" class="filter-select" onchange="QueueManager.filterQueue()">
                             <option value="all">All Experiments</option>
-                            <option value="ready">Ready for Analysis</option>
+                            <option value="ready" selected>Ready for Analysis</option>
+                            <option value="analyzed">Already Analyzed</option>
                             <option value="recent">Recently Modified</option>
                         </select>
                         
@@ -367,8 +368,8 @@
                     </div>
                     
                     <div>
-                        <button class="btn btn-outline-secondary" onclick="QueueManager.selectAll()">
-                            <i class="fas fa-check-square"></i> Select All
+                        <button class="btn btn-outline-success" onclick="QueueManager.reanalyzeSelected()">
+                            <i class="fas fa-redo"></i> Re-analyze Selected
                         </button>
                         <button class="btn btn-outline-danger ml-2" onclick="QueueManager.clearQueue()">
                             <i class="fas fa-trash"></i> Clear Queue
@@ -486,8 +487,8 @@
                 window.queueManager.sortQueue();
             }
             
-            static selectAll() {
-                window.queueManager.selectAll();
+            static reanalyzeSelected() {
+                window.queueManager.reanalyzeSelected();
             }
             
             static toggleSelectAll() {
@@ -696,8 +697,12 @@
                         if (rememberChoice.checked) {
                             sessionStorage.setItem('skipPathPrompt', 'true');
                         }
-                        modal.remove();
-                        resolve(null);
+                        // Clean up modal properly
+                        $('#pathPromptModal').modal('hide');
+                        setTimeout(() => {
+                            modal.remove();
+                            resolve(null);
+                        }, 300);
                     });
                     
                     saveBtn.addEventListener('click', () => {
@@ -709,12 +714,25 @@
                         } else if (rememberChoice.checked) {
                             sessionStorage.setItem('skipPathPrompt', 'true');
                         }
-                        modal.remove();
-                        resolve(fullPath || null);
+                        // Clean up modal properly
+                        $('#pathPromptModal').modal('hide');
+                        setTimeout(() => {
+                            modal.remove();
+                            resolve(fullPath || null);
+                        }, 300);
                     });
                     
                     // Show modal
                     $('#pathPromptModal').modal('show');
+                    
+                    // Handle modal close events (including backdrop clicks and ESC key)
+                    $('#pathPromptModal').on('hidden.bs.modal', function () {
+                        // If the modal was closed without resolving, resolve with null
+                        if (modal.parentNode) {
+                            modal.remove();
+                            resolve(null);
+                        }
+                    });
                 });
             }
             
@@ -842,17 +860,32 @@
                     if (saved) {
                         const folderInfo = JSON.parse(saved);
                         document.getElementById('current-folder-display').textContent = folderInfo.name;
+                        document.getElementById('current-folder-display').className = 'text-warning';
                         
-                        // Show path if available
-                        if (folderInfo.path && folderInfo.path !== 'Path not available') {
-                            document.getElementById('current-folder-path').textContent = `Previous: ${folderInfo.path} (click Browse to reselect and refresh)`;
-                            document.getElementById('current-folder-path').className = 'text-warning';
+                        // Show enhanced path information if available
+                        const pathDisplay = document.getElementById('current-folder-path');
+                        if (folderInfo.fullPath && folderInfo.fullPath.includes(':\\')) {
+                            // We have a complete Windows-style path
+                            pathDisplay.textContent = `Previous: ${folderInfo.fullPath} (click Browse to reselect and refresh)`;
+                            pathDisplay.className = 'text-warning';
+                            pathDisplay.style.fontWeight = 'bold';
+                        } else if (folderInfo.fullPath && !folderInfo.fullPath.includes('not available')) {
+                            // We have some enhanced path information
+                            pathDisplay.textContent = `Previous: ${folderInfo.fullPath} (click Browse to reselect and refresh)`;
+                            pathDisplay.className = 'text-warning';
+                            pathDisplay.style.fontWeight = 'normal';
                         } else if (folderInfo.type === 'handle') {
-                            document.getElementById('current-folder-path').textContent = `Previous: "${folderInfo.name}" (File System Access API - click Browse to reselect)`;
-                            document.getElementById('current-folder-path').className = 'text-warning';
+                            pathDisplay.textContent = `Previous: "${folderInfo.name}" (File System Access API - click Browse to reselect)`;
+                            pathDisplay.className = 'text-warning';
+                            pathDisplay.style.fontWeight = 'normal';
+                        } else if (folderInfo.path && folderInfo.path !== 'Path not available') {
+                            pathDisplay.textContent = `Previous: ${folderInfo.path} (click Browse to reselect and refresh)`;
+                            pathDisplay.className = 'text-warning';
+                            pathDisplay.style.fontWeight = 'normal';
                         } else {
-                            document.getElementById('current-folder-path').textContent = `Previously selected folder (click Browse to reselect and scan for new files)`;
-                            document.getElementById('current-folder-path').className = 'text-warning';
+                            pathDisplay.textContent = `Previously selected folder (click Browse to reselect and scan for new files)`;
+                            pathDisplay.className = 'text-warning';
+                            pathDisplay.style.fontWeight = 'normal';
                         }
                         
                         this.showNotification('Previous folder remembered. Click Browse to reselect for monitoring.', 'info');
@@ -884,11 +917,22 @@
                     nameDisplay.textContent = this.monitoredFolder.name;
                     nameDisplay.className = 'text-success';
                     
-                    // Try to get the full path if available
-                    if (this.monitoredFolder.type === 'handle') {
+                    // Check if we have enhanced full path information
+                    if (this.monitoredFolder.fullPath && this.monitoredFolder.fullPath.includes(':\\')) {
+                        // We have a complete Windows-style path (like C:\Users\jsniffen\Desktop\run files)
+                        pathDisplay.textContent = this.monitoredFolder.fullPath;
+                        pathDisplay.className = 'text-success';
+                        pathDisplay.style.fontWeight = 'bold';
+                    } else if (this.monitoredFolder.fullPath && !this.monitoredFolder.fullPath.includes('not available')) {
+                        // We have some enhanced path information
+                        pathDisplay.textContent = this.monitoredFolder.fullPath;
+                        pathDisplay.className = 'text-info';
+                        pathDisplay.style.fontWeight = 'normal';
+                    } else if (this.monitoredFolder.type === 'handle') {
                         // For File System Access API, we can only show the folder name
                         pathDisplay.textContent = `Selected: "${this.monitoredFolder.name}" (File System Access API - full system path not available due to browser security)`;
-                        pathDisplay.className = 'text-info';
+                        pathDisplay.className = 'text-warning';
+                        pathDisplay.style.fontWeight = 'normal';
                     } else if (this.monitoredFolder.data instanceof Array && this.monitoredFolder.data.length > 0) {
                         // For webkitdirectory, we can extract the path from the first file
                         const firstFile = this.monitoredFolder.data[0];
@@ -900,14 +944,17 @@
                             
                             // Show the relative path from browser selection
                             pathDisplay.textContent = `Relative path: ${folderPath} (from browser file selection)`;
-                            pathDisplay.className = 'text-success';
+                            pathDisplay.className = 'text-info';
+                            pathDisplay.style.fontWeight = 'normal';
                         } else {
                             pathDisplay.textContent = `Selected: "${this.monitoredFolder.name}" (path details not available from browser)`;
                             pathDisplay.className = 'text-muted';
+                            pathDisplay.style.fontWeight = 'normal';
                         }
                     } else {
                         pathDisplay.textContent = `Selected: "${this.monitoredFolder.name}" (path details not available)`;
                         pathDisplay.className = 'text-muted';
+                        pathDisplay.style.fontWeight = 'normal';
                     }
                 } else {
                     nameDisplay.textContent = 'No folder selected';
@@ -1349,6 +1396,10 @@
                         continue;
                     }
                     
+                    if (statusFilter === 'analyzed' && entry.status !== 'analyzed') {
+                        continue;
+                    }
+                    
                     if (statusFilter === 'recent' && Date.now() - entry.timestamp > 86400000) { // 24 hours
                         continue;
                     }
@@ -1408,9 +1459,24 @@
                 ).join('');
                 
                 const totalFiles = entry.amplificationFiles.length + (entry.summaryFile ? 1 : 0);
-                const statusBadge = entry.status === 'ready' ? 
-                    '<span class="badge badge-success">Ready</span>' : 
-                    '<span class="badge badge-warning">Partial</span>';
+                
+                // Enhanced status badge logic
+                let statusBadge;
+                if (entry.status === 'analyzed') {
+                    const lastAnalyzed = entry.lastAnalyzed ? new Date(entry.lastAnalyzed).toLocaleString() : 'Unknown';
+                    statusBadge = `<span class="badge badge-info" title="Last analyzed: ${lastAnalyzed}">Analyzed</span>`;
+                } else if (entry.status === 'ready') {
+                    statusBadge = '<span class="badge badge-success">Ready</span>';
+                } else if (entry.status === 'queued-for-reanalysis') {
+                    statusBadge = '<span class="badge badge-warning">Queued</span>';
+                } else {
+                    statusBadge = '<span class="badge badge-secondary">Partial</span>';
+                }
+                
+                // Update button text based on status
+                const buttonText = entry.status === 'analyzed' ? 
+                    '<i class="fas fa-redo"></i> Re-analyze' : 
+                    '<i class="fas fa-play"></i> Analyze';
                 
                 return `
                     <tr data-experiment-id="${entry.experimentId}">
@@ -1440,7 +1506,7 @@
                         <td>
                             <button class="btn btn-sm analyze-btn" 
                                     onclick="window.queueManager.analyzeExperiment('${entry.experimentId}')">
-                                <i class="fas fa-play"></i> Analyze
+                                ${buttonText}
                             </button>
                         </td>
                     </tr>
@@ -1558,6 +1624,12 @@
                     sessionStorage.setItem('queueAnalysisData', JSON.stringify(analysisData));
                     localStorage.setItem('pendingAnalysis', JSON.stringify(analysisData));
                     
+                    // Mark this experiment as analyzed
+                    entry.status = 'analyzed';
+                    entry.lastAnalyzed = Date.now();
+                    this.fileQueue.set(experimentId, entry);
+                    this.saveQueueData();
+                    
                     console.log(`Prepared analysis data for ${experimentId}: ${entry.amplificationFiles.length} amplification files, ${entry.summaryFile ? 1 : 0} summary file with content ready`);
                     
                     // Navigate to main page with analysis flag
@@ -1589,11 +1661,39 @@
                 });
             }
             
-            selectAll() {
-                const checkboxes = document.querySelectorAll('.experiment-checkbox');
-                const selectAllCheckbox = document.getElementById('select-all-checkbox');
+            reanalyzeSelected() {
+                const checkboxes = document.querySelectorAll('.experiment-checkbox:checked');
                 
-                checkboxes.forEach(cb => cb.checked = selectAllCheckbox.checked);
+                if (checkboxes.length === 0) {
+                    this.showNotification('Please select experiments to re-analyze using the checkboxes.', 'warning');
+                    return;
+                }
+                
+                const experimentIds = Array.from(checkboxes).map(cb => cb.closest('tr').dataset.experimentId);
+                
+                if (confirm(`Are you sure you want to re-analyze ${experimentIds.length} selected experiment(s)? This will open them in the main analyzer.`)) {
+                    // For multiple experiments, we'll analyze them one by one
+                    if (experimentIds.length === 1) {
+                        // Single experiment - direct analysis
+                        this.analyzeExperiment(experimentIds[0]);
+                    } else {
+                        // Multiple experiments - show selection modal or batch process
+                        this.showNotification(`Re-analyzing ${experimentIds.length} experiments. Processing the first one now.`, 'info');
+                        this.analyzeExperiment(experimentIds[0]);
+                        
+                        // Mark the others for potential batch processing (future enhancement)
+                        experimentIds.slice(1).forEach(id => {
+                            const entry = this.fileQueue.get(id);
+                            if (entry) {
+                                entry.status = 'queued-for-reanalysis';
+                                this.fileQueue.set(id, entry);
+                            }
+                        });
+                        
+                        this.updateQueueDisplay();
+                        this.saveQueueData();
+                    }
+                }
             }
             
             toggleSelectAll() {
