@@ -549,13 +549,29 @@
                         
                         console.log('Directory selected:', dirHandle.name);
                         
+                        // Try to get more path information from the handle
+                        let fullPath = 'Path not available (browser security)';
+                        try {
+                            // Some browsers might provide additional path information
+                            if (dirHandle.name && typeof dirHandle.name === 'string') {
+                                // Try to prompt user for full path since browser won't give us the complete path
+                                const userPath = await this.promptForFullPath(dirHandle.name);
+                                if (userPath) {
+                                    fullPath = userPath;
+                                    console.log('User provided full path:', userPath);
+                                }
+                            }
+                        } catch (pathError) {
+                            console.warn('Could not get additional path info:', pathError);
+                        }
+                        
                         // Test permissions immediately
                         const permission = await dirHandle.requestPermission({ mode: 'read' });
                         if (permission !== 'granted') {
                             throw new Error('Permission to read directory was denied');
                         }
                         
-                        await this.setMonitoredFolderFromHandle(dirHandle);
+                        await this.setMonitoredFolderFromHandle(dirHandle, fullPath);
                         this.refreshQueue();
                         return;
                     }
@@ -585,24 +601,148 @@
                 }
             }
             
-            async setMonitoredFolderFromHandle(dirHandle) {
+            /**
+             * Prompt user to manually enter the full folder path
+             * This helps us get the complete path that browsers won't provide
+             */
+            async promptForFullPath(folderName) {
+                return new Promise((resolve) => {
+                    // Create a modal prompt for the user to enter the full path
+                    const modalHTML = `
+                        <div class="modal fade" id="pathPromptModal" tabindex="-1" role="dialog" data-backdrop="static">
+                            <div class="modal-dialog" role="document">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title">
+                                            <i class="fas fa-folder-plus"></i> Complete Folder Path
+                                        </h5>
+                                    </div>
+                                    <div class="modal-body">
+                                        <p>You selected folder: <strong>"${folderName}"</strong></p>
+                                        <p>For better tracking, please enter the complete folder path:</p>
+                                        <div class="form-group">
+                                            <label for="fullPathInput">Full Path:</label>
+                                            <input type="text" 
+                                                   class="form-control" 
+                                                   id="fullPathInput" 
+                                                   placeholder="e.g., C:\\Users\\username\\Desktop\\run files"
+                                                   style="font-family: monospace;">
+                                            <small class="form-text text-muted">
+                                                Optional: This helps track where your files came from. 
+                                                Leave blank if you prefer not to specify.
+                                            </small>
+                                        </div>
+                                        <div class="form-group">
+                                            <div class="form-check">
+                                                <input type="checkbox" class="form-check-input" id="rememberPathChoice">
+                                                <label class="form-check-label" for="rememberPathChoice">
+                                                    Remember this choice (don't ask again for this session)
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-secondary" id="skipPathBtn">
+                                            Skip (Use folder name only)
+                                        </button>
+                                        <button type="button" class="btn btn-primary" id="savePathBtn">
+                                            <i class="fas fa-save"></i> Save Path
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    // Remove any existing modal
+                    const existingModal = document.getElementById('pathPromptModal');
+                    if (existingModal) {
+                        existingModal.remove();
+                    }
+                    
+                    // Add modal to page
+                    document.body.insertAdjacentHTML('beforeend', modalHTML);
+                    
+                    const modal = document.getElementById('pathPromptModal');
+                    const pathInput = document.getElementById('fullPathInput');
+                    const rememberChoice = document.getElementById('rememberPathChoice');
+                    const skipBtn = document.getElementById('skipPathBtn');
+                    const saveBtn = document.getElementById('savePathBtn');
+                    
+                    // Try to guess the path format based on user agent
+                    const isWindows = navigator.platform.indexOf('Win') > -1;
+                    const isMac = navigator.platform.indexOf('Mac') > -1;
+                    
+                    if (isWindows) {
+                        pathInput.placeholder = `C:\\Users\\${navigator.userAgent.includes('Chrome') ? 'username' : 'your-username'}\\Desktop\\${folderName}`;
+                    } else if (isMac) {
+                        pathInput.placeholder = `/Users/username/Desktop/${folderName}`;
+                    } else {
+                        pathInput.placeholder = `/home/username/Desktop/${folderName}`;
+                    }
+                    
+                    // Focus the input
+                    setTimeout(() => pathInput.focus(), 100);
+                    
+                    // Handle Enter key
+                    pathInput.addEventListener('keypress', (e) => {
+                        if (e.key === 'Enter') {
+                            saveBtn.click();
+                        }
+                    });
+                    
+                    // Handle buttons
+                    skipBtn.addEventListener('click', () => {
+                        if (rememberChoice.checked) {
+                            sessionStorage.setItem('skipPathPrompt', 'true');
+                        }
+                        modal.remove();
+                        resolve(null);
+                    });
+                    
+                    saveBtn.addEventListener('click', () => {
+                        const fullPath = pathInput.value.trim();
+                        if (rememberChoice.checked && fullPath) {
+                            // Save the path pattern for future use
+                            const pathPattern = fullPath.replace(folderName, '{FOLDER_NAME}');
+                            sessionStorage.setItem('pathPattern', pathPattern);
+                        } else if (rememberChoice.checked) {
+                            sessionStorage.setItem('skipPathPrompt', 'true');
+                        }
+                        modal.remove();
+                        resolve(fullPath || null);
+                    });
+                    
+                    // Show modal
+                    $('#pathPromptModal').modal('show');
+                });
+            }
+            
+            async setMonitoredFolderFromHandle(dirHandle, fullPath = null) {
                 this.monitoredFolder = {
                     name: dirHandle.name,
                     data: dirHandle,
                     timestamp: Date.now(),
-                    type: 'handle'
+                    type: 'handle',
+                    fullPath: fullPath || `Selected: "${dirHandle.name}" (complete path not available)`
                 };
                 
-                // Save to localStorage (just the name, can't serialize handle)
+                // Save to localStorage (just the name and path, can't serialize handle)
                 localStorage.setItem('monitoredFolder', JSON.stringify({
                     name: dirHandle.name,
                     timestamp: this.monitoredFolder.timestamp,
-                    type: 'handle'
+                    type: 'handle',
+                    fullPath: this.monitoredFolder.fullPath
                 }));
                 
                 this.updateFolderDisplay();
-                this.showNotification(`Monitoring folder: ${dirHandle.name}`, 'success');
-                console.log('Monitored folder set via handle:', dirHandle.name);
+                
+                if (fullPath) {
+                    this.showNotification(`Monitoring folder: ${fullPath}`, 'success');
+                } else {
+                    this.showNotification(`Monitoring folder: ${dirHandle.name}`, 'success');
+                }
+                console.log('Monitored folder set via handle:', dirHandle.name, 'Full path:', fullPath);
             }
             
             showFolderInputFallback() {
@@ -612,11 +752,33 @@
                 input.multiple = true;
                 input.style.display = 'none';
                 
-                input.addEventListener('change', (event) => {
+                input.addEventListener('change', async (event) => {
                     const files = Array.from(event.target.files);
                     if (files.length > 0) {
                         const folderPath = files[0].webkitRelativePath.split('/')[0];
-                        this.setMonitoredFolder(folderPath, files);
+                        
+                        // Try to extract more path information from the browser
+                        let fullPath = null;
+                        
+                        // Check if user previously set a path pattern
+                        const savedPattern = sessionStorage.getItem('pathPattern');
+                        const skipPrompt = sessionStorage.getItem('skipPathPrompt') === 'true';
+                        
+                        if (savedPattern && !skipPrompt) {
+                            // Use the saved pattern
+                            fullPath = savedPattern.replace('{FOLDER_NAME}', folderPath);
+                            console.log('Using saved path pattern:', fullPath);
+                        } else if (!skipPrompt) {
+                            // Prompt user for full path
+                            try {
+                                fullPath = await this.promptForFullPath(folderPath);
+                            } catch (error) {
+                                console.warn('Error prompting for path:', error);
+                            }
+                        }
+                        
+                        // Set folder with enhanced path information
+                        this.setMonitoredFolder(folderPath, files, fullPath);
                         this.refreshQueue();
                     }
                     document.body.removeChild(input);
@@ -626,34 +788,50 @@
                 input.click();
             }
             
-            setMonitoredFolder(folderName, folderData) {
-                this.monitoredFolder = {
-                    name: folderName,
-                    data: folderData,
-                    timestamp: Date.now(),
-                    type: 'webkitdirectory'
-                };
-                
-                // Extract and save folder path information
+            setMonitoredFolder(folderName, folderData, fullPath = null) {
+                // Extract and enhance folder path information
                 let folderPath = 'Path not available';
+                let enhancedPath = fullPath;
+                
                 if (folderData && folderData.length > 0 && folderData[0].webkitRelativePath) {
                     const pathParts = folderData[0].webkitRelativePath.split('/');
                     pathParts.pop(); // Remove filename
                     folderPath = pathParts.length > 0 ? pathParts.join('/') : folderName;
+                    
+                    // If user provided full path, use it; otherwise try to reconstruct
+                    if (!enhancedPath) {
+                        // Try to extract more path info from the file objects
+                        const firstFile = folderData[0];
+                        if (firstFile.webkitRelativePath && firstFile.webkitRelativePath.includes('/')) {
+                            // We have relative path information
+                            enhancedPath = `Browser selected: ${folderPath} (relative path from selection)`;
+                        } else {
+                            enhancedPath = `Browser selected: ${folderName} (folder name only)`;
+                        }
+                    }
                 }
+                
+                this.monitoredFolder = {
+                    name: folderName,
+                    data: folderData,
+                    timestamp: Date.now(),
+                    type: 'webkitdirectory',
+                    fullPath: enhancedPath || folderPath
+                };
                 
                 // Save to localStorage
                 localStorage.setItem('monitoredFolder', JSON.stringify({
                     name: folderName,
                     path: folderPath,
                     timestamp: this.monitoredFolder.timestamp,
-                    type: 'webkitdirectory'
+                    type: 'webkitdirectory',
+                    fullPath: this.monitoredFolder.fullPath
                 }));
                 
                 // Update UI
                 this.updateFolderDisplay();
                 
-                console.log('Monitored folder set:', folderName, 'Path:', folderPath);
+                console.log('Monitored folder set:', folderName, 'Path:', folderPath, 'Full path:', enhancedPath);
             }
             
             loadSavedFolder() {
