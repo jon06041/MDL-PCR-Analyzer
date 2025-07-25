@@ -2100,6 +2100,256 @@ def get_enabled_pathogens():
 
 # ===== END ML ENDPOINTS =====
 
+# ===== FOLDER QUEUE ENDPOINTS =====
+
+@app.route('/queue.html')
+def queue_page():
+    """Serve the dedicated queue management page"""
+    return send_from_directory('.', 'queue.html')
+
+@app.route('/api/folder-queue/scan', methods=['POST'])
+def scan_folder_for_files():
+    """
+    Scan a folder path for qPCR files and return matching file pairs
+    Note: In a production environment, this would need proper security controls
+    """
+    try:
+        data = request.get_json()
+        folder_path = data.get('folder_path')
+        
+        if not folder_path or not os.path.exists(folder_path):
+            return jsonify({
+                'success': False,
+                'error': 'Invalid folder path'
+            }), 400
+        
+        # Security check - only allow certain directories
+        # In production, implement proper access controls
+        if not is_safe_folder_path(folder_path):
+            return jsonify({
+                'success': False,
+                'error': 'Access denied to this folder'
+            }), 403
+        
+        file_pairs = scan_folder_for_qpcr_files(folder_path)
+        
+        return jsonify({
+            'success': True,
+            'file_pairs': file_pairs,
+            'folder_path': folder_path,
+            'scan_time': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error scanning folder: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+def is_safe_folder_path(folder_path):
+    """
+    Security check for folder access
+    In production, implement proper user permissions and role-based access
+    """
+    # For development, allow all paths
+    # In production, check against allowed directories and user permissions
+    
+    # Basic security - prevent path traversal
+    normalized_path = os.path.normpath(folder_path)
+    if '..' in normalized_path:
+        return False
+    
+    # Add additional security checks as needed
+    # e.g., check against whitelist of allowed directories
+    # e.g., check user permissions based on authentication
+    
+    return True
+
+def scan_folder_for_qpcr_files(folder_path):
+    """
+    Scan folder for qPCR file pairs (amplification + summary)
+    Returns list of experiment file pairs
+    """
+    file_pairs = {}
+    
+    try:
+        # Pattern matching for qPCR files
+        amplification_pattern = re.compile(r'(.+)_(\d+)_([A-Z0-9]+)\.csv$', re.IGNORECASE)
+        summary_pattern = re.compile(r'(.+)_(\d+)_([A-Z0-9]+).*summary.*\.csv$', re.IGNORECASE)
+        
+        amplification_files = {}  # experiment_id -> [files]
+        summary_files = {}        # experiment_id -> file
+        
+        # Scan all CSV files in the folder
+        for filename in os.listdir(folder_path):
+            if not filename.lower().endswith('.csv'):
+                continue
+                
+            file_path = os.path.join(folder_path, filename)
+            file_stat = os.stat(file_path)
+            
+            # Check if it's a summary file
+            summary_match = summary_pattern.match(filename)
+            if summary_match:
+                test_name, run_id, instrument = summary_match.groups()
+                experiment_id = f"{test_name}_{run_id}_{instrument}"
+                
+                # Keep the newest summary file if duplicates exist
+                if (experiment_id not in summary_files or 
+                    file_stat.st_mtime > summary_files[experiment_id]['modified']):
+                    summary_files[experiment_id] = {
+                        'filename': filename,
+                        'path': file_path,
+                        'modified': file_stat.st_mtime,
+                        'size': file_stat.st_size
+                    }
+                continue
+            
+            # Check if it's an amplification file
+            amp_match = amplification_pattern.match(filename)
+            if amp_match and 'summary' not in filename.lower():
+                test_name, run_id, instrument = amp_match.groups()
+                experiment_id = f"{test_name}_{run_id}_{instrument}"
+                
+                if experiment_id not in amplification_files:
+                    amplification_files[experiment_id] = []
+                
+                file_info = {
+                    'filename': filename,
+                    'path': file_path,
+                    'modified': file_stat.st_mtime,
+                    'size': file_stat.st_size,
+                    'fluorophore': detect_fluorophore_from_filename(filename)
+                }
+                
+                # Handle duplicates - keep the newest file
+                existing_files = amplification_files[experiment_id]
+                base_name = re.sub(r'\d+\.csv$', '', filename, flags=re.IGNORECASE)
+                
+                existing_index = -1
+                for i, existing_file in enumerate(existing_files):
+                    existing_base = re.sub(r'\d+\.csv$', '', existing_file['filename'], flags=re.IGNORECASE)
+                    if existing_base == base_name:
+                        existing_index = i
+                        break
+                
+                if existing_index >= 0:
+                    if file_stat.st_mtime > existing_files[existing_index]['modified']:
+                        existing_files[existing_index] = file_info
+                else:
+                    existing_files.append(file_info)
+                
+                # Limit to 4 amplification files per experiment
+                if len(existing_files) > 4:
+                    existing_files.sort(key=lambda x: x['modified'], reverse=True)
+                    amplification_files[experiment_id] = existing_files[:4]
+        
+        # Create file pairs for experiments with both amplification and summary files
+        for experiment_id in amplification_files:
+            if experiment_id in summary_files:
+                amp_files = amplification_files[experiment_id]
+                summary_file = summary_files[experiment_id]
+                
+                file_pairs[experiment_id] = {
+                    'experiment_id': experiment_id,
+                    'amplification_files': amp_files,
+                    'summary_file': summary_file,
+                    'timestamp': max(
+                        summary_file['modified'],
+                        max(f['modified'] for f in amp_files)
+                    ),
+                    'fluorophores': [f['fluorophore'] for f in amp_files],
+                    'total_files': len(amp_files) + 1
+                }
+        
+        return list(file_pairs.values())
+        
+    except Exception as e:
+        app.logger.error(f"Error scanning folder {folder_path}: {str(e)}")
+        raise
+
+def detect_fluorophore_from_filename(filename):
+    """Detect fluorophore from filename patterns"""
+    filename_lower = filename.lower()
+    
+    if 'cy5' in filename_lower or 'red' in filename_lower:
+        return 'Cy5'
+    elif 'fam' in filename_lower or 'green' in filename_lower:
+        return 'FAM'
+    elif 'hex' in filename_lower or 'yellow' in filename_lower:
+        return 'HEX'
+    elif 'texas' in filename_lower and 'red' in filename_lower:
+        return 'TexasRed'
+    elif 'rox' in filename_lower:
+        return 'TexasRed'
+    else:
+        return 'Unknown'
+
+@app.route('/api/folder-queue/validate-files', methods=['POST'])
+def validate_queue_files():
+    """
+    Validate that the files in a queue entry are still accessible and properly formatted
+    """
+    try:
+        data = request.get_json()
+        file_paths = data.get('file_paths', [])
+        
+        validation_results = {}
+        
+        for file_path in file_paths:
+            try:
+                if not os.path.exists(file_path):
+                    validation_results[file_path] = {
+                        'valid': False,
+                        'error': 'File not found'
+                    }
+                    continue
+                
+                # Basic CSV validation
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    first_line = f.readline().strip()
+                    if not first_line:
+                        validation_results[file_path] = {
+                            'valid': False,
+                            'error': 'Empty file'
+                        }
+                        continue
+                
+                # Check if it looks like a CSV
+                if ',' not in first_line and '\t' not in first_line:
+                    validation_results[file_path] = {
+                        'valid': False,
+                        'error': 'Not a valid CSV file'
+                    }
+                    continue
+                
+                validation_results[file_path] = {
+                    'valid': True,
+                    'size': os.path.getsize(file_path),
+                    'modified': os.path.getmtime(file_path)
+                }
+                
+            except Exception as e:
+                validation_results[file_path] = {
+                    'valid': False,
+                    'error': str(e)
+                }
+        
+        return jsonify({
+            'success': True,
+            'validation_results': validation_results
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error validating queue files: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+# ===== END FOLDER QUEUE ENDPOINTS =====
+
 if __name__ == '__main__':
     # Get port from environment variable or use default
     port = int(os.environ.get('PORT', 5000))

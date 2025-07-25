@@ -1,0 +1,1471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Queue - MDL PCR Analyzer</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .queue-header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 30px;
+            margin: 30px 0;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+        
+        .queue-main {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            min-height: 600px;
+        }
+        
+        .folder-status-section {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+            border-left: 5px solid #667eea;
+        }
+        
+        .queue-controls {
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            margin-bottom: 25px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        
+        .queue-stats {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-card {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            text-align: center;
+            min-width: 120px;
+        }
+        
+        .stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            display: block;
+        }
+        
+        .stat-label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+        
+        .queue-table {
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        
+        .queue-table thead {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+        }
+        
+        .queue-table th {
+            border: none;
+            padding: 15px;
+            font-weight: 600;
+        }
+        
+        .queue-table td {
+            padding: 15px;
+            vertical-align: middle;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        .queue-table tbody tr:hover {
+            background-color: #f8f9fa;
+            transform: translateY(-2px);
+            transition: all 0.3s ease;
+        }
+        
+        .experiment-name {
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        .file-count-badge {
+            background: #e9ecef;
+            color: #495057;
+            padding: 4px 8px;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            margin-right: 5px;
+        }
+        
+        .channel-badges .badge {
+            margin-right: 4px;
+            margin-bottom: 2px;
+        }
+        
+        .analyze-btn {
+            background: linear-gradient(135deg, #28a745, #20c997);
+            border: none;
+            padding: 8px 16px;
+            border-radius: 20px;
+            color: white;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+        
+        .analyze-btn:hover {
+            background: linear-gradient(135deg, #218838, #1ea383);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
+            color: white;
+        }
+        
+        .analyze-btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .back-btn {
+            background: linear-gradient(135deg, #6c757d, #495057);
+            border: none;
+            padding: 10px 20px;
+            border-radius: 25px;
+            color: white;
+            font-weight: 500;
+            text-decoration: none;
+            transition: all 0.3s ease;
+        }
+        
+        .back-btn:hover {
+            background: linear-gradient(135deg, #5a6268, #343a40);
+            transform: translateY(-2px);
+            color: white;
+            text-decoration: none;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+        
+        .empty-state i {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+        
+        .refresh-indicator {
+            display: none;
+            color: #28a745;
+            margin-left: 10px;
+        }
+        
+        .refresh-indicator.active {
+            display: inline-block;
+        }
+        
+        .search-filter-controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .search-input, .filter-select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 0.9rem;
+        }
+        
+        .pagination-container {
+            margin-top: 30px;
+            display: flex;
+            justify-content: center;
+        }
+        
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.9);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+            z-index: 10;
+        }
+        
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .alert-notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            min-width: 300px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <!-- Header -->
+        <div class="queue-header">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1><i class="fas fa-layer-group"></i> PCR File Queue</h1>
+                    <p class="mb-0 text-muted">Monitor folders for new PCR files and manage analysis queue</p>
+                </div>
+                <div>
+                    <a href="/" class="back-btn">
+                        <i class="fas fa-arrow-left"></i> Back to Analyzer
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Main Queue Content -->
+        <div class="queue-main">
+            <div class="position-relative">
+                <!-- Loading Overlay -->
+                <div class="loading-overlay" id="loading-overlay">
+                    <div class="text-center">
+                        <div class="loading-spinner"></div>
+                        <p class="mt-3">Scanning folder...</p>
+                    </div>
+                </div>
+                
+                <!-- Folder Status Section -->
+                <div class="folder-status-section">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h5><i class="fas fa-folder-open"></i> Monitored Folder</h5>
+                            <p class="mb-1">
+                                <strong>Name:</strong> 
+                                <span id="current-folder-display" class="text-muted">No folder selected</span>
+                            </p>
+                            <p class="mb-0">
+                                <strong>Path:</strong> 
+                                <span id="current-folder-path" class="text-muted" style="font-family: monospace; font-size: 0.9em;">Not available</span>
+                            </p>
+                            <small class="text-success" id="auto-refresh-status">
+                                <i class="fas fa-sync-alt"></i> Auto-refresh: Every 2 minutes
+                            </small>
+                        </div>
+                        <div>
+                            <button class="btn btn-primary" onclick="QueueManager.browseFolder()">
+                                <i class="fas fa-folder-open"></i> Browse Folder
+                            </button>
+                            <button class="btn btn-secondary ml-2" onclick="QueueManager.refreshQueue()">
+                                <i class="fas fa-sync-alt" id="refresh-icon"></i> Refresh
+                                <span class="refresh-indicator" id="refresh-indicator">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                </span>
+                            </button>
+                            <button class="btn btn-info ml-2" onclick="QueueManager.toggleDebug()">
+                                <i class="fas fa-bug"></i> Debug
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Debug Information Panel -->
+                    <div id="debug-panel" style="display: none; margin-top: 15px; padding: 15px; background: #e9ecef; border-radius: 8px;">
+                        <h6><i class="fas fa-bug"></i> Debug Information</h6>
+                        <div id="debug-info">
+                            <p><strong>Browser Support:</strong></p>
+                            <ul>
+                                <li>File System Access API: <span id="debug-fsapi">-</span></li>
+                                <li>webkitdirectory: <span id="debug-webkit">-</span></li>
+                                <li>User Agent: <span id="debug-useragent">-</span></li>
+                            </ul>
+                            <p><strong>Last Scan Results:</strong></p>
+                            <div id="debug-scan-results">No scan performed yet</div>
+                            <p><strong>Console Logs:</strong> <small>Check browser developer console (F12) for detailed logs</small></p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Queue Statistics -->
+                <div class="queue-stats">
+                    <div class="stat-card">
+                        <span class="stat-number" id="total-experiments">0</span>
+                        <span class="stat-label">Experiments</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-number" id="total-files">0</span>
+                        <span class="stat-label">Total Files</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-number" id="ready-for-analysis">0</span>
+                        <span class="stat-label">Ready for Analysis</span>
+                    </div>
+                </div>
+                
+                <!-- Queue Controls -->
+                <div class="queue-controls">
+                    <div class="search-filter-controls">
+                        <input type="text" 
+                               id="search-experiments" 
+                               class="search-input" 
+                               placeholder="Search experiments..."
+                               onkeyup="QueueManager.filterQueue()">
+                        
+                        <select id="filter-status" class="filter-select" onchange="QueueManager.filterQueue()">
+                            <option value="all">All Experiments</option>
+                            <option value="ready">Ready for Analysis</option>
+                            <option value="recent">Recently Modified</option>
+                        </select>
+                        
+                        <select id="sort-by" class="filter-select" onchange="QueueManager.sortQueue()">
+                            <option value="timestamp">Sort by Time</option>
+                            <option value="name">Sort by Name</option>
+                            <option value="files">Sort by File Count</option>
+                        </select>
+                    </div>
+                    
+                    <div>
+                        <button class="btn btn-outline-secondary" onclick="QueueManager.selectAll()">
+                            <i class="fas fa-check-square"></i> Select All
+                        </button>
+                        <button class="btn btn-outline-danger ml-2" onclick="QueueManager.clearQueue()">
+                            <i class="fas fa-trash"></i> Clear Queue
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Queue Table -->
+                <div class="table-responsive">
+                    <table class="table queue-table" id="queue-table">
+                        <thead>
+                            <tr>
+                                <th width="3%">
+                                    <input type="checkbox" id="select-all-checkbox" onchange="QueueManager.toggleSelectAll()">
+                                </th>
+                                <th width="25%">Experiment</th>
+                                <th width="15%">Files</th>
+                                <th width="20%">Channels</th>
+                                <th width="15%">Last Modified</th>
+                                <th width="12%">Status</th>
+                                <th width="10%">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="queue-table-body">
+                            <!-- Queue items will be populated here -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Empty State -->
+                <div class="empty-state" id="empty-state" style="display: none;">
+                    <i class="fas fa-inbox"></i>
+                    <h4>No experiments found</h4>
+                    <p>Click "Browse Folder" above to select a folder to monitor,<br>or check your search filters if you've already selected a folder.</p>
+                </div>
+                
+                <!-- Pagination -->
+                <div class="pagination-container" id="pagination-container" style="display: none;">
+                    <nav>
+                        <ul class="pagination">
+                            <!-- Pagination will be generated here -->
+                        </ul>
+                    </nav>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- jQuery and Bootstrap JS -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Pathogen Library for validation -->
+    <script src="/static/pathogen_library.js"></script>
+    
+    <!-- Queue Manager JavaScript -->
+    <script>
+        class QueueManager {
+            constructor() {
+                this.fileQueue = new Map();
+                this.filteredQueue = new Map();
+                this.monitoredFolder = null;
+                this.autoRefreshInterval = null;
+                this.autoRefreshDelay = 120000; // 2 minutes instead of 30 seconds
+                this.currentPage = 1;
+                this.itemsPerPage = 20;
+                this.isRefreshing = false;
+                
+                this.initialize();
+            }
+            
+            initialize() {
+                console.log('Initializing Queue Manager...');
+                
+                // Load saved folder from localStorage
+                this.loadSavedFolder();
+                
+                // Start auto-refresh
+                this.startAutoRefresh();
+                
+                // Initialize debug info
+                this.updateDebugInfo();
+                
+                // Add event listeners for page visibility changes
+                document.addEventListener('visibilitychange', () => {
+                    if (document.hidden) {
+                        this.saveQueueData();
+                    }
+                });
+                
+                // Save data before page unload
+                window.addEventListener('beforeunload', () => {
+                    this.saveQueueData();
+                });
+                
+                // Initial refresh
+                this.refreshQueue();
+                
+                console.log('Queue Manager initialized');
+            }
+            
+            static browseFolder() {
+                window.queueManager.browseFolder();
+            }
+            
+            static refreshQueue() {
+                window.queueManager.refreshQueue();
+            }
+            
+            static filterQueue() {
+                window.queueManager.filterQueue();
+            }
+            
+            static sortQueue() {
+                window.queueManager.sortQueue();
+            }
+            
+            static selectAll() {
+                window.queueManager.selectAll();
+            }
+            
+            static toggleSelectAll() {
+                window.queueManager.toggleSelectAll();
+            }
+            
+            static clearQueue() {
+                window.queueManager.clearQueue();
+            }
+            
+            static toggleDebug() {
+                window.queueManager.toggleDebug();
+            }
+            
+            toggleDebug() {
+                const panel = document.getElementById('debug-panel');
+                if (panel.style.display === 'none') {
+                    panel.style.display = 'block';
+                    this.updateDebugInfo();
+                } else {
+                    panel.style.display = 'none';
+                }
+            }
+            
+            updateDebugInfo() {
+                // Check browser support
+                document.getElementById('debug-fsapi').textContent = 'showDirectoryPicker' in window ? '✅ Supported' : '❌ Not supported';
+                document.getElementById('debug-webkit').textContent = 'webkitdirectory' in document.createElement('input') ? '✅ Supported' : '❌ Not supported';
+                document.getElementById('debug-useragent').textContent = navigator.userAgent.substring(0, 100) + '...';
+            }
+            
+            updateScanDebugInfo(scanInfo) {
+                const debugResults = document.getElementById('debug-scan-results');
+                debugResults.innerHTML = `
+                    <div style="font-family: monospace; font-size: 0.9em;">
+                        <strong>Last scan (${new Date().toLocaleTimeString()}):</strong><br>
+                        • Mode: ${scanInfo.mode}<br>
+                        • Total files: ${scanInfo.totalFiles}<br>
+                        • CSV files: ${scanInfo.csvFiles}<br>
+                        • Amplification files: ${scanInfo.amplificationFiles || 0}<br>
+                        • Summary files: ${scanInfo.summaryFiles || 0}<br>
+                        • Other CSV files: ${scanInfo.otherCsvFiles || 0}<br>
+                        • Queue entries created: ${this.fileQueue.size}
+                    </div>
+                `;
+            }
+            
+            async browseFolder() {
+                try {
+                    // Try File System Access API first (Chrome, Edge)
+                    if ('showDirectoryPicker' in window) {
+                        console.log('Using File System Access API...');
+                        
+                        // Request directory with read permissions
+                        const dirHandle = await window.showDirectoryPicker({
+                            mode: 'read',
+                            startIn: 'documents' // Start in a common location
+                        });
+                        
+                        console.log('Directory selected:', dirHandle.name);
+                        
+                        // Test permissions immediately
+                        const permission = await dirHandle.requestPermission({ mode: 'read' });
+                        if (permission !== 'granted') {
+                            throw new Error('Permission to read directory was denied');
+                        }
+                        
+                        await this.setMonitoredFolderFromHandle(dirHandle);
+                        this.refreshQueue();
+                        return;
+                    }
+                    
+                    // Fallback to webkitdirectory (most browsers)
+                    console.log('File System Access API not available, using webkitdirectory fallback...');
+                    this.showFolderInputFallback();
+                    
+                } catch (error) {
+                    if (error.name === 'AbortError') {
+                        console.log('User cancelled folder selection');
+                        return;
+                    }
+                    
+                    console.error('Error browsing folder:', error);
+                    
+                    if (error.message.includes('Permission') || error.message.includes('denied')) {
+                        this.showNotification(`Access denied: ${error.message}. Please contact your IT team to allow folder access for this application.`, 'warning');
+                    } else if (error.message.includes('not allowed')) {
+                        this.showNotification('Folder access not allowed. Your IT team may need to configure permissions for this site.', 'warning');
+                    } else {
+                        this.showNotification(`Folder access error: ${error.message}. Try the manual upload option or contact IT support.`, 'error');
+                    }
+                    
+                    // Fallback to manual file selection
+                    this.showFolderInputFallback();
+                }
+            }
+            
+            async setMonitoredFolderFromHandle(dirHandle) {
+                this.monitoredFolder = {
+                    name: dirHandle.name,
+                    data: dirHandle,
+                    timestamp: Date.now(),
+                    type: 'handle'
+                };
+                
+                // Save to localStorage (just the name, can't serialize handle)
+                localStorage.setItem('monitoredFolder', JSON.stringify({
+                    name: dirHandle.name,
+                    timestamp: this.monitoredFolder.timestamp,
+                    type: 'handle'
+                }));
+                
+                this.updateFolderDisplay();
+                this.showNotification(`Monitoring folder: ${dirHandle.name}`, 'success');
+                console.log('Monitored folder set via handle:', dirHandle.name);
+            }
+            
+            showFolderInputFallback() {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.webkitdirectory = true;
+                input.multiple = true;
+                input.style.display = 'none';
+                
+                input.addEventListener('change', (event) => {
+                    const files = Array.from(event.target.files);
+                    if (files.length > 0) {
+                        const folderPath = files[0].webkitRelativePath.split('/')[0];
+                        this.setMonitoredFolder(folderPath, files);
+                        this.refreshQueue();
+                    }
+                    document.body.removeChild(input);
+                });
+                
+                document.body.appendChild(input);
+                input.click();
+            }
+            
+            setMonitoredFolder(folderName, folderData) {
+                this.monitoredFolder = {
+                    name: folderName,
+                    data: folderData,
+                    timestamp: Date.now(),
+                    type: 'webkitdirectory'
+                };
+                
+                // Extract and save folder path information
+                let folderPath = 'Path not available';
+                if (folderData && folderData.length > 0 && folderData[0].webkitRelativePath) {
+                    const pathParts = folderData[0].webkitRelativePath.split('/');
+                    pathParts.pop(); // Remove filename
+                    folderPath = pathParts.length > 0 ? pathParts.join('/') : folderName;
+                }
+                
+                // Save to localStorage
+                localStorage.setItem('monitoredFolder', JSON.stringify({
+                    name: folderName,
+                    path: folderPath,
+                    timestamp: this.monitoredFolder.timestamp,
+                    type: 'webkitdirectory'
+                }));
+                
+                // Update UI
+                this.updateFolderDisplay();
+                
+                console.log('Monitored folder set:', folderName, 'Path:', folderPath);
+            }
+            
+            loadSavedFolder() {
+                try {
+                    const saved = localStorage.getItem('monitoredFolder');
+                    const savedQueue = localStorage.getItem('fileQueue');
+                    
+                    if (saved) {
+                        const folderInfo = JSON.parse(saved);
+                        document.getElementById('current-folder-display').textContent = folderInfo.name;
+                        
+                        // Show path if available
+                        if (folderInfo.path && folderInfo.path !== 'Path not available') {
+                            document.getElementById('current-folder-path').textContent = `Previous: ${folderInfo.path} (click Browse to reselect and refresh)`;
+                            document.getElementById('current-folder-path').className = 'text-warning';
+                        } else if (folderInfo.type === 'handle') {
+                            document.getElementById('current-folder-path').textContent = `Previous: "${folderInfo.name}" (File System Access API - click Browse to reselect)`;
+                            document.getElementById('current-folder-path').className = 'text-warning';
+                        } else {
+                            document.getElementById('current-folder-path').textContent = `Previously selected folder (click Browse to reselect and scan for new files)`;
+                            document.getElementById('current-folder-path').className = 'text-warning';
+                        }
+                        
+                        this.showNotification('Previous folder remembered. Click Browse to reselect for monitoring.', 'info');
+                    }
+                    
+                    // Restore queue data if available
+                    if (savedQueue) {
+                        const queueData = JSON.parse(savedQueue);
+                        // Convert the plain objects back to Map
+                        this.fileQueue = new Map(Object.entries(queueData));
+                        console.log(`Restored ${this.fileQueue.size} experiments from saved queue`);
+                        this.updateQueueDisplay();
+                        this.updateStatistics();
+                        
+                        if (this.fileQueue.size > 0) {
+                            this.showNotification(`Restored ${this.fileQueue.size} experiments from previous session`, 'success');
+                        }
+                    }
+                } catch (error) {
+                    console.warn('Could not load saved data:', error);
+                }
+            }
+            
+            updateFolderDisplay() {
+                const nameDisplay = document.getElementById('current-folder-display');
+                const pathDisplay = document.getElementById('current-folder-path');
+                
+                if (this.monitoredFolder) {
+                    nameDisplay.textContent = this.monitoredFolder.name;
+                    nameDisplay.className = 'text-success';
+                    
+                    // Try to get the full path if available
+                    if (this.monitoredFolder.type === 'handle') {
+                        // For File System Access API, we can only show the folder name
+                        pathDisplay.textContent = `Selected: "${this.monitoredFolder.name}" (File System Access API - full system path not available due to browser security)`;
+                        pathDisplay.className = 'text-info';
+                    } else if (this.monitoredFolder.data instanceof Array && this.monitoredFolder.data.length > 0) {
+                        // For webkitdirectory, we can extract the path from the first file
+                        const firstFile = this.monitoredFolder.data[0];
+                        if (firstFile.webkitRelativePath) {
+                            const fullPath = firstFile.webkitRelativePath;
+                            const pathParts = fullPath.split('/');
+                            pathParts.pop(); // Remove filename
+                            const folderPath = pathParts.length > 0 ? pathParts.join('/') : this.monitoredFolder.name;
+                            
+                            // Show the relative path from browser selection
+                            pathDisplay.textContent = `Relative path: ${folderPath} (from browser file selection)`;
+                            pathDisplay.className = 'text-success';
+                        } else {
+                            pathDisplay.textContent = `Selected: "${this.monitoredFolder.name}" (path details not available from browser)`;
+                            pathDisplay.className = 'text-muted';
+                        }
+                    } else {
+                        pathDisplay.textContent = `Selected: "${this.monitoredFolder.name}" (path details not available)`;
+                        pathDisplay.className = 'text-muted';
+                    }
+                } else {
+                    nameDisplay.textContent = 'No folder selected';
+                    nameDisplay.className = 'text-muted';
+                    pathDisplay.textContent = 'Not available';
+                    pathDisplay.className = 'text-muted';
+                }
+            }
+            
+            async refreshQueue() {
+                if (this.isRefreshing) return;
+                
+                this.isRefreshing = true;
+                const loadingOverlay = document.getElementById('loading-overlay');
+                const refreshIndicator = document.getElementById('refresh-indicator');
+                
+                loadingOverlay.style.display = 'flex';
+                refreshIndicator.classList.add('active');
+                
+                try {
+                    if (this.monitoredFolder) {
+                        await this.scanFolderForFiles();
+                    }
+                    
+                    this.updateQueueDisplay();
+                    this.updateStatistics();
+                    
+                } catch (error) {
+                    console.error('Error refreshing queue:', error);
+                    this.showNotification('Error scanning folder. Please check permissions.', 'error');
+                } finally {
+                    this.isRefreshing = false;
+                    loadingOverlay.style.display = 'none';
+                    refreshIndicator.classList.remove('active');
+                }
+            }
+            
+            async scanFolderForFiles() {
+                if (!this.monitoredFolder) return;
+                
+                console.log('Scanning folder for CSV files...', this.monitoredFolder.name);
+                this.fileQueue.clear();
+                
+                try {
+                    let files = [];
+                    let totalFilesFound = 0;
+                    let csvFilesFound = 0;
+                    
+                    if (this.monitoredFolder.data instanceof Array) {
+                        // webkitdirectory mode - files are already loaded
+                        files = this.monitoredFolder.data;
+                        totalFilesFound = files.length;
+                        
+                        console.log(`webkitdirectory mode: Processing ${totalFilesFound} files`);
+                        files.forEach((file, index) => {
+                            console.log(`File ${index + 1}: "${file.name}", Size: ${file.size}, Path: ${file.webkitRelativePath || 'N/A'}`);
+                            if (file.name.toLowerCase().endsWith('.csv')) {
+                                csvFilesFound++;
+                                console.log(`✅ CSV file found: ${file.name}`);
+                            } else {
+                                console.log(`❌ Not CSV: ${file.name} (extension: ${file.name.split('.').pop()})`);
+                            }
+                        });
+                        
+                        console.log(`webkitdirectory mode: ${totalFilesFound} total files, ${csvFilesFound} CSV files`);
+                        
+                    } else if (this.monitoredFolder.data.values) {
+                        // File System Access API mode - need to iterate through directory
+                        console.log('Iterating through directory with File System Access API...');
+                        
+                        try {
+                            for await (const [name, entry] of this.monitoredFolder.data.entries()) {
+                                totalFilesFound++;
+                                console.log(`Found entry: ${name} (${entry.kind})`);
+                                
+                                if (entry.kind === 'file') {
+                                    try {
+                                        const file = await entry.getFile();
+                                        
+                                        // Add a custom property for path tracking without modifying the read-only property
+                                        Object.defineProperty(file, 'relativePath', {
+                                            value: name,
+                                            writable: false,
+                                            enumerable: false
+                                        });
+                                        
+                                        files.push(file);
+                                        
+                                        // Enhanced debugging for CSV detection
+                                        console.log(`File details - Name: "${file.name}", Directory Name: "${name}", Size: ${file.size}`);
+                                        console.log(`Lowercase name: "${file.name.toLowerCase()}", Ends with .csv: ${file.name.toLowerCase().endsWith('.csv')}`);
+                                        
+                                        if (file.name.toLowerCase().endsWith('.csv')) {
+                                            csvFilesFound++;
+                                            console.log(`✅ CSV file found: ${file.name}, size: ${file.size}, modified: ${new Date(file.lastModified).toLocaleString()}`);
+                                        } else {
+                                            console.log(`❌ Not CSV: ${file.name} (extension: ${file.name.split('.').pop()})`);
+                                        }
+                                    } catch (fileError) {
+                                        console.warn(`Could not read file ${name}:`, fileError);
+                                    }
+                                } else if (entry.kind === 'directory') {
+                                    console.log(`Skipping subdirectory: ${name}`);
+                                }
+                            }
+                        } catch (iterationError) {
+                            console.error('Error iterating directory:', iterationError);
+                            throw new Error(`Cannot read directory contents: ${iterationError.message}`);
+                        }
+                    }
+                    
+                    console.log(`Scan complete: ${totalFilesFound} total entries, ${csvFilesFound} CSV files to process`);
+                    
+                    // Process the files first to get the counts
+                    const processResult = await this.processFiles(files);
+                    
+                    // Update debug panel with actual results
+                    this.updateScanDebugInfo({
+                        totalFiles: totalFilesFound,
+                        csvFiles: csvFilesFound,
+                        amplificationFiles: processResult?.amplificationCount || 0,
+                        summaryFiles: processResult?.summaryCount || 0,
+                        otherCsvFiles: processResult?.otherCsvCount || 0,
+                        mode: this.monitoredFolder.data instanceof Array ? 'webkitdirectory' : 'File System Access API'
+                    });
+                    
+                    if (csvFilesFound === 0) {
+                        this.showNotification(`No CSV files found in "${this.monitoredFolder.name}". Make sure the folder contains PCR export files.`, 'info');
+                    }
+                    
+                } catch (error) {
+                    console.error('Error scanning folder:', error);
+                    this.showNotification(`Error reading folder: ${error.message}. Check folder permissions.`, 'error');
+                    throw error;
+                }
+            }
+            
+            async processFiles(files) {
+                console.log(`Processing ${files.length} files...`);
+                
+                const amplificationFiles = new Map();
+                const summaryFiles = new Map();
+                
+                // More flexible patterns for PCR files - handle various naming conventions
+                const amplificationPattern = /(.+?)[-_\s]*(\d+)[-_\s]*([A-Z0-9]+)[-_\s]*(?:quantification|amplification|results?).*\.csv$/i;
+                const summaryPattern = /(.+?)[-_\s]*(\d+)[-_\s]*([A-Z0-9]+).*summary.*\.csv$/i;
+                const alternativeSummaryPattern = /(.+)summary(.+)\.csv$/i;
+                
+                // Additional patterns for common PCR file formats
+                const broadAmplificationPattern = /(.+?)(?:quantification|amplification|results?).*\.csv$/i;
+                const broadSummaryPattern = /(.+?)summary.*\.csv$/i;
+                
+                let amplificationCount = 0;
+                let summaryCount = 0;
+                let otherCsvCount = 0;
+                
+                for (const file of files) {
+                    const fileName = file.name || file.webkitRelativePath?.split('/').pop() || file.relativePath || '';
+                    
+                    // Skip non-CSV files
+                    if (!fileName.toLowerCase().endsWith('.csv')) {
+                        continue;
+                    }
+                    
+                    console.log(`Processing CSV file: ${fileName}`);
+                    
+                    // Check if it's a summary file (multiple patterns)
+                    let summaryMatch = fileName.match(summaryPattern);
+                    if (!summaryMatch) {
+                        summaryMatch = fileName.match(alternativeSummaryPattern);
+                    }
+                    
+                    if (summaryMatch || fileName.toLowerCase().includes('summary')) {
+                        summaryCount++;
+                        console.log(`Identified as summary file: ${fileName}`);
+                        
+                        // Try to extract experiment ID, fallback to filename-based ID
+                        let experimentId;
+                        if (summaryMatch && summaryMatch.length >= 4) {
+                            const [, testName, runId, instrument] = summaryMatch;
+                            experimentId = `${testName.trim()}_${runId}_${instrument}`;
+                        } else {
+                            // Fallback: create ID from filename parts before common keywords
+                            const basePattern = /^(.+?)(?:[-_\s]*(?:summary|quantification|amplification|results?))/i;
+                            const baseMatch = fileName.match(basePattern);
+                            experimentId = baseMatch ? baseMatch[1].trim().replace(/\s+/g, '_') : fileName.replace(/\.csv$/i, '').replace(/summary/i, '').trim();
+                        }
+                        
+                        console.log(`Summary file experiment ID: ${experimentId}`);
+                        
+                        // Keep the newest summary file if duplicates exist
+                        if (!summaryFiles.has(experimentId) || file.lastModified > summaryFiles.get(experimentId).lastModified) {
+                            summaryFiles.set(experimentId, file);
+                        }
+                        continue;
+                    }
+                    
+                    // Check if it's an amplification file (try multiple patterns)
+                    let ampMatch = fileName.match(amplificationPattern);
+                    let experimentId;
+                    
+                    if (ampMatch && ampMatch.length >= 4) {
+                        amplificationCount++;
+                        const [, testName, runId, instrument] = ampMatch;
+                        experimentId = `${testName.trim()}_${runId}_${instrument}`;
+                        console.log(`Identified as amplification file (pattern match): ${fileName} -> ${experimentId}`);
+                    } else if (fileName.match(broadAmplificationPattern)) {
+                        amplificationCount++;
+                        // For broader pattern, create experiment ID from filename
+                        const basePattern = /^(.+?)(?:[-_\s]*(?:quantification|amplification|results?))/i;
+                        const baseMatch = fileName.match(basePattern);
+                        experimentId = baseMatch ? baseMatch[1].trim().replace(/\s+/g, '_') : fileName.replace(/\.csv$/i, '').trim();
+                        console.log(`Identified as amplification file (broad pattern): ${fileName} -> ${experimentId}`);
+                    }
+                    
+                    if (experimentId) {
+                        if (!amplificationFiles.has(experimentId)) {
+                            amplificationFiles.set(experimentId, []);
+                        }
+                        
+                        const fileList = amplificationFiles.get(experimentId);
+                        
+                        // Handle duplicates - keep the newest file
+                        const existingIndex = fileList.findIndex(f => 
+                            f.name.replace(/\d+\.csv$/i, '') === fileName.replace(/\d+\.csv$/i, '')
+                        );
+                        
+                        if (existingIndex >= 0) {
+                            if (file.lastModified > fileList[existingIndex].lastModified) {
+                                console.log(`Replacing older duplicate: ${fileList[existingIndex].name} -> ${fileName}`);
+                                fileList[existingIndex] = file;
+                            }
+                        } else {
+                            fileList.push(file);
+                        }
+                        
+                        // Limit to 4 amplification files per experiment
+                        if (fileList.length > 4) {
+                            fileList.sort((a, b) => b.lastModified - a.lastModified);
+                            fileList.splice(4);
+                            console.log(`Limited to 4 newest files for ${experimentId}`);
+                        }
+                    } else {
+                        otherCsvCount++;
+                        console.log(`CSV file doesn't match expected patterns: ${fileName}`);
+                    }
+                }
+                
+                console.log(`File processing summary:
+                    - Amplification files: ${amplificationCount}
+                    - Summary files: ${summaryCount}
+                    - Other CSV files: ${otherCsvCount}
+                    - Experiment IDs found: ${amplificationFiles.size}
+                    - Summary files matched: ${summaryFiles.size}`);
+                
+                // Create queue entries for experiments with both amplification and summary files
+                let queueEntriesCreated = 0;
+                for (const [experimentId, ampFiles] of amplificationFiles) {
+                    const summaryFile = summaryFiles.get(experimentId);
+                    
+                    if (summaryFile && ampFiles.length > 0) {
+                        queueEntriesCreated++;
+                        
+                        // Read file content immediately and store it
+                        const amplificationData = [];
+                        for (const file of ampFiles) {
+                            try {
+                                const content = await this.readFileContent(file);
+                                amplificationData.push({
+                                    name: file.name,
+                                    size: file.size,
+                                    lastModified: file.lastModified,
+                                    type: file.type || 'text/csv',
+                                    content: content
+                                });
+                                console.log(`Read content for amplification file: ${file.name}, length: ${content.length}`);
+                            } catch (error) {
+                                console.warn(`Could not read amplification file ${file.name}:`, error);
+                            }
+                        }
+                        
+                        let summaryData = null;
+                        if (summaryFile) {
+                            try {
+                                const content = await this.readFileContent(summaryFile);
+                                summaryData = {
+                                    name: summaryFile.name,
+                                    size: summaryFile.size,
+                                    lastModified: summaryFile.lastModified,
+                                    type: summaryFile.type || 'text/csv',
+                                    content: content
+                                };
+                                console.log(`Read content for summary file: ${summaryFile.name}, length: ${content.length}`);
+                            } catch (error) {
+                                console.warn(`Could not read summary file:`, error);
+                            }
+                        }
+                        
+                        this.fileQueue.set(experimentId, {
+                            experimentId,
+                            amplificationFiles: amplificationData, // Store data with content
+                            summaryFile: summaryData, // Store data with content
+                            timestamp: Math.max(
+                                summaryFile.lastModified,
+                                ...ampFiles.map(f => f.lastModified)
+                            ),
+                            channels: this.detectChannels(ampFiles),
+                            status: 'ready'
+                        });
+                        
+                        console.log(`Queue entry created for ${experimentId}: ${ampFiles.length} amplification + 1 summary (with content)`);
+                    } else {
+                        console.log(`Incomplete experiment ${experimentId}: ${ampFiles.length} amplification, ${summaryFile ? 1 : 0} summary`);
+                    }
+                }
+                
+                // Also create entries for amplification-only experiments (fallback for multichannel runs)
+                for (const [experimentId, ampFiles] of amplificationFiles) {
+                    const summaryFile = summaryFiles.get(experimentId);
+                    
+                    // If no exact summary match but we have multiple amplification files (likely multichannel)
+                    if (!summaryFile && ampFiles.length >= 2) {
+                        // Try to find any summary file that might belong to this experiment
+                        let possibleSummary = null;
+                        for (const [summaryId, summary] of summaryFiles) {
+                            // Check if summary ID is contained in or contains the experiment ID
+                            if (summaryId.includes(experimentId.split('_')[0]) || experimentId.includes(summaryId.split('_')[0])) {
+                                possibleSummary = summary;
+                                console.log(`Found possible summary match: ${summaryId} for experiment ${experimentId}`);
+                                break;
+                            }
+                        }
+                        
+                        queueEntriesCreated++;
+                        
+                        // Read file content immediately for multichannel experiments too
+                        const amplificationData = [];
+                        for (const file of ampFiles) {
+                            try {
+                                const content = await this.readFileContent(file);
+                                amplificationData.push({
+                                    name: file.name,
+                                    size: file.size,
+                                    lastModified: file.lastModified,
+                                    type: file.type || 'text/csv',
+                                    content: content
+                                });
+                                console.log(`Read content for multichannel amplification file: ${file.name}, length: ${content.length}`);
+                            } catch (error) {
+                                console.warn(`Could not read multichannel amplification file ${file.name}:`, error);
+                            }
+                        }
+                        
+                        let summaryData = null;
+                        if (possibleSummary) {
+                            try {
+                                const content = await this.readFileContent(possibleSummary);
+                                summaryData = {
+                                    name: possibleSummary.name,
+                                    size: possibleSummary.size,
+                                    lastModified: possibleSummary.lastModified,
+                                    type: possibleSummary.type || 'text/csv',
+                                    content: content
+                                };
+                                console.log(`Read content for matched summary file: ${possibleSummary.name}, length: ${content.length}`);
+                            } catch (error) {
+                                console.warn(`Could not read matched summary file:`, error);
+                            }
+                        }
+                        
+                        this.fileQueue.set(experimentId, {
+                            experimentId,
+                            amplificationFiles: amplificationData, // Store data with content
+                            summaryFile: summaryData, // Store data with content (or null)
+                            timestamp: Math.max(...ampFiles.map(f => f.lastModified)),
+                            channels: this.detectChannels(ampFiles),
+                            status: possibleSummary ? 'ready' : 'partial'
+                        });
+                        
+                        console.log(`Queue entry created for multichannel experiment ${experimentId}: ${ampFiles.length} amplification files${possibleSummary ? ' + matched summary' : ' (no summary)'} (with content)`);
+                    }
+                }
+                
+                // Save queue data to localStorage for persistence
+                this.saveQueueData();
+                
+                if (queueEntriesCreated === 0 && (amplificationCount > 0 || summaryCount > 0)) {
+                    this.showNotification(
+                        `Found ${amplificationCount} amplification and ${summaryCount} summary files, but couldn't match them into complete experiments. Check file naming patterns.`, 
+                        'warning'
+                    );
+                } else if (queueEntriesCreated > 0) {
+                    this.showNotification(`Found ${queueEntriesCreated} complete experiments ready for analysis!`, 'success');
+                }
+                
+                // Return the counts for debug panel
+                return { amplificationCount, summaryCount, otherCsvCount };
+            }
+            
+            detectChannels(files) {
+                const channels = [];
+                const patterns = {
+                    'Cy5': /cy5|red/i,
+                    'FAM': /fam|green/i,
+                    'HEX': /hex|yellow/i,
+                    'TexasRed': /texas.*red|rox/i
+                };
+                
+                for (const file of files) {
+                    for (const [name, pattern] of Object.entries(patterns)) {
+                        if (pattern.test(file.name) && !channels.includes(name)) {
+                            channels.push(name);
+                        }
+                    }
+                }
+                
+                return channels.length > 0 ? channels : ['Unknown'];
+            }
+            
+            updateQueueDisplay() {
+                this.filteredQueue = new Map(this.fileQueue);
+                this.filterQueue();
+            }
+            
+            filterQueue() {
+                const searchTerm = document.getElementById('search-experiments').value.toLowerCase();
+                const statusFilter = document.getElementById('filter-status').value;
+                
+                this.filteredQueue = new Map();
+                
+                for (const [id, entry] of this.fileQueue) {
+                    // Apply search filter
+                    if (searchTerm && !entry.experimentId.toLowerCase().includes(searchTerm)) {
+                        continue;
+                    }
+                    
+                    // Apply status filter
+                    if (statusFilter === 'ready' && entry.status !== 'ready') {
+                        continue;
+                    }
+                    
+                    if (statusFilter === 'recent' && Date.now() - entry.timestamp > 86400000) { // 24 hours
+                        continue;
+                    }
+                    
+                    this.filteredQueue.set(id, entry);
+                }
+                
+                this.sortQueue();
+            }
+            
+            sortQueue() {
+                const sortBy = document.getElementById('sort-by').value;
+                const entries = Array.from(this.filteredQueue.entries());
+                
+                entries.sort(([, a], [, b]) => {
+                    switch (sortBy) {
+                        case 'name':
+                            return a.experimentId.localeCompare(b.experimentId);
+                        case 'files':
+                            return (b.amplificationFiles.length + 1) - (a.amplificationFiles.length + 1);
+                        case 'timestamp':
+                        default:
+                            return b.timestamp - a.timestamp;
+                    }
+                });
+                
+                this.filteredQueue = new Map(entries);
+                this.renderQueueTable();
+            }
+            
+            renderQueueTable() {
+                const tbody = document.getElementById('queue-table-body');
+                const emptyState = document.getElementById('empty-state');
+                
+                if (this.filteredQueue.size === 0) {
+                    tbody.innerHTML = '';
+                    emptyState.style.display = 'block';
+                    return;
+                }
+                
+                emptyState.style.display = 'none';
+                
+                const entries = Array.from(this.filteredQueue.values());
+                const startIndex = (this.currentPage - 1) * this.itemsPerPage;
+                const endIndex = startIndex + this.itemsPerPage;
+                const pageEntries = entries.slice(startIndex, endIndex);
+                
+                tbody.innerHTML = pageEntries.map(entry => this.createQueueRowHTML(entry)).join('');
+                
+                this.renderPagination(entries.length);
+            }
+            
+            createQueueRowHTML(entry) {
+                const timeStr = new Date(entry.timestamp).toLocaleString();
+                const channelsBadges = entry.channels.map(f => 
+                    `<span class="badge badge-primary mr-1">${f}</span>`
+                ).join('');
+                
+                const totalFiles = entry.amplificationFiles.length + (entry.summaryFile ? 1 : 0);
+                const statusBadge = entry.status === 'ready' ? 
+                    '<span class="badge badge-success">Ready</span>' : 
+                    '<span class="badge badge-warning">Partial</span>';
+                
+                return `
+                    <tr data-experiment-id="${entry.experimentId}">
+                        <td>
+                            <input type="checkbox" class="experiment-checkbox" value="${entry.experimentId}">
+                        </td>
+                        <td>
+                            <div class="experiment-name">${entry.experimentId}</div>
+                            <small class="text-muted">${timeStr}</small>
+                        </td>
+                        <td>
+                            <span class="file-count-badge">${entry.amplificationFiles.length}</span> amplification
+                            <br>
+                            <span class="file-count-badge">${entry.summaryFile ? 1 : 0}</span> summary
+                        </td>
+                        <td>
+                            <div class="channel-badges">
+                                ${channelsBadges}
+                            </div>
+                        </td>
+                        <td>
+                            <small>${this.timeAgo(entry.timestamp)}</small>
+                        </td>
+                        <td>
+                            ${statusBadge}
+                        </td>
+                        <td>
+                            <button class="btn btn-sm analyze-btn" 
+                                    onclick="window.queueManager.analyzeExperiment('${entry.experimentId}')">
+                                <i class="fas fa-play"></i> Analyze
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }
+            
+            timeAgo(timestamp) {
+                const now = Date.now();
+                const diff = now - timestamp;
+                const minutes = Math.floor(diff / 60000);
+                const hours = Math.floor(diff / 3600000);
+                const days = Math.floor(diff / 86400000);
+                
+                if (days > 0) return `${days}d ago`;
+                if (hours > 0) return `${hours}h ago`;
+                if (minutes > 0) return `${minutes}m ago`;
+                return 'Just now';
+            }
+            
+            renderPagination(totalItems) {
+                const container = document.getElementById('pagination-container');
+                const totalPages = Math.ceil(totalItems / this.itemsPerPage);
+                
+                if (totalPages <= 1) {
+                    container.style.display = 'none';
+                    return;
+                }
+                
+                container.style.display = 'block';
+                // Implement pagination HTML generation here if needed
+            }
+            
+            updateStatistics() {
+                document.getElementById('total-experiments').textContent = this.fileQueue.size;
+                
+                let totalFiles = 0;
+                let readyCount = 0;
+                
+                for (const entry of this.fileQueue.values()) {
+                    totalFiles += entry.amplificationFiles.length + (entry.summaryFile ? 1 : 0);
+                    if (entry.status === 'ready' || entry.status === 'partial') readyCount++;
+                }
+                
+                document.getElementById('total-files').textContent = totalFiles;
+                document.getElementById('ready-for-analysis').textContent = readyCount;
+            }
+            
+            saveQueueData() {
+                try {
+                    // Convert Map to plain object for JSON serialization
+                    const queueObj = {};
+                    for (const [key, value] of this.fileQueue) {
+                        // Data is already in the correct format with content included
+                        queueObj[key] = {
+                            experimentId: value.experimentId,
+                            amplificationFiles: value.amplificationFiles, // Already has content
+                            summaryFile: value.summaryFile, // Already has content
+                            timestamp: value.timestamp,
+                            channels: value.channels,
+                            status: value.status
+                        };
+                    }
+                    
+                    localStorage.setItem('fileQueue', JSON.stringify(queueObj));
+                    console.log(`Saved ${Object.keys(queueObj).length} experiments to localStorage with file content`);
+                } catch (error) {
+                    console.warn('Could not save queue data:', error);
+                }
+            }
+            
+            async analyzeExperiment(experimentId) {
+                const entry = this.fileQueue.get(experimentId);
+                if (!entry) {
+                    this.showNotification('Experiment not found', 'error');
+                    return;
+                }
+                
+                try {
+                    // Show loading state
+                    const button = document.querySelector(`[onclick="window.queueManager.analyzeExperiment('${experimentId}')"]`);
+                    if (button) {
+                        button.disabled = true;
+                        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparing...';
+                    }
+                    
+                    // Check if we have file content (should be pre-loaded)
+                    const hasAmplificationContent = entry.amplificationFiles && 
+                        entry.amplificationFiles.length > 0 && 
+                        entry.amplificationFiles[0].content;
+                    
+                    const hasSummaryContent = entry.summaryFile && entry.summaryFile.content;
+                    
+                    if (!hasAmplificationContent) {
+                        throw new Error('Amplification file content not available. Please re-scan the folder.');
+                    }
+                    
+                    console.log(`Analysis data ready for ${experimentId}:`, {
+                        amplificationFiles: entry.amplificationFiles.length,
+                        summaryFile: !!entry.summaryFile,
+                        amplificationContentLengths: entry.amplificationFiles.map(f => f.content.length),
+                        summaryContentLength: entry.summaryFile ? entry.summaryFile.content.length : 0
+                    });
+                    
+                    // Store the complete data for analysis (content is already included)
+                    const analysisData = {
+                        experimentId: experimentId,
+                        amplificationFiles: entry.amplificationFiles, // Already has content
+                        summaryFile: entry.summaryFile, // Already has content
+                        channels: entry.channels,
+                        status: entry.status,
+                        timestamp: entry.timestamp
+                    };
+                    
+                    // Store in both sessionStorage and localStorage for reliability
+                    sessionStorage.setItem('queueAnalysisData', JSON.stringify(analysisData));
+                    localStorage.setItem('pendingAnalysis', JSON.stringify(analysisData));
+                    
+                    console.log(`Prepared analysis data for ${experimentId}: ${entry.amplificationFiles.length} amplification files, ${entry.summaryFile ? 1 : 0} summary file with content ready`);
+                    
+                    // Navigate to main page with analysis flag
+                    window.location.href = '/?fromQueue=true&experiment=' + encodeURIComponent(experimentId);
+                    
+                } catch (error) {
+                    console.error('Error preparing analysis:', error);
+                    this.showNotification('Error preparing analysis: ' + error.message, 'error');
+                    
+                    // Reset button
+                    const button = document.querySelector(`[onclick="window.queueManager.analyzeExperiment('${experimentId}')"]`);
+                    if (button) {
+                        button.disabled = false;
+                        button.innerHTML = '<i class="fas fa-play"></i> Analyze';
+                    }
+                }
+            }
+            
+            async readFileContent(file) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        resolve(e.target.result);
+                    };
+                    reader.onerror = function(e) {
+                        reject(new Error('Failed to read file: ' + file.name));
+                    };
+                    reader.readAsText(file);
+                });
+            }
+            
+            selectAll() {
+                const checkboxes = document.querySelectorAll('.experiment-checkbox');
+                const selectAllCheckbox = document.getElementById('select-all-checkbox');
+                
+                checkboxes.forEach(cb => cb.checked = selectAllCheckbox.checked);
+            }
+            
+            toggleSelectAll() {
+                this.selectAll();
+            }
+            
+            clearQueue() {
+                if (confirm('Are you sure you want to clear the entire queue?')) {
+                    this.fileQueue.clear();
+                    localStorage.removeItem('fileQueue');
+                    this.updateQueueDisplay();
+                    this.updateStatistics();
+                    this.showNotification('Queue cleared', 'success');
+                }
+            }
+            
+            startAutoRefresh() {
+                if (this.autoRefreshInterval) {
+                    clearInterval(this.autoRefreshInterval);
+                }
+                
+                this.autoRefreshInterval = setInterval(() => {
+                    if (this.monitoredFolder) {
+                        this.refreshQueue();
+                    }
+                }, this.autoRefreshDelay);
+            }
+            
+            showNotification(message, type = 'info') {
+                const notification = document.createElement('div');
+                notification.className = `alert alert-${type === 'error' ? 'danger' : type} alert-dismissible fade show alert-notification`;
+                notification.innerHTML = `
+                    ${message}
+                    <button type="button" class="close" data-dismiss="alert">
+                        <span>&times;</span>
+                    </button>
+                `;
+                
+                document.body.appendChild(notification);
+                
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.parentNode.removeChild(notification);
+                    }
+                }, 5000);
+            }
+        }
+        
+        // Initialize Queue Manager
+        window.queueManager = new QueueManager();
+    </script>
+</body>
+</html>

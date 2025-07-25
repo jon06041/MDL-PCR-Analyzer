@@ -1,0 +1,294 @@
+/* folder_queue.css - Styles for Automatic Folder Queue System */
+
+/* Queue Access and Browse Buttons */
+.folder-queue-btn {
+    position: relative;
+    transition: all 0.3s ease;
+    font-size: 0.875rem;
+    white-space: nowrap;
+}
+
+.folder-queue-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.folder-queue-btn .btn-text {
+    margin-left: 5px;
+}
+
+/* Queue Count Badge */
+.queue-count {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    background: #dc3545;
+    color: white;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    font-size: 0.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    min-width: 20px;
+}
+
+/* Queue Modal */
+#folderQueueModal .modal-dialog {
+    max-width: 800px;
+}
+
+#folderQueueModal .modal-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-bottom: none;
+}
+
+#folderQueueModal .modal-header .close {
+    color: white;
+    opacity: 0.8;
+}
+
+#folderQueueModal .modal-header .close:hover {
+    opacity: 1;
+}
+
+/* Folder Status Section */
+.folder-status {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 15px;
+    border-left: 4px solid #667eea;
+}
+
+.folder-status strong {
+    color: #495057;
+}
+
+#current-folder-display {
+    font-family: 'Courier New', monospace;
+    font-weight: 500;
+    margin-left: 10px;
+}
+
+#current-folder-display.text-success {
+    color: #28a745 !important;
+}
+
+/* Queue Container */
+.queue-container {
+    margin-top: 20px;
+}
+
+.queue-items {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 10px;
+    background: #fff;
+}
+
+/* Queue Item Cards */
+.queue-item {
+    border: 1px solid #e9ecef;
+    transition: all 0.3s ease;
+    cursor: default;
+}
+
+.queue-item:hover {
+    border-color: #667eea;
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+    transform: translateY(-1px);
+}
+
+.queue-item .card-title {
+    color: #495057;
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.queue-item .badge {
+    font-size: 0.75rem;
+    padding: 0.3em 0.6em;
+}
+
+.queue-item .badge-primary {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    border: none;
+}
+
+/* Analyze Button */
+.analyze-btn {
+    background: linear-gradient(135deg, #28a745, #20c997);
+    border: none;
+    padding: 0.375rem 0.75rem;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.analyze-btn:hover {
+    background: linear-gradient(135deg, #218838, #1ea383);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
+}
+
+.analyze-btn:focus {
+    box-shadow: 0 0 0 0.2rem rgba(40, 167, 69, 0.25);
+}
+
+/* Empty State */
+.queue-items .text-center.text-muted {
+    padding: 40px 20px;
+}
+
+.queue-items .fa-inbox {
+    color: #6c757d;
+    opacity: 0.5;
+}
+
+/* Refresh Animation */
+.fa-spinner.fa-spin {
+    animation: fa-spin 1s infinite linear;
+}
+
+@keyframes fa-spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .folder-queue-btn .btn-text {
+        display: none;
+    }
+    
+    .folder-status {
+        padding: 10px;
+    }
+    
+    .folder-status .d-flex {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .queue-item .d-flex {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .queue-item .ml-3 {
+        margin-left: 0 !important;
+        align-self: flex-start;
+    }
+}
+
+/* Auto-refresh Status */
+#auto-refresh-status {
+    color: #28a745;
+    font-weight: 500;
+}
+
+/* Button Groups in Modal */
+.modal-body .btn-group {
+    margin-bottom: 10px;
+}
+
+.modal-body .btn-sm {
+    font-size: 0.8rem;
+    padding: 0.25rem 0.5rem;
+}
+
+/* Integration with existing upload section */
+.upload-section .folder-queue-btn {
+    margin-top: 10px;
+}
+
+/* File badges styling */
+.queue-item .badge {
+    margin-right: 4px;
+    margin-bottom: 2px;
+}
+
+/* Success/Error states */
+.queue-item.success {
+    border-color: #28a745;
+    background-color: #f8fff9;
+}
+
+.queue-item.error {
+    border-color: #dc3545;
+    background-color: #fff8f8;
+}
+
+.queue-item.processing {
+    border-color: #ffc107;
+    background-color: #fffbf0;
+}
+
+/* Notification styles (fixed positioning) */
+.alert.fixed-notification {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 9999;
+    min-width: 300px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Role-based visibility helpers */
+.role-hidden {
+    display: none !important;
+}
+
+.role-visible {
+    display: inline-block !important;
+}
+
+/* Folder path display */
+#current-folder-display {
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: inline-block;
+    vertical-align: top;
+}
+
+/* Loading states */
+.loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+}
+
+.loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #667eea;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Integration styles for existing UI */
+.file-upload-multi .folder-queue-btn {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    z-index: 10;
+}

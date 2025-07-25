@@ -33,8 +33,14 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" defer></script>
     <!-- Load pathogen library BEFORE script.js to ensure getRequiredChannels is available -->
     
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    
     <link rel="stylesheet" href="/static/style.css?v=1751381539">
     <link rel="stylesheet" href="/static/results-table-custom.css?v=1751381539">
+    <link rel="stylesheet" href="/static/folder_queue.css">
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
     <div class="container">
@@ -62,6 +68,13 @@
                 <div class="upload-icon">📁</div>
                 <h3>Upload qPCR Data Files</h3>
                 <p>Upload amplification data and optionally integrate Cq values and sample names</p>
+                
+                <!-- File Queue Button -->
+                <a href="/queue.html" class="btn btn-outline-primary folder-queue-btn">
+                    <i class="fas fa-layer-group"></i>
+                    <span class="btn-text">File Queue</span>
+                    <span class="queue-count" id="queueCount" style="display: none;">0</span>
+                </a>
                 
                 <div class="file-upload-grid">
                     <div class="upload-item primary">
@@ -511,7 +524,272 @@
         } else {
             console.error('MLFeedbackInterface class not found');
         }
+        
+        // Check if we came from the queue page
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('fromQueue') === 'true') {
+            const queueData = sessionStorage.getItem('queueAnalysisData') || localStorage.getItem('pendingAnalysis');
+            if (queueData) {
+                try {
+                    const data = JSON.parse(queueData);
+                    console.log('Loading experiment from queue:', data.experimentId);
+                    console.log('Full queue data:', data);
+                    
+                    // Debug file content availability
+                    if (data.amplificationFiles) {
+                        console.log('Amplification files count:', data.amplificationFiles.length);
+                        data.amplificationFiles.forEach((file, index) => {
+                            console.log(`Amplification file ${index}:`, {
+                                name: file.name,
+                                hasContent: !!file.content,
+                                contentLength: file.content ? file.content.length : 0,
+                                contentPreview: file.content ? file.content.substring(0, 100) + '...' : 'No content'
+                            });
+                        });
+                    }
+                    
+                    if (data.summaryFile) {
+                        console.log('Summary file:', {
+                            name: data.summaryFile.name,
+                            hasContent: !!data.summaryFile.content,
+                            contentLength: data.summaryFile.content ? data.summaryFile.content.length : 0,
+                            contentPreview: data.summaryFile.content ? data.summaryFile.content.substring(0, 100) + '...' : 'No content'
+                        });
+                    }
+                    
+                    // Check if we have file content to load directly
+                    const hasAmplificationContent = data.amplificationFiles && 
+                        data.amplificationFiles.length > 0 && 
+                        data.amplificationFiles[0].content && 
+                        data.amplificationFiles[0].content.length > 0;
+                    
+                    const hasSummaryContent = data.summaryFile && 
+                        data.summaryFile.content && 
+                        data.summaryFile.content.length > 0;
+                    
+                    console.log('Content analysis:', {
+                        hasAmplificationContent,
+                        hasSummaryContent,
+                        amplificationFilesCount: data.amplificationFiles ? data.amplificationFiles.length : 0
+                    });
+                    
+                    if (hasAmplificationContent) {
+                        console.log('Found file content in queue data, loading directly...');
+                        
+                        // Wait for the page to fully load including uploadManager
+                        const loadFiles = () => {
+                            console.log('Checking for uploadManager...');
+                            
+                            // Check multiple possible upload manager references
+                            const uploadMgr = window.uploadManager || window.UploadManager || 
+                                             (window.script && window.script.uploadManager);
+                            
+                            // Set a reasonable timeout (10 seconds max)
+                            const maxWaitTime = 10000; // 10 seconds
+                            const startTime = loadFiles.startTime || Date.now();
+                            loadFiles.startTime = startTime;
+                            
+                            if (!uploadMgr) {
+                                const elapsed = Date.now() - startTime;
+                                if (elapsed > maxWaitTime) {
+                                    console.log('UploadManager not found after 10 seconds, trying alternative file loading methods...');
+                                    loadFilesDirectly(data);
+                                    return;
+                                }
+                                
+                                console.log(`UploadManager not ready, waiting... (${Math.round(elapsed/1000)}s)`);
+                                setTimeout(loadFiles, 500);
+                                return;
+                            }
+                            
+                            console.log('UploadManager found! Loading files...');
+                            loadFilesViaUploadManager(data, uploadMgr);
+                        };
+                        
+                        // Method to load files via upload manager
+                        const loadFilesViaUploadManager = (data, uploadMgr) => {
+                            try {
+                                // Create File objects from the content
+                                const amplificationFiles = data.amplificationFiles.map((fileData, index) => {
+                                    console.log(`Creating amplification file ${index + 1}: ${fileData.name}, content length: ${fileData.content.length}`);
+                                    const blob = new Blob([fileData.content], { type: 'text/csv' });
+                                    const file = new File([blob], fileData.name, {
+                                        type: 'text/csv',
+                                        lastModified: fileData.lastModified
+                                    });
+                                    return file;
+                                });
+                                
+                                let summaryFile = null;
+                                if (hasSummaryContent) {
+                                    console.log(`Creating summary file: ${data.summaryFile.name}, content length: ${data.summaryFile.content.length}`);
+                                    const blob = new Blob([data.summaryFile.content], { type: 'text/csv' });
+                                    summaryFile = new File([blob], data.summaryFile.name, {
+                                        type: 'text/csv',
+                                        lastModified: data.summaryFile.lastModified
+                                    });
+                                }
+                                
+                                // Load files via upload manager
+                                console.log('Loading files via uploadManager...');
+                                if (uploadMgr.handleFiles) {
+                                    uploadMgr.handleFiles(amplificationFiles, 'amplification');
+                                    if (summaryFile) {
+                                        uploadMgr.handleFiles([summaryFile], 'summary');
+                                    }
+                                } else {
+                                    throw new Error('UploadManager.handleFiles method not found');
+                                }
+                                
+                                showSuccessNotification(data, amplificationFiles.length, summaryFile ? 1 : 0);
+                                autoTriggerAnalysis();
+                                
+                            } catch (error) {
+                                console.error('Error with uploadManager method:', error);
+                                loadFilesDirectly(data);
+                            }
+                        };
+                        
+                        // Alternative method to load files directly
+                        const loadFilesDirectly = (data) => {
+                            console.log('Loading files directly via DOM manipulation...');
+                            
+                            try {
+                                // Create File objects
+                                const amplificationFiles = data.amplificationFiles.map(fileData => {
+                                    const blob = new Blob([fileData.content], { type: 'text/csv' });
+                                    return new File([blob], fileData.name, {
+                                        type: 'text/csv',
+                                        lastModified: fileData.lastModified
+                                    });
+                                });
+                                
+                                let summaryFile = null;
+                                if (hasSummaryContent) {
+                                    const blob = new Blob([data.summaryFile.content], { type: 'text/csv' });
+                                    summaryFile = new File([blob], data.summaryFile.name, {
+                                        type: 'text/csv',
+                                        lastModified: data.summaryFile.lastModified
+                                    });
+                                }
+                                
+                                // Direct DOM manipulation approach
+                                const fileInput = document.getElementById('fileInput');
+                                const samplesInput = document.getElementById('samplesInput');
+                                
+                                if (fileInput && amplificationFiles.length > 0) {
+                                    const dt = new DataTransfer();
+                                    amplificationFiles.forEach(file => dt.items.add(file));
+                                    fileInput.files = dt.files;
+                                    
+                                    // Trigger change event
+                                    const event = new Event('change', { bubbles: true });
+                                    fileInput.dispatchEvent(event);
+                                    console.log('Triggered amplification files change event');
+                                }
+                                
+                                if (summaryFile && samplesInput) {
+                                    const dt2 = new DataTransfer();
+                                    dt2.items.add(summaryFile);
+                                    samplesInput.files = dt2.files;
+                                    
+                                    const event2 = new Event('change', { bubbles: true });
+                                    samplesInput.dispatchEvent(event2);
+                                    console.log('Triggered summary file change event');
+                                }
+                                
+                                showSuccessNotification(data, amplificationFiles.length, summaryFile ? 1 : 0);
+                                autoTriggerAnalysis();
+                                
+                            } catch (error) {
+                                console.error('Error with direct file loading:', error);
+                                showFallbackNotification(data);
+                            }
+                        };
+                        
+                        // Helper methods
+                        const showSuccessNotification = (data, ampCount, summaryCount) => {
+                            const notification = document.createElement('div');
+                            notification.className = 'alert alert-success alert-dismissible fade show';
+                            notification.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+                            notification.innerHTML = `
+                                <strong>✅ Queue Files Loaded!</strong><br>
+                                Experiment: <strong>${data.experimentId}</strong><br>
+                                <small>📁 ${ampCount} amplification + ${summaryCount} summary files loaded. Analysis starting automatically...</small>
+                                <button type="button" class="close" data-dismiss="alert">
+                                    <span>&times;</span>
+                                </button>
+                            `;
+                            document.body.appendChild(notification);
+                            
+                            setTimeout(() => {
+                                if (notification.parentNode) {
+                                    notification.parentNode.removeChild(notification);
+                                }
+                            }, 8000);
+                        };
+                        
+                        const autoTriggerAnalysis = () => {
+                            setTimeout(() => {
+                                const analyzeBtn = document.getElementById('analyzeBtn');
+                                if (analyzeBtn && !analyzeBtn.disabled) {
+                                    console.log('Auto-triggering analysis...');
+                                    analyzeBtn.click();
+                                } else {
+                                    console.log('Analyze button not ready, files loaded for manual analysis');
+                                }
+                            }, 1500);
+                        };
+                        
+                        // Start loading files
+                        setTimeout(loadFiles, 100);
+                        
+                    } else {
+                        console.log('No file content in queue data, showing fallback notification');
+                        showFallbackNotification(data);
+                    }
+                    
+                    // Clear the session data
+                    sessionStorage.removeItem('queueAnalysisData');
+                    localStorage.removeItem('pendingAnalysis');
+                    
+                } catch (error) {
+                    console.error('Error processing queue data:', error);
+                }
+            }
+        }
+        
+        function showFallbackNotification(data) {
+            const notification = document.createElement('div');
+            notification.className = 'alert alert-warning alert-dismissible fade show';
+            notification.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+            notification.innerHTML = `
+                <strong>⚠️ Queue Transfer Issue</strong><br>
+                Experiment: <strong>${data.experimentId}</strong><br>
+                <small>File content not available. Please re-select files manually or return to queue to re-scan folder.</small>
+                <button type="button" class="close" data-dismiss="alert">
+                    <span>&times;</span>
+                </button>
+            `;
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 10000);
+        }
     });
     </script>
+
+    <!-- jQuery and Bootstrap JS -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/js/bootstrap.bundle.min.js"></script>
+    
+</body>
+</html>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/js/bootstrap.bundle.min.js"></script>
+    
 </body>
 </html>

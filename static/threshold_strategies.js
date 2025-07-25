@@ -139,7 +139,7 @@ window.PATHOGEN_FIXED_THRESHOLDS = {
     "Texas Red": { linear: 100, log: 100 }
   },
   "Calb": { 
-    "FAM": { linear: 150, log: 150 }
+    "HEX": { linear: 150, log: 150 }
   },
   "Cglab": { 
     "FAM": { linear: 150, log: 150 }
