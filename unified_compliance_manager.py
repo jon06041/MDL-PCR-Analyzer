@@ -42,8 +42,13 @@ class UnifiedComplianceManager:
     
     def get_db_connection(self):
         """Get database connection with proper settings"""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30.0)  # 30 second timeout
         conn.row_factory = sqlite3.Row
+        # Enable WAL mode for better concurrent access
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute('PRAGMA synchronous=NORMAL')
+        conn.execute('PRAGMA cache_size=10000')
+        conn.execute('PRAGMA temp_store=MEMORY')
         return conn
     
     def track_compliance_event(self, event_type: str, event_data: Dict[str, Any], 
@@ -59,8 +64,8 @@ class UnifiedComplianceManager:
         
         for req_code in affected_requirements:
             try:
-                # Record evidence for this requirement
-                evidence_id = self.record_compliance_evidence(
+                # Record evidence for this requirement with retry logic
+                evidence_id = self._record_evidence_with_retry(
                     requirement_code=req_code,
                     evidence_type='automated_log',
                     evidence_source=f'system_event_{event_type}',
@@ -68,23 +73,77 @@ class UnifiedComplianceManager:
                     user_id=user_id
                 )
                 
-                # Update compliance status
-                self.update_requirement_status(req_code, user_id)
+                # Update compliance status with retry logic
+                self._update_status_with_retry(req_code, user_id)
                 updated_requirements.append(req_code)
                 
                 self.logger.info(f"Updated compliance for {req_code} based on {event_type}")
                 
             except Exception as e:
                 self.logger.error(f"Error updating compliance for {req_code}: {e}")
+                # Continue with other requirements even if one fails
         
         return updated_requirements
     
+    def _record_evidence_with_retry(self, requirement_code: str, evidence_type: str,
+                                   evidence_source: str, evidence_data: Dict,
+                                   user_id: str = 'user', max_retries: int = 3) -> int:
+        """Record evidence with retry logic for database locks"""
+        import time
+        
+        for attempt in range(max_retries):
+            try:
+                return self.record_compliance_evidence(
+                    requirement_code, evidence_type, evidence_source, 
+                    evidence_data, user_id
+                )
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e) and attempt < max_retries - 1:
+                    time.sleep(0.1 * (attempt + 1))  # Exponential backoff
+                    continue
+                else:
+                    raise e
+        
+        raise Exception("Failed to record evidence after retries")
+    
+    def _update_status_with_retry(self, requirement_code: str, user_id: str = 'user', max_retries: int = 3):
+        """Update status with retry logic for database locks"""
+        import time
+        
+        for attempt in range(max_retries):
+            try:
+                self.update_requirement_status(requirement_code, user_id)
+                return
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e) and attempt < max_retries - 1:
+                    time.sleep(0.1 * (attempt + 1))  # Exponential backoff
+                    continue
+                else:
+                    raise e
+        
+        raise Exception("Failed to update status after retries")
+    
     def record_compliance_evidence(self, requirement_code: str, evidence_type: str,
                                  evidence_source: str, evidence_data: Dict,
-                                 user_id: str = 'system') -> int:
+                                 user_id: str = 'user') -> int:
         """Record evidence for a compliance requirement"""
         with self.get_db_connection() as conn:
             cursor = conn.cursor()
+            
+            # Ensure compliance_evidence table exists
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS compliance_evidence (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    requirement_code TEXT NOT NULL,
+                    evidence_type TEXT NOT NULL,
+                    evidence_source TEXT NOT NULL,
+                    evidence_data TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    compliance_score INTEGER NOT NULL,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (requirement_code) REFERENCES compliance_requirements(requirement_code)
+                )
+            """)
             
             # Calculate compliance score based on evidence quality
             compliance_score = self._calculate_evidence_score(evidence_type, evidence_data)
@@ -116,12 +175,12 @@ class UnifiedComplianceManager:
         
         return min(100, base_score + completeness_bonus)
     
-    def update_requirement_status(self, requirement_code: str, user_id: str = 'system'):
+    def update_requirement_status(self, requirement_code: str, user_id: str = 'user'):
         """Update the compliance status of a requirement based on recent evidence"""
         with self.get_db_connection() as conn:
             cursor = conn.cursor()
             
-            # Get requirement details
+            # Check if requirement exists first
             cursor.execute("""
                 SELECT * FROM compliance_requirements 
                 WHERE requirement_code = ?
@@ -129,6 +188,8 @@ class UnifiedComplianceManager:
             requirement = cursor.fetchone()
             
             if not requirement:
+                # Requirement doesn't exist, skip silently (may be in development)
+                self.logger.warning(f"Requirement {requirement_code} not found in database")
                 return
             
             # Get recent evidence for this requirement
@@ -152,7 +213,11 @@ class UnifiedComplianceManager:
                 SELECT compliance_status FROM compliance_requirements 
                 WHERE requirement_code = ?
             """, (requirement_code,))
-            current_status = cursor.fetchone()['compliance_status']
+            current_row = cursor.fetchone()
+            if not current_row:
+                return
+            
+            current_status = current_row['compliance_status']
             
             # Update status if changed
             if new_status != current_status:
@@ -161,6 +226,19 @@ class UnifiedComplianceManager:
                     SET compliance_status = ?, last_assessed_date = ?
                     WHERE requirement_code = ?
                 """, (new_status, datetime.date.today().isoformat(), requirement_code))
+                
+                # Ensure compliance_status_log table exists
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS compliance_status_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        requirement_code TEXT NOT NULL,
+                        previous_status TEXT NOT NULL,
+                        new_status TEXT NOT NULL,
+                        change_reason TEXT,
+                        changed_by TEXT,
+                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
                 
                 # Log the status change
                 cursor.execute("""

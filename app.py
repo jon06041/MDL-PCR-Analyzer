@@ -2958,6 +2958,31 @@ def record_training():
 
 @app.route('/api/fda-compliance/create-risk-assessment', methods=['POST'])
 def create_risk_assessment():
+    """Create risk assessment record"""
+    try:
+        if not fda_compliance_manager:
+            return jsonify({'error': 'FDA Compliance Manager not available'}), 503
+        
+        data = request.get_json()
+        
+        assessment_id = fda_compliance_manager.create_risk_assessment(
+            assessment_type=data.get('assessment_type'),
+            risk_category=data.get('risk_category'),
+            description=data.get('description'),
+            probability_score=data.get('probability_score'),
+            severity_score=data.get('severity_score'),
+            mitigation_plan=data.get('mitigation_plan'),
+            assessor=data.get('assessor')
+        )
+        
+        return jsonify({
+            'success': True,
+            'assessment_id': assessment_id
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error creating risk assessment: {str(e)}")
+        return jsonify({'error': str(e)}), 500
     """Create risk assessment for ISO 14971 compliance"""
     try:
         if not fda_compliance_manager:
@@ -3254,39 +3279,6 @@ def initialize_default_user():
             print("✓ Default user 'user' initialized with analyst role")
         except Exception as e:
             print(f"Warning: Could not initialize default user: {e}")
-
-# Call initialization
-initialize_default_user()
-
-if __name__ == '__main__':
-    # Load configurations with error handling
-    try:
-        # Ensure all directories exist
-        os.makedirs('static', exist_ok=True)
-        os.makedirs('config', exist_ok=True)
-        os.makedirs('test files', exist_ok=True)
-        
-        # Run Flask app
-        port = int(os.environ.get("PORT", 8080))
-        
-        # Configure logging
-        if not app.debug:
-            file_handler = RotatingFileHandler('app.log', maxBytes=10240000, backupCount=10)
-            file_handler.setFormatter(logging.Formatter(
-                '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
-            ))
-            file_handler.setLevel(logging.INFO)
-            app.logger.addHandler(file_handler)
-            app.logger.setLevel(logging.INFO)
-            app.logger.info('qPCR Analyzer startup')
-        
-        print(f"Starting qPCR Analyzer on port {port}")
-        app.run(host='0.0.0.0', port=port, debug=os.environ.get('FLASK_DEBUG', 'False').lower() == 'true')
-        
-    except Exception as e:
-        print(f"Failed to start qPCR Analyzer: {e}")
-        import traceback
-        traceback.print_exc()
 
 # ===== END FOLDER QUEUE ENDPOINTS =====
 

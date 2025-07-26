@@ -18,10 +18,21 @@ class MLConfigManager:
         self.db_path = db_path
         self.init_tables()
     
+    def get_db_connection(self):
+        """Get database connection with proper settings"""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)  # 30 second timeout
+        conn.row_factory = sqlite3.Row
+        # Enable WAL mode for better concurrent access
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute('PRAGMA synchronous=NORMAL')
+        conn.execute('PRAGMA cache_size=10000')
+        conn.execute('PRAGMA temp_store=MEMORY')
+        return conn
+    
     def init_tables(self):
         """Initialize ML configuration tables"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.get_db_connection() as conn:
                 # Read and execute schema
                 schema_path = 'ml_config_schema.sql'
                 if os.path.exists(schema_path):
@@ -36,9 +47,7 @@ class MLConfigManager:
     def get_pathogen_ml_config(self, pathogen_code, fluorophore=None):
         """Get ML configuration for specific pathogen/fluorophore"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                
+            with self.get_db_connection() as conn:
                 if fluorophore:
                     cursor = conn.execute(
                         "SELECT * FROM ml_pathogen_config WHERE pathogen_code = ? AND fluorophore = ?",
@@ -59,7 +68,7 @@ class MLConfigManager:
     def set_pathogen_ml_enabled(self, pathogen_code, fluorophore, enabled, user_info=None):
         """Enable/disable ML for specific pathogen+fluorophore"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.get_db_connection() as conn:
                 # Get current state for audit
                 cursor = conn.execute(
                     "SELECT ml_enabled FROM ml_pathogen_config WHERE pathogen_code = ? AND fluorophore = ?",
@@ -96,7 +105,7 @@ class MLConfigManager:
             if not self._is_global_ml_enabled():
                 return False
             
-            with sqlite3.connect(self.db_path) as conn:
+            with self.get_db_connection() as conn:
                 cursor = conn.execute(
                     "SELECT ml_enabled FROM ml_pathogen_config WHERE pathogen_code = ? AND fluorophore = ?",
                     (pathogen_code, fluorophore)
@@ -113,7 +122,7 @@ class MLConfigManager:
     def get_system_config(self, key):
         """Get system-wide configuration value"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.get_db_connection() as conn:
                 cursor = conn.execute(
                     "SELECT config_value FROM ml_system_config WHERE config_key = ?",
                     (key,)
@@ -127,7 +136,7 @@ class MLConfigManager:
     def set_system_config(self, key, value, user_info=None):
         """Set system-wide configuration value"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.get_db_connection() as conn:
                 # Get old value for audit
                 cursor = conn.execute(
                     "SELECT config_value FROM ml_system_config WHERE config_key = ?",
@@ -169,7 +178,7 @@ class MLConfigManager:
             # Create backup before reset
             backup_path = self._create_training_backup()
             
-            with sqlite3.connect(self.db_path) as conn:
+            with self.get_db_connection() as conn:
                 if pathogen_code:
                     # Reset specific pathogen data
                     if fluorophore:
@@ -213,8 +222,7 @@ class MLConfigManager:
     def get_all_pathogen_configs(self):
         """Get all pathogen ML configurations"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
+            with self.get_db_connection() as conn:
                 cursor = conn.execute("""
                     SELECT pathogen_code, fluorophore, ml_enabled, training_locked, 
                            min_confidence, updated_at
@@ -229,8 +237,7 @@ class MLConfigManager:
     def get_enabled_pathogen_configs(self):
         """Get only enabled pathogen ML configurations for UI filtering"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
+            with self.get_db_connection() as conn:
                 cursor = conn.execute("""
                     SELECT pathogen_code, fluorophore, ml_enabled, min_confidence
                     FROM ml_pathogen_config 
@@ -245,8 +252,7 @@ class MLConfigManager:
     def get_audit_log(self, limit=50):
         """Get recent audit log entries"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
+            with self.get_db_connection() as conn:
                 cursor = conn.execute("""
                     SELECT * FROM ml_audit_log 
                     ORDER BY timestamp DESC 
@@ -281,8 +287,7 @@ class MLConfigManager:
             backup_path = f"ml_training_backup_{timestamp}.json"
             
             # Export current training data
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
+            with self.get_db_connection() as conn:
                 cursor = conn.execute("SELECT * FROM ml_training_data")
                 data = [dict(row) for row in cursor.fetchall()]
             

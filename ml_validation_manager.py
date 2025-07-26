@@ -16,10 +16,20 @@ class MLModelValidationManager:
         self.logger = logging.getLogger(__name__)
         self.initialize_validation_schema()
     
+    def get_db_connection(self):
+        """Get database connection with proper settings"""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)  # 30 second timeout
+        # Enable WAL mode for better concurrent access
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute('PRAGMA synchronous=NORMAL')
+        conn.execute('PRAGMA cache_size=10000')
+        conn.execute('PRAGMA temp_store=MEMORY')
+        return conn
+    
     def initialize_validation_schema(self):
         """Initialize the ML validation tracking schema"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.get_db_connection() as conn:
                 # Read and execute the schema
                 schema_path = os.path.join(os.path.dirname(__file__), 'ml_model_validation_schema.sql')
                 if os.path.exists(schema_path):
@@ -35,8 +45,7 @@ class MLModelValidationManager:
     def get_active_model_version(self, model_type: str, pathogen_code: str = None, fluorophore: str = None) -> Optional[Dict]:
         """Get the currently active model version"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
+            with self.get_db_connection() as conn:
                 cursor = conn.cursor()
                 
                 query = """
@@ -65,7 +74,7 @@ class MLModelValidationManager:
                                 performance_notes: str = None, trained_by: str = None) -> int:
         """Create a new model version and deactivate the previous one"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.get_db_connection() as conn:
                 cursor = conn.cursor()
                 
                 # Deactivate previous version
@@ -109,7 +118,7 @@ class MLModelValidationManager:
                              fluorophore: str = None, test_type: str = None) -> int:
         """Create a performance tracking record for a run"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.get_db_connection() as conn:
                 cursor = conn.cursor()
                 
                 cursor.execute("""
@@ -130,7 +139,7 @@ class MLModelValidationManager:
                         feature_data: Dict = None) -> int:
         """Track an individual ML prediction and any expert override"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.get_db_connection() as conn:
                 cursor = conn.cursor()
                 
                 is_expert_override = expert_decision is not None and expert_decision != ml_prediction
@@ -177,7 +186,7 @@ class MLModelValidationManager:
     def update_performance_summary(self, performance_id: int):
         """Update the performance summary statistics"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.get_db_connection() as conn:
                 cursor = conn.cursor()
                 
                 # Calculate statistics
@@ -206,8 +215,7 @@ class MLModelValidationManager:
     def get_model_performance_summary(self, days: int = 30, pathogen_code: str = None) -> Dict:
         """Get performance summary for the last N days"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
+            with self.get_db_connection() as conn:
                 cursor = conn.cursor()
                 
                 base_query = """
@@ -251,8 +259,7 @@ class MLModelValidationManager:
     def get_pathogen_performance_details(self, pathogen_code: str, days: int = 30) -> Dict:
         """Get detailed performance for a specific pathogen"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
+            with self.get_db_connection() as conn:
                 cursor = conn.cursor()
                 
                 # Overall statistics
@@ -305,7 +312,7 @@ class MLModelValidationManager:
                                 regulatory_impact: str = 'low'):
         """Log an event for FDA compliance auditing"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.get_db_connection() as conn:
                 cursor = conn.cursor()
                 
                 cursor.execute("""
@@ -322,8 +329,7 @@ class MLModelValidationManager:
     def get_expert_override_rate(self, days: int = 30, pathogen_code: str = None) -> Dict:
         """Calculate expert override rates for quality assessment"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
+            with self.get_db_connection() as conn:
                 cursor = conn.cursor()
                 
                 base_query = """
@@ -366,8 +372,7 @@ class MLModelValidationManager:
             if not end_date:
                 end_date = datetime.now().strftime('%Y-%m-%d')
             
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
+            with self.get_db_connection() as conn:
                 cursor = conn.cursor()
                 
                 # Model versions used in period
