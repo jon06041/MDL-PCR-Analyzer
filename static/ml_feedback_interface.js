@@ -2245,6 +2245,9 @@ class MLFeedbackInterface {
                     // Mark this sample as trained to prevent future duplicates
                     this.markSampleAsTrained();
                     
+                    // Track this prediction for validation
+                    await this.trackPredictionForValidation(wellData, expertClassification, submissionWellData);
+                    
                     // Update the results table with the expert classification
                     await this.updateResultsTableAfterFeedback(expertClassification);
                     
@@ -4039,6 +4042,136 @@ class MLFeedbackInterface {
         } catch (error) {
             console.log('Failed to refresh ML prediction:', error.message);
         }
+    }
+
+    async trackPredictionForValidation(wellData, expertClassification, submissionWellData) {
+        try {
+            // Extract current session information
+            const sessionId = window.currentAnalysisResults?.session_id || 'unknown';
+            const runFileName = window.currentAnalysisResults?.file_name || 'unknown';
+            
+            // Get ML prediction if available
+            const mlPrediction = wellData.ml_prediction || wellData.ml_classification || wellData.classification || 'unknown';
+            const mlConfidence = wellData.ml_confidence || wellData.confidence || 0;
+            
+            // Determine if this is an expert override
+            const isOverride = expertClassification !== mlPrediction && mlPrediction !== 'unknown';
+            
+            const trackingData = {
+                model_type: 'general_pcr', // Default for now
+                pathogen_code: submissionWellData.specific_pathogen || submissionWellData.target,
+                fluorophore: submissionWellData.channel || submissionWellData.fluorophore,
+                run_file_name: runFileName,
+                session_id: sessionId,
+                test_type: submissionWellData.test_code || submissionWellData.experiment_pattern,
+                well_id: wellData.well_id || submissionWellData.well,
+                sample_name: submissionWellData.sample,
+                ml_prediction: mlPrediction,
+                ml_confidence: mlConfidence,
+                expert_decision: isOverride ? expertClassification : null,
+                final_classification: expertClassification,
+                feature_data: {
+                    r2: wellData.r2_score || 0,
+                    steepness: wellData.steepness || 0,
+                    snr: wellData.snr || 0,
+                    midpoint: wellData.midpoint || 0,
+                    baseline: wellData.baseline || 0,
+                    amplitude: wellData.amplitude || 0,
+                    cqj: this.extractNumericValue(wellData.cqj),
+                    calcj: this.extractNumericValue(wellData.calcj)
+                }
+            };
+
+            console.log('📊 Tracking ML prediction for validation:', trackingData);
+
+            const response = await fetch('/api/ml-validation/track-prediction', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(trackingData)
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                if (result.success) {
+                    console.log('✅ Successfully tracked prediction for validation:', result);
+                } else {
+                    console.warn('⚠️ Failed to track prediction:', result.error);
+                }
+            } else {
+                console.warn('⚠️ Server error tracking prediction:', response.status);
+            }
+
+        } catch (error) {
+            console.error('Error tracking prediction for validation:', error);
+            // Don't throw - this is auxiliary functionality
+        }
+    }
+    
+    async trackPredictionForValidation(wellData, expertClassification, submissionWellData) {
+        /**
+         * Track ML prediction and expert override for validation system
+         */
+        try {
+            const trackingData = {
+                well_id: submissionWellData.well,
+                sample_name: submissionWellData.sample,
+                pathogen_code: submissionWellData.specific_pathogen || submissionWellData.pathogen,
+                fluorophore: submissionWellData.fluorophore,
+                ml_prediction: wellData.ml_classification ? wellData.ml_classification.classification : 'UNKNOWN',
+                ml_confidence: wellData.ml_classification ? wellData.ml_classification.confidence : 0,
+                expert_decision: expertClassification,
+                final_classification: expertClassification,
+                run_file_name: window.currentAnalysisResults ? 
+                    (window.currentAnalysisResults.metadata ? window.currentAnalysisResults.metadata.filename : 'unknown.csv') : 
+                    'unknown.csv',
+                session_id: window.currentSessionId || null,
+                test_type: submissionWellData.test_code || this.extractTestCode(),
+                model_version_used: wellData.ml_classification ? wellData.ml_classification.model_version : 'v1.0',
+                feature_data: {
+                    amplitude: wellData.amplitude || 0,
+                    r2_score: wellData.r2_score || 0,
+                    steepness: wellData.steepness || 0,
+                    snr: wellData.snr || 0,
+                    midpoint: wellData.midpoint || 0,
+                    baseline: wellData.baseline || 0,
+                    cqj: this.extractNumericValue(wellData.cqj),
+                    calcj: this.extractNumericValue(wellData.calcj)
+                }
+            };
+            
+            console.log('📊 Tracking prediction for validation:', trackingData);
+            
+            const response = await fetch('/api/ml-validation/track-prediction', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(trackingData)
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                console.log('✅ Prediction tracked for validation:', result);
+            } else {
+                console.warn('⚠️ Failed to track prediction for validation:', response.status);
+            }
+            
+        } catch (error) {
+            console.error('❌ Error tracking prediction for validation:', error);
+            // Don't throw error - validation tracking shouldn't break the main workflow
+        }
+    }
+    
+    extractTestCode() {
+        // Extract test code from current experiment pattern
+        const experimentPattern = getCurrentFullPattern ? getCurrentFullPattern() : '';
+        if (experimentPattern) {
+            const match = experimentPattern.match(/^Ac([A-Za-z0-9]+)_/);
+            return match ? match[1] : 'Unknown';
+        }
+        return 'Unknown';
     }
 }
 
