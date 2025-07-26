@@ -15,6 +15,7 @@ from threshold_backend import create_threshold_routes
 from cqj_calcj_utils import calculate_cqj_calcj_for_well
 from ml_config_manager import MLConfigManager
 from fda_compliance_manager import FDAComplianceManager
+from unified_compliance_manager import UnifiedComplianceManager
 
 def safe_json_dumps(value, default=None):
     """Helper function to safely serialize to JSON, avoiding double-encoding"""
@@ -561,11 +562,117 @@ except Exception as e:
     print(f"Warning: Could not initialize FDA Compliance Manager: {e}")
     fda_compliance_manager = None
 
+# Initialize unified compliance manager
+try:
+    sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
+    unified_compliance_manager = UnifiedComplianceManager(sqlite_path)
+    print("Unified Compliance Manager initialized")
+except Exception as e:
+    print(f"Warning: Could not initialize Unified Compliance Manager: {e}")
+    unified_compliance_manager = None
+
 # Initialize threshold routes
 create_threshold_routes(app)
 
+def track_compliance_automatically(event_type, event_data, user_id='user'):
+    """
+    Automatically track compliance events based on software usage
+    This function maps real software activities to compliance requirements
+    """
+    if not unified_compliance_manager:
+        return
+    
+    try:
+        # Map software events to compliance requirements
+        compliance_events = {
+            'ANALYSIS_COMPLETED': {
+                'FDA_820.30_ANALYSIS': 'qPCR analysis software validated through successful test execution',
+                'FDA_11.10_QPCR_RECORDS': 'Electronic qPCR records maintained with data integrity',
+                'CLIA_493.1105_QPCR': 'qPCR test records automatically generated and stored'
+            },
+            'CONTROL_ANALYZED': {
+                'QC_SOFTWARE_INTEGRATION': 'Quality control samples analyzed within software system',
+                'CLIA_493.1105_QPCR': 'QC test records maintained in electronic system'
+            },
+            'REPORT_GENERATED': {
+                'CLIA_493.1291_QPCR_REPORTS': 'Electronic qPCR test reports generated with proper formatting',
+                'FDA_11.10_QPCR_RECORDS': 'Report generation maintains electronic record integrity'
+            },
+            'DATA_EXPORTED': {
+                'FDA_11.10_QPCR_RECORDS': 'Data export maintains electronic record audit trail',
+                'CAP_INF.11450_QPCR_DATA': 'Data integrity preserved during export operations'
+            },
+            'SYSTEM_VALIDATION': {
+                'CAP_INF.11400_QPCR_VALIDATION': 'qPCR software system validation performed',
+                'FDA_820.30_ANALYSIS': 'Analysis software validated for intended use'
+            },
+            'THRESHOLD_ADJUSTED': {
+                'FDA_820.70_THRESHOLD_CONTROLS': 'Threshold parameter changes controlled and documented',
+                'SOFTWARE_CHANGE_CONTROL': 'Software parameter modifications tracked'
+            },
+            'USER_TRAINING': {
+                'USER_COMPETENCY_QPCR': 'User competency on qPCR software demonstrated'
+            }
+        }
+        
+        # Get compliance requirements for this event type
+        requirements_to_update = compliance_events.get(event_type, {})
+        
+        for req_code, evidence_note in requirements_to_update.items():
+            try:
+                # Record evidence for this requirement
+                unified_compliance_manager.record_compliance_evidence(
+                    requirement_code=req_code,
+                    evidence_type='automated_activity',
+                    evidence_source=f'software_usage_{event_type.lower()}',
+                    evidence_data={
+                        **event_data,
+                        'compliance_note': evidence_note,
+                        'automatic_tracking': True
+                    },
+                    user_id=user_id
+                )
+                
+                # Update requirement status to compliant
+                unified_compliance_manager.update_requirement_status(req_code, user_id)
+                
+                print(f"✓ Compliance tracked: {req_code} - {evidence_note}")
+                
+            except Exception as req_error:
+                print(f"Warning: Could not track compliance for {req_code}: {req_error}")
+                
+    except Exception as e:
+        print(f"Warning: Automatic compliance tracking failed: {e}")
+
+# Add a simple session tracking function
+def get_current_user():
+    """Get current user (simplified for now)"""
+    # For now, return default user. Later this will integrate with authentication
+    return 'user'
+
+def track_user_session(action='access'):
+    """Track user session for compliance"""
+    if unified_compliance_manager:
+        try:
+            user_id = get_current_user()
+            session_details = {
+                'timestamp': datetime.utcnow().isoformat(),
+                'user_agent': request.headers.get('User-Agent', 'unknown'),
+                'endpoint': request.endpoint if hasattr(request, 'endpoint') else 'unknown'
+            }
+            
+            unified_compliance_manager.log_user_access(
+                user_id=user_id,
+                action=action,
+                details=session_details
+            )
+        except Exception as e:
+            print(f"Warning: Could not track user session: {e}")
+
 @app.route('/')
 def index():
+    # Track user access to main page
+    track_user_session('page_access')
     return send_from_directory('.', 'index.html')
 
 @app.route('/ml-validation-dashboard')
@@ -575,6 +682,10 @@ def ml_validation_dashboard():
 @app.route('/fda-compliance-dashboard')
 def fda_compliance_dashboard():
     return send_from_directory('.', 'fda_compliance_dashboard.html')
+
+@app.route('/unified-validation-dashboard')
+def unified_validation_dashboard():
+    return send_from_directory('.', 'unified_validation_dashboard.html')
 
 @app.route('/ml-config')
 def ml_config():
@@ -742,6 +853,38 @@ def analyze_data():
                             app.logger.info(f"[FRESH ANALYSIS] First well sample_name: '{sample_name}', well_id in data: '{well_id_in_data}'")
                 
             print(f"[ANALYZE] Analysis completed successfully")
+            
+            # Enhanced automatic compliance tracking
+            analysis_metadata = {
+                'filename': filename,
+                'fluorophore': fluorophore,
+                'total_wells': len(results.get('individual_results', {})),
+                'good_curves': len(results.get('good_curves', [])),
+                'analysis_method': 'qPCR',
+                'timestamp': datetime.utcnow().isoformat(),
+                'success_rate': (len(results.get('good_curves', [])) / len(results.get('individual_results', {})) * 100) if results.get('individual_results') else 0
+            }
+            
+            # Track analysis completion for compliance
+            track_compliance_automatically('ANALYSIS_COMPLETED', analysis_metadata)
+            
+            # Check if control samples were analyzed
+            individual_results = results.get('individual_results', {})
+            control_wells = []
+            for well_id, well_data in individual_results.items():
+                sample_name = well_data.get('sample_name', '').upper()
+                if any(control in sample_name for control in ['H1', 'H2', 'H3', 'H4', 'M1', 'M2', 'M3', 'M4', 'L1', 'L2', 'L3', 'L4', 'NTC', 'CONTROL']):
+                    control_wells.append(well_id)
+            
+            if control_wells:
+                control_metadata = {
+                    **analysis_metadata,
+                    'control_wells': control_wells,
+                    'control_count': len(control_wells)
+                }
+                track_compliance_automatically('CONTROL_ANALYZED', control_metadata)
+                print(f"✓ Tracked {len(control_wells)} control wells for compliance")
+                    
         except Exception as analysis_error:
             print(f"Analysis processing error: {analysis_error}")
             import traceback
@@ -2840,6 +2983,280 @@ def create_risk_assessment():
     except Exception as e:
         app.logger.error(f"Error creating risk assessment: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+# ===== UNIFIED COMPLIANCE API ENDPOINTS =====
+
+@app.route('/api/unified-compliance/dashboard-data', methods=['GET'])
+def get_unified_compliance_dashboard_data():
+    """Get comprehensive unified compliance dashboard data"""
+    try:
+        if not unified_compliance_manager:
+            return jsonify({'error': 'Unified Compliance Manager not available'}), 503
+        
+        # Get query parameters
+        days = request.args.get('days', 30, type=int)
+        category = request.args.get('category')  # FDA, CLIA, CAP, NYSDOH, ISO
+        status = request.args.get('status')  # COMPLIANT, NON_COMPLIANT, PENDING, NOT_STARTED
+        
+        # Get dashboard data
+        dashboard_data = unified_compliance_manager.get_dashboard_data(
+            days=days, 
+            category=category,
+            status=status
+        )
+        
+        return jsonify(dashboard_data)
+        
+    except Exception as e:
+        app.logger.error(f"Error getting unified compliance dashboard data: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/unified-compliance/requirements', methods=['GET'])
+def get_compliance_requirements():
+    """Get all compliance requirements with filtering"""
+    try:
+        if not unified_compliance_manager:
+            return jsonify({'error': 'Unified Compliance Manager not available'}), 503
+        
+        # Get query parameters
+        category = request.args.get('category')
+        status = request.args.get('status')
+        regulation_number = request.args.get('regulation_number')
+        
+        # Get requirements
+        requirements = unified_compliance_manager.get_requirements(
+            category=category,
+            status=status,
+            regulation_number=regulation_number
+        )
+        
+        return jsonify(requirements)
+        
+    except Exception as e:
+        app.logger.error(f"Error getting compliance requirements: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/unified-compliance/requirement/<int:requirement_id>/status', methods=['PUT'])
+def update_requirement_status(requirement_id):
+    """Update the status of a specific compliance requirement"""
+    try:
+        if not unified_compliance_manager:
+            return jsonify({'error': 'Unified Compliance Manager not available'}), 503
+        
+        data = request.get_json()
+        if not data or 'status' not in data:
+            return jsonify({'error': 'Status is required'}), 400
+        
+        # Update status
+        result = unified_compliance_manager.update_requirement_status(
+            requirement_id=requirement_id,
+            status=data['status'],
+            evidence=data.get('evidence'),
+            notes=data.get('notes')
+        )
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        app.logger.error(f"Error updating requirement status: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/unified-compliance/event', methods=['POST'])
+def log_compliance_event():
+    """Log a compliance-related event for real-time tracking"""
+    try:
+        if not unified_compliance_manager:
+            return jsonify({'error': 'Unified Compliance Manager not available'}), 503
+        
+        data = request.get_json()
+        if not data or 'event_type' not in data:
+            return jsonify({'error': 'Event type is required'}), 400
+        
+        # Log event and update related requirements
+        result = unified_compliance_manager.log_event(
+            event_type=data['event_type'],
+            metadata=data.get('metadata', {}),
+            session_id=data.get('session_id'),
+            user_id=data.get('user_id')
+        )
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        app.logger.error(f"Error logging compliance event: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/unified-compliance/export', methods=['GET'])
+def export_compliance_data():
+    """Export compliance data in various formats"""
+    try:
+        if not unified_compliance_manager:
+            return jsonify({'error': 'Unified Compliance Manager not available'}), 503
+        
+        # Get query parameters
+        format_type = request.args.get('format', 'json')  # json, csv, pdf
+        category = request.args.get('category')
+        date_range = request.args.get('date_range', 30)
+        
+        # Generate export data
+        export_data = unified_compliance_manager.export_compliance_data(
+            format_type=format_type,
+            category=category,
+            date_range=int(date_range)
+        )
+        
+        # Track compliance for data export
+        export_metadata = {
+            'format_type': format_type,
+            'category': category,
+            'date_range': date_range,
+            'timestamp': datetime.utcnow().isoformat(),
+            'export_size': len(str(export_data)) if export_data else 0
+        }
+        track_compliance_automatically('DATA_EXPORTED', export_metadata)
+        
+        if format_type == 'csv':
+            # Return CSV file
+            return Response(
+                export_data,
+                mimetype='text/csv',
+                headers={"Content-disposition": "attachment; filename=compliance_report.csv"}
+            )
+        elif format_type == 'pdf':
+            # Return PDF file
+            return Response(
+                export_data,
+                mimetype='application/pdf',
+                headers={"Content-disposition": "attachment; filename=compliance_report.pdf"}
+            )
+        else:
+            # Return JSON
+            return jsonify(export_data)
+        
+    except Exception as e:
+        app.logger.error(f"Error exporting compliance data: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/unified-compliance/validate-system', methods=['POST'])
+def validate_system_compliance():
+    """Run comprehensive system validation against all compliance requirements"""
+    try:
+        if not unified_compliance_manager:
+            return jsonify({'error': 'Unified Compliance Manager not available'}), 503
+        
+        # Run system validation
+        validation_results = unified_compliance_manager.validate_system_compliance()
+        
+        # Track compliance for system validation
+        validation_metadata = {
+            'validation_type': 'comprehensive_system_validation',
+            'timestamp': datetime.utcnow().isoformat(),
+            'total_requirements_checked': validation_results.get('total_requirements', 0),
+            'compliance_score': validation_results.get('overall_compliance_score', 0)
+        }
+        track_compliance_automatically('SYSTEM_VALIDATION', validation_metadata)
+        
+        return jsonify(validation_results)
+        
+    except Exception as e:
+        app.logger.error(f"Error running system validation: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# ===== END UNIFIED COMPLIANCE API ENDPOINTS =====
+
+# ===== COMPLIANCE TRAINING AND USER ACTIONS =====
+
+@app.route('/api/compliance/training/complete', methods=['POST'])
+def complete_training():
+    """Mark training completion for compliance requirements"""
+    try:
+        data = request.get_json()
+        user_id = data.get('user_id', 'user')  # Default to 'user'
+        training_type = data.get('training_type', 'general')
+        training_details = data.get('details', {})
+        
+        # Track compliance for user training
+        training_metadata = {
+            'user_id': user_id,
+            'training_type': training_type,
+            'training_details': training_details,
+            'timestamp': datetime.utcnow().isoformat(),
+            'completion_method': 'user_reported'
+        }
+        track_compliance_automatically('USER_TRAINING', training_metadata, user_id)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Training completion recorded for {training_type}',
+            'user_id': user_id
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error recording training completion: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/compliance/manual-evidence', methods=['POST'])
+def record_manual_evidence():
+    """Allow users to manually record compliance evidence"""
+    try:
+        data = request.get_json()
+        requirement_code = data.get('requirement_code')
+        evidence_description = data.get('evidence_description')
+        user_id = data.get('user_id', 'user')  # Default to 'user'
+        evidence_details = data.get('details', {})
+        
+        if not requirement_code or not evidence_description:
+            return jsonify({'error': 'requirement_code and evidence_description are required'}), 400
+        
+        if unified_compliance_manager:
+            # Record manual evidence
+            evidence_id = unified_compliance_manager.record_compliance_evidence(
+                requirement_code=requirement_code,
+                evidence_type='manual_entry',
+                evidence_source='user_interface',
+                evidence_data={
+                    'description': evidence_description,
+                    'details': evidence_details,
+                    'manual_entry': True,
+                    'timestamp': datetime.utcnow().isoformat()
+                },
+                user_id=user_id
+            )
+            
+            # Update requirement status
+            unified_compliance_manager.update_requirement_status(requirement_code, user_id)
+            
+            return jsonify({
+                'success': True,
+                'message': f'Evidence recorded for {requirement_code}',
+                'evidence_id': evidence_id
+            })
+        else:
+            return jsonify({'error': 'Compliance manager not available'}), 503
+            
+    except Exception as e:
+        app.logger.error(f"Error recording manual evidence: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# ===== END COMPLIANCE TRAINING AND USER ACTIONS =====
+
+# Initialize default user and role on startup
+def initialize_default_user():
+    """Initialize default user with analyst role"""
+    if unified_compliance_manager:
+        try:
+            # Assign default role to 'user'
+            unified_compliance_manager.assign_user_role(
+                user_id='user',
+                role='analyst',
+                assigned_by='system'
+            )
+            print("✓ Default user 'user' initialized with analyst role")
+        except Exception as e:
+            print(f"Warning: Could not initialize default user: {e}")
+
+# Call initialization
+initialize_default_user()
 
 if __name__ == '__main__':
     # Load configurations with error handling

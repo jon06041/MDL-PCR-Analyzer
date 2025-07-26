@@ -150,6 +150,23 @@ def create_threshold_routes(app):
                     print(f"[THRESHOLD-BACKEND] Session lookup error: {session_error}")
                     response['session_error'] = str(session_error)
             
+            # Track compliance for threshold adjustments
+            try:
+                # Import the tracking function from the main app
+                import app
+                if hasattr(app, 'track_compliance_automatically'):
+                    threshold_metadata = {
+                        'strategy': strategy,
+                        'scale_mode': scale_mode,
+                        'session_id': session_id,
+                        'experiment_pattern': experiment_pattern,
+                        'timestamp': app.datetime.utcnow().isoformat()
+                    }
+                    app.track_compliance_automatically('THRESHOLD_ADJUSTED', threshold_metadata)
+                    print(f"✓ Compliance tracked for threshold adjustment: {strategy}")
+            except Exception as compliance_error:
+                print(f"Warning: Could not track compliance for threshold adjustment: {compliance_error}")
+            
             return jsonify(response)
             
         except Exception as e:

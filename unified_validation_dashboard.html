@@ -1,0 +1,1201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Validation & Compliance Dashboard - MDL PCR Analyzer</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/date-fns@2.29.3/index.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .dashboard-container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            position: relative;
+        }
+
+        .header h1 {
+            font-size: 2.8em;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+
+        .header p {
+            font-size: 1.3em;
+            opacity: 0.9;
+        }
+
+        .compliance-score {
+            position: absolute;
+            top: 20px;
+            right: 30px;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 15px 25px;
+            border-radius: 50px;
+            backdrop-filter: blur(10px);
+        }
+
+        .score-number {
+            font-size: 2.2em;
+            font-weight: bold;
+        }
+
+        .score-label {
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
+        .controls {
+            padding: 20px 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .regulation-filter {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .regulation-filter select, .time-selector select, .time-selector input {
+            padding: 8px 12px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            background: white;
+        }
+
+        .export-controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn-primary { background: #3498db; color: white; }
+        .btn-success { background: #27ae60; color: white; }
+        .btn-warning { background: #f39c12; color: white; }
+        .btn-danger { background: #e74c3c; color: white; }
+        .btn-info { background: #17a2b8; color: white; }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn-secondary { background: #6c757d; color: white; }
+
+        /* Modal Styles */
+        .modal {
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(5px);
+        }
+
+        .modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 30px;
+            border-radius: 15px;
+            width: 90%;
+            max-width: 600px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+            animation: modalSlideIn 0.3s ease;
+        }
+
+        @keyframes modalSlideIn {
+            from { transform: translateY(-50px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            line-height: 1;
+        }
+
+        .close:hover { color: #e74c3c; }
+
+        .compliance-action-tabs {
+            display: flex;
+            gap: 5px;
+            margin: 20px 0;
+            background: #f8f9fa;
+            padding: 5px;
+            border-radius: 10px;
+        }
+
+        .compliance-action-tab {
+            padding: 8px 16px;
+            border: none;
+            background: transparent;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .compliance-action-tab.active {
+            background: white;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .compliance-tab-content {
+            margin-top: 20px;
+        }
+
+        .modal form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .modal label {
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .modal input, .modal select, .modal textarea {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .modal textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+            gap: 25px;
+            padding: 30px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+        }
+
+        .card h3 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+            font-size: 1.4em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .regulation-badge {
+            font-size: 0.8em;
+            padding: 2px 8px;
+            border-radius: 12px;
+            background: #ecf0f1;
+            color: #2c3e50;
+            font-weight: 500;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-compliant { background: #27ae60; }
+        .status-partial { background: #f39c12; }
+        .status-non-compliant { background: #e74c3c; }
+        .status-unknown { background: #95a5a6; }
+
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #ecf0f1;
+        }
+
+        .metric:last-child {
+            border-bottom: none;
+        }
+
+        .metric-label {
+            color: #7f8c8d;
+            font-size: 0.9em;
+        }
+
+        .metric-value {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .chart-container {
+            height: 300px;
+            margin-top: 20px;
+        }
+
+        .wide-card {
+            grid-column: 1 / -1;
+        }
+
+        .regulation-tabs {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 20px;
+            background: #f8f9fa;
+            padding: 5px;
+            border-radius: 10px;
+        }
+
+        .regulation-tab {
+            padding: 8px 16px;
+            border: none;
+            background: transparent;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .regulation-tab.active {
+            background: white;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .requirements-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        .requirements-table th, .requirements-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ecf0f1;
+        }
+
+        .requirements-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .requirements-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .requirement-code {
+            font-family: 'Courier New', monospace;
+            background: #ecf0f1;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.85em;
+        }
+
+        .priority-badge {
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: 500;
+        }
+
+        .priority-critical { background: #fee; color: #c53030; }
+        .priority-high { background: #fff5e6; color: #d69e2e; }
+        .priority-medium { background: #e6f7ff; color: #2b6cb0; }
+        .priority-low { background: #f0fff4; color: #38a169; }
+
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .alert-danger { background: #fef2f2; border: 1px solid #fecaca; color: #dc2626; }
+        .alert-warning { background: #fffbeb; border: 1px solid #fed7aa; color: #d97706; }
+        .alert-success { background: #f0fdf4; border: 1px solid #bbf7d0; color: #059669; }
+        .alert-info { background: #eff6ff; border: 1px solid #bfdbfe; color: #2563eb; }
+
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: #7f8c8d;
+        }
+
+        .error {
+            color: #e74c3c;
+            text-align: center;
+            padding: 30px;
+        }
+
+        .recommendation-item {
+            padding: 15px;
+            margin: 10px 0;
+            border-left: 4px solid #3498db;
+            background: #f8f9fa;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .recommendation-title {
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+
+        .recommendation-action {
+            color: #7f8c8d;
+            font-size: 0.9em;
+        }
+
+        .expandable-section {
+            margin-top: 20px;
+        }
+
+        .section-toggle {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            padding: 10px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.3s ease;
+        }
+
+        .section-toggle:hover {
+            background: #e9ecef;
+        }
+
+        .section-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+
+        .section-content.expanded {
+            max-height: 1000px;
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+                padding: 15px;
+            }
+            
+            .controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .compliance-score {
+                position: static;
+                margin: 15px auto 0;
+                display: inline-block;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <div class="header">
+            <div class="compliance-score">
+                <div class="score-number" id="overallScore">--</div>
+                <div class="score-label">Overall Compliance</div>
+            </div>
+            <h1>📊 Validation & Compliance Dashboard</h1>
+            <p>Comprehensive regulatory compliance monitoring with specific requirement tracking</p>
+        </div>
+
+        <div class="controls">
+            <div class="regulation-filter">
+                <label for="regulationFilter">Filter by Regulation:</label>
+                <select id="regulationFilter">
+                    <option value="">All Regulations</option>
+                    <option value="CLIA_42CFR">CLIA (42 CFR 493)</option>
+                    <option value="CAP_LAB">CAP Laboratory Standards</option>
+                    <option value="FDA_21CFR">FDA (21 CFR)</option>
+                    <option value="NYSDOH_CLEP">NY DOH CLEP</option>
+                    <option value="ISO_15189">ISO 15189</option>
+                </select>
+                
+                <label for="timeRange">Time Period:</label>
+                <select id="timeRange">
+                    <option value="7">Last 7 days</option>
+                    <option value="30" selected>Last 30 days</option>
+                    <option value="90">Last 90 days</option>
+                    <option value="365">Last year</option>
+                </select>
+                
+                <button class="btn btn-primary" onclick="loadDashboard()">Refresh</button>
+            </div>
+            
+            <div class="export-controls">
+                <button class="btn btn-success" onclick="exportReport('summary')">Export Summary</button>
+                <button class="btn btn-warning" onclick="exportReport('detailed')">Export Detailed Report</button>
+                <button class="btn btn-info" onclick="exportReport('regulatory')">Export by Regulation</button>
+                <button class="btn btn-primary" onclick="showComplianceActions()">📋 Record Compliance</button>
+                <a href="/" class="btn btn-secondary">Return to Main App</a>
+            </div>
+            
+            <!-- Compliance Actions Modal -->
+            <div id="complianceModal" class="modal" style="display: none;">
+                <div class="modal-content">
+                    <span class="close" onclick="closeComplianceModal()">&times;</span>
+                    <h3>🎓 Record Compliance Activity</h3>
+                    
+                    <div class="compliance-action-tabs">
+                        <button class="compliance-action-tab active" onclick="showComplianceTab('training')">Training Completion</button>
+                        <button class="compliance-action-tab" onclick="showComplianceTab('evidence')">Manual Evidence</button>
+                    </div>
+                    
+                    <div id="training-tab" class="compliance-tab-content">
+                        <h4>Record Training Completion</h4>
+                        <form id="trainingForm">
+                            <label for="trainingType">Training Type:</label>
+                            <select id="trainingType" required>
+                                <option value="">Select training type...</option>
+                                <option value="qpcr_software_operation">qPCR Software Operation</option>
+                                <option value="threshold_adjustment">Threshold Parameter Controls</option>
+                                <option value="data_export_procedures">Data Export and Integrity</option>
+                                <option value="result_interpretation">qPCR Result Interpretation</option>
+                                <option value="quality_control_integration">QC Integration in Software</option>
+                            </select>
+                            
+                            <label for="userId">User ID:</label>
+                            <input type="text" id="userId" placeholder="Enter your user ID" required>
+                            
+                            <label for="trainingDetails">Training Details:</label>
+                            <textarea id="trainingDetails" placeholder="Describe the training completed..."></textarea>
+                            
+                            <button type="submit" class="btn btn-primary">Record Training</button>
+                        </form>
+                    </div>
+                    
+                    <div id="evidence-tab" class="compliance-tab-content" style="display: none;">
+                        <h4>Record Manual Evidence</h4>
+                        <form id="evidenceForm">
+                            <label for="requirementCode">Requirement Code:</label>
+                            <select id="requirementCode" required>
+                                <option value="">Select requirement...</option>
+                                <option value="FDA_820.30_ANALYSIS">FDA qPCR Analysis Software Validation</option>
+                                <option value="FDA_11.10_QPCR_RECORDS">FDA qPCR Electronic Records</option>
+                                <option value="CLIA_493.1105_QPCR">CLIA qPCR Test Records</option>
+                                <option value="CLIA_493.1291_QPCR_REPORTS">CLIA qPCR Result Reporting</option>
+                                <option value="CAP_INF.11400_QPCR_VALIDATION">CAP qPCR System Validation</option>
+                                <option value="QC_SOFTWARE_INTEGRATION">QC Software Integration</option>
+                            </select>
+                            
+                            <label for="evidenceDescription">Evidence Description:</label>
+                            <textarea id="evidenceDescription" placeholder="Describe the compliance evidence..." required></textarea>
+                            
+                            <label for="evidenceUserId">User ID:</label>
+                            <input type="text" id="evidenceUserId" placeholder="Enter your user ID" required>
+                            
+                            <button type="submit" class="btn btn-primary">Record Evidence</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="dashboardContent" class="dashboard-grid">
+            <div class="loading">
+                <h3>Loading comprehensive compliance data...</h3>
+                <p>Analyzing requirements from CLIA, CAP, FDA, NY DOH, and ISO standards...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let dashboardData = null;
+        let charts = {};
+        let currentRegulationFilter = '';
+
+        // Load dashboard on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadDashboard();
+            
+            // Setup regulation filter
+            document.getElementById('regulationFilter').addEventListener('change', function() {
+                currentRegulationFilter = this.value;
+                if (dashboardData) {
+                    renderDashboard(dashboardData);
+                }
+            });
+        });
+
+        async function loadDashboard() {
+            const content = document.getElementById('dashboardContent');
+            const scoreElement = document.getElementById('overallScore');
+            
+            try {
+                content.innerHTML = '<div class="loading"><h3>Loading compliance data...</h3></div>';
+                scoreElement.textContent = '--';
+                
+                const timeRange = document.getElementById('timeRange').value;
+                const response = await fetch(`/api/unified-compliance/dashboard-data?days=${timeRange}`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                dashboardData = await response.json();
+                renderDashboard(dashboardData);
+                
+            } catch (error) {
+                console.error('Error loading dashboard:', error);
+                content.innerHTML = `
+                    <div class="error">
+                        <h3>Error Loading Dashboard</h3>
+                        <p>Failed to load compliance data: ${error.message}</p>
+                        <button class="btn btn-primary" onclick="loadDashboard()">Retry</button>
+                    </div>
+                `;
+            }
+        }
+
+        function renderDashboard(data) {
+            const content = document.getElementById('dashboardContent');
+            const scoreElement = document.getElementById('overallScore');
+            
+            // Update overall compliance score
+            const complianceScore = data.compliance_percentage || 0;
+            scoreElement.textContent = `${complianceScore.toFixed(1)}%`;
+            scoreElement.className = 'score-number';
+            if (complianceScore >= 90) {
+                scoreElement.style.color = '#27ae60';
+            } else if (complianceScore >= 70) {
+                scoreElement.style.color = '#f39c12';
+            } else {
+                scoreElement.style.color = '#e74c3c';
+            }
+
+            content.innerHTML = `
+                ${renderAlerts(data)}
+                ${renderRegulationScores(data.regulation_scores)}
+                ${renderAttentionNeeded(data.attention_needed)}
+                ${renderTrackingSummary(data.tracking_summary)}
+                ${renderRecentActivities(data.recent_activities)}
+                ${renderComplianceGaps(data.compliance_gaps)}
+                ${renderRecommendations(data.recommendations)}
+                ${renderMLValidationSection(data)}
+                ${renderDetailedRequirements(data)}
+            `;
+
+            // Initialize charts
+            setTimeout(() => {
+                initializeCharts(data);
+            }, 100);
+        }
+
+        function renderAlerts(data) {
+            const alerts = [];
+            const complianceScore = data.compliance_percentage || 0;
+            
+            if (complianceScore < 70) {
+                alerts.push({
+                    type: 'danger',
+                    message: `Critical compliance issues detected (${complianceScore.toFixed(1)}%). Immediate action required.`
+                });
+            } else if (complianceScore < 90) {
+                alerts.push({
+                    type: 'warning',
+                    message: `Some compliance areas need attention (${complianceScore.toFixed(1)}%).`
+                });
+            }
+            
+            // Check for critical requirements needing attention
+            const criticalIssues = data.attention_needed.filter(req => 
+                req.criticality_level === 'critical' && req.compliance_status === 'non_compliant'
+            ).length;
+            
+            if (criticalIssues > 0) {
+                alerts.push({
+                    type: 'danger',
+                    message: `${criticalIssues} critical requirement(s) are non-compliant.`
+                });
+            }
+
+            return alerts.length > 0 ? `
+                <div class="wide-card">
+                    ${alerts.map(alert => `
+                        <div class="alert alert-${alert.type}">
+                            <strong>Alert:</strong> ${alert.message}
+                        </div>
+                    `).join('')}
+                </div>
+            ` : '';
+        }
+
+        function renderRegulationScores(regulationScores) {
+            if (!regulationScores || Object.keys(regulationScores).length === 0) {
+                return '';
+            }
+
+            const regulations = Object.keys(regulationScores);
+            
+            return `
+                <div class="card wide-card">
+                    <h3>🏛️ Compliance by Regulation</h3>
+                    <div class="regulation-tabs">
+                        <button class="regulation-tab active" onclick="showRegulationTab('all', event)">All</button>
+                        ${regulations.map(reg => `
+                            <button class="regulation-tab" onclick="showRegulationTab('${reg}', event)">${reg.replace('_', ' ')}</button>
+                        `).join('')}
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="regulationChart"></canvas>
+                    </div>
+                    <table class="requirements-table">
+                        <thead>
+                            <tr>
+                                <th>Regulation</th>
+                                <th>Score</th>
+                                <th>Total Requirements</th>
+                                <th>Compliant</th>
+                                <th>Critical Compliant</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${regulations.map(reg => {
+                                const data = regulationScores[reg];
+                                const status = data.score >= 90 ? 'compliant' : data.score >= 70 ? 'partial' : 'non-compliant';
+                                return `
+                                    <tr>
+                                        <td><span class="regulation-badge">${reg.replace('_', ' ')}</span></td>
+                                        <td><strong>${data.score || 0}%</strong></td>
+                                        <td>${data.total || 0}</td>
+                                        <td>${data.compliant || 0}/${data.total || 0}</td>
+                                        <td>${data.compliant || 0}/${data.total || 0}</td>
+                                        <td><span class="status-indicator status-${status}"></span></td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        function renderAttentionNeeded(attentionNeeded) {
+            if (!attentionNeeded || attentionNeeded.length === 0) {
+                return `
+                    <div class="card">
+                        <h3>✅ Requirements Needing Attention</h3>
+                        <p style="color: #27ae60; text-align: center; padding: 20px;">
+                            All requirements are currently compliant!
+                        </p>
+                    </div>
+                `;
+            }
+
+            // Filter by current regulation if selected
+            const filtered = currentRegulationFilter ? 
+                attentionNeeded.filter(req => req.regulation_source === currentRegulationFilter) :
+                attentionNeeded;
+
+            return `
+                <div class="card">
+                    <h3>⚠️ Requirements Needing Attention</h3>
+                    <div style="max-height: 400px; overflow-y: auto;">
+                        ${filtered.slice(0, 10).map(req => `
+                            <div class="metric">
+                                <div>
+                                    <div class="requirement-code">${req.requirement_code}</div>
+                                    <div style="font-size: 0.9em; margin-top: 5px;">${req.requirement_title}</div>
+                                    <div style="font-size: 0.8em; color: #7f8c8d; margin-top: 3px;">
+                                        ${req.regulation_source.replace('_', ' ')} | ${req.frequency}
+                                    </div>
+                                </div>
+                                <div style="text-align: right;">
+                                    <span class="status-indicator status-${req.compliance_status}"></span>
+                                    <div class="priority-badge priority-${req.criticality_level}">${req.criticality_level}</div>
+                                </div>
+                            </div>
+                        `).join('')}
+                        ${filtered.length > 10 ? `<p style="text-align: center; color: #7f8c8d; margin-top: 15px;">... and ${filtered.length - 10} more</p>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderTrackingSummary(trackingSummary) {
+            if (!trackingSummary) return '';
+
+            const autoTotal = Object.values(trackingSummary.auto_trackable).reduce((a, b) => a + b, 0);
+            const manualTotal = Object.values(trackingSummary.manual_required).reduce((a, b) => a + b, 0);
+
+            return `
+                <div class="card">
+                    <h3>🤖 Tracking Capabilities</h3>
+                    <div class="metric">
+                        <span class="metric-label">Auto-Trackable Requirements</span>
+                        <span class="metric-value">${autoTotal}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Manual Documentation Required</span>
+                        <span class="metric-value">${manualTotal}</span>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="trackingChart"></canvas>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderRecentActivities(recentActivities) {
+            if (!recentActivities || recentActivities.length === 0) {
+                return `
+                    <div class="card">
+                        <h3>📋 Recent Compliance Activities</h3>
+                        <p style="text-align: center; color: #7f8c8d; padding: 20px;">No recent activities recorded.</p>
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="card">
+                    <h3>📋 Recent Compliance Activities</h3>
+                    <div style="max-height: 300px; overflow-y: auto;">
+                        ${recentActivities.slice(0, 8).map(activity => `
+                            <div class="metric">
+                                <div>
+                                    <div class="requirement-code">${activity.requirement_code}</div>
+                                    <div style="font-size: 0.9em; margin-top: 3px;">${activity.evidence_type}</div>
+                                    <div style="font-size: 0.8em; color: #7f8c8d;">${new Date(activity.timestamp).toLocaleString()}</div>
+                                </div>
+                                <div style="text-align: right;">
+                                    <div style="font-weight: bold; color: ${activity.compliance_score >= 90 ? '#27ae60' : activity.compliance_score >= 70 ? '#f39c12' : '#e74c3c'}">
+                                        ${activity.compliance_score}%
+                                    </div>
+                                    <div style="font-size: 0.8em; color: #7f8c8d;">${activity.regulation_source.replace('_', ' ')}</div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderComplianceGaps(complianceGaps) {
+            if (!complianceGaps || complianceGaps.length === 0) {
+                return `
+                    <div class="card">
+                        <h3>🎯 Compliance Gaps</h3>
+                        <p style="color: #27ae60; text-align: center; padding: 20px;">
+                            No open compliance gaps identified!
+                        </p>
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="card">
+                    <h3>🎯 Compliance Gaps</h3>
+                    ${complianceGaps.map(gap => `
+                        <div class="metric">
+                            <div>
+                                <div class="requirement-code">${gap.area || 'Unknown Area'}</div>
+                                <div style="font-size: 0.9em; margin-top: 5px;">${gap.gap || 'No description available'}</div>
+                                <div style="font-size: 0.8em; color: #7f8c8d; margin-top: 3px;">
+                                    Action: ${gap.recommended_action || 'Not set'}
+                                </div>
+                            </div>
+                            <div style="text-align: right;">
+                                <div class="priority-badge priority-${(gap.impact || 'medium').toLowerCase()}">${gap.impact || 'Medium'}</div>
+                                <div style="font-size: 0.8em; color: #7f8c8d; margin-top: 5px;">Needs Attention</div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        function renderRecommendations(recommendations) {
+            if (!recommendations || recommendations.length === 0) {
+                return '';
+            }
+
+            return `
+                <div class="card wide-card">
+                    <h3>💡 Compliance Recommendations</h3>
+                    ${recommendations.map(rec => `
+                        <div class="recommendation-item">
+                            <div class="recommendation-title">
+                                <span class="priority-badge priority-${rec.priority || 'medium'}">${rec.priority || 'Medium'}</span>
+                                ${rec.title || 'No title available'}
+                            </div>
+                            <div style="margin: 5px 0; font-size: 0.9em;">${rec.description || 'No description available'}</div>
+                            <div class="recommendation-action"><strong>Estimated Effort:</strong> ${rec.estimated_effort || 'Not specified'}</div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        function renderMLValidationSection(data) {
+            return `
+                <div class="card wide-card">
+                    <h3>🤖 ML Model Validation (Sub-component of FDA Software Validation)</h3>
+                    <div class="expandable-section">
+                        <div class="section-toggle" onclick="toggleSection('mlValidation')">
+                            <span>ML Validation Details (21 CFR 820.30 Software Controls)</span>
+                            <span>▼</span>
+                        </div>
+                        <div class="section-content" id="mlValidation">
+                            <div style="padding: 20px; background: #f8f9fa; margin-top: 10px; border-radius: 8px;">
+                                <p><strong>Regulatory Context:</strong> ML validation is implemented as part of broader FDA software validation requirements.</p>
+                                <div style="margin-top: 15px;">
+                                    <button class="btn btn-info" onclick="window.open('/ml-validation-dashboard', '_blank')">
+                                        View Detailed ML Validation Dashboard
+                                    </button>
+                                </div>
+                                <div style="margin-top: 15px; font-size: 0.9em; color: #7f8c8d;">
+                                    <strong>Related Requirements:</strong>
+                                    <br>• FDA 820.30 - Software Design Controls
+                                    <br>• FDA 820.70 - Software Production Controls  
+                                    <br>• CAP INF.11400 - Information System Validation
+                                    <br>• ISO 15189 5.1 - Personnel Competence
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderDetailedRequirements(data) {
+            return `
+                <div class="card wide-card">
+                    <h3>📋 Detailed Compliance Requirements</h3>
+                    <div class="expandable-section">
+                        <div class="section-toggle" onclick="toggleSection('detailedRequirements')">
+                            <span>View All Requirements by Regulation</span>
+                            <span>▼</span>
+                        </div>
+                        <div class="section-content" id="detailedRequirements">
+                            <div style="padding: 20px; background: #f8f9fa; margin-top: 10px; border-radius: 8px;">
+                                <p>Use the export functions above to generate detailed reports for specific regulations or all requirements.</p>
+                                <div style="margin-top: 15px;">
+                                    <button class="btn btn-primary" onclick="showRequirementsModal()">
+                                        View Interactive Requirements List
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function initializeCharts(data) {
+            // Regulation scores chart
+            if (data.regulation_scores) {
+                const regulationCtx = document.getElementById('regulationChart');
+                if (regulationCtx && charts.regulationChart) {
+                    charts.regulationChart.destroy();
+                }
+                if (regulationCtx) {
+                    const regulations = Object.keys(data.regulation_scores);
+                    const scores = regulations.map(reg => data.regulation_scores[reg].score);
+                    
+                    charts.regulationChart = new Chart(regulationCtx, {
+                        type: 'bar',
+                        data: {
+                            labels: regulations.map(reg => reg.replace('_', ' ')),
+                            datasets: [{
+                                label: 'Compliance Score (%)',
+                                data: scores,
+                                backgroundColor: scores.map(score => 
+                                    score >= 90 ? '#27ae60' : score >= 70 ? '#f39c12' : '#e74c3c'
+                                ),
+                                borderWidth: 0
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    max: 100
+                                }
+                            },
+                            plugins: {
+                                legend: {
+                                    display: false
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+
+            // Tracking capabilities chart
+            if (data.tracking_summary) {
+                const trackingCtx = document.getElementById('trackingChart');
+                if (trackingCtx && charts.trackingChart) {
+                    charts.trackingChart.destroy();
+                }
+                if (trackingCtx) {
+                    const autoTotal = Object.values(data.tracking_summary.auto_trackable).reduce((a, b) => a + b, 0);
+                    const manualTotal = Object.values(data.tracking_summary.manual_required).reduce((a, b) => a + b, 0);
+                    
+                    charts.trackingChart = new Chart(trackingCtx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: ['Auto-Trackable', 'Manual Required'],
+                            datasets: [{
+                                data: [autoTotal, manualTotal],
+                                backgroundColor: ['#3498db', '#95a5a6'],
+                                borderWidth: 0
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    position: 'bottom'
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+        }
+
+        function toggleSection(sectionId) {
+            const content = document.getElementById(sectionId);
+            const toggle = content.previousElementSibling.querySelector('span:last-child');
+            
+            if (content.classList.contains('expanded')) {
+                content.classList.remove('expanded');
+                toggle.textContent = '▼';
+            } else {
+                content.classList.add('expanded');
+                toggle.textContent = '▲';
+            }
+        }
+
+        function showRegulationTab(regulation, event) {
+            // Update active tab
+            document.querySelectorAll('.regulation-tab').forEach(tab => tab.classList.remove('active'));
+            
+            // Make the clicked tab active
+            if (event && event.target) {
+                event.target.classList.add('active');
+            } else {
+                // Fallback: find the tab by regulation name
+                const tabs = document.querySelectorAll('.regulation-tab');
+                tabs.forEach(tab => {
+                    if ((regulation === 'all' && tab.textContent.trim() === 'All') ||
+                        tab.textContent.trim() === regulation.replace('_', ' ')) {
+                        tab.classList.add('active');
+                    }
+                });
+            }
+            
+            // Filter displayed data
+            currentRegulationFilter = regulation === 'all' ? '' : regulation;
+            if (dashboardData) {
+                renderDashboard(dashboardData);
+            }
+        }
+
+        async function exportReport(type) {
+            try {
+                const timeRange = document.getElementById('timeRange').value;
+                const regulation = document.getElementById('regulationFilter').value;
+                
+                let url = `/api/unified-compliance/export-report?type=${type}&days=${timeRange}`;
+                if (regulation) {
+                    url += `&regulation=${regulation}`;
+                }
+                
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`Export failed: ${response.statusText}`);
+                }
+                
+                const blob = await response.blob();
+                const downloadUrl = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = downloadUrl;
+                a.download = `compliance_${type}_report_${new Date().toISOString().split('T')[0]}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(downloadUrl);
+                
+                alert(`${type.charAt(0).toUpperCase() + type.slice(1)} report exported successfully!`);
+                
+            } catch (error) {
+                console.error('Export error:', error);
+                alert(`Export failed: ${error.message}`);
+            }
+        }
+
+        function showRequirementsModal() {
+            // This would open a detailed requirements modal
+            alert('Interactive requirements viewer would be implemented here');
+        }
+
+        // Compliance Actions Functions
+        function showComplianceActions() {
+            document.getElementById('complianceModal').style.display = 'block';
+        }
+
+        function closeComplianceModal() {
+            document.getElementById('complianceModal').style.display = 'none';
+        }
+
+        function showComplianceTab(tabName) {
+            // Update active tab
+            document.querySelectorAll('.compliance-action-tab').forEach(tab => tab.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            // Show/hide tab content
+            document.getElementById('training-tab').style.display = tabName === 'training' ? 'block' : 'none';
+            document.getElementById('evidence-tab').style.display = tabName === 'evidence' ? 'block' : 'none';
+        }
+
+        // Handle training form submission
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('trainingForm').addEventListener('submit', async function(e) {
+                e.preventDefault();
+                
+                const formData = {
+                    user_id: document.getElementById('userId').value,
+                    training_type: document.getElementById('trainingType').value,
+                    details: {
+                        description: document.getElementById('trainingDetails').value,
+                        timestamp: new Date().toISOString()
+                    }
+                };
+                
+                try {
+                    const response = await fetch('/api/compliance/training/complete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(formData)
+                    });
+                    
+                    if (response.ok) {
+                        alert('Training completion recorded successfully!');
+                        this.reset();
+                        closeComplianceModal();
+                        loadDashboard(); // Refresh dashboard
+                    } else {
+                        const error = await response.json();
+                        alert(`Error: ${error.error}`);
+                    }
+                } catch (error) {
+                    alert(`Error recording training: ${error.message}`);
+                }
+            });
+
+            document.getElementById('evidenceForm').addEventListener('submit', async function(e) {
+                e.preventDefault();
+                
+                const formData = {
+                    requirement_code: document.getElementById('requirementCode').value,
+                    evidence_description: document.getElementById('evidenceDescription').value,
+                    user_id: document.getElementById('evidenceUserId').value,
+                    details: {
+                        timestamp: new Date().toISOString(),
+                        entry_method: 'manual_dashboard'
+                    }
+                };
+                
+                try {
+                    const response = await fetch('/api/compliance/manual-evidence', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(formData)
+                    });
+                    
+                    if (response.ok) {
+                        alert('Evidence recorded successfully!');
+                        this.reset();
+                        closeComplianceModal();
+                        loadDashboard(); // Refresh dashboard
+                    } else {
+                        const error = await response.json();
+                        alert(`Error: ${error.error}`);
+                    }
+                } catch (error) {
+                    alert(`Error recording evidence: ${error.message}`);
+                }
+            });
+        });
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('complianceModal');
+            if (event.target === modal) {
+                closeComplianceModal();
+            }
+        }
+    </script>
+</body>
+</html>
