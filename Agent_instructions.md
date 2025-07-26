@@ -1,6 +1,43 @@
 # MDL-PCR-Analyzer: Comprehensive Agent Instructions & Progress Log
 
-## 🎯 **CURRENT STATUS: Threshold Issues Investigation Branch** (July 23, 2025)
+## 🎯 **CURRENT STATUS: CalcJ Verification & Manual Threshold Fix** (July 25, 2025)
+
+### ✅ **RESOLVED: Centralized Configuration System** (July 25, 2025)
+
+**SOLUTION IMPLEMENTED**:
+- **Single Source**: `config/concentration_controls.json` - centralized config file (22 test configurations)
+- **Backend Integration**: `config_loader.py` loads centralized config, `cqj_calcj_utils.py` uses it
+- **Frontend Integration**: `static/config_manager.js` loads config via Flask `/config/` route
+- **Management Tools**: `manage_config.py` CLI for easy updates (`list-controls`, `update-control`)
+- **Control CalcJ Logic**: Both frontend and backend assign FIXED values to H/M/L controls
+
+### ✅ **RESOLVED: Manual Threshold CQJ Recalculation** (July 25, 2025)
+
+**ISSUE**: Manual threshold changes weren't triggering CQJ recalculation in frontend
+**FIX**: Added immediate CQJ recalculation trigger in `static/threshold_frontend.js` manual threshold handler
+
+### � **CURRENT FOCUS: CalcJ Behavior Verification** (July 25, 2025)
+
+**Expected Behavior**:
+- **Controls (H/M/L)**: CalcJ remains CONSTANT (fixed values from centralized config)
+- **Samples**: CalcJ changes (recalculated using control-based standard curve)  
+- **All wells**: CQJ changes when threshold changes
+
+**Implementation Status**:
+- ✅ Centralized config loading (both frontend/backend)
+- ✅ Control detection logic (both frontend/backend)
+- ✅ Fixed CalcJ assignment for controls
+- ✅ Manual threshold CQJ recalculation fix
+- 🔍 **TESTING**: Complete CalcJ behavior verification needed
+
+**Files Modified**:
+- `config/concentration_controls.json`: Centralized control values (22 tests)
+- `config_loader.py`: Python config loader
+- `static/config_manager.js`: JavaScript config loader  
+- `manage_config.py`: CLI management tool
+- `cqj_calcj_utils.py`: Uses centralized config, assigns fixed control values
+- `static/threshold_frontend.js`: Fixed manual threshold CQJ recalculation
+- `THRESHOLD_STRATEGIES.md`: Updated CalcJ behavior documentation
 
 ### 🔧 **NEW BRANCH: ml-curve-classifier-training-threshold-fixes** (July 23, 2025)
 

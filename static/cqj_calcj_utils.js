@@ -398,8 +398,12 @@ function recalculateCQJValues() {
                 // Check if this is a control well - if so, use FIXED concentration values
                 const controlType = determineControlType(wellKey, well);
                 if (controlType && ['H', 'M', 'L'].includes(controlType)) {
-                    // Control wells get FIXED concentrations from CONCENTRATION_CONTROLS
-                    const concValues = CONCENTRATION_CONTROLS[testCode]?.[channel];
+                    // Control wells get FIXED concentrations from centralized CONCENTRATION_CONTROLS
+                    const concentrationControls = (typeof CONCENTRATION_CONTROLS !== 'undefined') ? 
+                        CONCENTRATION_CONTROLS : 
+                        (typeof window !== 'undefined' ? window.CONCENTRATION_CONTROLS : null);
+                        
+                    const concValues = concentrationControls?.[testCode]?.[channel];
                     if (concValues && concValues[controlType]) {
                         calcjResult = { 
                             calcj_value: concValues[controlType], 
@@ -468,7 +472,11 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
     const currentWellControlType = determineControlType(wellKey, well);
     if (currentWellControlType && ['H', 'M', 'L'].includes(currentWellControlType)) {
         // This well is a control - it should get fixed values, not calculated ones
-        const concValues = CONCENTRATION_CONTROLS[testCode]?.[channel];
+        const concentrationControls = (typeof CONCENTRATION_CONTROLS !== 'undefined') ? 
+            CONCENTRATION_CONTROLS : 
+            (typeof window !== 'undefined' ? window.CONCENTRATION_CONTROLS : null);
+            
+        const concValues = concentrationControls?.[testCode]?.[channel];
         if (concValues && concValues[currentWellControlType]) {
             console.log(`[CALCJ-DEBUG] Control well ${wellKey} (${currentWellControlType}) getting fixed value: ${concValues[currentWellControlType]}`);
             return { 
@@ -479,12 +487,21 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
     }
     
     // Check if we have concentration controls for this test/channel
-    if (typeof CONCENTRATION_CONTROLS === 'undefined') {
-        console.warn('[CALCJ-DEBUG] CONCENTRATION_CONTROLS not available');
+    if (typeof CONCENTRATION_CONTROLS === 'undefined' && typeof window !== 'undefined') {
+        // Try to get from window if not in global scope
+        window.CONCENTRATION_CONTROLS = window.CONCENTRATION_CONTROLS || {};
+    }
+    
+    const concentrationControls = (typeof CONCENTRATION_CONTROLS !== 'undefined') ? 
+        CONCENTRATION_CONTROLS : 
+        (typeof window !== 'undefined' ? window.CONCENTRATION_CONTROLS : null);
+        
+    if (!concentrationControls) {
+        console.warn('[CALCJ-DEBUG] CONCENTRATION_CONTROLS not available - may need to wait for config loading');
         return { calcj_value: null, method: 'no_concentration_controls' };
     }
     
-    const concValues = CONCENTRATION_CONTROLS[testCode]?.[channel];
+    const concValues = concentrationControls[testCode]?.[channel];
     if (!concValues) {
         console.warn(`[CALCJ-DEBUG] No concentration controls for ${testCode}/${channel}`);
         return { calcj_value: null, method: 'no_concentration_controls' };
@@ -695,6 +712,11 @@ window.forceCQJCalcJRecalculation = function(options = {}) {
             if (wellsForSelector) {
                 populateWellSelector(wellsForSelector);
             }
+        }
+        
+        // CRITICAL: Refresh open modal if it exists
+        if (window.currentModalWellKey && typeof updateModalContent === 'function') {
+            updateModalContent(window.currentModalWellKey);
         }
         
         return true;

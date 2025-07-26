@@ -2,8 +2,42 @@
 CQJ/CalcJ calculation utilities for qPCR analysis
 """
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import numpy as np
+
+# Import centralized concentration controls
+try:
+    from config_loader import CONCENTRATION_CONTROLS
+except ImportError:
+    print("[CONFIG-WARNING] Could not import centralized config, using fallback values")
+    # Fallback values if config loader fails
+    CONCENTRATION_CONTROLS = {
+        'Lacto': {
+            'Cy5': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3},
+            'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'TexasRed': {'H': 1e7, 'M': 1e5, 'L': 1e3}
+        },
+        'Calb': {'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 
+        'Ctrach': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'Ngon': {'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 
+        'Tvag': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'Cglab': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 
+        'Cpara': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'Ctrop': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 
+        'Gvag': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'BVAB2': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 
+        'CHVIC': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'AtopVag': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 
+        'Megasphaera': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'Efaecalis': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 
+        'Saureus': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'Ecoli': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 
+        'AtopVagNY': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'BVAB2NY': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 
+        'GvagNY': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'MegasphaeraNY': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'LactoNY': {'Cy5': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'TexasRed': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'RNaseP': {'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}}
+    }
 
 def calculate_cqj_simple(rfu: List[float], cycles: List[float], threshold: float) -> Optional[float]:
     """
@@ -84,6 +118,59 @@ def calculate_cqj(well, threshold):
     print(f"[CQJ-DEBUG] Well {well_id}: No threshold crossing found (max RFU: {max(raw_rfu) if raw_rfu else 'N/A'})")
     return None  # never crossed
 
+def determine_control_type_python(well_id, well_data):
+    """
+    Python version of determineControlType function from JavaScript
+    Determine if a well is a control well and what type (H, M, L, NTC)
+    """
+    if not well_id or not well_data:
+        return None
+    
+    sample_name = well_data.get('sample_name', '')
+    upper_sample_name = sample_name.upper()
+    
+    # Check for NTC first
+    if 'NTC' in sample_name or 'NTC' in upper_sample_name:
+        print(f"[CONTROL-DETECT-PY] Found NTC control: {well_id} (sample: {sample_name})")
+        return 'NTC'
+    
+    # Method 1: Look for H-, M-, L- patterns (most reliable)
+    if 'H-' in sample_name:
+        print(f"[CONTROL-DETECT-PY] Found H control: {well_id} (H- pattern in: {sample_name})")
+        return 'H'
+    if 'M-' in sample_name:
+        print(f"[CONTROL-DETECT-PY] Found M control: {well_id} (M- pattern in: {sample_name})")
+        return 'M'
+    if 'L-' in sample_name:
+        print(f"[CONTROL-DETECT-PY] Found L control: {well_id} (L- pattern in: {sample_name})")
+        return 'L'
+    
+    # Method 2: Look for explicit concentration indicators
+    if any(conc in upper_sample_name for conc in ['1E7', '10E7', '1E+7']):
+        print(f"[CONTROL-DETECT-PY] Found H control by concentration: {well_id} (sample: {sample_name})")
+        return 'H'
+    if any(conc in upper_sample_name for conc in ['1E5', '10E5', '1E+5']):
+        print(f"[CONTROL-DETECT-PY] Found M control by concentration: {well_id} (sample: {sample_name})")
+        return 'M'
+    if any(conc in upper_sample_name for conc in ['1E3', '10E3', '1E+3']):
+        print(f"[CONTROL-DETECT-PY] Found L control by concentration: {well_id} (sample: {sample_name})")
+        return 'L'
+    
+    # Method 3: Look for explicit control words (only if very clear)
+    if any(ctrl in upper_sample_name for ctrl in ['HIGH CONTROL', 'POSITIVE CONTROL']):
+        print(f"[CONTROL-DETECT-PY] Found H control by explicit name: {well_id} (sample: {sample_name})")
+        return 'H'
+    if any(ctrl in upper_sample_name for ctrl in ['MEDIUM CONTROL', 'MED CONTROL']):
+        print(f"[CONTROL-DETECT-PY] Found M control by explicit name: {well_id} (sample: {sample_name})")
+        return 'M'
+    if 'LOW CONTROL' in upper_sample_name:
+        print(f"[CONTROL-DETECT-PY] Found L control by explicit name: {well_id} (sample: {sample_name})")
+        return 'L'
+    
+    # DO NOT classify as control well - be very conservative
+    print(f"[CONTROL-DETECT-PY] Sample well (not control): {well_id} (sample: {sample_name})")
+    return None
+
 def calculate_calcj_with_controls(well_data, threshold, all_well_results, test_code, channel):
     """
     Calculate CalcJ using H/M/L control-based standard curve.
@@ -101,26 +188,29 @@ def calculate_calcj_with_controls(well_data, threshold, all_well_results, test_c
     # Try multiple ways to get well identifier
     well_id = well_data.get('well_id') or well_data.get('wellKey') or well_data.get('well_key') or 'UNKNOWN'
     
-    # Standard concentration values from concentration_controls.js
-    # COMMENTED OUT: These should be in JavaScript only, not duplicated here
-    # CONCENTRATION_CONTROLS = {
-    #     'Lacto': {
-    #         'Cy5': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3},
-    #         'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'TexasRed': {'H': 1e7, 'M': 1e5, 'L': 1e3}
-    #     },
-    #     'Calb': {'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Ctrach': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-    #     'Ngon': {'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Tvag': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-    #     'Cglab': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Cpara': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-    #     'Ctrop': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Gvag': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-    #     'BVAB2': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'CHVIC': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-    #     'AtopVag': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Megasphaera': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-    #     'Efaecalis': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'Saureus': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-    #     'Ecoli': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'AtopVagNY': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-    #     'BVAB2NY': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 'GvagNY': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-    #     'MegasphaeraNY': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-    #     'LactoNY': {'Cy5': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'TexasRed': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-    #     'RNaseP': {'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}}
-    # }
+    # CRITICAL FIX: Check if the current well itself is a control well first
+    # If it is, return fixed concentration value from centralized config instead of calculating
+    current_well_control_type = determine_control_type_python(well_id, well_data)
+    if current_well_control_type and current_well_control_type in ['H', 'M', 'L']:
+        # Get fixed value from centralized configuration
+        conc_values = CONCENTRATION_CONTROLS.get(test_code, {}).get(channel, {})
+        fixed_value = conc_values.get(current_well_control_type)
+        if fixed_value:
+            print(f"[CALCJ-DEBUG] Control well {well_id} ({current_well_control_type}) getting FIXED value from config: {fixed_value}")
+            return {
+                'calcj_value': fixed_value, 
+                'method': f'fixed_{current_well_control_type.lower()}_control_backend_centralized'
+            }
+        else:
+            # Fallback to standard values if not in config
+            fixed_concentrations = {'H': 1e7, 'M': 1e5, 'L': 1e3}
+            fixed_value = fixed_concentrations.get(current_well_control_type)
+            print(f"[CALCJ-DEBUG] Control well {well_id} ({current_well_control_type}) using FALLBACK value: {fixed_value}")
+            return {
+                'calcj_value': fixed_value, 
+                'method': f'fixed_{current_well_control_type.lower()}_control_backend_fallback'
+            }
+    
     
     # Get concentration values for this test/channel
     conc_values = CONCENTRATION_CONTROLS.get(test_code, {}).get(channel, {})

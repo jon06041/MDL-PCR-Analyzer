@@ -1512,7 +1512,7 @@ function initializeManualThresholdControls() {
     if (thresholdInput) {
         // Function to handle manual threshold changes
       // Inside initializeManualThresholdControls function
-function handleManualThresholdChange() {
+async function handleManualThresholdChange() {
     let channel = window.currentFluorophore;
     
     // Validate channel selection
@@ -1545,8 +1545,17 @@ function handleManualThresholdChange() {
         }
         
         // Send manual threshold to backend for proper CQJ recalculation
-        sendManualThresholdToBackend(channel, scale, value);
+        const backendResult = await sendManualThresholdToBackend(channel, scale, value);
         
+        // Only do frontend recalculation if backend failed or didn't return success
+        if (!backendResult || !backendResult.success) {
+            console.log('[THRESHOLD] Backend update failed, falling back to frontend recalculation');
+            if (window.forceCQJCalcJRecalculation) {
+                window.forceCQJCalcJRecalculation({ updateWellSelector: false });
+            } else if (window.recalculateCQJValues) {
+                window.recalculateCQJValues();
+            }
+        }
         
         // Force strategy to manual when user manually sets threshold
         const strategySelect = document.getElementById('thresholdStrategySelect');
@@ -1688,6 +1697,11 @@ async function sendManualThresholdToBackend(channel, scale, value) {
                 // Also trigger CQJ value updates in the UI
                 if (typeof updateCQJDisplayValues === 'function') {
                     updateCQJDisplayValues();
+                }
+                
+                // CRITICAL: Refresh open modal if it exists
+                if (window.currentModalWellKey && typeof updateModalContent === 'function') {
+                    updateModalContent(window.currentModalWellKey);
                 }
                 
                 return result;

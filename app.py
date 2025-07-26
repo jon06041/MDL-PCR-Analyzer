@@ -556,6 +556,11 @@ def ml_config():
 def static_files(filename):
     return send_from_directory('static', filename)
 
+@app.route('/config/<path:filename>')
+def serve_config(filename):
+    """Serve configuration files from the config directory"""
+    return send_from_directory('config', filename)
+
 @app.route('/analyze', methods=['POST'])
 def analyze_data():
     """Endpoint to analyze qPCR data and save results to database"""
