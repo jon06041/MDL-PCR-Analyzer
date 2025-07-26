@@ -3838,6 +3838,16 @@ function handleFileUpload(file, type = 'amplification') {
                         fileName: file.name
                     };
                     updateAmplificationFilesList();
+                    
+                    // Track FDA compliance for file upload
+                    trackFDACompliance('file_upload', {
+                        file_name: file.name,
+                        file_type: 'amplification',
+                        fluorophore: fluorophore,
+                        file_size: file.size,
+                        upload_timestamp: new Date().toISOString()
+                    });
+                    
                     // Don't show status for amplification files - use the file list instead
                 } else if (type === 'samples') {
                     // For summary files, check pattern consistency with existing amplification files
@@ -3858,6 +3868,15 @@ function handleFileUpload(file, type = 'amplification') {
                         fileName: file.name
                     };
                     updateFileStatus('samplesStatus', file.name, true);
+                    
+                    // Track FDA compliance for file upload
+                    trackFDACompliance('file_upload', {
+                        file_name: file.name,
+                        file_type: 'samples',
+                        file_size: file.size,
+                        upload_timestamp: new Date().toISOString()
+                    });
+                    
                     // console.log('Samples data loaded:', samplesData);
                 }
                 
@@ -13576,3 +13595,47 @@ window.deleteAllSessions = deleteAllSessions;
 window.deleteSessionGroup = deleteSessionGroup;
 window.createPathogenControlGrids = createPathogenControlGrids;
 window.showPathogenGrid = showPathogenGrid;
+
+// FDA Compliance Tracking Function
+async function trackFDACompliance(actionType, actionDetails = {}) {
+    /**
+     * Track user actions for FDA compliance (21 CFR Part 11)
+     */
+    try {
+        const complianceData = {
+            user_id: 'laboratory_operator', // Could be made dynamic based on login
+            user_role: 'operator',
+            action_type: actionType,
+            resource_accessed: 'qpcr_analysis_system',
+            action_details: {
+                timestamp: new Date().toISOString(),
+                browser_info: navigator.userAgent,
+                session_id: window.currentSessionId || null,
+                url: window.location.href,
+                ...actionDetails
+            },
+            success: true
+        };
+        
+        const response = await fetch('/api/fda-compliance/log-user-action', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(complianceData)
+        });
+        
+        if (response.ok) {
+            console.log('📋 FDA compliance action logged:', actionType);
+        } else {
+            console.warn('⚠️ Failed to log FDA compliance action:', response.status);
+        }
+        
+    } catch (error) {
+        console.error('❌ Error logging FDA compliance action:', error);
+        // Non-blocking - compliance logging shouldn't break the main workflow
+    }
+}
+
+// Make trackFDACompliance globally available
+window.trackFDACompliance = trackFDACompliance;

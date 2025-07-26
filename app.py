@@ -14,6 +14,7 @@ from sqlalchemy.exc import OperationalError, IntegrityError, DatabaseError
 from threshold_backend import create_threshold_routes
 from cqj_calcj_utils import calculate_cqj_calcj_for_well
 from ml_config_manager import MLConfigManager
+from fda_compliance_manager import FDAComplianceManager
 
 def safe_json_dumps(value, default=None):
     """Helper function to safely serialize to JSON, avoiding double-encoding"""
@@ -551,6 +552,15 @@ except Exception as e:
     print(f"Warning: Could not initialize ML Model Validation Manager: {e}")
     ml_validation_manager = None
 
+# Initialize FDA compliance manager
+try:
+    sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
+    fda_compliance_manager = FDAComplianceManager(sqlite_path)
+    print("FDA Compliance Manager initialized")
+except Exception as e:
+    print(f"Warning: Could not initialize FDA Compliance Manager: {e}")
+    fda_compliance_manager = None
+
 # Initialize threshold routes
 create_threshold_routes(app)
 
@@ -561,6 +571,10 @@ def index():
 @app.route('/ml-validation-dashboard')
 def ml_validation_dashboard():
     return send_from_directory('.', 'ml_validation_dashboard.html')
+
+@app.route('/fda-compliance-dashboard')
+def fda_compliance_dashboard():
+    return send_from_directory('.', 'fda_compliance_dashboard.html')
 
 @app.route('/ml-config')
 def ml_config():
@@ -2602,6 +2616,229 @@ def create_model_version():
         
     except Exception as e:
         app.logger.error(f"Error creating model version: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# ===== FDA COMPLIANCE API ENDPOINTS =====
+
+@app.route('/api/fda-compliance/dashboard-data', methods=['GET'])
+def get_fda_compliance_dashboard_data():
+    """Get comprehensive FDA compliance dashboard data"""
+    try:
+        if not fda_compliance_manager:
+            return jsonify({'error': 'FDA Compliance Manager not available'}), 503
+        
+        # Get query parameters
+        days = request.args.get('days', 30, type=int)
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        
+        # If custom date range provided, calculate days
+        if start_date and end_date:
+            from datetime import datetime, date
+            start = datetime.strptime(start_date, '%Y-%m-%d').date()
+            end = datetime.strptime(end_date, '%Y-%m-%d').date()
+            days = (end - start).days
+        
+        dashboard_data = fda_compliance_manager.get_compliance_dashboard_data(days)
+        
+        # Log this action for audit trail
+        fda_compliance_manager.log_user_action(
+            user_id='system',
+            user_role='operator',
+            action_type='dashboard_access',
+            resource_accessed='fda_compliance_dashboard',
+            action_details={'days': days, 'start_date': start_date, 'end_date': end_date}
+        )
+        
+        return jsonify(dashboard_data)
+        
+    except Exception as e:
+        app.logger.error(f"Error getting FDA compliance dashboard data: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/fda-compliance/export-report', methods=['GET'])
+def export_fda_compliance_report():
+    """Export comprehensive FDA compliance report"""
+    try:
+        if not fda_compliance_manager:
+            return jsonify({'error': 'FDA Compliance Manager not available'}), 503
+        
+        # Get query parameters
+        report_type = request.args.get('type', 'summary')  # summary or full
+        days = request.args.get('days', 90, type=int)
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        
+        # Calculate date range
+        if start_date and end_date:
+            pass  # Use provided dates
+        else:
+            from datetime import datetime, timedelta
+            end_date = datetime.now().date().isoformat()
+            start_date = (datetime.now().date() - timedelta(days=days)).isoformat()
+        
+        # Generate report
+        report = fda_compliance_manager.export_compliance_report(
+            report_type=report_type,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        # Log this action for audit trail
+        fda_compliance_manager.log_user_action(
+            user_id='system',
+            user_role='operator',
+            action_type='report_export',
+            resource_accessed='fda_compliance_report',
+            action_details={'type': report_type, 'start_date': start_date, 'end_date': end_date}
+        )
+        
+        response = jsonify(report)
+        response.headers['Content-Disposition'] = f'attachment; filename=fda_compliance_{report_type}_report_{end_date}.json'
+        return response
+        
+    except Exception as e:
+        app.logger.error(f"Error exporting FDA compliance report: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/fda-compliance/log-user-action', methods=['POST'])
+def log_fda_user_action():
+    """Log user action for 21 CFR Part 11 compliance"""
+    try:
+        if not fda_compliance_manager:
+            return jsonify({'error': 'FDA Compliance Manager not available'}), 503
+        
+        data = request.get_json()
+        
+        action_id = fda_compliance_manager.log_user_action(
+            user_id=data.get('user_id', 'anonymous'),
+            user_role=data.get('user_role', 'operator'),
+            action_type=data.get('action_type'),
+            resource_accessed=data.get('resource_accessed'),
+            action_details=data.get('action_details'),
+            success=data.get('success', True),
+            ip_address=request.remote_addr
+        )
+        
+        return jsonify({
+            'success': True,
+            'action_id': action_id
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error logging FDA user action: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/fda-compliance/record-qc-run', methods=['POST'])
+def record_qc_run():
+    """Record quality control run for CLIA compliance"""
+    try:
+        if not fda_compliance_manager:
+            return jsonify({'error': 'FDA Compliance Manager not available'}), 503
+        
+        data = request.get_json()
+        
+        qc_id = fda_compliance_manager.create_qc_run(
+            qc_date=data.get('qc_date', datetime.now().date().isoformat()),
+            qc_type=data.get('qc_type'),
+            test_type=data.get('test_type'),
+            operator_id=data.get('operator_id'),
+            expected_results=data.get('expected_results'),
+            actual_results=data.get('actual_results'),
+            supervisor_id=data.get('supervisor_id')
+        )
+        
+        return jsonify({
+            'success': True,
+            'qc_id': qc_id
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error recording QC run: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/fda-compliance/create-adverse-event', methods=['POST'])
+def create_adverse_event():
+    """Create adverse event record for MDR compliance"""
+    try:
+        if not fda_compliance_manager:
+            return jsonify({'error': 'FDA Compliance Manager not available'}), 503
+        
+        data = request.get_json()
+        
+        event_id = fda_compliance_manager.create_adverse_event(
+            event_id=data.get('event_id'),
+            event_date=data.get('event_date'),
+            event_type=data.get('event_type'),
+            severity=data.get('severity'),
+            event_description=data.get('event_description'),
+            patient_affected=data.get('patient_affected', False)
+        )
+        
+        return jsonify({
+            'success': True,
+            'event_id': event_id
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error creating adverse event: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/fda-compliance/record-training', methods=['POST'])
+def record_training():
+    """Record personnel training for compliance"""
+    try:
+        if not fda_compliance_manager:
+            return jsonify({'error': 'FDA Compliance Manager not available'}), 503
+        
+        data = request.get_json()
+        
+        training_id = fda_compliance_manager.record_training(
+            employee_id=data.get('employee_id'),
+            employee_name=data.get('employee_name'),
+            role=data.get('role'),
+            training_type=data.get('training_type'),
+            training_topic=data.get('training_topic'),
+            trainer=data.get('trainer'),
+            assessment_score=data.get('assessment_score'),
+            passing_score=data.get('passing_score', 80.0)
+        )
+        
+        return jsonify({
+            'success': True,
+            'training_id': training_id
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error recording training: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/fda-compliance/create-risk-assessment', methods=['POST'])
+def create_risk_assessment():
+    """Create risk assessment for ISO 14971 compliance"""
+    try:
+        if not fda_compliance_manager:
+            return jsonify({'error': 'FDA Compliance Manager not available'}), 503
+        
+        data = request.get_json()
+        
+        risk_id = fda_compliance_manager.create_risk_assessment(
+            risk_id=data.get('risk_id'),
+            hazard_description=data.get('hazard_description'),
+            hazardous_situation=data.get('hazardous_situation'),
+            harm_description=data.get('harm_description'),
+            probability=data.get('probability'),
+            severity=data.get('severity'),
+            risk_owner=data.get('risk_owner')
+        )
+        
+        return jsonify({
+            'success': True,
+            'risk_id': risk_id
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error creating risk assessment: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

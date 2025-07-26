@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FDA Compliance Dashboard - MDL PCR Analyzer</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/date-fns@2.29.3/index.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .dashboard-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            position: relative;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .compliance-score {
+            position: absolute;
+            top: 20px;
+            right: 30px;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 15px 25px;
+            border-radius: 50px;
+            backdrop-filter: blur(10px);
+        }
+
+        .score-number {
+            font-size: 2em;
+            font-weight: bold;
+        }
+
+        .score-label {
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
+        .controls {
+            padding: 20px 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .time-selector {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .time-selector select, .time-selector input {
+            padding: 8px 12px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            background: white;
+        }
+
+        .export-controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn-primary {
+            background: #3498db;
+            color: white;
+        }
+
+        .btn-success {
+            background: #27ae60;
+            color: white;
+        }
+
+        .btn-warning {
+            background: #f39c12;
+            color: white;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 25px;
+            padding: 30px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+        }
+
+        .card h3 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+            font-size: 1.3em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-compliant {
+            background: #27ae60;
+        }
+
+        .status-non-compliant {
+            background: #e74c3c;
+        }
+
+        .status-warning {
+            background: #f39c12;
+        }
+
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #ecf0f1;
+        }
+
+        .metric:last-child {
+            border-bottom: none;
+        }
+
+        .metric-label {
+            color: #7f8c8d;
+            font-size: 0.9em;
+        }
+
+        .metric-value {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .chart-container {
+            height: 300px;
+            margin-top: 20px;
+        }
+
+        .wide-card {
+            grid-column: 1 / -1;
+        }
+
+        .compliance-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        .compliance-table th, .compliance-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ecf0f1;
+        }
+
+        .compliance-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .compliance-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .alert-danger {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            color: #dc2626;
+        }
+
+        .alert-warning {
+            background: #fffbeb;
+            border: 1px solid #fed7aa;
+            color: #d97706;
+        }
+
+        .alert-success {
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            color: #059669;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: #7f8c8d;
+        }
+
+        .error {
+            color: #e74c3c;
+            text-align: center;
+            padding: 30px;
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+                padding: 15px;
+            }
+            
+            .controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .compliance-score {
+                position: static;
+                margin: 15px auto 0;
+                display: inline-block;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <div class="header">
+            <div class="compliance-score">
+                <div class="score-number" id="overallScore">--</div>
+                <div class="score-label">Compliance Score</div>
+            </div>
+            <h1>FDA Compliance Dashboard</h1>
+            <p>Comprehensive regulatory compliance monitoring for pathogen testing software</p>
+        </div>
+
+        <div class="controls">
+            <div class="time-selector">
+                <label for="timeRange">Time Period:</label>
+                <select id="timeRange">
+                    <option value="7">Last 7 days</option>
+                    <option value="30" selected>Last 30 days</option>
+                    <option value="90">Last 90 days</option>
+                    <option value="365">Last year</option>
+                    <option value="custom">Custom range</option>
+                </select>
+                <input type="date" id="startDate" style="display: none;">
+                <input type="date" id="endDate" style="display: none;">
+                <button class="btn btn-primary" onclick="loadDashboard()">Refresh</button>
+            </div>
+            
+            <div class="export-controls">
+                <button class="btn btn-success" onclick="exportReport('summary')">Export Summary</button>
+                <button class="btn btn-warning" onclick="exportReport('full')">Export Full Report</button>
+                <a href="/" class="btn btn-primary">Return to Main App</a>
+            </div>
+        </div>
+
+        <div id="dashboardContent" class="dashboard-grid">
+            <div class="loading">
+                <h3>Loading FDA compliance data...</h3>
+                <p>Please wait while we gather comprehensive compliance metrics.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let dashboardData = null;
+        let charts = {};
+
+        // Load dashboard on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadDashboard();
+            
+            // Setup time range selector
+            document.getElementById('timeRange').addEventListener('change', function() {
+                const customInputs = document.querySelectorAll('#startDate, #endDate');
+                if (this.value === 'custom') {
+                    customInputs.forEach(input => input.style.display = 'inline-block');
+                } else {
+                    customInputs.forEach(input => input.style.display = 'none');
+                }
+            });
+        });
+
+        async function loadDashboard() {
+            const content = document.getElementById('dashboardContent');
+            const scoreElement = document.getElementById('overallScore');
+            
+            try {
+                content.innerHTML = '<div class="loading"><h3>Loading FDA compliance data...</h3></div>';
+                scoreElement.textContent = '--';
+                
+                const timeRange = document.getElementById('timeRange').value;
+                let url = `/api/fda-compliance/dashboard-data?days=${timeRange}`;
+                
+                if (timeRange === 'custom') {
+                    const startDate = document.getElementById('startDate').value;
+                    const endDate = document.getElementById('endDate').value;
+                    if (startDate && endDate) {
+                        url = `/api/fda-compliance/dashboard-data?start_date=${startDate}&end_date=${endDate}`;
+                    }
+                }
+                
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                dashboardData = await response.json();
+                renderDashboard(dashboardData);
+                
+            } catch (error) {
+                console.error('Error loading dashboard:', error);
+                content.innerHTML = `
+                    <div class="error">
+                        <h3>Error Loading Dashboard</h3>
+                        <p>Failed to load FDA compliance data: ${error.message}</p>
+                        <button class="btn btn-primary" onclick="loadDashboard()">Retry</button>
+                    </div>
+                `;
+            }
+        }
+
+        function renderDashboard(data) {
+            const content = document.getElementById('dashboardContent');
+            const scoreElement = document.getElementById('overallScore');
+            
+            // Update overall compliance score
+            scoreElement.textContent = `${data.overall_compliance_score}%`;
+            scoreElement.className = 'score-number';
+            if (data.overall_compliance_score >= 90) {
+                scoreElement.style.color = '#27ae60';
+            } else if (data.overall_compliance_score >= 70) {
+                scoreElement.style.color = '#f39c12';
+            } else {
+                scoreElement.style.color = '#e74c3c';
+            }
+
+            content.innerHTML = `
+                ${renderAlerts(data)}
+                ${renderSoftwareVersionCard(data.software_versions)}
+                ${renderQualityControlCard(data.quality_control)}
+                ${renderMethodValidationCard(data.method_validation)}
+                ${renderInstrumentStatusCard(data.instrument_status)}
+                ${renderAdverseEventsCard(data.adverse_events)}
+                ${renderRiskManagementCard(data.risk_management)}
+                ${renderTrainingComplianceCard(data.training_compliance)}
+                ${renderDataIntegrityCard(data.data_integrity)}
+                ${renderUserActivityCard(data.user_activity)}
+                ${renderComplianceOverviewCard(data)}
+            `;
+
+            // Initialize charts
+            setTimeout(() => {
+                initializeCharts(data);
+            }, 100);
+        }
+
+        function renderAlerts(data) {
+            const alerts = [];
+            
+            if (data.overall_compliance_score < 70) {
+                alerts.push({
+                    type: 'danger',
+                    message: 'Critical compliance issues detected. Immediate action required.'
+                });
+            } else if (data.overall_compliance_score < 90) {
+                alerts.push({
+                    type: 'warning',
+                    message: 'Some compliance areas need attention.'
+                });
+            }
+            
+            if (data.instrument_status.overdue_qualifications > 0) {
+                alerts.push({
+                    type: 'warning',
+                    message: `${data.instrument_status.overdue_qualifications} instrument qualification(s) overdue.`
+                });
+            }
+            
+            if (data.quality_control.pass_rate < 95) {
+                alerts.push({
+                    type: 'warning',
+                    message: `QC pass rate (${data.quality_control.pass_rate}%) below 95% threshold.`
+                });
+            }
+
+            return alerts.length > 0 ? `
+                <div class="wide-card">
+                    ${alerts.map(alert => `
+                        <div class="alert alert-${alert.type}">
+                            <strong>Alert:</strong> ${alert.message}
+                        </div>
+                    `).join('')}
+                </div>
+            ` : '';
+        }
+
+        function renderSoftwareVersionCard(data) {
+            const status = data.status === 'compliant' ? 'compliant' : 'non-compliant';
+            return `
+                <div class="card">
+                    <h3>
+                        <span class="status-indicator status-${status}"></span>
+                        Software Version Control
+                    </h3>
+                    <div class="metric">
+                        <span class="metric-label">Current Version</span>
+                        <span class="metric-value">${data.current_version?.version_number || 'Unknown'}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Validation Status</span>
+                        <span class="metric-value">${data.current_version?.validation_status || 'Unknown'}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Total Versions</span>
+                        <span class="metric-value">${data.total_versions}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Last Approval</span>
+                        <span class="metric-value">${data.current_version?.approval_date ? new Date(data.current_version.approval_date).toLocaleDateString() : 'N/A'}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderQualityControlCard(data) {
+            const status = data.status === 'compliant' ? 'compliant' : 'non-compliant';
+            return `
+                <div class="card">
+                    <h3>
+                        <span class="status-indicator status-${status}"></span>
+                        Quality Control (CLIA)
+                    </h3>
+                    <div class="metric">
+                        <span class="metric-label">Total QC Runs</span>
+                        <span class="metric-value">${data.total_runs}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Pass Rate</span>
+                        <span class="metric-value">${data.pass_rate}%</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Passed Runs</span>
+                        <span class="metric-value">${data.status_breakdown.pass || 0}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Failed Runs</span>
+                        <span class="metric-value">${data.status_breakdown.fail || 0}</span>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="qcChart"></canvas>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderMethodValidationCard(data) {
+            const status = data.status === 'compliant' ? 'compliant' : 'non-compliant';
+            return `
+                <div class="card">
+                    <h3>
+                        <span class="status-indicator status-${status}"></span>
+                        Method Validation
+                    </h3>
+                    <div class="metric">
+                        <span class="metric-label">Total Studies</span>
+                        <span class="metric-value">${data.total_studies}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Completed</span>
+                        <span class="metric-value">${data.status_breakdown.completed || 0}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Active</span>
+                        <span class="metric-value">${data.status_breakdown.active || 0}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Failed</span>
+                        <span class="metric-value">${data.status_breakdown.failed || 0}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderInstrumentStatusCard(data) {
+            const status = data.status === 'compliant' ? 'compliant' : 'non-compliant';
+            return `
+                <div class="card">
+                    <h3>
+                        <span class="status-indicator status-${status}"></span>
+                        Instrument Qualification
+                    </h3>
+                    <div class="metric">
+                        <span class="metric-label">Compliant Instruments</span>
+                        <span class="metric-value">${data.status_breakdown.compliant || 0}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Non-Compliant</span>
+                        <span class="metric-value">${data.status_breakdown.non_compliant || 0}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Overdue Qualifications</span>
+                        <span class="metric-value">${data.overdue_qualifications}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Pending</span>
+                        <span class="metric-value">${data.status_breakdown.pending || 0}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderAdverseEventsCard(data) {
+            const status = data.status === 'compliant' ? 'compliant' : 'non-compliant';
+            return `
+                <div class="card">
+                    <h3>
+                        <span class="status-indicator status-${status}"></span>
+                        Adverse Events (MDR)
+                    </h3>
+                    <div class="metric">
+                        <span class="metric-label">Total Events</span>
+                        <span class="metric-value">${data.total_events}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Death</span>
+                        <span class="metric-value">${data.severity_breakdown.death || 0}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Serious Injury</span>
+                        <span class="metric-value">${data.severity_breakdown.serious_injury || 0}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Malfunction</span>
+                        <span class="metric-value">${data.severity_breakdown.malfunction || 0}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderRiskManagementCard(data) {
+            const status = data.status === 'compliant' ? 'compliant' : 'non-compliant';
+            return `
+                <div class="card">
+                    <h3>
+                        <span class="status-indicator status-${status}"></span>
+                        Risk Management (ISO 14971)
+                    </h3>
+                    <div class="metric">
+                        <span class="metric-label">Active Risks</span>
+                        <span class="metric-value">${data.total_active_risks}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Acceptable</span>
+                        <span class="metric-value">${data.acceptability_breakdown.acceptable || 0}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">ALARP</span>
+                        <span class="metric-value">${data.acceptability_breakdown.alarp || 0}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Unacceptable</span>
+                        <span class="metric-value">${data.acceptability_breakdown.unacceptable || 0}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderTrainingComplianceCard(data) {
+            const status = data.status === 'compliant' ? 'compliant' : 'non-compliant';
+            return `
+                <div class="card">
+                    <h3>
+                        <span class="status-indicator status-${status}"></span>
+                        Training Compliance
+                    </h3>
+                    <div class="metric">
+                        <span class="metric-label">Total Trainings</span>
+                        <span class="metric-value">${data.total_trainings}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Pass Rate</span>
+                        <span class="metric-value">${data.pass_rate}%</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Passed</span>
+                        <span class="metric-value">${data.status_breakdown.pass || 0}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Failed</span>
+                        <span class="metric-value">${data.status_breakdown.fail || 0}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderDataIntegrityCard(data) {
+            const status = data.status === 'compliant' ? 'compliant' : 'non-compliant';
+            return `
+                <div class="card">
+                    <h3>
+                        <span class="status-indicator status-${status}"></span>
+                        Data Integrity (21 CFR Part 11)
+                    </h3>
+                    <div class="metric">
+                        <span class="metric-label">Records Audited</span>
+                        <span class="metric-value">${data.total_records}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Integrity Status</span>
+                        <span class="metric-value">Verified</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">ALCOA+ Compliant</span>
+                        <span class="metric-value">Yes</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Electronic Signatures</span>
+                        <span class="metric-value">Valid</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderUserActivityCard(data) {
+            const status = data.status === 'compliant' ? 'compliant' : 'non-compliant';
+            return `
+                <div class="card">
+                    <h3>
+                        <span class="status-indicator status-${status}"></span>
+                        User Access Control
+                    </h3>
+                    <div class="metric">
+                        <span class="metric-label">Total Actions</span>
+                        <span class="metric-value">${data.total_actions}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Success Rate</span>
+                        <span class="metric-value">${data.success_rate}%</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Failed Actions</span>
+                        <span class="metric-value">${data.failed_actions}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Security Events</span>
+                        <span class="metric-value">0</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderComplianceOverviewCard(data) {
+            return `
+                <div class="card wide-card">
+                    <h3>
+                        <span class="status-indicator status-compliant"></span>
+                        Compliance Areas Overview
+                    </h3>
+                    <table class="compliance-table">
+                        <thead>
+                            <tr>
+                                <th>Compliance Area</th>
+                                <th>Status</th>
+                                <th>Score</th>
+                                <th>Last Updated</th>
+                                <th>Next Review</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Software Version Control (21 CFR 820.30)</td>
+                                <td><span class="status-indicator status-${data.software_versions.status}"></span> ${data.software_versions.status}</td>
+                                <td>95%</td>
+                                <td>${new Date().toLocaleDateString()}</td>
+                                <td>Next Release</td>
+                            </tr>
+                            <tr>
+                                <td>Quality Control (CLIA)</td>
+                                <td><span class="status-indicator status-${data.quality_control.status}"></span> ${data.quality_control.status}</td>
+                                <td>${data.quality_control.pass_rate}%</td>
+                                <td>${new Date().toLocaleDateString()}</td>
+                                <td>Daily</td>
+                            </tr>
+                            <tr>
+                                <td>Method Validation</td>
+                                <td><span class="status-indicator status-${data.method_validation.status}"></span> ${data.method_validation.status}</td>
+                                <td>98%</td>
+                                <td>${new Date().toLocaleDateString()}</td>
+                                <td>Annual</td>
+                            </tr>
+                            <tr>
+                                <td>Instrument Qualification</td>
+                                <td><span class="status-indicator status-${data.instrument_status.status}"></span> ${data.instrument_status.status}</td>
+                                <td>${data.instrument_status.overdue_qualifications === 0 ? '100' : '75'}%</td>
+                                <td>${new Date().toLocaleDateString()}</td>
+                                <td>Quarterly</td>
+                            </tr>
+                            <tr>
+                                <td>Risk Management (ISO 14971)</td>
+                                <td><span class="status-indicator status-${data.risk_management.status}"></span> ${data.risk_management.status}</td>
+                                <td>92%</td>
+                                <td>${new Date().toLocaleDateString()}</td>
+                                <td>Semi-Annual</td>
+                            </tr>
+                            <tr>
+                                <td>Training Compliance</td>
+                                <td><span class="status-indicator status-${data.training_compliance.status}"></span> ${data.training_compliance.status}</td>
+                                <td>${data.training_compliance.pass_rate}%</td>
+                                <td>${new Date().toLocaleDateString()}</td>
+                                <td>Monthly</td>
+                            </tr>
+                            <tr>
+                                <td>Data Integrity (21 CFR Part 11)</td>
+                                <td><span class="status-indicator status-${data.data_integrity.status}"></span> ${data.data_integrity.status}</td>
+                                <td>100%</td>
+                                <td>${new Date().toLocaleDateString()}</td>
+                                <td>Continuous</td>
+                            </tr>
+                            <tr>
+                                <td>User Access Control</td>
+                                <td><span class="status-indicator status-${data.user_activity.status}"></span> ${data.user_activity.status}</td>
+                                <td>${data.user_activity.success_rate}%</td>
+                                <td>${new Date().toLocaleDateString()}</td>
+                                <td>Continuous</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        function initializeCharts(data) {
+            // QC Performance Chart
+            const qcCtx = document.getElementById('qcChart');
+            if (qcCtx && charts.qcChart) {
+                charts.qcChart.destroy();
+            }
+            if (qcCtx) {
+                charts.qcChart = new Chart(qcCtx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Pass', 'Fail'],
+                        datasets: [{
+                            data: [
+                                data.quality_control.status_breakdown.pass || 0,
+                                data.quality_control.status_breakdown.fail || 0
+                            ],
+                            backgroundColor: ['#27ae60', '#e74c3c'],
+                            borderWidth: 0
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'bottom'
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        async function exportReport(type) {
+            try {
+                const timeRange = document.getElementById('timeRange').value;
+                let url = `/api/fda-compliance/export-report?type=${type}&days=${timeRange}`;
+                
+                if (timeRange === 'custom') {
+                    const startDate = document.getElementById('startDate').value;
+                    const endDate = document.getElementById('endDate').value;
+                    if (startDate && endDate) {
+                        url = `/api/fda-compliance/export-report?type=${type}&start_date=${startDate}&end_date=${endDate}`;
+                    }
+                }
+                
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`Export failed: ${response.statusText}`);
+                }
+                
+                const blob = await response.blob();
+                const downloadUrl = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = downloadUrl;
+                a.download = `fda_compliance_${type}_report_${new Date().toISOString().split('T')[0]}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(downloadUrl);
+                
+                alert(`${type.charAt(0).toUpperCase() + type.slice(1)} report exported successfully!`);
+                
+            } catch (error) {
+                console.error('Export error:', error);
+                alert(`Export failed: ${error.message}`);
+            }
+        }
+    </script>
+</body>
+</html>

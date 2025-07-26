@@ -4154,6 +4154,16 @@ class MLFeedbackInterface {
             if (response.ok) {
                 const result = await response.json();
                 console.log('✅ Prediction tracked for validation:', result);
+                
+                // Also track for FDA compliance (21 CFR Part 11)
+                await this.trackFDACompliance('ml_prediction_override', {
+                    well_id: trackingData.well_id,
+                    pathogen_code: trackingData.pathogen_code,
+                    ml_prediction: trackingData.ml_prediction,
+                    expert_decision: trackingData.expert_decision,
+                    confidence: trackingData.ml_confidence
+                });
+                
             } else {
                 console.warn('⚠️ Failed to track prediction for validation:', response.status);
             }
@@ -4161,6 +4171,45 @@ class MLFeedbackInterface {
         } catch (error) {
             console.error('❌ Error tracking prediction for validation:', error);
             // Don't throw error - validation tracking shouldn't break the main workflow
+        }
+    }
+    
+    async trackFDACompliance(actionType, actionDetails = {}) {
+        /**
+         * Track user actions for FDA compliance (21 CFR Part 11)
+         */
+        try {
+            const complianceData = {
+                user_id: 'laboratory_operator', // Could be made dynamic
+                user_role: 'operator',
+                action_type: actionType,
+                resource_accessed: 'qpcr_analysis_system',
+                action_details: {
+                    timestamp: new Date().toISOString(),
+                    browser_info: navigator.userAgent,
+                    session_id: window.currentSessionId || null,
+                    ...actionDetails
+                },
+                success: true
+            };
+            
+            const response = await fetch('/api/fda-compliance/log-user-action', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(complianceData)
+            });
+            
+            if (response.ok) {
+                console.log('📋 FDA compliance action logged:', actionType);
+            } else {
+                console.warn('⚠️ Failed to log FDA compliance action:', response.status);
+            }
+            
+        } catch (error) {
+            console.error('❌ Error logging FDA compliance action:', error);
+            // Non-blocking - compliance logging shouldn't break the main workflow
         }
     }
     
