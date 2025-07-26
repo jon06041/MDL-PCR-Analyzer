@@ -3842,6 +3842,15 @@ class MLFeedbackInterface {
             // Update the specific table cell directly
             this.updateTableCellWithClassification(this.currentWellKey, expertClassification);
             
+            // Refresh the modal if it's currently showing this well
+            if (window.currentModalWellKey === this.currentWellKey && 
+                typeof window.updateModalContent === 'function') {
+                console.log('🔄 Refreshing modal content after feedback submission');
+                setTimeout(() => {
+                    window.updateModalContent(this.currentWellKey);
+                }, 100); // Small delay to allow state to settle
+            }
+            
             // Get a fresh ML prediction for this well to show updated model performance
             setTimeout(async () => {
                 try {

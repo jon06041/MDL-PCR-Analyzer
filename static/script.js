@@ -12573,41 +12573,86 @@ function updateModalDetails(wellResult) {
         // pathogenDisplayText
     // });
     
-    // Determine result classification
+    // Determine result classification - prioritize expert feedback, then ML, then rule-based
     let resultClass = 'modal-result-redo';
     let resultText = 'REDO';
+    let classificationSource = 'rule-based';
     
-    // Check for anomalies
-    let hasAnomalies = false;
-    if (wellResult.anomalies) {
-        try {
-            const anomalies = typeof wellResult.anomalies === 'string' ? 
-                JSON.parse(wellResult.anomalies) : wellResult.anomalies;
-            hasAnomalies = Array.isArray(anomalies) && anomalies.length > 0 && 
-                          !(anomalies.length === 1 && anomalies[0] === 'None');
-        } catch (e) {
-            hasAnomalies = true;
-        }
+    // Check for expert classification first (highest priority)
+    if (wellResult.curve_classification && 
+        wellResult.curve_classification.classification &&
+        wellResult.curve_classification.method === 'expert_feedback') {
+        
+        resultText = wellResult.curve_classification.classification;
+        classificationSource = 'expert_feedback';
+        
+        // Map expert classifications to modal result classes
+        const expertClassMap = {
+            'STRONG_POSITIVE': 'modal-result-pos',
+            'POSITIVE': 'modal-result-pos',
+            'WEAK_POSITIVE': 'modal-result-pos',
+            'NEGATIVE': 'modal-result-neg',
+            'INDETERMINATE': 'modal-result-redo',
+            'REDO': 'modal-result-redo',
+            'SUSPICIOUS': 'modal-result-redo'
+        };
+        resultClass = expertClassMap[resultText] || 'modal-result-redo';
     }
-    
-    // POS/NEG/REDO strict criteria (match table):
-    const isGoodSCurve = wellResult.is_good_scurve || false;
-    const cqValue = wellResult.cq_value;
-    
-    // Check for POS first (all criteria must be met)
-    if (isGoodSCurve && amplitude >= 400 && !hasAnomalies && !isNaN(Number(cqValue))) {
-        resultClass = 'modal-result-pos';
-        resultText = 'POS';
-    } 
-    // Check for NEG (fails amplitude or other critical criteria)
-    else if (amplitude < 400 || !isGoodSCurve || isNaN(Number(cqValue))) {
-        resultClass = 'modal-result-neg';
-        resultText = 'NEG';
-    } 
-    // Everything else is REDO
+    // Check for ML classification (second priority)
+    else if (wellResult.ml_classification && 
+             wellResult.ml_classification.classification &&
+             wellResult.ml_classification.method !== 'expert_feedback') {
+        
+        resultText = wellResult.ml_classification.classification;
+        classificationSource = 'ml_prediction';
+        
+        // Map ML classifications to modal result classes
+        const mlClassMap = {
+            'STRONG_POSITIVE': 'modal-result-pos',
+            'POSITIVE': 'modal-result-pos',
+            'WEAK_POSITIVE': 'modal-result-pos',
+            'NEGATIVE': 'modal-result-neg',
+            'INDETERMINATE': 'modal-result-redo',
+            'REDO': 'modal-result-redo',
+            'SUSPICIOUS': 'modal-result-redo'
+        };
+        resultClass = mlClassMap[resultText] || 'modal-result-redo';
+    }
+    // Fallback to rule-based criteria (lowest priority)
     else {
-        resultClass = 'modal-result-redo';
-        resultText = 'REDO';
+        // Check for anomalies
+        let hasAnomalies = false;
+        if (wellResult.anomalies) {
+            try {
+                const anomalies = typeof wellResult.anomalies === 'string' ? 
+                    JSON.parse(wellResult.anomalies) : wellResult.anomalies;
+                hasAnomalies = Array.isArray(anomalies) && anomalies.length > 0 && 
+                              !(anomalies.length === 1 && anomalies[0] === 'None');
+            } catch (e) {
+                hasAnomalies = true;
+            }
+        }
+        
+        // POS/NEG/REDO strict criteria (match table):
+        const isGoodSCurve = wellResult.is_good_scurve || false;
+        const cqValue = wellResult.cq_value;
+        
+        // Check for POS first (all criteria must be met)
+        if (isGoodSCurve && amplitude >= 400 && !hasAnomalies && !isNaN(Number(cqValue))) {
+            resultClass = 'modal-result-pos';
+            resultText = 'POS';
+        } 
+        // Check for NEG (fails amplitude or other critical criteria)
+        else if (amplitude < 400 || !isGoodSCurve || isNaN(Number(cqValue))) {
+            resultClass = 'modal-result-neg';
+            resultText = 'NEG';
+        } 
+        // Everything else is REDO
+        else {
+            resultClass = 'modal-result-redo';
+            resultText = 'REDO';
+        }
+        classificationSource = 'rule-based';
     }
     
     modalDetails.innerHTML = `
@@ -12627,7 +12672,10 @@ function updateModalDetails(wellResult) {
             </div>
             <div class="modal-parameter-item">
                 <span class="modal-parameter-label">Result:</span>
-                <span class="modal-result-badge ${resultClass}">${resultText}</span>
+                <span class="modal-result-badge ${resultClass}" title="Classification source: ${classificationSource}">
+                    ${resultText}
+                    ${classificationSource === 'expert_feedback' ? ' ✓' : classificationSource === 'ml_prediction' ? ' 🤖' : ''}
+                </span>
             </div>
             <div class="modal-parameter-item">
                 <span class="modal-parameter-label">R² Score:</span>
@@ -12677,6 +12725,7 @@ function updateModalDetails(wellResult) {
             sample: sampleName,
             sample_name: sampleName,
             classification: resultText,
+            classification_source: classificationSource,
             raw_rfu: wellResult.raw_rfu,
             raw_cycles: wellResult.raw_cycles,
             r2_score: wellResult.r2_score || 0,
@@ -12688,7 +12737,8 @@ function updateModalDetails(wellResult) {
             fluorophore: fluorophore,
             cqj: wellResult.cqj && wellResult.cqj[fluorophore] ? wellResult.cqj[fluorophore] : 0,
             calcj: wellResult.calcj && wellResult.calcj[fluorophore] ? wellResult.calcj[fluorophore] : (wellResult.calcj_value ? Number(wellResult.calcj_value) : 0),
-            ml_classification: wellResult.ml_classification
+            ml_classification: wellResult.ml_classification,
+            curve_classification: wellResult.curve_classification
         };
         
         // Use the correct method name and pass wellKey as first parameter
