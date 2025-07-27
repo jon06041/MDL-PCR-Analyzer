@@ -1,7 +1,7 @@
 """
-Unified Validation & Compliance Manager
-Automatically tracks specific regulatory requirements and updates compliance status
-Maps system events to regulatory compliance requirements
+Unified Validation & Compliance Manager - Software-Specific Compliance
+Tracks only compliance requirements that can be satisfied by running the qPCR analysis software
+Focus on auto-trackable requirements that demonstrate real software validation
 """
 
 import sqlite3
@@ -16,28 +16,53 @@ class UnifiedComplianceManager:
         self.db_path = db_path
         self.logger = logging.getLogger(__name__)
         
-        # Mapping of system events to software-specific compliance requirements
+        # Mapping of system events to SOFTWARE-SPECIFIC compliance requirements
+        # Only includes requirements that can be satisfied by using this qPCR software
         self.event_to_requirements_map = {
-            'ANALYSIS_COMPLETED': ['FDA_820.30_ANALYSIS', 'FDA_11.10_QPCR_RECORDS', 'CLIA_493.1105_QPCR'],
-            'REPORT_GENERATED': ['CLIA_493.1291_QPCR_REPORTS', 'FDA_11.10_QPCR_RECORDS'],
-            'THRESHOLD_ADJUSTED': ['FDA_820.70_THRESHOLD_CONTROLS', 'SOFTWARE_CHANGE_CONTROL'],
-            'QC_ANALYZED': ['QC_SOFTWARE_INTEGRATION', 'CLIA_493.1105_QPCR'],
-            'DATA_EXPORTED': ['FDA_11.10_QPCR_RECORDS', 'CAP_INF.11450_QPCR_DATA'],
-            'SYSTEM_VALIDATION': ['CAP_INF.11400_QPCR_VALIDATION', 'FDA_820.30_ANALYSIS'],
-            'USER_TRAINING': ['USER_COMPETENCY_QPCR'],
-            'SOFTWARE_UPDATE': ['SOFTWARE_CHANGE_CONTROL', 'CAP_INF.11400_QPCR_VALIDATION'],
-            'CONTROL_ANALYZED': ['QC_SOFTWARE_INTEGRATION', 'CLIA_493.1105_QPCR'],
-            # Security and Access Control Events
-            'USER_LOGIN': ['FDA_11.10_ACCESS_CONTROL', 'HIPAA_164.312_ACCESS'],
-            'USER_LOGOUT': ['FDA_11.10_ACCESS_CONTROL', 'AUDIT_TRAIL_LOGGING'],
-            'ROLE_ASSIGNED': ['FDA_11.10_ACCESS_CONTROL', 'RBAC_COMPLIANCE'],
-            'PERMISSION_CHANGED': ['FDA_11.10_ACCESS_CONTROL', 'RBAC_COMPLIANCE'],
-            'DATA_ENCRYPTED': ['FDA_11.10_ENCRYPTION', 'HIPAA_164.312_ENCRYPTION'],
-            'DATA_DECRYPTED': ['FDA_11.10_ENCRYPTION', 'AUDIT_TRAIL_LOGGING'],
-            'ALGORITHM_VALIDATED': ['CRYPTO_ALGORITHM_VALIDATION', 'FDA_11.10_ENCRYPTION'],
-            'ACCESS_DENIED': ['FDA_11.10_ACCESS_CONTROL', 'SECURITY_INCIDENT_LOGGING'],
-            'SESSION_TIMEOUT': ['FDA_11.10_ACCESS_CONTROL', 'SESSION_MANAGEMENT'],
-            'PASSWORD_CHANGED': ['FDA_11.10_ACCESS_CONTROL', 'PASSWORD_POLICY_COMPLIANCE']
+            # ML Model Validation & Versioning
+            'ML_MODEL_TRAINED': ['ML_MODEL_VALIDATION', 'ML_VERSION_CONTROL', 'ML_PERFORMANCE_TRACKING'],
+            'ML_PREDICTION_MADE': ['ML_MODEL_VALIDATION', 'ML_AUDIT_TRAIL'],
+            'ML_FEEDBACK_SUBMITTED': ['ML_EXPERT_VALIDATION', 'ML_CONTINUOUS_LEARNING'],
+            'ML_MODEL_RETRAINED': ['ML_VERSION_CONTROL', 'ML_PERFORMANCE_TRACKING'],
+            'ML_ACCURACY_VALIDATED': ['ML_PERFORMANCE_VALIDATION', 'ML_EXPERT_VALIDATION'],
+            
+            # Core qPCR Analysis Activities
+            'ANALYSIS_COMPLETED': ['ANALYSIS_EXECUTION_TRACKING', 'ELECTRONIC_RECORDS_CREATION'],
+            'REPORT_GENERATED': ['ELECTRONIC_REPORT_GENERATION', 'DATA_INTEGRITY_TRACKING'],
+            'THRESHOLD_ADJUSTED': ['SOFTWARE_CONFIGURATION_CONTROL', 'ANALYSIS_PARAMETER_TRACKING'],
+            'DATA_EXPORTED': ['DATA_EXPORT_TRACKING', 'AUDIT_TRAIL_GENERATION'],
+            
+            # Quality Control Through Software
+            'QC_ANALYZED': ['QC_SOFTWARE_EXECUTION', 'CONTROL_SAMPLE_TRACKING'],
+            'CONTROL_ANALYZED': ['CONTROL_SAMPLE_VALIDATION', 'QC_SOFTWARE_EXECUTION'],
+            'NEGATIVE_CONTROL_VERIFIED': ['NEGATIVE_CONTROL_TRACKING', 'QC_SOFTWARE_EXECUTION'],
+            'POSITIVE_CONTROL_VERIFIED': ['POSITIVE_CONTROL_TRACKING', 'QC_SOFTWARE_EXECUTION'],
+            
+            # System Validation & Software Operation
+            'SYSTEM_VALIDATION': ['SOFTWARE_VALIDATION_EXECUTION', 'SYSTEM_PERFORMANCE_VERIFICATION'],
+            'SOFTWARE_FEATURE_USED': ['SOFTWARE_FUNCTIONALITY_VALIDATION', 'USER_INTERACTION_TRACKING'],
+            'CONFIGURATION_CHANGED': ['SOFTWARE_CONFIGURATION_CONTROL', 'CHANGE_CONTROL_TRACKING'],
+            
+            # User Training & Competency (Software-Specific)
+            'USER_TRAINING': ['SOFTWARE_TRAINING_COMPLETION', 'USER_COMPETENCY_SOFTWARE'],
+            'TRAINING_COMPLETED': ['SOFTWARE_TRAINING_TRACKING', 'COMPETENCY_VERIFICATION'],
+            
+            # Security & Access Control (When Implemented)
+            'USER_LOGIN': ['ACCESS_CONTROL_SOFTWARE', 'USER_AUTHENTICATION_TRACKING'],
+            'USER_LOGOUT': ['SESSION_MANAGEMENT_SOFTWARE', 'ACCESS_AUDIT_TRAIL'],
+            'ROLE_ASSIGNED': ['ROLE_BASED_ACCESS_CONTROL', 'USER_PERMISSION_MANAGEMENT'],
+            'PERMISSION_CHANGED': ['ACCESS_CONTROL_SOFTWARE', 'PERMISSION_AUDIT_TRAIL'],
+            'DATA_ENCRYPTED': ['ENCRYPTION_SOFTWARE_IMPLEMENTATION', 'DATA_SECURITY_TRACKING'],
+            'ALGORITHM_VALIDATED': ['ENCRYPTION_ALGORITHM_VALIDATION', 'CRYPTO_SOFTWARE_VALIDATION'],
+            'ACCESS_DENIED': ['ACCESS_CONTROL_SOFTWARE', 'SECURITY_EVENT_TRACKING'],
+            'SESSION_TIMEOUT': ['SESSION_MANAGEMENT_SOFTWARE', 'TIMEOUT_POLICY_ENFORCEMENT'],
+            'PASSWORD_CHANGED': ['PASSWORD_POLICY_ENFORCEMENT', 'SECURITY_TRACKING'],
+            
+            # Data Integrity & Electronic Records
+            'DATA_MODIFIED': ['DATA_MODIFICATION_TRACKING', 'AUDIT_TRAIL_GENERATION'],
+            'FILE_UPLOADED': ['FILE_INTEGRITY_TRACKING', 'DATA_INPUT_VALIDATION'],
+            'CALCULATION_PERFORMED': ['CALCULATION_VALIDATION', 'ALGORITHM_VERIFICATION'],
+            'RESULT_VERIFIED': ['RESULT_VERIFICATION_TRACKING', 'QUALITY_ASSURANCE_SOFTWARE']
         }
     
     def get_db_connection(self):
