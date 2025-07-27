@@ -1,0 +1,9 @@
+{
+  "run_id": "Candida_albicans_20250727_171723",
+  "pathogen_code": "Candida albicans",
+  "run_type": "prediction",
+  "total_samples": 330,
+  "accuracy_rate": 0.9666666666666667,
+  "model_version": "v1.0_validation",
+  "created_date": "2025-07-27T17:17:23.135351"
+}

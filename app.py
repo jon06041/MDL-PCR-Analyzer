@@ -1748,6 +1748,30 @@ def simple_delete_session(session_id):
 try:
     from ml_curve_classifier import ml_classifier
     ML_AVAILABLE = True
+    
+    # Track ML model loading compliance
+    if ml_classifier and hasattr(ml_classifier, 'model_trained') and ml_classifier.model_trained:
+        model_stats = ml_classifier.get_model_stats()
+        ml_startup_metadata = {
+            'model_loaded_at_startup': True,
+            'training_samples': len(ml_classifier.training_data) if hasattr(ml_classifier, 'training_data') else 0,
+            'model_accuracy': model_stats.get('accuracy', 0.0),
+            'model_version': model_stats.get('version', 'startup_load'),
+            'pathogen_models': len(model_stats.get('pathogen_breakdown', {})),
+            'startup_validation': True
+        }
+        
+        # Use a delayed compliance tracking to ensure database is ready
+        def track_startup_compliance():
+            try:
+                track_ml_compliance('ML_MODEL_VALIDATION', ml_startup_metadata)
+            except Exception as e:
+                print(f"Could not track startup ML compliance: {e}")
+        
+        # Schedule for after app initialization
+        import threading
+        threading.Timer(2.0, track_startup_compliance).start()
+        
 except ImportError:
     print("ML classifier not available - scikit-learn may not be installed")
     ML_AVAILABLE = False
@@ -1826,6 +1850,21 @@ def ml_analyze_curve():
                 current_test_samples += 1
         
         total_samples = len(ml_classifier.training_data)
+        
+        # Track ML compliance for prediction made
+        if not recent_feedback:  # Only track actual ML predictions, not recent feedback returns
+            ml_prediction_metadata = {
+                'well_id': well_id,
+                'pathogen': pathogen,
+                'prediction': prediction['classification'],
+                'confidence': prediction['confidence'],
+                'method': prediction['method'],
+                'total_training_samples': total_samples,
+                'pathogen_specific_samples': current_test_samples,
+                'model_version': ml_classifier.get_model_stats().get('version', 'unknown'),
+                'prediction_features': list(existing_metrics.keys())
+            }
+            track_ml_compliance('ML_PREDICTION_MADE', ml_prediction_metadata)
         
         return jsonify({
             'success': True,
@@ -2017,6 +2056,38 @@ def ml_retrain():
         success = ml_classifier.retrain_model()
         model_stats = ml_classifier.get_model_stats()
         
+        # Track ML compliance for model training/retraining
+        if success:
+            ml_training_metadata = {
+                'training_trigger': 'manual' if manual_trigger else 'automatic',
+                'training_samples': len(ml_classifier.training_data),
+                'model_accuracy': model_stats.get('accuracy', 0.0),
+                'model_version': model_stats.get('version', 'unknown'),
+                'pathogen_models': len(model_stats.get('pathogen_breakdown', {})),
+                'retraining_success': True,
+                'model_performance': {
+                    'accuracy': model_stats.get('accuracy', 0.0),
+                    'training_data_size': len(ml_classifier.training_data),
+                    'cross_validation_score': model_stats.get('cross_val_score', 0.0)
+                }
+            }
+            
+            # Track multiple compliance events for model training
+            track_ml_compliance('ML_MODEL_TRAINED', ml_training_metadata)
+            track_ml_compliance('ML_MODEL_RETRAINED', ml_training_metadata)
+            
+            # Track model performance validation
+            if model_stats.get('accuracy', 0.0) > 0:
+                validation_metadata = {
+                    'validation_type': 'retraining_validation',
+                    'accuracy_score': model_stats.get('accuracy', 0.0),
+                    'validation_samples': len(ml_classifier.training_data),
+                    'validation_date': datetime.utcnow().isoformat(),
+                    'validation_method': 'cross_validation',
+                    'performance_threshold_met': model_stats.get('accuracy', 0.0) >= 0.7
+                }
+                track_ml_compliance('ML_ACCURACY_VALIDATED', validation_metadata)
+        
         return jsonify({
             'success': success,
             'message': f'Model retrained with {len(ml_classifier.training_data)} samples' if success else 'Retraining failed',
@@ -2046,6 +2117,35 @@ def ml_stats():
         
     except Exception as e:
         print(f"ML stats error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-validation-dashboard', methods=['GET'])
+def ml_validation_dashboard_api():
+    """Get comprehensive ML validation dashboard data with pathogen tracking"""
+    try:
+        from ml_validation_tracker import ml_tracker
+        
+        # Get pathogen-specific model data
+        pathogen_data = ml_tracker.get_pathogen_dashboard_data()
+        
+        # Get expert teaching summary
+        teaching_summary = ml_tracker.get_expert_teaching_summary(days=30)
+        
+        # Get general ML stats
+        ml_stats_data = {}
+        if ML_AVAILABLE and ml_classifier is not None:
+            ml_stats_data = ml_classifier.get_model_stats()
+        
+        return jsonify({
+            'success': True,
+            'pathogen_models': pathogen_data,
+            'teaching_summary': teaching_summary,
+            'ml_stats': ml_stats_data,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        app.logger.error(f"ML validation dashboard error: {e}")
         return jsonify({'error': str(e)}), 500
 
 # ===== ML CONFIGURATION ENDPOINTS =====

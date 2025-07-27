@@ -129,8 +129,10 @@ class MLCurveClassifier:
         except:
             return 0
     
-    def predict_classification(self, rfu_data, cycles, existing_metrics, pathogen=None):
+    def predict_classification(self, rfu_data, cycles, existing_metrics, pathogen=None, well_id=None):
         """Predict curve classification using ML model"""
+        from ml_validation_tracker import ml_tracker
+        
         # Ensure pathogen is a valid string or None
         if pathogen is not None:
             pathogen = str(pathogen).strip()
@@ -142,10 +144,12 @@ class MLCurveClassifier:
             model = self.pathogen_models[pathogen]
             scaler = self.pathogen_scalers[pathogen]
             model_type = f"pathogen-specific ({pathogen})"
+            model_version = f"pathogen_{pathogen}_1.0"
         elif self.model_trained:
             model = self.model
             scaler = self.scaler
             model_type = "general ML"
+            model_version = f"general_1.{len(self.training_data)}"
         else:
             print(f"🔍 ML Debug: No trained model available, using fallback classification")
             return self.fallback_classification(existing_metrics)
@@ -167,6 +171,18 @@ class MLCurveClassifier:
             
             # Additional debug logging for prediction
             print(f"🔍 ML Debug: Prediction result: {prediction} (confidence: {confidence:.3f})")
+            
+            # Track prediction for dashboard (only if well_id provided to avoid duplicate tracking)
+            if well_id:
+                ml_tracker.track_model_prediction(
+                    well_id=well_id,
+                    pathogen=pathogen or 'General_PCR',
+                    prediction=str(prediction),
+                    confidence=float(confidence),
+                    features_used=features,
+                    model_version=model_version,
+                    user_id='ml_system'
+                )
             
             # Convert numpy values to Python native types for JSON serialization
             return {
@@ -209,24 +225,69 @@ class MLCurveClassifier:
     
     def add_training_sample(self, rfu_data, cycles, existing_metrics, expert_classification, well_id, pathogen=None):
         """Add a training sample from expert feedback"""
+        from ml_validation_tracker import ml_tracker
+        from ml_qc_validation_system import ml_qc_system
+        
+        pathogen_safe = pathogen or 'General_PCR'
+        
+        # Check if training should be paused for this pathogen
+        if ml_qc_system.should_pause_training(pathogen_safe):
+            print(f"⏸️  Training paused for {pathogen_safe} - 40+ sample milestone reached")
+            print(f"   Expert feedback logged but no retraining triggered")
+            print(f"   Focus on validation runs to establish capability evidence")
+            
+            # Still log the expert feedback for record keeping
+            features = self.extract_advanced_features(rfu_data, cycles, existing_metrics)
+            ml_prediction_result = self.predict_classification(rfu_data, cycles, existing_metrics, pathogen)
+            ml_classification = ml_prediction_result.get('classification', 'UNKNOWN')
+            ml_confidence = ml_prediction_result.get('confidence', 0.0)
+            
+            ml_tracker.track_expert_decision(
+                well_id=well_id,
+                original_prediction=ml_classification,
+                expert_correction=expert_classification,
+                pathogen=pathogen_safe,
+                confidence=ml_confidence,
+                features_used=features,
+                user_id='expert'
+            )
+            
+            return  # Exit without retraining
+        
         features = self.extract_advanced_features(rfu_data, cycles, existing_metrics)
         
         # Create unique sample identifier for duplicate prevention
         # This should match the frontend logic: full_sample_name||pathogen||channel
         sample_name = existing_metrics.get('sample', 'Unknown_Sample')
         channel = existing_metrics.get('channel', existing_metrics.get('fluorophore', 'Unknown_Channel'))
-        pathogen_safe = pathogen or 'General_PCR'
         sample_identifier = f"{sample_name}||{pathogen_safe}||{channel}"
+        
+        # Get ML prediction before expert correction
+        ml_prediction_result = self.predict_classification(rfu_data, cycles, existing_metrics, pathogen)
+        ml_classification = ml_prediction_result.get('classification', 'UNKNOWN')
+        ml_confidence = ml_prediction_result.get('confidence', 0.0)
         
         # Debug logging for feature extraction consistency 
         print(f"🔍 ML Debug: Adding training sample for feedback")
         print(f"   Well ID: {well_id}")
         print(f"   Sample Identifier: {sample_identifier}")
         print(f"   Expert classification: {expert_classification}")
+        print(f"   ML prediction: {ml_classification} (confidence: {ml_confidence:.3f})")
         print(f"   Pathogen: {pathogen}")
         print(f"   Key features: amplitude={features.get('amplitude', 'N/A'):.2f}, "
               f"r2={features.get('r2', 'N/A'):.3f}, snr={features.get('snr', 'N/A'):.2f}")
         print(f"   CQJ/CalcJ: cqj={features.get('cqj', 'N/A')}, calcj={features.get('calcj', 'N/A')}")
+        
+        # Track expert decision for compliance and dashboard
+        ml_tracker.track_expert_decision(
+            well_id=well_id,
+            original_prediction=ml_classification,
+            expert_correction=expert_classification,
+            pathogen=pathogen_safe,
+            confidence=ml_confidence,
+            features_used=features,
+            user_id='expert'
+        )
         
         # Check if this sample identifier already exists and remove it (for retraining)
         self.training_data = [
@@ -247,7 +308,7 @@ class MLCurveClassifier:
             'features': features,
             'expert_classification': expert_classification,
             'existing_classification': existing_metrics.get('classification', 'UNKNOWN'),
-            'ml_classification': self.predict_classification(rfu_data, cycles, existing_metrics, pathogen).get('classification', 'UNKNOWN')
+            'ml_classification': ml_classification
         }
         
         print(f"🔍 ML Debug: Training sample created with ML classification: {training_sample['ml_classification']}")
@@ -257,7 +318,13 @@ class MLCurveClassifier:
         
         total_samples = len(self.training_data)
         
-        # Enhanced retraining logic - retrain at key milestones and regularly
+        # Check for TEACHING milestone (40+ samples) - this triggers training pause
+        teaching_milestone = ml_qc_system.check_training_milestone(pathogen_safe, total_samples)
+        
+        if teaching_milestone:
+            print(f"🎓 TEACHING MILESTONE: {pathogen_safe} - Training will be paused after this retrain")
+        
+        # Enhanced retraining logic - milestone-based instead of frequent
         should_retrain = False
         retrain_reason = ""
         
@@ -268,14 +335,56 @@ class MLCurveClassifier:
         elif total_samples == 20:
             should_retrain = True
             retrain_reason = "production ready (20 samples)"
-        # Regular retraining every 5 samples after 20
-        elif total_samples > 20 and (total_samples - 20) % 5 == 0:
+        elif total_samples == 40:
             should_retrain = True
-            retrain_reason = f"regular update ({total_samples} samples)"
-        # Force retrain if we haven't retrained in a while (every 15 samples after 20)
-        elif total_samples > 20 and (total_samples - 20) % 15 == 0:
+            retrain_reason = "teaching milestone (40 samples) - FINAL TRAINING"
+        # After 40 samples, only retrain for significant milestones
+        elif total_samples > 40 and total_samples % 20 == 0:
             should_retrain = True
-            retrain_reason = f"periodic refresh ({total_samples} samples)"
+            retrain_reason = f"major milestone ({total_samples} samples)"
+        
+        if should_retrain:
+            print(f"🔄 ML Debug: Triggering general model retrain - {retrain_reason}")
+            success = self.retrain_model()
+            if success:
+                print(f"✅ ML Debug: Model successfully retrained with {total_samples} samples")
+            else:
+                print(f"❌ ML Debug: Model retraining failed with {total_samples} samples")
+        else:
+            print(f"📊 ML Debug: No retraining needed yet ({total_samples} samples, next at {self._get_next_retrain_threshold(total_samples)})")
+            
+        # Also retrain pathogen-specific model if we have enough samples (but respect pause)
+        if pathogen and not ml_qc_system.should_pause_training(pathogen_safe):
+            # Safely filter training data with pathogen validation
+            pathogen_samples = []
+            for s in self.training_data:
+                sample_pathogen = s.get('pathogen')
+                if sample_pathogen is not None and str(sample_pathogen) == str(pathogen):
+                    pathogen_samples.append(s)
+            
+            pathogen_count = len(pathogen_samples)
+            # More conservative pathogen-specific retraining
+            if pathogen_count >= 5 and (pathogen_count == 5 or pathogen_count % 10 == 0):
+                print(f"🔄 ML Debug: Triggering pathogen-specific model retrain for {pathogen} with {pathogen_count} samples")
+                self.retrain_pathogen_model(pathogen)
+        
+        # Milestone-based retraining logic - only retrain at significant milestones
+        should_retrain = False
+        retrain_reason = ""
+        
+        # Milestone-based versioning (40+ samples minimum for production)
+        if total_samples == 10:
+            should_retrain = True
+            retrain_reason = "initial training milestone (10 samples)"
+        elif total_samples == 25:
+            should_retrain = True
+            retrain_reason = "validation milestone (25 samples)"
+        elif total_samples == 40:
+            should_retrain = True
+            retrain_reason = "production readiness milestone (40 samples)"
+        elif total_samples >= 40 and total_samples % 25 == 0:
+            should_retrain = True
+            retrain_reason = f"milestone checkpoint ({total_samples} samples)"
         
         if should_retrain:
             print(f"🔄 ML Debug: Triggering general model retrain - {retrain_reason}")
@@ -303,14 +412,82 @@ class MLCurveClassifier:
                 self.retrain_pathogen_model(pathogen)
                 
     def _get_next_retrain_threshold(self, current_samples):
-        """Calculate when the next retraining will occur"""
+        """Calculate when the next retraining will occur - milestone-based"""
         if current_samples < 10:
             return 10
         elif current_samples < 20:
             return 20
+        elif current_samples < 40:
+            return 40  # Teaching milestone
+        elif current_samples >= 40:
+            # After teaching milestone, only major milestones (every 20 samples)
+            return ((current_samples // 20) + 1) * 20
         else:
-            # Next multiple of 5 after 20
-            return 20 + ((current_samples - 20) // 5 + 1) * 5
+            return current_samples + 10  # Fallback
+                
+    def register_prediction_run_for_qc(self, run_samples, pathogen=None):
+        """Register a prediction run for QC validation"""
+        from ml_qc_validation_system import ml_qc_system
+        
+        pathogen_safe = pathogen or 'General_PCR'
+        
+        # Only register runs that are in validation or production phase
+        phase = ml_qc_system.get_pathogen_phase(pathogen_safe)
+        
+        if phase == 'teaching':
+            print(f"📚 Teaching phase for {pathogen_safe} - predictions not registered for QC yet")
+            return None
+        
+        print(f"📊 Registering prediction run for QC validation: {pathogen_safe} ({phase} phase)")
+        
+        # Prepare sample data for QC tracking
+        samples_data = []
+        for sample in run_samples:
+            samples_data.append({
+                'sample_id': sample.get('sample_id', sample.get('well_id')),
+                'well_id': sample.get('well_id'),
+                'ml_prediction': sample.get('ml_prediction'),
+                'ml_confidence': sample.get('ml_confidence', 0.0),
+                'expected_result': sample.get('expected_result'),  # If known
+                'is_correct': sample.get('is_correct', False)  # Will be determined by QC
+            })
+        
+        # Get current model version
+        model_version = self.get_current_model_version(pathogen_safe)
+        
+        # Register with QC system
+        run_id = ml_qc_system.register_prediction_run(
+            pathogen_code=pathogen_safe,
+            samples_data=samples_data,
+            model_version=model_version
+        )
+        
+        if run_id:
+            print(f"✅ QC run registered: {run_id} ({len(samples_data)} samples)")
+            print(f"   QC can now validate this run for evidence-based capability assessment")
+        
+        return run_id
+    
+    def get_current_model_version(self, pathogen=None):
+        """Get current model version for pathogen"""
+        from ml_qc_validation_system import ml_qc_system
+        
+        pathogen_safe = pathogen or 'General_PCR'
+        phase = ml_qc_system.get_pathogen_phase(pathogen_safe)
+        
+        # Base version on training samples and phase
+        if pathogen and pathogen in self.pathogen_models:
+            base_samples = len([s for s in self.training_data 
+                              if s.get('pathogen') == pathogen])
+        else:
+            base_samples = len(self.training_data)
+        
+        if phase == 'production':
+            return f"v2.0_validated"
+        elif phase == 'validation':
+            return f"v1.{base_samples}_validation"
+        else:
+            return f"v0.{base_samples}_teaching"
                 
     def check_sample_already_trained(self, sample_identifier, full_sample_name, pathogen, channel):
         """Check if a sample has already been used for training"""
@@ -349,6 +526,8 @@ class MLCurveClassifier:
     
     def retrain_model(self):
         """Retrain the ML model with current training data"""
+        from ml_validation_tracker import ml_tracker
+        
         if len(self.training_data) < 10:
             print("Insufficient training data for ML model")
             return False
@@ -431,10 +610,32 @@ class MLCurveClassifier:
         # Store accuracy in model stats
         self.last_accuracy = accuracy
         
+        # Track training event for general PCR model
+        model_version = f"1.{len(self.training_data)}"
+        ml_tracker.track_training_event(
+            pathogen='General_PCR',
+            training_samples=len(self.training_data),
+            accuracy=accuracy,
+            model_version=model_version,
+            trigger_reason=f"expert_feedback_retrain_{len(self.training_data)}_samples",
+            user_id='ml_system'
+        )
+        
+        # Update model version in database
+        ml_tracker.update_pathogen_model_version(
+            pathogen='General_PCR',
+            version=model_version,
+            accuracy=accuracy,
+            training_samples=len(self.training_data),
+            deployment_status='active'
+        )
+        
         return True
     
     def retrain_pathogen_model(self, pathogen):
         """Retrain pathogen-specific ML model"""
+        from ml_validation_tracker import ml_tracker
+        
         # Safely filter training data with pathogen validation
         pathogen_samples = []
         for s in self.training_data:
@@ -505,11 +706,35 @@ class MLCurveClassifier:
         # Train model
         pathogen_model.fit(X_scaled, y)
         
+        # Calculate accuracy (simple evaluation on training data for pathogen-specific models)
+        predictions = pathogen_model.predict(X_scaled)
+        accuracy = np.mean(predictions == y)
+        
         # Store pathogen-specific model
         self.pathogen_models[pathogen] = pathogen_model
         self.pathogen_scalers[pathogen] = pathogen_scaler
         
-        print(f"Pathogen-specific model trained for {pathogen} with {len(X)} samples")
+        print(f"Pathogen-specific model trained for {pathogen} with {len(X)} samples (accuracy: {accuracy:.2f})")
+        
+        # Track pathogen-specific training event
+        model_version = f"1.{len(pathogen_samples)}"
+        ml_tracker.track_training_event(
+            pathogen=pathogen,
+            training_samples=len(pathogen_samples),
+            accuracy=accuracy,
+            model_version=model_version,
+            trigger_reason=f"pathogen_specific_retrain_{len(pathogen_samples)}_samples",
+            user_id='ml_system'
+        )
+        
+        # Update pathogen-specific model version
+        ml_tracker.update_pathogen_model_version(
+            pathogen=pathogen,
+            version=model_version,
+            accuracy=accuracy,
+            training_samples=len(pathogen_samples),
+            deployment_status='active'
+        )
         
         # Save pathogen models
         self.save_pathogen_models()

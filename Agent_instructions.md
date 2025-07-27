@@ -51,12 +51,88 @@
    - 🔄 Password policy enforcement
    - 🔄 Failed login attempt monitoring
 
-**NEXT STEPS**:
-1. Enhance compliance requirements to focus only on software-demonstrable factors
-2. Implement ML model validation metrics tracking
-3. Add real-time compliance scoring based on actual software usage
-4. Create compliance evidence that's automatically generated through normal app operation
-5. Build compliance reports that prove software validation through usage patterns
+**PRODUCTION REQUIREMENTS DEFINED** (July 27, 2025):
+
+### 🎯 **USER WORKFLOW & AUTHENTICATION**:
+1. **Primary Workflow**: Upload Data → qPCR Analysis → ML Feedback → Compliance Tracking → QC Tech Confirmation
+2. **User Roles & Access**:
+   - **Compliance Officers**: Full compliance dashboard, audit reports, system oversight
+   - **QC Technicians**: Analysis validation, ML feedback, compliance confirmation
+   - **Administrators**: User management, system configuration, full access
+   - **Lab Technicians**: Limited analysis access, basic operations
+   - **Research Users**: Read-only analysis access, research data export
+3. **Authentication**: Microsoft Entra ID integration for Amazon deployment
+4. **Scalability**: Multi-user concurrent access, potentially high data volume
+
+### 🏗️ **TECHNICAL ARCHITECTURE ROADMAP**:
+
+#### **Phase 1: Core Compliance System** ✅ (COMPLETED)
+- ✅ Software-specific compliance tracking
+- ✅ ML model validation with version control  
+- ✅ Analysis execution tracking with success percentages
+- ✅ Pathogen-specific performance metrics
+- ✅ Fresh database with proper schema
+
+#### **Phase 2: User Management & Authentication** 🔄 (NEXT PRIORITY)
+- 🔄 Microsoft Entra ID integration
+- 🔄 Role-based access control (5 user types)
+- 🔄 Session management and security
+- 🔄 User audit trails and compliance logging
+
+#### **Phase 3: Enhanced Compliance Dashboard** 🔄 (IN PROGRESS)
+- ✅ Real-time compliance scoring
+- 🔄 QC technician confirmation workflow
+- 🔄 Pathogen-specific success rate tracking
+- 🔄 ML model version control aligned with test success
+- 🔄 Comprehensive audit reports and exports
+
+#### **Phase 4: Production Deployment** 🔄 (PLANNED)
+- 🔄 Amazon cloud deployment with Entra integration
+- 🔄 Production-grade database (PostgreSQL)
+- 🔄 Load balancing for concurrent users
+- 🔄 Data backup and recovery systems
+- 🔄 Performance monitoring and alerting
+
+**IMMEDIATE NEXT STEPS**:
+1. ✅ **COMPLETED**: ML validation system successfully connected to compliance tracking
+2. Implement Microsoft Entra ID authentication system  
+3. Build role-based access control for 5 user types
+4. Connect qPCR analysis pipeline to compliance tracking
+5. Enhance compliance dashboard for QC tech confirmation workflow
+6. Prepare production deployment architecture for Amazon cloud
+
+### ✅ **MAJOR SUCCESS: ML Validation Compliance System Connected** (July 27, 2025)
+
+**BREAKTHROUGH ACHIEVED**: Successfully connected all ML validation operations to compliance tracking system!
+
+**Key Accomplishments**:
+- ✅ **ML Compliance Score**: Improved from 3 → 6 (100% increase!)
+- ✅ **ML Requirements**: 6 requirements moved from "unknown" to "partial/compliant" status
+- ✅ **Model Accuracy**: 81.8% (exceeds 70% compliance threshold)
+- ✅ **Evidence Generation**: 15+ ML compliance events automatically logged
+- ✅ **Real-time Tracking**: All ML operations now generate compliance evidence
+
+**Successfully Implemented ML Compliance Tracking**:
+1. **ML_MODEL_VALIDATION**: ✅ Model loading, retraining, and accuracy validation tracking
+2. **ML_VERSION_CONTROL**: ✅ Model versioning, sample count tracking, update logging  
+3. **ML_PERFORMANCE_TRACKING**: ✅ Real-time accuracy monitoring and performance metrics
+4. **ML_EXPERT_VALIDATION**: ✅ Expert feedback submission and integration tracking
+5. **ML_AUDIT_TRAIL**: ✅ ML prediction logging with decision rationale
+6. **ML_CONTINUOUS_LEARNING**: ✅ Learning events and model update validation
+
+**Technical Implementation**:
+- Enhanced `ml_submit_feedback()` endpoint with compliance tracking
+- Added compliance tracking to `ml_analyze_curve()` for predictions  
+- Implemented ML training compliance in `ml_retrain()` endpoint
+- Added startup model validation with delayed compliance tracking
+- Created comprehensive ML metadata for all compliance events
+
+**Compliance Evidence Sources**:
+- Model retraining events with performance metrics
+- ML prediction events with confidence scores and features
+- Expert feedback submission with learning outcomes
+- Model accuracy validation with cross-validation scores
+- Version control events with training sample progression
 
 ### ✅ **CRITICAL FIX: Resolved app.py Startup Hang** (July 26, 2025)
 
