@@ -333,6 +333,7 @@ class UnifiedComplianceManager:
     
     def get_compliance_dashboard_data(self, days: int = 30) -> Dict[str, Any]:
         """Get comprehensive compliance dashboard data with specific requirements"""
+        # Updated to include compliance_percentage
         with self.get_db_connection() as conn:
             cursor = conn.cursor()
             
@@ -406,7 +407,29 @@ class UnifiedComplianceManager:
             """)
             tracking_summary = cursor.fetchall()
             
+            # Calculate compliance percentage for frontend display
+            cursor.execute("""
+                SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN compliance_status = 'compliant' THEN 1 ELSE 0 END) as compliant
+                FROM compliance_requirements
+            """)
+            totals = cursor.fetchone()
+            compliance_percentage = round((totals['compliant'] / max(totals['total'], 1)) * 100, 1)
+            
+            # Calculate auto-trackable percentage
+            cursor.execute("""
+                SELECT COUNT(*) as auto_trackable_count
+                FROM compliance_requirements
+                WHERE auto_trackable = 1
+            """)
+            auto_trackable_count = cursor.fetchone()['auto_trackable_count']
+            auto_trackable_percentage = round((auto_trackable_count / max(totals['total'], 1)) * 100, 1)
+            
             return {
+                'ml_validation_metrics': self.ml_validation_manager.get_validation_metrics() if hasattr(self, 'ml_validation_manager') else {},
+                'auto_trackable_percentage': auto_trackable_percentage,
+                'software_specific_focus': True,  # Indicates this dashboard focuses on software-demonstrable requirements
                 'compliance_summary': self._format_compliance_summary(compliance_summary),
                 'attention_needed': [dict(row) for row in attention_needed],
                 'recent_activities': [dict(row) for row in recent_activities],
@@ -414,6 +437,7 @@ class UnifiedComplianceManager:
                 'regulation_scores': regulation_scores,
                 'tracking_summary': self._format_tracking_summary(tracking_summary),
                 'overall_score': self._calculate_overall_compliance_score(cursor),
+                'compliance_percentage': compliance_percentage,
                 'recommendations': self._generate_compliance_recommendations(cursor),
                 'period': {
                     'start': (datetime.date.today() - datetime.timedelta(days=days)).isoformat(),
