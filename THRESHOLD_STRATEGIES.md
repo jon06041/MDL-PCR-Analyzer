@@ -49,12 +49,57 @@ When thresholds are changed (either through strategy change or manual adjustment
 
 ### Troubleshooting Threshold Issues
 
-If controls are not maintaining constant CalcJ values:
+If threshold changes don't produce expected CQJ/CalcJ behavior:
+1. Check that threshold strategies are correctly implemented in `static/threshold_strategies.js`
+2. Verify control detection logic is working (`determine_control_type_python()` and frontend equivalent)
+3. Ensure centralized config is loading properly (check browser console and backend logs)
+4. Confirm that both frontend and backend are using the same threshold calculation
 
-1. **Check Control Detection:** Use browser console to see `[CONTROL-DETECT]` log messages
-2. **Verify Control Patterns:** Ensure control wells have detectable naming (H-, M-, L-, NTC patterns)
-3. **Check CONCENTRATION_CONTROLS:** Verify test code and channel mapping exists
-4. **Debug Function:** Use `window.debugCalcJMath(wellKey)` to trace calculation logic
+---
+
+# Centralized Configuration System
+
+## Overview
+The centralized configuration system ensures that when thresholds change, CQJ values for controls change but CalcJ values remain constant, and all control values are managed from a single location.
+
+## Key Files and Their Roles
+
+### Configuration Source
+- **`config/concentration_controls.json`** - Single source of truth for all H/M/L control values
+  - Organized by test_code -> channel -> control_type -> value
+  - Updated via management script only
+
+### Python Backend
+- **`config_loader.py`** - Loads JSON config for Python backend
+  - Function: `load_concentration_controls()` returns the complete config
+  - Used by backend calculation functions
+  
+- **`cqj_calcj_utils.py`** - Updated backend calculation logic
+  - Uses centralized config via `config_loader.py`
+  - Assigns fixed CalcJ values for controls (H, M, L)
+  - Function: `determine_control_type_python()` for control detection
+
+### JavaScript Frontend
+- **`static/config_manager.js`** - Loads config for frontend
+  - Fetches from Flask route `/config/concentration_controls.json`
+  - Provides async function: `loadConcentrationControls()`
+  
+- **`static/concentration_controls.js`** - Updated to use centralized config
+  - Falls back to hardcoded values if config loading fails
+  - Should be updated to use `config_manager.js`
+
+## Configuration Management
+- **Management Script**: Use dedicated script to update control values
+- **Version Control**: Configuration changes should be tracked in version control
+- **Testing**: Verify configuration loads correctly in both frontend and backend
+- **Fallback**: System includes fallback values if configuration loading fails
+
+## Usage
+1. Update control values only through `config/concentration_controls.json`
+2. Use `config_loader.py` for Python backend access
+3. Use `config_manager.js` for JavaScript frontend access
+4. Test configuration changes across all test types and channels
+5. Verify that controls maintain constant CalcJ values after threshold changes
 
 ### Centralized Configuration Management
 

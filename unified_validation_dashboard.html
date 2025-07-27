@@ -723,9 +723,9 @@
                                     <tr>
                                         <td><span class="regulation-badge">${reg.replace('_', ' ')}</span></td>
                                         <td><strong>${data.score || 0}%</strong></td>
-                                        <td>${data.total || 0}</td>
-                                        <td>${data.compliant || 0}/${data.total || 0}</td>
-                                        <td>${data.compliant || 0}/${data.total || 0}</td>
+                                        <td>${data.total_requirements || 0}</td>
+                                        <td>${data.compliant || 0}/${data.total_requirements || 0}</td>
+                                        <td>${data.critical_compliant || 0}/${data.critical_total || 0}</td>
                                         <td><span class="status-indicator status-${status}"></span></td>
                                     </tr>
                                 `;

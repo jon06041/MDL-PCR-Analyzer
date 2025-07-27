@@ -921,3 +921,121 @@ When a model is active, the system tracks:
 - Export training data for external analysis if needed
 
 This documentation provides a complete overview of the ML curve classification system, from basic usage to advanced technical details. The system is designed to learn from expert knowledge and continuously improve qPCR analysis accuracy while maintaining transparency and user control.
+
+---
+
+# ML Validation Dashboard & Tracking System
+
+## 🚀 Implementation Overview
+
+### ML Validation Tracker System (`ml_validation_tracker.py`)
+- **Expert Decision Tracking**: Logs when experts correct or confirm ML predictions
+- **Model Prediction Tracking**: Records all ML predictions with confidence scores  
+- **Training Event Tracking**: Logs model retraining events with accuracy metrics
+- **Pathogen-Specific Model Versioning**: Tracks individual pathogen model versions and performance
+
+### Enhanced ML Curve Classifier (Updated `ml_curve_classifier.py`)
+- **Integrated Tracking**: All training, prediction, and expert feedback events are now logged to database
+- **Pathogen-Specific Models**: Training events create pathogen-specific version records
+- **Expert Decision Integration**: Feedback from experts is tracked for teaching analysis
+- **Model Version Management**: Automatic versioning based on training samples
+
+### ML Validation Dashboard (`ml_validation_dashboard.html`)
+- **Real-time Updates**: Auto-refreshes every 30 seconds
+- **Pathogen-Specific Metrics**: Shows individual pathogen model performance
+- **Expert Teaching Analytics**: Displays confirmation/correction rates and teaching scores
+- **Model Version Tracking**: Shows current versions, accuracy, and deployment status
+- **Comprehensive Statistics**: Training samples, predictions, expert decisions, teaching effectiveness
+
+### API Endpoint (`/api/ml-validation-dashboard`)
+- **Comprehensive Data**: Returns pathogen models, teaching summary, and ML stats
+- **Real-time**: Reflects current state from database tracking tables
+- **JSON Format**: Structured data for dashboard consumption
+
+## 📊 Dashboard Features
+
+### Summary Metrics Cards
+- **Total Training Samples**: Count of all ML training examples
+- **Active Pathogen Models**: Number of pathogen-specific models
+- **Expert Teaching Score**: Percentage of expert decisions that confirm ML predictions
+- **Model Accuracy Average**: Average accuracy across all pathogen models
+
+### Pathogen-Specific Model Performance
+- **Model Version**: Current version for each pathogen
+- **Training Samples**: Number of training examples per pathogen
+- **Accuracy**: Current model accuracy percentage
+- **Last Updated**: Timestamp of most recent training
+- **Status**: Active/Training/Validation status
+- **Prediction Count**: Total predictions made by each model
+
+### Expert Teaching Activity
+- **Teaching Events**: List of recent expert feedback
+- **Confirmation Rate**: Percentage of ML predictions confirmed by experts
+- **Correction Details**: What experts changed and why
+- **Learning Impact**: How expert feedback improved model performance
+
+## 🔗 Integration Points
+
+### Database Tables Used
+- `ml_pathogen_config`: Pathogen model configurations
+- `ml_training_history`: Training event logs
+- `ml_prediction_tracking`: All ML predictions with outcomes
+- `ml_audit_log`: Expert feedback and decision tracking
+
+### ML System Integration
+- Automatic logging during training, prediction, and feedback
+- Real-time dashboard updates via API
+- Expert decision override system
+- Model version management
+
+## 🎯 Key Benefits
+1. **Real-time Visibility**: See exactly how ML models are performing
+2. **Expert Teaching Analytics**: Track teaching effectiveness and model improvement
+3. **Pathogen-Specific Tracking**: Individual model performance for each pathogen
+4. **Version Control**: Complete model versioning with sample count tracking
+5. **Compliance Support**: Audit trail for regulatory compliance
+6. **Performance Monitoring**: Continuous model accuracy assessment
+
+## 🚀 Usage
+
+### Access the Dashboard
+1. Navigate to `/ml_validation_dashboard.html` in your browser
+2. Dashboard auto-refreshes every 30 seconds
+3. View real-time ML model performance and expert teaching analytics
+
+### API Access
+Access `/api/ml-validation-dashboard` for JSON data including:
+- Pathogen model performance metrics
+- Expert teaching summary
+- Overall ML system statistics
+
+## 📈 Sample Data
+The dashboard displays actual production data from the ML system, including:
+- Real training sample counts
+- Actual model accuracy scores
+- Live expert teaching rates
+- Current model versions and status
+
+## Milestone-Based Versioning & QC Validation
+
+### QC Validation System (`ml_qc_validation_system.py`)
+- **Milestone-Based Versioning**: Requires minimum 40 teaching samples before version advancement
+- **Run-Level QC Tracking**: Tracks quality control at the run level with sample details
+- **QC Confirmation**: Expert confirmation required for model validation
+- **Evidence-Based Assessment**: Capability assessment based on confirmed QC runs
+- **Training Pause Logic**: Training paused after teaching milestone until validation established
+
+### Key Features
+- **Teaching Milestone**: Models advance versions only after 40+ confirmed teaching samples
+- **QC Run Tracking**: Complete run-level quality control with sample-by-sample details
+- **Expert Confirmation**: QC runs require expert review and confirmation
+- **Capability Assessment**: Evidence-based determination of model readiness
+- **Version Control**: Automatic version management based on validated milestones
+
+### Database Integration
+- `ml_qc_runs`: QC run tracking with expert confirmation
+- `ml_qc_sample_details`: Sample-level QC data within runs
+- `ml_model_milestones`: Teaching milestone tracking
+- `ml_model_versions`: Version history with validation evidence
+
+This comprehensive ML validation system ensures robust, evidence-based model development with full regulatory compliance and expert oversight.
