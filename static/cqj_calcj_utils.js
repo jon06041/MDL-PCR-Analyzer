@@ -330,6 +330,7 @@ function recalculateCQJValues() {
     const currentScale = window.currentScaleMode || 'linear';
     let updateCount = 0;
     let calcjUpdateCount = 0;
+    let safetyFixCount = 0;
     
     // Get test code for CalcJ calculations using robust extraction
     const testCode = getCurrentTestCode();
@@ -440,7 +441,7 @@ function recalculateCQJValues() {
     console.log(`[CALCJ-RECALC] Completed: ${updateCount} CQJ updates, ${calcjUpdateCount} CalcJ updates, ${safetyFixCount} safety fixes`);
     
     // SAFETY CHECK: Ensure any well with null CQJ has N/A CalcJ
-    let safetyFixCount = 0;
+    safetyFixCount = 0; // Reset counter for safety check
     Object.entries(results).forEach(([wellKey, well]) => {
         if ((well.cqj_value === null || well.cqj_value === undefined) && 
             (well.calcj_value !== null && well.calcj_value !== undefined && well.calcj_value !== 'N/A')) {
