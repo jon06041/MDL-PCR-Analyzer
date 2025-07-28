@@ -1238,5 +1238,36 @@
     "expert_classification": "POSITIVE",
     "existing_classification": "UNKNOWN",
     "ml_classification": "NEGATIVE"
+  },
+  {
+    "timestamp": "2025-07-27T23:55:23.630444",
+    "well_id": "A10_FAM_FAM",
+    "sample_identifier": "13980965-1-2576724||Gardnerella vaginalis||FAM",
+    "sample_name": "13980965-1-2576724",
+    "channel": "FAM",
+    "pathogen": "Gardnerella vaginalis",
+    "features": {
+      "r2": 0.8253348258484099,
+      "steepness": 0.5618645670151471,
+      "snr": 0,
+      "midpoint": 7.024034399210687,
+      "baseline": -38.27430237155148,
+      "amplitude": 40.48870647229822,
+      "cqj": -1,
+      "calcj": -1,
+      "max_slope": 11.4746437893032,
+      "max_slope_cycle": 5,
+      "baseline_std": 4.369455272088863,
+      "curve_auc": -174.71860771857595,
+      "early_cycles_mean": -14.458827876587907,
+      "late_cycles_mean": 2.2628851291599013,
+      "plateau_detection": 7.178245285850072,
+      "curve_efficiency": 200,
+      "derivative_peak": 11.4746437893032,
+      "second_derivative_max": 8.394852734244775
+    },
+    "expert_classification": "NEGATIVE",
+    "existing_classification": "UNKNOWN",
+    "ml_classification": "POSITIVE"
   }
 ]
