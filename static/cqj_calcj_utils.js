@@ -620,22 +620,49 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
     
     // Calculate CalcJ using ACTUAL H/L controls from this specific run
     try {
-        // Validate that we have reasonable control data
+        // DIVISION BY ZERO PROTECTION: Validate that we have reasonable control data
         if (Math.abs(hCq - lCq) < 0.5) {
-            return { calcj_value: null, method: 'controls_too_close' };
+            return { calcj_value: 'N/A', method: 'controls_too_close' };
+        }
+        
+        // DIVISION BY ZERO PROTECTION: Ensure concentration values are positive
+        if (hVal <= 0 || lVal <= 0) {
+            return { calcj_value: 'N/A', method: 'invalid_concentration_values' };
         }
         
         // Log-linear interpolation using ACTUAL control values from this run
         const logH = Math.log10(hVal);
         const logL = Math.log10(lVal);
         
+        // DIVISION BY ZERO PROTECTION: Check for invalid log values
+        if (!isFinite(logH) || !isFinite(logL)) {
+            return { calcj_value: 'N/A', method: 'invalid_log_values' };
+        }
+        
         // Calculate slope: change in log(concentration) per cycle
         // NOTE: Slope should be NEGATIVE because lower CQJ = higher concentration
-        const slope = (logH - logL) / (hCq - lCq);
+        // DIVISION BY ZERO PROTECTION: Ensure we're not dividing by zero
+        const cqjDifference = hCq - lCq;
+        if (Math.abs(cqjDifference) < 1e-10) {
+            return { calcj_value: 'N/A', method: 'zero_cqj_difference' };
+        }
+        
+        const slope = (logH - logL) / cqjDifference;
         const intercept = logH - slope * hCq;
+        
+        // DIVISION BY ZERO PROTECTION: Check for invalid slope/intercept
+        if (!isFinite(slope) || !isFinite(intercept)) {
+            return { calcj_value: 'N/A', method: 'invalid_slope_intercept' };
+        }
         
         // Calculate concentration for current CQJ
         const logConc = slope * currentCqj + intercept;
+        
+        // DIVISION BY ZERO PROTECTION: Check for invalid log concentration
+        if (!isFinite(logConc)) {
+            return { calcj_value: 'N/A', method: 'invalid_log_concentration' };
+        }
+        
         const calcjResult = Math.pow(10, logConc);
         
         // Enhanced sanity checks: result should be within reasonable range
@@ -651,6 +678,11 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
         // CRITICAL: Check for negative e-notation results (should be N/A)
         if (calcjResult < 1) {
             return { calcj_value: 'N/A', method: 'negative_exponential' };
+        }
+        
+        // DIVISION BY ZERO PROTECTION: Final check for zero result
+        if (calcjResult === 0) {
+            return { calcj_value: 'N/A', method: 'zero_result' };
         }
         
         return { calcj_value: calcjResult, method: 'dynamic_control_based' };

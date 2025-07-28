@@ -15,6 +15,7 @@ class UnifiedComplianceManager:
     def __init__(self, db_path: str = 'qpcr_analysis.db'):
         self.db_path = db_path
         self.logger = logging.getLogger(__name__)
+        self.initialize_tables()
         
         # Mapping of system events to SOFTWARE-SPECIFIC compliance requirements
         # Only includes requirements that can be satisfied by using this qPCR software
@@ -64,6 +65,115 @@ class UnifiedComplianceManager:
             'CALCULATION_PERFORMED': ['CALCULATION_VALIDATION', 'ALGORITHM_VERIFICATION'],
             'RESULT_VERIFIED': ['RESULT_VERIFICATION_TRACKING', 'QUALITY_ASSURANCE_SOFTWARE']
         }
+    
+    def initialize_tables(self):
+        """Initialize all compliance-related database tables"""
+        with self.get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Create compliance_requirements table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS compliance_requirements (
+                    requirement_code TEXT PRIMARY KEY,
+                    requirement_name TEXT NOT NULL,
+                    requirement_title TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    compliance_category TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    compliance_status TEXT DEFAULT 'not_implemented',
+                    target_score INTEGER DEFAULT 95,
+                    current_score INTEGER DEFAULT 0,
+                    last_assessment DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    last_assessed_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    validation_method TEXT DEFAULT 'automated',
+                    priority_level TEXT DEFAULT 'medium',
+                    criticality_level TEXT DEFAULT 'medium',
+                    regulation_source TEXT DEFAULT 'CFR_Title_21',
+                    section_number TEXT DEFAULT '211.68',
+                    frequency TEXT DEFAULT 'monthly',
+                    auto_trackable INTEGER DEFAULT 1,
+                    next_assessment_date DATE,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create compliance_evidence table (if not exists)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS compliance_evidence (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    requirement_code TEXT NOT NULL,
+                    evidence_type TEXT NOT NULL,
+                    evidence_source TEXT NOT NULL,
+                    evidence_data TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    compliance_score INTEGER NOT NULL,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (requirement_code) REFERENCES compliance_requirements(requirement_code)
+                )
+            """)
+            
+            # Create compliance_status_log table (if not exists)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS compliance_status_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    requirement_code TEXT NOT NULL,
+                    old_status TEXT,
+                    new_status TEXT NOT NULL,
+                    change_reason TEXT,
+                    user_id TEXT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (requirement_code) REFERENCES compliance_requirements(requirement_code)
+                )
+            """)
+            
+            # Create compliance_gaps table (if not exists)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS compliance_gaps (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    requirement_code TEXT NOT NULL,
+                    gap_description TEXT NOT NULL,
+                    gap_category TEXT DEFAULT 'general',
+                    gap_severity TEXT DEFAULT 'medium',
+                    priority_level TEXT DEFAULT 'medium',
+                    resolution_status TEXT DEFAULT 'open',
+                    status TEXT DEFAULT 'open',
+                    target_resolution_date DATE,
+                    created_by TEXT DEFAULT 'system',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    resolved_at DATETIME,
+                    resolution_notes TEXT,
+                    FOREIGN KEY (requirement_code) REFERENCES compliance_requirements(requirement_code)
+                )
+            """)
+            
+            # Initialize basic compliance requirements
+            self._initialize_basic_requirements(cursor)
+            
+            conn.commit()
+            self.logger.info("Compliance tables initialized successfully")
+    
+    def _initialize_basic_requirements(self, cursor):
+        """Initialize basic compliance requirements"""
+        basic_requirements = [
+            ('ML_MODEL_VALIDATION', 'ML Model Validation', 'ML Model Validation', 'ml_validation', 'ml_validation', 'Machine learning models must be validated', 'CFR_Title_21_Part_211', '211.68', 'high'),
+            ('ML_VERSION_CONTROL', 'ML Version Control', 'ML Version Control', 'ml_validation', 'ml_validation', 'Version control for ML models', 'CFR_Title_21_Part_211', '211.68', 'high'),
+            ('ML_PERFORMANCE_TRACKING', 'ML Performance Tracking', 'ML Performance Tracking', 'ml_validation', 'ml_validation', 'Track ML model performance', 'CFR_Title_21_Part_211', '211.68', 'high'),
+            ('ANALYSIS_EXECUTION_TRACKING', 'Analysis Execution Tracking', 'Analysis Execution Tracking', 'qpcr_analysis', 'qpcr_analysis', 'Track qPCR analysis execution', 'CFR_Title_21_Part_820', '820.70', 'high'),
+            ('ELECTRONIC_RECORDS_CREATION', 'Electronic Records Creation', 'Electronic Records Creation', 'data_integrity', 'data_integrity', 'Creation of electronic records', 'CFR_Title_21_Part_11', '11.10', 'critical'),
+            ('QC_SOFTWARE_EXECUTION', 'QC Software Execution', 'QC Software Execution', 'quality_control', 'quality_control', 'Quality control through software', 'CFR_Title_21_Part_820', '820.70', 'high'),
+            ('SOFTWARE_VALIDATION_EXECUTION', 'Software Validation', 'Software Validation', 'system_validation', 'system_validation', 'Software validation execution', 'CFR_Title_21_Part_820', '820.70', 'critical'),
+            ('DATA_INTEGRITY_TRACKING', 'Data Integrity Tracking', 'Data Integrity Tracking', 'data_integrity', 'data_integrity', 'Track data integrity', 'CFR_Title_21_Part_11', '11.10', 'critical'),
+            ('AUDIT_TRAIL_GENERATION', 'Audit Trail Generation', 'Audit Trail Generation', 'data_integrity', 'data_integrity', 'Generate audit trails', 'CFR_Title_21_Part_11', '11.10', 'critical'),
+        ]
+        
+        for req_code, name, title, category, comp_category, description, reg_source, section, criticality in basic_requirements:
+            cursor.execute("""
+                INSERT OR IGNORE INTO compliance_requirements 
+                (requirement_code, requirement_name, requirement_title, category, compliance_category, 
+                 description, regulation_source, section_number, criticality_level)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (req_code, name, title, category, comp_category, description, reg_source, section, criticality))
     
     def get_db_connection(self):
         """Get database connection with proper settings"""
