@@ -6,6 +6,7 @@ Handles model performance tracking, versioning, and FDA compliance reporting
 import sqlite3
 import json
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 import os
@@ -26,9 +27,26 @@ class MLModelValidationManager:
         conn.execute('PRAGMA temp_store=MEMORY')
         return conn
     
+    def _execute_with_retry(self, operation_func, max_retries: int = 3, delay: float = 0.1):
+        """Execute database operation with retry logic for handling locks"""
+        for attempt in range(max_retries):
+            try:
+                return operation_func()
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e) and attempt < max_retries - 1:
+                    self.logger.warning(f"Database locked, retrying in {delay} seconds (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(delay)
+                    delay *= 2  # Exponential backoff
+                    continue
+                else:
+                    raise e
+            except Exception as e:
+                # Re-raise non-lock exceptions immediately
+                raise e
+        
     def initialize_validation_schema(self):
         """Initialize the ML validation tracking schema"""
-        try:
+        def _initialize():
             with self.get_db_connection() as conn:
                 # Read and execute the schema
                 schema_path = os.path.join(os.path.dirname(__file__), 'ml_model_validation_schema.sql')
@@ -39,6 +57,9 @@ class MLModelValidationManager:
                     self.logger.info("ML validation schema initialized successfully")
                 else:
                     self.logger.warning("ML validation schema file not found")
+        
+        try:
+            self._execute_with_retry(_initialize)
         except Exception as e:
             self.logger.error(f"Error initializing ML validation schema: {e}")
     
@@ -185,7 +206,7 @@ class MLModelValidationManager:
     
     def update_performance_summary(self, performance_id: int):
         """Update the performance summary statistics"""
-        try:
+        def _update():
             with self.get_db_connection() as conn:
                 cursor = conn.cursor()
                 
@@ -208,7 +229,9 @@ class MLModelValidationManager:
                     SET total_predictions = ?, correct_predictions = ?, expert_overrides = ?
                     WHERE id = ?
                 """, (total, correct, overrides, performance_id))
-                
+        
+        try:
+            self._execute_with_retry(_update)
         except Exception as e:
             self.logger.error(f"Error updating performance summary: {e}")
     
@@ -311,7 +334,7 @@ class MLModelValidationManager:
                                 event_data: str = None, compliance_notes: str = None,
                                 regulatory_impact: str = 'low'):
         """Log an event for FDA compliance auditing"""
-        try:
+        def _log_event():
             with self.get_db_connection() as conn:
                 cursor = conn.cursor()
                 
@@ -322,7 +345,9 @@ class MLModelValidationManager:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (event_type, user_id, model_version, pathogen_code, session_id,
                       event_data, compliance_notes, regulatory_impact))
-                
+        
+        try:
+            self._execute_with_retry(_log_event)
         except Exception as e:
             self.logger.error(f"Error logging FDA compliance event: {e}")
     

@@ -16,6 +16,7 @@ from cqj_calcj_utils import calculate_cqj_calcj_for_well
 from ml_config_manager import MLConfigManager
 from fda_compliance_manager import FDAComplianceManager
 from unified_compliance_manager import UnifiedComplianceManager
+from database_management_api import db_mgmt_bp
 
 def safe_json_dumps(value, default=None):
     """Helper function to safely serialize to JSON, avoiding double-encoding"""
@@ -528,11 +529,16 @@ with app.app_context():
             print(f"Warning: Could not apply SQLite optimizations: {e}")
     
     db.create_all()
-    if not database_url or not database_url.startswith("mysql"):
-        sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
-        print(f"SQLite database initialized at: {sqlite_path}")
-    else:
-        print("MySQL database tables initialized")
+
+# Register database management blueprint
+app.register_blueprint(db_mgmt_bp)
+
+# Log database initialization
+if not database_url or not database_url.startswith("mysql"):
+    sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
+    print(f"SQLite database initialized at: {sqlite_path}")
+else:
+    print("MySQL database tables initialized")
 
 # Initialize ML configuration manager
 try:
@@ -695,6 +701,10 @@ def unified_validation_dashboard():
 @app.route('/ml-config')
 def ml_config():
     return send_from_directory('.', 'ml_config.html')
+
+@app.route('/qc-validation')
+def qc_validation():
+    return send_from_directory('.', 'qc_ml_validation.html')
 
 @app.route('/static/<path:filename>')
 def static_files(filename):

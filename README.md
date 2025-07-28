@@ -19,6 +19,8 @@ This project uses consolidated documentation for maintainability:
 ## Features
 
 - **qPCR Analysis**: Threshold detection, CQJ calculation, and concentration (CalcJ) determination
+- **Control-Based Calculations**: Advanced CalcJ calculations using H/L control-based standard curves with outlier detection
+- **Backend/Frontend Alignment**: Unified calculation methods ensuring consistent results between manual and automated analysis
 - **Centralized Configuration**: Single-source control values managed via `config/concentration_controls.json`
 - **Control Behavior**: H/M/L controls maintain constant CalcJ values; samples recalculated based on threshold changes
 - **ML-powered Classification**: S-curve, exponential, linear, noise classification with real-time learning

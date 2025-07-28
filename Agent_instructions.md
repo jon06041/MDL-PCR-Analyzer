@@ -33,6 +33,103 @@
    - Add ML model validation history
    - Connect ML training events to compliance evidence
 
+### 🚀 **NEW: Database Backup & ML Validation System** (July 28, 2025)
+
+**MAJOR FEATURE IMPLEMENTED**: Comprehensive database backup, recovery, and ML validation tracking system to prevent data loss and ensure ML model integrity.
+
+**Key Features Implemented**:
+
+#### **1. Automatic Database Backup System**
+- ✅ **Scheduled Backups**: Hourly, daily, and weekly automatic backups
+- ✅ **Manual Backups**: On-demand backup creation with descriptions
+- ✅ **Pre-Operation Backups**: Automatic backups before risky operations
+- ✅ **Backup Retention**: Configurable retention policy (keeps last 50 backups)
+- ✅ **Metadata Tracking**: File size, MD5 hash, timestamps, and descriptions
+
+#### **2. Development Data Reset Tools**
+- ✅ **Safe Development Reset**: Clear training data while preserving schema
+- ✅ **Full Reset Option**: Complete database recreation for major changes
+- ✅ **Pre-Reset Backup**: Automatic safety backup before any reset
+- ✅ **Selective Data Clearing**: Target specific tables for reset
+
+#### **3. ML Model Change Impact Tracking**
+- ✅ **Change Documentation**: Track when models are modified and why
+- ✅ **Impact Analysis**: Identify which models need revalidation after changes
+- ✅ **Validation Flagging**: Automatically flag models requiring validation
+- ✅ **Audit Trail**: Complete history of model changes and their impacts
+
+#### **4. QC Technician Confirmation Workflow**
+- ✅ **QC Validation Interface**: Dedicated UI for QC technician validation
+- ✅ **Session Management**: Track validation sessions with technician identity
+- ✅ **Real-time Statistics**: Accuracy tracking, override rates, progress monitoring
+- ✅ **Confidence Filtering**: Focus on low-confidence predictions for validation
+- ✅ **Expert Decision Recording**: Capture technician decisions with rationale
+
+**API Endpoints Added**:
+- `POST /api/db-backup/create` - Create database backup
+- `GET /api/db-backup/list` - List available backups
+- `POST /api/db-backup/restore` - Restore from backup
+- `POST /api/db-backup/reset-dev-data` - Reset development data
+- `POST /api/ml-validation/track-change` - Track model changes
+- `GET /api/ml-validation/validation-required` - Get models needing validation
+- `POST /api/ml-validation/qc-session` - Create QC validation session
+- `POST /api/ml-validation/qc-confirm` - Record QC confirmation
+- `GET /api/ml-validation/pathogen-stats` - Get pathogen accuracy statistics
+
+**Web Interfaces Added**:
+- `/db-management` - Complete database management dashboard
+- `/qc-validation` - QC technician ML validation interface
+
+**Command Line Tools**:
+```bash
+# Create backup
+python db_manager.py backup --desc "Before ML training"
+
+# List recent backups
+python db_manager.py list --count 10
+
+# Restore from backup
+python db_manager.py restore --file backup_file.db
+
+# Reset development data (safe)
+python db_manager.py reset --dev
+
+# Track model changes
+python db_manager.py track-change --model-type general_pcr --pathogen FLUA --desc "Updated threshold logic"
+
+# View ML statistics
+python db_manager.py stats --pathogen FLUA --days 30
+
+# Check validation requirements
+python db_manager.py validation-required
+```
+
+**Database Schema Enhancements**:
+- Enhanced `ml_prediction_tracking` table for QC confirmations
+- Enhanced `ml_model_performance` table for accuracy tracking
+- Enhanced `ml_audit_log` table for change impact tracking
+- New validation session tracking in `expert_review_sessions`
+
+**Files Created**:
+- `database_backup_manager.py` - Core backup and ML tracking logic
+- `database_management_api.py` - Flask API endpoints
+- `backup_scheduler.py` - Automatic backup scheduling
+- `db_manager.py` - Command-line interface
+- `qc_ml_validation.html` - QC technician validation interface
+
+**Integration Points**:
+- Automatic backup before ML model retraining
+- ML prediction tracking during analysis
+- Expert feedback integration with validation workflow
+- Compliance evidence generation for ML activities
+
+**Production Readiness**:
+- ✅ Error handling and logging
+- ✅ Data validation and integrity checks
+- ✅ User authentication integration ready
+- ✅ Audit trail compliance
+- ✅ Performance optimized for large datasets
+
 **SYSTEM ARCHITECTURE STATUS**:
 
 1. **ML Model Validation & Versioning** ✅:
@@ -236,6 +333,35 @@
 - 🔄 Session management and timeout tracking
 - 🔄 Password policy compliance
 - 🔄 Audit report generation (PDF/CSV exports)
+
+### ✅ **RESOLVED: Backend/Frontend CalcJ Alignment** (December 30, 2024)
+
+**CRITICAL FIX COMPLETED**: Successfully aligned backend and frontend CalcJ calculation methods to ensure consistent results.
+
+**Issues Fixed**:
+- **Backend Discrepancy**: Backend was using basic CalcJ calculation (amplitude/threshold) while frontend used control-based standard curves
+- **Negative Sample Values**: Negative samples were receiving CalcJ values instead of proper "N/A" for non-crossing curves
+- **Control Value Changes**: Control wells (H/M/L) were incorrectly changing CalcJ values during threshold adjustments
+
+**Solutions Implemented**:
+- **Unified Calculation Method**: Backend now uses same `calculateCalcjWithControls()` logic as frontend
+- **Strict Control Detection**: Enhanced control detection with exact pattern matching (H-, M-, L-, NTC)
+- **Outlier Consensus**: Added outlier detection and consensus averaging for control values
+- **Proper N/A Handling**: Non-crossing curves now correctly return "N/A" for CalcJ
+- **Standard Curve Consistency**: Both backend and frontend use identical H/L control-based standard curves
+
+**Files Modified**:
+- `threshold_backend.py`: Modified `recalculate_session_cqj_calcj()` to use control-based calculations
+- `cqj_calcj_utils.py`: Added `calculate_calcj_with_controls()` and improved threshold crossing validation
+- Control detection and outlier handling enhanced across both systems
+
+**Verification Results**:
+- ✅ Backend and frontend now produce identical CalcJ values
+- ✅ Control wells maintain constant CalcJ values during threshold changes
+- ✅ Sample wells recalculate properly using control-based standard curves
+- ✅ Negative samples correctly show "N/A" for CalcJ
+
+**Branch**: `result-table-updates-fix` - Ready for production deployment
 
 ### ✅ **RESOLVED: CalcJ Verification & Manual Threshold Fix** (July 25, 2025)
 

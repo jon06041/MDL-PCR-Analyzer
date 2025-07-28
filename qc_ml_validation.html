@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QC Tech ML Validation - MDL PCR Analyzer</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(45deg, #2c3e50, #34495e);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 16px;
+        }
+        
+        .session-info {
+            background: #f8f9fa;
+            padding: 15px 20px;
+            border-bottom: 1px solid #e0e0e0;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        .info-item {
+            text-align: center;
+        }
+        
+        .info-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 5px;
+        }
+        
+        .info-value {
+            font-size: 16px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        .content {
+            padding: 20px;
+        }
+        
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .control-group {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .control-group label {
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #2c3e50;
+        }
+        
+        .control-group input, .control-group select {
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        
+        .control-group input:focus, .control-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s;
+            margin-right: 10px;
+        }
+        
+        .btn:hover {
+            background: #5a6fd8;
+            transform: translateY(-1px);
+        }
+        
+        .btn-success {
+            background: #27ae60;
+        }
+        
+        .btn-success:hover {
+            background: #229954;
+        }
+        
+        .btn-warning {
+            background: #f39c12;
+        }
+        
+        .btn-warning:hover {
+            background: #e67e22;
+        }
+        
+        .btn-danger {
+            background: #e74c3c;
+        }
+        
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+        
+        .validation-grid {
+            display: grid;
+            gap: 20px;
+        }
+        
+        .well-card {
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            transition: all 0.3s;
+        }
+        
+        .well-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.1);
+        }
+        
+        .well-card.validated {
+            border-color: #27ae60;
+            background: #f8fff8;
+        }
+        
+        .well-card.override {
+            border-color: #f39c12;
+            background: #fffdf8;
+        }
+        
+        .well-header {
+            display: grid;
+            grid-template-columns: 1fr auto auto;
+            gap: 15px;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .well-id {
+            font-size: 18px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        .ml-prediction {
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        
+        .prediction-positive {
+            background: #ffebee;
+            color: #c62828;
+        }
+        
+        .prediction-negative {
+            background: #e8f5e8;
+            color: #2e7d32;
+        }
+        
+        .prediction-indeterminate {
+            background: #fff3e0;
+            color: #ef6c00;
+        }
+        
+        .confidence-score {
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .well-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .detail-item {
+            text-align: center;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        
+        .detail-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        
+        .detail-value {
+            font-size: 14px;
+            font-weight: bold;
+        }
+        
+        .validation-actions {
+            display: grid;
+            grid-template-columns: 1fr auto auto;
+            gap: 15px;
+            align-items: center;
+        }
+        
+        .expert-decision {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .decision-btn {
+            flex: 1;
+            padding: 8px 16px;
+            border: 2px solid transparent;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            transition: all 0.3s;
+        }
+        
+        .decision-btn.positive {
+            background: #ffebee;
+            color: #c62828;
+            border-color: #ffcdd2;
+        }
+        
+        .decision-btn.negative {
+            background: #e8f5e8;
+            color: #2e7d32;
+            border-color: #c8e6c9;
+        }
+        
+        .decision-btn.indeterminate {
+            background: #fff3e0;
+            color: #ef6c00;
+            border-color: #ffe0b2;
+        }
+        
+        .decision-btn.selected {
+            transform: scale(1.05);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        
+        .decision-btn.positive.selected {
+            border-color: #c62828;
+        }
+        
+        .decision-btn.negative.selected {
+            border-color: #2e7d32;
+        }
+        
+        .decision-btn.indeterminate.selected {
+            border-color: #ef6c00;
+        }
+        
+        .stats-panel {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 300px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            padding: 15px;
+            z-index: 1000;
+        }
+        
+        .stats-header {
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #2c3e50;
+            border-bottom: 1px solid #e0e0e0;
+            padding-bottom: 5px;
+        }
+        
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        
+        .stat-label {
+            color: #666;
+        }
+        
+        .stat-value {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            transition: width 0.3s;
+        }
+        
+        .status-message {
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status-info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        
+        @media (max-width: 768px) {
+            .controls {
+                grid-template-columns: 1fr;
+            }
+            
+            .stats-panel {
+                position: relative;
+                width: 100%;
+                margin-bottom: 20px;
+            }
+            
+            .well-header {
+                grid-template-columns: 1fr;
+                text-align: center;
+            }
+            
+            .validation-actions {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔬 QC Technician ML Validation</h1>
+            <p>Review and confirm ML predictions for quality control validation</p>
+        </div>
+        
+        <div class="session-info">
+            <div class="info-item">
+                <div class="info-label">QC Technician</div>
+                <div class="info-value" id="qcTechName">Not Set</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Session ID</div>
+                <div class="info-value" id="sessionId">Not Started</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Run File</div>
+                <div class="info-value" id="runFileName">No File</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Progress</div>
+                <div class="info-value" id="validationProgress">0/0</div>
+            </div>
+        </div>
+        
+        <div class="content">
+            <!-- Status Messages -->
+            <div id="statusMessage" class="status-message"></div>
+            
+            <!-- Controls -->
+            <div class="controls">
+                <div class="control-group">
+                    <label for="technicianName">QC Technician Name:</label>
+                    <input type="text" id="technicianName" placeholder="Enter your name" required>
+                </div>
+                
+                <div class="control-group">
+                    <label for="runFile">Run File Name:</label>
+                    <input type="text" id="runFile" placeholder="qPCR run filename">
+                </div>
+                
+                <div class="control-group">
+                    <label for="confidenceFilter">Show Wells With Confidence:</label>
+                    <select id="confidenceFilter">
+                        <option value="all">All Confidence Levels</option>
+                        <option value="low">Low Confidence (&lt; 0.7)</option>
+                        <option value="medium">Medium Confidence (0.7-0.9)</option>
+                        <option value="high">High Confidence (&gt; 0.9)</option>
+                    </select>
+                </div>
+                
+                <div class="control-group" style="align-self: end;">
+                    <button class="btn btn-success" onclick="startValidationSession()">Start QC Session</button>
+                    <button class="btn btn-warning" onclick="loadFromAnalysis()">Load Current Analysis</button>
+                </div>
+            </div>
+            
+            <!-- Statistics Panel -->
+            <div class="stats-panel">
+                <div class="stats-header">Session Statistics</div>
+                <div class="stat-item">
+                    <span class="stat-label">Total Wells:</span>
+                    <span class="stat-value" id="totalWells">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Validated:</span>
+                    <span class="stat-value" id="validatedWells">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">ML Correct:</span>
+                    <span class="stat-value" id="correctPredictions">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Expert Overrides:</span>
+                    <span class="stat-value" id="expertOverrides">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Accuracy:</span>
+                    <span class="stat-value" id="accuracyPercent">0%</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                </div>
+                <div style="margin-top: 15px;">
+                    <button class="btn btn-success" onclick="completeSession()">Complete Session</button>
+                </div>
+            </div>
+            
+            <!-- Validation Grid -->
+            <div id="validationGrid" class="validation-grid">
+                <div style="text-align: center; padding: 40px; color: #666;">
+                    <h3>No ML predictions loaded</h3>
+                    <p>Start a QC session or load analysis results to begin validation</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let currentSession = {
+            sessionId: null,
+            technicianName: '',
+            runFile: '',
+            wells: [],
+            validatedWells: 0,
+            correctPredictions: 0,
+            expertOverrides: 0
+        };
+        
+        // Utility functions
+        function showStatus(message, type = 'info') {
+            const statusEl = document.getElementById('statusMessage');
+            statusEl.textContent = message;
+            statusEl.className = `status-message status-${type}`;
+            statusEl.style.display = 'block';
+            
+            setTimeout(() => {
+                statusEl.style.display = 'none';
+            }, 5000);
+        }
+        
+        async function apiCall(url, options = {}) {
+            try {
+                const response = await fetch(url, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    },
+                    ...options
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.message || 'API call failed');
+                }
+                
+                return data;
+            } catch (error) {
+                console.error('API call error:', error);
+                throw error;
+            }
+        }
+        
+        // Session management
+        async function startValidationSession() {
+            const technicianName = document.getElementById('technicianName').value.trim();
+            const runFile = document.getElementById('runFile').value.trim();
+            
+            if (!technicianName) {
+                showStatus('Please enter your name', 'error');
+                return;
+            }
+            
+            try {
+                const result = await apiCall('/api/ml-validation/qc-session', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        qc_technician: technicianName,
+                        run_file_name: runFile,
+                        pathogen_codes: [] // Will be populated from loaded analysis
+                    })
+                });
+                
+                currentSession.sessionId = result.session_id;
+                currentSession.technicianName = technicianName;
+                currentSession.runFile = runFile;
+                
+                updateSessionInfo();
+                showStatus('QC validation session started successfully', 'success');
+                
+            } catch (error) {
+                showStatus(`Failed to start session: ${error.message}`, 'error');
+            }
+        }
+        
+        function updateSessionInfo() {
+            document.getElementById('qcTechName').textContent = currentSession.technicianName || 'Not Set';
+            document.getElementById('sessionId').textContent = currentSession.sessionId || 'Not Started';
+            document.getElementById('runFileName').textContent = currentSession.runFile || 'No File';
+            document.getElementById('validationProgress').textContent = 
+                `${currentSession.validatedWells}/${currentSession.wells.length}`;
+                
+            updateStatistics();
+        }
+        
+        function updateStatistics() {
+            document.getElementById('totalWells').textContent = currentSession.wells.length;
+            document.getElementById('validatedWells').textContent = currentSession.validatedWells;
+            document.getElementById('correctPredictions').textContent = currentSession.correctPredictions;
+            document.getElementById('expertOverrides').textContent = currentSession.expertOverrides;
+            
+            const accuracy = currentSession.validatedWells > 0 ? 
+                Math.round((currentSession.correctPredictions / currentSession.validatedWells) * 100) : 0;
+            document.getElementById('accuracyPercent').textContent = `${accuracy}%`;
+            
+            const progress = currentSession.wells.length > 0 ? 
+                (currentSession.validatedWells / currentSession.wells.length) * 100 : 0;
+            document.getElementById('progressFill').style.width = `${progress}%`;
+        }
+        
+        // Load analysis results
+        function loadFromAnalysis() {
+            // Check if there are current analysis results
+            if (typeof window.currentAnalysisResults !== 'undefined' && 
+                window.currentAnalysisResults && 
+                window.currentAnalysisResults.individual_results) {
+                
+                loadAnalysisResults(window.currentAnalysisResults.individual_results);
+                showStatus('Loaded current analysis results', 'success');
+            } else {
+                showStatus('No current analysis results found. Please run an analysis first.', 'error');
+            }
+        }
+        
+        function loadAnalysisResults(analysisResults) {
+            currentSession.wells = [];
+            
+            // Convert analysis results to validation format
+            for (const [wellKey, result] of Object.entries(analysisResults)) {
+                if (result.ml_prediction && result.ml_confidence !== undefined) {
+                    currentSession.wells.push({
+                        wellId: wellKey,
+                        sampleName: result.sample_name || result.sample || wellKey,
+                        pathogenCode: result.test_code || result.pathogen_code,
+                        fluorophore: result.fluorophore,
+                        mlPrediction: result.ml_prediction,
+                        mlConfidence: result.ml_confidence,
+                        expertDecision: null,
+                        validated: false,
+                        cqj: result.cqj_value || result.cqj,
+                        calcj: result.calcj_value || result.calcj,
+                        amplitude: result.amplitude,
+                        r_squared: result.r_squared
+                    });
+                }
+            }
+            
+            renderValidationGrid();
+            updateSessionInfo();
+        }
+        
+        // Render validation interface
+        function renderValidationGrid() {
+            const gridEl = document.getElementById('validationGrid');
+            
+            if (currentSession.wells.length === 0) {
+                gridEl.innerHTML = `
+                    <div style="text-align: center; padding: 40px; color: #666;">
+                        <h3>No ML predictions found</h3>
+                        <p>Load analysis results that contain ML predictions to begin validation</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            const confidenceFilter = document.getElementById('confidenceFilter').value;
+            let filteredWells = currentSession.wells;
+            
+            if (confidenceFilter !== 'all') {
+                filteredWells = currentSession.wells.filter(well => {
+                    const confidence = well.mlConfidence;
+                    switch (confidenceFilter) {
+                        case 'low': return confidence < 0.7;
+                        case 'medium': return confidence >= 0.7 && confidence <= 0.9;
+                        case 'high': return confidence > 0.9;
+                        default: return true;
+                    }
+                });
+            }
+            
+            gridEl.innerHTML = filteredWells.map(well => createWellCard(well)).join('');
+        }
+        
+        function createWellCard(well) {
+            const cardClass = well.validated ? 
+                (well.expertDecision === well.mlPrediction ? 'validated' : 'override') : '';
+                
+            return `
+                <div class="well-card ${cardClass}" data-well-id="${well.wellId}">
+                    <div class="well-header">
+                        <div class="well-id">${well.wellId}</div>
+                        <div class="ml-prediction prediction-${well.mlPrediction.toLowerCase()}">
+                            ${well.mlPrediction}
+                        </div>
+                        <div class="confidence-score">
+                            ${Math.round(well.mlConfidence * 100)}% confidence
+                        </div>
+                    </div>
+                    
+                    <div class="well-details">
+                        <div class="detail-item">
+                            <div class="detail-label">Sample</div>
+                            <div class="detail-value">${well.sampleName}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">Pathogen</div>
+                            <div class="detail-value">${well.pathogenCode}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">Channel</div>
+                            <div class="detail-value">${well.fluorophore}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">CQJ</div>
+                            <div class="detail-value">${well.cqj || 'N/A'}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">CalcJ</div>
+                            <div class="detail-value">${well.calcj || 'N/A'}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">R²</div>
+                            <div class="detail-value">${well.r_squared ? well.r_squared.toFixed(3) : 'N/A'}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="validation-actions">
+                        <div class="expert-decision">
+                            <button class="decision-btn positive ${well.expertDecision === 'POSITIVE' ? 'selected' : ''}" 
+                                    onclick="setExpertDecision('${well.wellId}', 'POSITIVE')">
+                                Positive
+                            </button>
+                            <button class="decision-btn negative ${well.expertDecision === 'NEGATIVE' ? 'selected' : ''}" 
+                                    onclick="setExpertDecision('${well.wellId}', 'NEGATIVE')">
+                                Negative
+                            </button>
+                            <button class="decision-btn indeterminate ${well.expertDecision === 'INDETERMINATE' ? 'selected' : ''}" 
+                                    onclick="setExpertDecision('${well.wellId}', 'INDETERMINATE')">
+                                Indeterminate
+                            </button>
+                        </div>
+                        <button class="btn ${well.validated ? 'btn-success' : ''}" 
+                                onclick="confirmValidation('${well.wellId}')"
+                                ${well.expertDecision ? '' : 'disabled'}>
+                            ${well.validated ? '✓ Validated' : 'Confirm'}
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Validation actions
+        function setExpertDecision(wellId, decision) {
+            const well = currentSession.wells.find(w => w.wellId === wellId);
+            if (!well) return;
+            
+            well.expertDecision = decision;
+            
+            // Update UI
+            const card = document.querySelector(`[data-well-id="${wellId}"]`);
+            const buttons = card.querySelectorAll('.decision-btn');
+            buttons.forEach(btn => btn.classList.remove('selected'));
+            
+            const selectedBtn = card.querySelector(`.decision-btn.${decision.toLowerCase()}`);
+            if (selectedBtn) selectedBtn.classList.add('selected');
+            
+            // Enable confirm button
+            const confirmBtn = card.querySelector('.btn');
+            confirmBtn.disabled = false;
+        }
+        
+        async function confirmValidation(wellId) {
+            const well = currentSession.wells.find(w => w.wellId === wellId);
+            if (!well || !well.expertDecision) return;
+            
+            if (!currentSession.sessionId) {
+                showStatus('Please start a QC session first', 'error');
+                return;
+            }
+            
+            try {
+                await apiCall('/api/ml-validation/qc-confirm', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        session_id: currentSession.sessionId,
+                        well_id: wellId,
+                        ml_prediction: well.mlPrediction,
+                        expert_decision: well.expertDecision,
+                        confidence_level: well.mlConfidence > 0.9 ? 'high' : 
+                                        well.mlConfidence > 0.7 ? 'medium' : 'low'
+                    })
+                });
+                
+                // Update local state
+                if (!well.validated) {
+                    well.validated = true;
+                    currentSession.validatedWells++;
+                    
+                    if (well.expertDecision === well.mlPrediction) {
+                        currentSession.correctPredictions++;
+                    } else {
+                        currentSession.expertOverrides++;
+                    }
+                }
+                
+                // Update UI
+                const card = document.querySelector(`[data-well-id="${wellId}"]`);
+                card.classList.add(well.expertDecision === well.mlPrediction ? 'validated' : 'override');
+                
+                const confirmBtn = card.querySelector('.btn');
+                confirmBtn.textContent = '✓ Validated';
+                confirmBtn.classList.add('btn-success');
+                
+                updateStatistics();
+                showStatus(`Validation recorded for ${wellId}`, 'success');
+                
+            } catch (error) {
+                showStatus(`Failed to record validation: ${error.message}`, 'error');
+            }
+        }
+        
+        async function completeSession() {
+            if (currentSession.validatedWells === 0) {
+                showStatus('No validations recorded in this session', 'error');
+                return;
+            }
+            
+            const remainingWells = currentSession.wells.length - currentSession.validatedWells;
+            if (remainingWells > 0) {
+                const confirm = window.confirm(
+                    `There are ${remainingWells} wells not yet validated. Complete session anyway?`
+                );
+                if (!confirm) return;
+            }
+            
+            try {
+                // Generate summary report
+                const accuracy = Math.round((currentSession.correctPredictions / currentSession.validatedWells) * 100);
+                const overrideRate = Math.round((currentSession.expertOverrides / currentSession.validatedWells) * 100);
+                
+                showStatus(
+                    `Session completed! Accuracy: ${accuracy}%, Override Rate: ${overrideRate}%`, 
+                    'success'
+                );
+                
+                // Reset session
+                setTimeout(() => {
+                    if (confirm('Reset for new session?')) {
+                        resetSession();
+                    }
+                }, 3000);
+                
+            } catch (error) {
+                showStatus(`Failed to complete session: ${error.message}`, 'error');
+            }
+        }
+        
+        function resetSession() {
+            currentSession = {
+                sessionId: null,
+                technicianName: '',
+                runFile: '',
+                wells: [],
+                validatedWells: 0,
+                correctPredictions: 0,
+                expertOverrides: 0
+            };
+            
+            document.getElementById('technicianName').value = '';
+            document.getElementById('runFile').value = '';
+            
+            updateSessionInfo();
+            renderValidationGrid();
+        }
+        
+        // Event listeners
+        document.getElementById('confidenceFilter').addEventListener('change', renderValidationGrid);
+        
+        // Initialize
+        updateSessionInfo();
+    </script>
+</body>
+</html>

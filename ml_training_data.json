@@ -1269,5 +1269,36 @@
     "expert_classification": "NEGATIVE",
     "existing_classification": "UNKNOWN",
     "ml_classification": "POSITIVE"
+  },
+  {
+    "timestamp": "2025-07-28T13:45:35.191531",
+    "well_id": "A10_Cy5_Cy5",
+    "sample_identifier": "13980965-1-2576724||Bifidobacterium breve||Cy5",
+    "sample_name": "13980965-1-2576724",
+    "channel": "Cy5",
+    "pathogen": "Bifidobacterium breve",
+    "features": {
+      "r2": -0.005338922188078188,
+      "steepness": 0.010000000000000002,
+      "snr": 0,
+      "midpoint": 32.999999984905415,
+      "baseline": 2.319594692554527,
+      "amplitude": 1.8276219064950043,
+      "cqj": -1,
+      "calcj": -1,
+      "max_slope": 7.222837339929832,
+      "max_slope_cycle": 19,
+      "baseline_std": 5.006173727264094,
+      "curve_auc": 102.83224374782854,
+      "early_cycles_mean": 4.996023169659898,
+      "late_cycles_mean": 1.433182089418445,
+      "plateau_detection": 5.025043691351071,
+      "curve_efficiency": 200,
+      "derivative_peak": 7.222837339929832,
+      "second_derivative_max": 9.737072931639416
+    },
+    "expert_classification": "NEGATIVE",
+    "existing_classification": "UNKNOWN",
+    "ml_classification": "POSITIVE"
   }
 ]

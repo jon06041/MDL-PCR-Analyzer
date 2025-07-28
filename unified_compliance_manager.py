@@ -367,10 +367,10 @@ class UnifiedComplianceManager:
                     CREATE TABLE IF NOT EXISTS compliance_status_log (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         requirement_code TEXT NOT NULL,
-                        previous_status TEXT NOT NULL,
+                        old_status TEXT,
                         new_status TEXT NOT NULL,
                         change_reason TEXT,
-                        changed_by TEXT,
+                        user_id TEXT,
                         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
@@ -378,8 +378,8 @@ class UnifiedComplianceManager:
                 # Log the status change
                 cursor.execute("""
                     INSERT INTO compliance_status_log 
-                    (requirement_code, previous_status, new_status, 
-                     change_reason, changed_by)
+                    (requirement_code, old_status, new_status, 
+                     change_reason, user_id)
                     VALUES (?, ?, ?, ?, ?)
                 """, (requirement_code, current_status, new_status,
                       f"Automated update based on recent evidence", user_id))

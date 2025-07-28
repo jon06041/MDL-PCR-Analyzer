@@ -45,6 +45,8 @@ When thresholds are changed (either through strategy change or manual adjustment
 #### Sample Wells
 - **Should Change:** Sample CalcJ values are calculated using the standard curve from H/M/L control CQJ averages
 - **Calculation:** Log-linear interpolation based on sample CQJ vs control CQJ averages
+- **Implementation:** Both backend (`cqj_calcj_utils.py`) and frontend (`cqj_calcj_utils.js`) use identical control-based calculation methods
+- **Recent Enhancement:** Backend/frontend calculation alignment ensures consistent results across manual and automated threshold adjustments
 - **Impact:** As control CQJ values change, the standard curve slope/intercept changes, affecting sample concentrations
 
 ### Troubleshooting Threshold Issues
