@@ -295,28 +295,27 @@
                         <option value="redo">REDO Results</option>
                         <option value="controls">Controls</option>
                     </select>
-                    <button class="control-btn" id="toggleSortModeBtn" style="margin-left:10px;">Sort: A1, A2...</button>
                 </div>
                 <div class="table-wrapper">
                     <table id="resultsTable">
                         <thead>
             <tr>
-                <th>Well</th>
-                <th class="sample-col">Sample Name</th>
-                <th>Fluorophore</th>
-                <th>Results</th>
-                <th class="results-col-curve-class">Curve Class</th>
-                <th class="results-col-status">Status</th>
-                <th>R²</th>
-                <th>RMSE</th>
-                <th>Amp</th>
-                <th>Steep</th>
-                <th>Mid</th>
-                <th>Base</th>
-                <th>Cq</th>
-                <th>CQ-J</th>
-                <th>Calc-J</th>
-                <th class="results-col-anom">Anom</th>
+                <th class="sortable sortable-well" data-sort="well">Well</th>
+                <th class="sortable sample-col" data-sort="sample">Sample Name</th>
+                <th class="sortable" data-sort="fluorophore">Fluorophore</th>
+                <th class="sortable" data-sort="results">Results</th>
+                <th class="sortable results-col-curve-class" data-sort="curve-class">Curve Class</th>
+                <th class="sortable results-col-status" data-sort="status">Status</th>
+                <th class="sortable" data-sort="r2">R²</th>
+                <th class="sortable" data-sort="rmse">RMSE</th>
+                <th class="sortable" data-sort="amp">Amp</th>
+                <th class="sortable" data-sort="steep">Steep</th>
+                <th class="sortable" data-sort="mid">Mid</th>
+                <th class="sortable" data-sort="base">Base</th>
+                <th class="sortable" data-sort="cq">Cq</th>
+                <th class="sortable" data-sort="cqj">CQ-J</th>
+                <th class="sortable" data-sort="calcj">Calc-J</th>
+                <th class="sortable results-col-anom" data-sort="anom">Anom</th>
             </tr>
                         </thead>
                         <tbody id="resultsTableBody">

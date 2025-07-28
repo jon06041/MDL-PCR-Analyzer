@@ -3344,10 +3344,10 @@ function toggleWellSortMode() {
     wellSortMode = (wellSortMode === 'letter-number') ? 'number-letter' : 'letter-number';
     // console.log('🔄 SORT - Well sort mode changed to:', wellSortMode);
     
-    const btn = document.getElementById('toggleSortModeBtn');
-    if (btn) {
-        btn.textContent = (wellSortMode === 'letter-number') ? 'Sort: A1, A2...' : 'Sort: 1A, 1B...';
-    }
+    // Reset to well sorting when toggling well sort mode
+    currentSortColumn = 'well';
+    currentSortDirection = 'asc';
+    updateSortHeaders();
     
     // Get the current fluorophore selection from state
     const selectedFluorophore = window.appState.currentFluorophore || 'all';
@@ -3364,11 +3364,261 @@ function toggleWellSortMode() {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-    const btn = document.getElementById('toggleSortModeBtn');
-    if (btn) {
-        btn.addEventListener('click', toggleWellSortMode);
+    // Add click handler for sortable Well column header (still needs toggle functionality)
+    const wellHeader = document.querySelector('th.sortable-well');
+    if (wellHeader) {
+        wellHeader.addEventListener('click', toggleWellSortMode);
     }
+    
+    // Add sorting functionality to all sortable columns
+    initializeTableSorting();
 });
+
+// Global variables for table sorting
+let currentSortColumn = null;
+let currentSortDirection = 'asc';
+
+function initializeTableSorting() {
+    const sortableHeaders = document.querySelectorAll('th.sortable:not(.sortable-well)');
+    sortableHeaders.forEach(header => {
+        header.addEventListener('click', function() {
+            const sortType = this.getAttribute('data-sort');
+            sortTable(sortType);
+        });
+    });
+}
+
+function sortTable(sortType) {
+    // Toggle direction if clicking the same column
+    if (currentSortColumn === sortType) {
+        currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
+    } else {
+        currentSortColumn = sortType;
+        currentSortDirection = 'asc';
+    }
+    
+    // Update header visual indicators
+    updateSortHeaders();
+    
+    // Repopulate table with current data using the new sort
+    if (currentAnalysisResults && currentAnalysisResults.individual_results) {
+        populateResultsTable(currentAnalysisResults.individual_results);
+    }
+}
+
+function updateSortHeaders() {
+    // Remove existing sort classes
+    const headers = document.querySelectorAll('th.sortable');
+    headers.forEach(header => {
+        header.classList.remove('sort-asc', 'sort-desc');
+    });
+    
+    // Add sort class to current column
+    if (currentSortColumn) {
+        const currentHeader = document.querySelector(`th[data-sort="${currentSortColumn}"]`);
+        if (currentHeader) {
+            currentHeader.classList.add(`sort-${currentSortDirection}`);
+        }
+    }
+}
+
+// Helper functions for sorting different data types
+function getClassificationForSorting(result) {
+    // Get classification from strict criteria
+    const amplitude = result.amplitude || 0;
+    const cqValue = result.cq_value;
+    
+    if (amplitude < 400 || !result.is_good_scurve || isNaN(Number(cqValue))) {
+        return 'neg';
+    } else if (result.is_good_scurve && amplitude > 500) {
+        const hasAnomalies = checkForAnomalies(result);
+        return hasAnomalies ? 'redo' : 'pos';
+    } else {
+        return 'redo';
+    }
+}
+
+function getCurveClassForSorting(result) {
+    if (result.ml_classification && result.ml_classification.classification) {
+        return result.ml_classification.classification.toLowerCase();
+    } else if (typeof result.curve_classification === 'object' && result.curve_classification.classification) {
+        return result.curve_classification.classification.toLowerCase();
+    } else if (typeof result.curve_classification === 'string') {
+        return result.curve_classification.toLowerCase();
+    }
+    return 'unknown';
+}
+
+function getCqjForSorting(result) {
+    if (result.cqj && typeof result.cqj === 'object' && result.fluorophore &&
+        result.cqj[result.fluorophore] !== undefined && result.cqj[result.fluorophore] !== null &&
+        !isNaN(result.cqj[result.fluorophore]) && result.cqj[result.fluorophore] !== -999 &&
+        result.cqj[result.fluorophore] > 5) {
+        return parseFloat(result.cqj[result.fluorophore]);
+    }
+    return 999; // Put N/A values at the end
+}
+
+function getCalcjForSorting(result) {
+    if (result.calcj && typeof result.calcj === 'object' && result.fluorophore &&
+        result.calcj[result.fluorophore] !== undefined && result.calcj[result.fluorophore] !== null &&
+        !isNaN(result.calcj[result.fluorophore]) && result.calcj[result.fluorophore] !== -999 &&
+        result.calcj[result.fluorophore] > 0) {
+        return parseFloat(result.calcj[result.fluorophore]);
+    } else if (result.calcj_value !== undefined && result.calcj_value !== null &&
+               !isNaN(result.calcj_value) && result.calcj_value !== 'N/A' && 
+               result.calcj_value !== -999 && result.calcj_value > 0) {
+        return parseFloat(result.calcj_value);
+    }
+    return 0; // Put N/A values at the beginning for CalcJ
+}
+
+function getAnomaliesTextForSorting(result) {
+    if (result.anomalies) {
+        try {
+            const anomalies = typeof result.anomalies === 'string' ? 
+                JSON.parse(result.anomalies) : result.anomalies;
+            return Array.isArray(anomalies) && anomalies.length > 0 ? 
+                anomalies.join(', ').toLowerCase() : 'none';
+        } catch (e) {
+            return 'parse error';
+        }
+    }
+    return 'none';
+}
+
+function checkForAnomalies(result) {
+    if (result.anomalies) {
+        try {
+            const anomalies = typeof result.anomalies === 'string' ? 
+                JSON.parse(result.anomalies) : result.anomalies;
+            return Array.isArray(anomalies) && anomalies.length > 0 && 
+                   !(anomalies.length === 1 && anomalies[0] === 'None');
+        } catch (e) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Helper function to apply current sort to entries array
+function applySortToEntries(entries) {
+    return entries.sort((a, b) => {
+        const [aKey, aResult] = a;
+        const [bKey, bResult] = b;
+        
+        let aValue, bValue;
+        
+        switch (currentSortColumn) {
+            case 'well':
+                // Use existing well sorting logic
+                const aWellId = aResult.well_id || aKey;
+                const bWellId = bResult.well_id || bKey;
+                const aMatch = aWellId.match(/([A-Z]+)(\d+)/i);
+                const bMatch = bWellId.match(/([A-Z]+)(\d+)/i);
+                if (aMatch && bMatch) {
+                    if (wellSortMode === 'letter-number') {
+                        const letterCompare = aMatch[1].localeCompare(bMatch[1]);
+                        if (letterCompare !== 0) return letterCompare * (currentSortDirection === 'asc' ? 1 : -1);
+                        return (parseInt(aMatch[2]) - parseInt(bMatch[2])) * (currentSortDirection === 'asc' ? 1 : -1);
+                    } else {
+                        const numCompare = parseInt(aMatch[2]) - parseInt(bMatch[2]);
+                        if (numCompare !== 0) return numCompare * (currentSortDirection === 'asc' ? 1 : -1);
+                        return aMatch[1].localeCompare(bMatch[1]) * (currentSortDirection === 'asc' ? 1 : -1);
+                    }
+                }
+                return aWellId.localeCompare(bWellId) * (currentSortDirection === 'asc' ? 1 : -1);
+                
+            case 'sample':
+                aValue = (aResult.sample || aResult.sample_name || 'Unknown').toString().toLowerCase();
+                bValue = (bResult.sample || bResult.sample_name || 'Unknown').toString().toLowerCase();
+                break;
+                
+            case 'fluorophore':
+                aValue = (aResult.fluorophore || 'Unknown').toString().toLowerCase();
+                bValue = (bResult.fluorophore || 'Unknown').toString().toLowerCase();
+                break;
+                
+            case 'results':
+                aValue = getClassificationForSorting(aResult);
+                bValue = getClassificationForSorting(bResult);
+                break;
+                
+            case 'curve-class':
+                aValue = getCurveClassForSorting(aResult);
+                bValue = getCurveClassForSorting(bResult);
+                break;
+                
+            case 'status':
+                aValue = aResult.is_good_scurve ? 'good' : 'poor';
+                bValue = bResult.is_good_scurve ? 'good' : 'poor';
+                break;
+                
+            case 'r2':
+                aValue = parseFloat(aResult.r2_score) || 0;
+                bValue = parseFloat(bResult.r2_score) || 0;
+                break;
+                
+            case 'rmse':
+                aValue = parseFloat(aResult.rmse) || 0;
+                bValue = parseFloat(bResult.rmse) || 0;
+                break;
+                
+            case 'amp':
+                aValue = parseFloat(aResult.amplitude) || 0;
+                bValue = parseFloat(bResult.amplitude) || 0;
+                break;
+                
+            case 'steep':
+                aValue = parseFloat(aResult.steepness) || 0;
+                bValue = parseFloat(bResult.steepness) || 0;
+                break;
+                
+            case 'mid':
+                aValue = parseFloat(aResult.midpoint) || 0;
+                bValue = parseFloat(bResult.midpoint) || 0;
+                break;
+                
+            case 'base':
+                aValue = parseFloat(aResult.baseline) || 0;
+                bValue = parseFloat(bResult.baseline) || 0;
+                break;
+                
+            case 'cq':
+                aValue = parseFloat(aResult.cq_value) || 999;
+                bValue = parseFloat(bResult.cq_value) || 999;
+                break;
+                
+            case 'cqj':
+                aValue = getCqjForSorting(aResult);
+                bValue = getCqjForSorting(bResult);
+                break;
+                
+            case 'calcj':
+                aValue = getCalcjForSorting(aResult);
+                bValue = getCalcjForSorting(bResult);
+                break;
+                
+            case 'anom':
+                aValue = getAnomaliesTextForSorting(aResult);
+                bValue = getAnomaliesTextForSorting(bResult);
+                break;
+                
+            default:
+                return 0;
+        }
+        
+        // Handle string comparison
+        if (typeof aValue === 'string' && typeof bValue === 'string') {
+            return aValue.localeCompare(bValue) * (currentSortDirection === 'asc' ? 1 : -1);
+        }
+        
+        // Handle numeric comparison
+        if (aValue < bValue) return currentSortDirection === 'asc' ? -1 : 1;
+        if (aValue > bValue) return currentSortDirection === 'asc' ? 1 : -1;
+        return 0;
+    });
+}
 // 🚨 EMERGENCY RESET - Nuclear option to clear everything
 function emergencyReset() {
     // console.log('🚨 EMERGENCY RESET TRIGGERED');
@@ -5544,28 +5794,36 @@ function populateResultsTable(individualResults) {
         
         tableBody.innerHTML = '';
         
-        // Sort wells according to the selected mode
+        // Sort wells according to the selected mode or current sort column
         let entries = Object.entries(individualResults);
-        entries.sort(([aWellKey, aResult], [bWellKey, bResult]) => {
-            const aWellId = aResult.well_id || aWellKey;
-            const bWellId = bResult.well_id || bWellKey;
-            const aMatch = aWellId.match(/([A-Z]+)(\d+)/i);
-            const bMatch = bWellId.match(/([A-Z]+)(\d+)/i);
-            if (aMatch && bMatch) {
-                if (wellSortMode === 'letter-number') {
-                    // A1, A2, ..., H12
-                    const letterCompare = aMatch[1].localeCompare(bMatch[1]);
-                    if (letterCompare !== 0) return letterCompare;
-                    return parseInt(aMatch[2]) - parseInt(bMatch[2]);
-                } else {
-                    // 1A, 1B, ..., 12H
-                    const numCompare = parseInt(aMatch[2]) - parseInt(bMatch[2]);
-                    if (numCompare !== 0) return numCompare;
-                    return aMatch[1].localeCompare(bMatch[1]);
+        
+        // If a custom sort is active, use that instead of default well sorting
+        if (currentSortColumn && currentSortColumn !== 'well') {
+            // Apply the custom sort
+            entries = applySortToEntries(entries);
+        } else {
+            // Default well sorting
+            entries.sort(([aWellKey, aResult], [bWellKey, bResult]) => {
+                const aWellId = aResult.well_id || aWellKey;
+                const bWellId = bResult.well_id || bWellKey;
+                const aMatch = aWellId.match(/([A-Z]+)(\d+)/i);
+                const bMatch = bWellId.match(/([A-Z]+)(\d+)/i);
+                if (aMatch && bMatch) {
+                    if (wellSortMode === 'letter-number') {
+                        // A1, A2, ..., H12
+                        const letterCompare = aMatch[1].localeCompare(bMatch[1]);
+                        if (letterCompare !== 0) return letterCompare;
+                        return parseInt(aMatch[2]) - parseInt(bMatch[2]);
+                    } else {
+                        // 1A, 1B, ..., 12H
+                        const numCompare = parseInt(aMatch[2]) - parseInt(bMatch[2]);
+                        if (numCompare !== 0) return numCompare;
+                        return aMatch[1].localeCompare(bMatch[1]);
+                    }
                 }
-            }
-            return aWellId.localeCompare(bWellId);
-        });
+                return aWellId.localeCompare(bWellId);
+            });
+        }
 
         entries.forEach(([wellKey, result]) => {
             try {

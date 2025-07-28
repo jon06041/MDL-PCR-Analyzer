@@ -1668,6 +1668,59 @@ th {
     padding: 4px 6px;
 }
 
+/* Sortable column headers */
+th.sortable {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    transition: all 0.2s ease;
+}
+
+th.sortable:hover {
+    background: #e9ecef;
+    color: #495057;
+}
+
+th.sortable::after {
+    content: ' ⇅';
+    font-size: 0.8em;
+    color: #6c757d;
+    margin-left: 4px;
+}
+
+/* Active sorting state */
+th.sortable.sort-asc::after {
+    content: ' ↑';
+    color: #007bff;
+    font-weight: bold;
+}
+
+th.sortable.sort-desc::after {
+    content: ' ↓';
+    color: #007bff;
+    font-weight: bold;
+}
+
+/* Legacy support for existing sortable-well class */
+th.sortable-well {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    transition: all 0.2s ease;
+}
+
+th.sortable-well:hover {
+    background: #e9ecef;
+    color: #495057;
+}
+
+th.sortable-well::after {
+    content: ' ⇅';
+    font-size: 0.8em;
+    color: #6c757d;
+    margin-left: 4px;
+}
+
 tr {
     cursor: pointer;
     transition: all 0.2s ease;
@@ -1677,7 +1730,7 @@ tr {
 
 tr::before {
    
-    content: "👁️ Click to view";
+   /*  content: "👁️ Click to view";*/
     position: absolute;
     right: 10px;
     top: 50%;
