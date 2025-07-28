@@ -913,21 +913,21 @@ When a model is active, the system tracks:
 
 **Note**: This roadmap represents the next evolution of the ML classification system, building on the robust foundation already implemented. The hybrid approach will provide both statistical rigor and visual intuition that experts naturally use in qPCR curve analysis.
 
-## Multichannel-Aware Batch Re-evaluation System (January 2025)
+## Multichannel-Aware Automatic Batch Re-evaluation System (January 2025)
 
 ### Overview
-The intelligent batch re-evaluation system automatically identifies and proposes re-analysis of similar wells when an expert corrects an ML prediction. This system respects multichannel data boundaries and ensures that corrections benefit similar samples within the same pathogen/fluorophore combination.
+The automatic batch re-evaluation system intelligently identifies and re-analyzes similar wells when an expert corrects an ML prediction. This system respects multichannel data boundaries and automatically applies improved predictions to similar samples within the same pathogen/fluorophore combination, updating the results table in real-time.
 
 ### Key Features
 
-#### 1. **Smart Well Similarity Detection**
+#### 1. **Automatic Well Similarity Detection**
 ```javascript
 // Identifies wells with similar characteristics using 30-metric ML features
 areWellsSimilar(well1, well2, similarityThreshold = 0.8)
 ```
 - **Metrics Compared**: amplitude, r2_score, snr, steepness, baseline
 - **Similarity Algorithm**: Normalized difference calculation across all metrics
-- **Threshold**: 80% similarity required for batch re-evaluation consideration
+- **Threshold**: 80% similarity required for automatic re-evaluation
 
 #### 2. **Multichannel-Aware Filtering**
 ```javascript
@@ -938,14 +938,14 @@ findSimilarWellsForBatchEvaluation(correctedWellKey, correctedWellData, expertCl
 - **Pathogen Specificity**: Limits re-evaluation to same pathogen target
 - **Independence**: FLUA/FAM corrections don't affect FLUB/HEX predictions
 
-#### 3. **Intelligent Workflow Integration**
+#### 3. **Automatic Workflow Integration**
 ```javascript
 // Triggered automatically after expert feedback submission
-proposeAndExecuteBatchReEvaluation(wellKey, wellData, expertClassification)
+executeAutomaticBatchReEvaluation(wellKey, wellData, expertClassification)
 ```
-- **Auto-Detection**: Runs after each expert correction (2-second delay)
-- **User Confirmation**: Shows interactive notification with well breakdown
-- **Non-Blocking**: Optional workflow that doesn't interrupt normal operations
+- **Auto-Execution**: Runs automatically after each expert correction (2-second delay)
+- **Real-time Updates**: Immediately updates results table with new predictions
+- **Non-Blocking**: Seamless workflow that doesn't interrupt normal operations
 
 ### Technical Implementation
 

@@ -2333,10 +2333,10 @@ class MLFeedbackInterface {
                         await this.handleTrainingMilestone(result.training_samples);
                     }, 1000);
                     
-                    // Intelligent batch re-evaluation for similar wells
+                    // Automatic batch re-evaluation for similar wells
                     // Run this after training milestone handling
                     setTimeout(async () => {
-                        await this.proposeAndExecuteBatchReEvaluation(
+                        await this.executeAutomaticBatchReEvaluation(
                             wellKey,
                             wellData,
                             expertClassification
@@ -3313,6 +3313,56 @@ class MLFeedbackInterface {
         }
     }
 
+    async executeAutomaticBatchReEvaluation(correctedWellKey, correctedWellData, expertClassification) {
+        try {
+            // Find similar wells that might benefit from re-evaluation
+            const similarWells = await this.findSimilarWellsForBatchEvaluation(
+                correctedWellKey, 
+                correctedWellData, 
+                expertClassification
+            );
+            
+            if (similarWells.length === 0) {
+                console.log('✅ No similar wells found requiring re-evaluation');
+                return;
+            }
+
+            // Show brief notification that automatic re-evaluation is happening
+            this.showAutomaticBatchNotification(correctedWellKey, expertClassification, similarWells);
+            
+            // Execute batch re-evaluation automatically
+            await this.executeBatchReEvaluation(similarWells, expertClassification);
+            
+        } catch (error) {
+            console.error('Error in automatic batch re-evaluation:', error);
+        }
+    }
+
+    async showAutomaticBatchNotification(correctedWellKey, expertClassification, similarWells) {
+        const pathogenBreakdown = {};
+        const fluorophoreBreakdown = {};
+        
+        // Analyze the similar wells
+        similarWells.forEach(well => {
+            pathogenBreakdown[well.pathogen] = (pathogenBreakdown[well.pathogen] || 0) + 1;
+            fluorophoreBreakdown[well.fluorophore] = (fluorophoreBreakdown[well.fluorophore] || 0) + 1;
+        });
+        
+        const pathogenSummary = Object.entries(pathogenBreakdown)
+            .map(([pathogen, count]) => `${pathogen}: ${count}`)
+            .join(', ');
+        
+        const fluorophoreSummary = Object.entries(fluorophoreBreakdown)
+            .map(([fluoro, count]) => `${fluoro}: ${count}`)
+            .join(', ');
+
+        this.showTrainingNotification(
+            'Automatic Batch Re-evaluation',
+            `🔄 Corrected ${correctedWellKey} to ${expertClassification}. Automatically re-evaluating ${similarWells.length} similar wells (${fluorophoreSummary})...`,
+            'info'
+        );
+    }
+
     async proposeAndExecuteBatchReEvaluation(correctedWellKey, correctedWellData, expertClassification) {
         try {
             // Find similar wells that might benefit from re-evaluation
@@ -3419,12 +3469,13 @@ class MLFeedbackInterface {
 
     async executeBatchReEvaluation(similarWells, expertClassification) {
         try {
-            console.log(`🔄 Executing batch re-evaluation for ${similarWells.length} similar wells`);
+            console.log(`🔄 Executing automatic batch re-evaluation for ${similarWells.length} similar wells`);
             
             // Show progress notification
             this.showTrainingNotification(
                 'Batch Re-evaluation In Progress',
-                `🔄 Re-evaluating ${similarWells.length} similar wells with updated ML model...`
+                `🔄 Re-evaluating ${similarWells.length} similar wells with updated ML model...`,
+                'info'
             );
             
             let reEvaluatedCount = 0;
@@ -3450,6 +3501,9 @@ class MLFeedbackInterface {
                             // Update the well data with new prediction
                             this.updateWellMLPrediction(similarWell.wellKey, reAnalysisResult, similarWell.fluorophore);
                             
+                            // Update the results table immediately
+                            this.updateTableCellWithMLPrediction(similarWell.wellKey, reAnalysisResult.prediction);
+                            
                             results.push({
                                 wellKey: similarWell.wellKey,
                                 oldPrediction: similarWell.currentPrediction,
@@ -3464,32 +3518,41 @@ class MLFeedbackInterface {
                 }
             }
             
-            // Update display to reflect changes
+            // Force update the entire display to reflect all changes
             if (typeof updateAnalysisResultsDisplay === 'function') {
                 updateAnalysisResultsDisplay();
+            } else if (typeof populateResultsTable === 'function' && window.currentAnalysisResults) {
+                // Fallback to table repopulation
+                const individualResults = window.currentAnalysisResults.fluorophore_data ? 
+                    Object.values(window.currentAnalysisResults.fluorophore_data).reduce((acc, fluorophoreData) => {
+                        return {...acc, ...fluorophoreData.well_data};
+                    }, {}) : window.currentAnalysisResults.well_data || {};
+                populateResultsTable(individualResults);
             }
             
             // Show completion notification
             let completionMessage;
             if (changedPredictions > 0) {
-                completionMessage = `✅ Batch re-evaluation complete! ${changedPredictions} of ${reEvaluatedCount} wells had updated predictions.`;
+                completionMessage = `✅ Automatic batch re-evaluation complete! Updated ${changedPredictions} of ${reEvaluatedCount} similar wells with improved predictions.`;
             } else {
-                completionMessage = `✅ Batch re-evaluation complete! All ${reEvaluatedCount} similar wells maintained their predictions.`;
+                completionMessage = `✅ Automatic batch re-evaluation complete! All ${reEvaluatedCount} similar wells maintained their predictions (model confidence validated).`;
             }
             
             this.showTrainingNotification(
                 'Batch Re-evaluation Complete',
-                completionMessage
+                completionMessage,
+                'success'
             );
             
-            console.log(`✅ Batch re-evaluation complete: ${changedPredictions}/${reEvaluatedCount} predictions changed`);
+            console.log(`✅ Automatic batch re-evaluation complete: ${changedPredictions}/${reEvaluatedCount} predictions updated`);
             return results;
             
         } catch (error) {
-            console.error('Error executing batch re-evaluation:', error);
+            console.error('Error executing automatic batch re-evaluation:', error);
             this.showTrainingNotification(
                 'Batch Re-evaluation Failed',
-                `❌ Error: ${error.message}`
+                `❌ Error: ${error.message}`,
+                'error'
             );
         }
     }
@@ -4346,12 +4409,53 @@ class MLFeedbackInterface {
      */
     updateTableCellWithMLPrediction(wellKey, prediction) {
         try {
-            if (!wellKey || !prediction) return;
+            if (!wellKey) return;
             
-            const rows = document.querySelectorAll('#resultsTableBody tr[data-well-key="' + wellKey + '"]');
-            if (rows.length > 0) {
-                const row = rows[0];
-                const curveClassCell = row.cells[4]; // Curve Class column is index 4
+            // Handle both string predictions and prediction objects
+            let predictionClass, confidence, displayText;
+            if (typeof prediction === 'string') {
+                predictionClass = prediction;
+                confidence = null;
+                displayText = prediction.replace('_', ' ');
+            } else if (prediction && prediction.classification) {
+                predictionClass = prediction.classification;
+                confidence = prediction.confidence;
+                displayText = prediction.classification.replace('_', ' ');
+            } else {
+                return;
+            }
+            
+            // Try multiple ways to find the table row
+            let row = null;
+            
+            // Method 1: By data attribute
+            const rowsByData = document.querySelectorAll('#resultsTableBody tr[data-well-key="' + wellKey + '"]');
+            if (rowsByData.length > 0) {
+                row = rowsByData[0];
+            } else {
+                // Method 2: Search all table rows for matching well key
+                const allRows = document.querySelectorAll('#resultsTableBody tr, .results-table tbody tr, table tbody tr');
+                for (const testRow of allRows) {
+                    const firstCell = testRow.querySelector('td:first-child');
+                    if (firstCell && firstCell.textContent.trim() === wellKey) {
+                        row = testRow;
+                        break;
+                    }
+                }
+            }
+            
+            if (row) {
+                // Find the curve classification column
+                let curveClassCell = null;
+                
+                // Try common column indices for curve class
+                for (const columnIndex of [4, 5, 6]) {
+                    const cell = row.cells[columnIndex];
+                    if (cell && (cell.querySelector('.curve-badge') || cell.innerHTML.includes('curve-') || cell.innerHTML.includes('POSITIVE') || cell.innerHTML.includes('NEGATIVE'))) {
+                        curveClassCell = cell;
+                        break;
+                    }
+                }
                 
                 if (curveClassCell) {
                     const classMap = {
@@ -4363,41 +4467,27 @@ class MLFeedbackInterface {
                         'SUSPICIOUS': 'curve-suspicious'
                     };
                     
-                    const badgeClass = classMap[prediction.classification] || 'curve-other';
-                    const confidence = (prediction.confidence * 100).toFixed(1);
-                    const displayText = prediction.classification.replace('_', ' ');
-                    const pathogenText = prediction.pathogen ? ` (${prediction.pathogen})` : '';
+                    const badgeClass = classMap[predictionClass] || 'curve-other';
+                    const confidenceText = confidence ? ` (${(confidence * 100).toFixed(1)}%)` : '';
                     
-                    curveClassCell.innerHTML = `<span class="curve-badge ${badgeClass}" title="ML Prediction: ${confidence}% confidence${pathogenText}">${displayText}</span>`;
+                    curveClassCell.innerHTML = `<span class="curve-badge ${badgeClass}" title="ML: Updated via batch re-evaluation${confidenceText}">${displayText}</span>`;
                     
-                    // Add a subtle highlight to show it was just updated
-                    curveClassCell.style.background = '#e8f8ff';
+                    // Add a highlight animation to show it was updated
+                    curveClassCell.style.background = '#e8f5e8';
+                    curveClassCell.style.transition = 'background-color 2s ease';
                     setTimeout(() => {
                         curveClassCell.style.background = '';
                     }, 2000);
                     
-                    console.log('✅ Updated table cell for', wellKey, 'with ML prediction:', prediction.classification, `(${confidence}%)`);
-                    
-                    // Also update the global results object for consistency
-                    if (window.currentAnalysisResults && 
-                        window.currentAnalysisResults.individual_results && 
-                        window.currentAnalysisResults.individual_results[wellKey]) {
-                        
-                        window.currentAnalysisResults.individual_results[wellKey].ml_classification = {
-                            classification: prediction.classification,
-                            confidence: prediction.confidence,
-                            method: prediction.method,
-                            pathogen: prediction.pathogen
-                        };
-                        
-                        // Also update curve_classification for compatibility
-                        window.currentAnalysisResults.individual_results[wellKey].curve_classification = 
-                            window.currentAnalysisResults.individual_results[wellKey].ml_classification;
-                    }
+                    console.log(`✅ Updated table cell for ${wellKey} with ML prediction: ${predictionClass}${confidenceText}`);
+                } else {
+                    console.log(`⚠️ Could not find curve classification column for ${wellKey}`);
                 }
+            } else {
+                console.log(`⚠️ Could not find table row for ${wellKey}`);
             }
         } catch (error) {
-            console.error('Failed to update table cell with ML prediction:', error);
+            console.error(`Error updating table cell for ${wellKey}:`, error);
         }
     }
 
