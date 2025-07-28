@@ -17,6 +17,8 @@ from ml_config_manager import MLConfigManager
 from fda_compliance_manager import FDAComplianceManager
 from unified_compliance_manager import UnifiedComplianceManager
 from database_management_api import db_mgmt_bp
+from enhanced_compliance_api import compliance_api
+from ml_run_api import ml_run_api
 
 def safe_json_dumps(value, default=None):
     """Helper function to safely serialize to JSON, avoiding double-encoding"""
@@ -533,6 +535,12 @@ with app.app_context():
 # Register database management blueprint
 app.register_blueprint(db_mgmt_bp)
 
+# Register enhanced compliance API blueprint
+app.register_blueprint(compliance_api)
+
+# Register ML run management API blueprint  
+app.register_blueprint(ml_run_api)
+
 # Log database initialization
 if not database_url or not database_url.startswith("mysql"):
     sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
@@ -688,7 +696,11 @@ def index():
 
 @app.route('/ml-validation-dashboard')
 def ml_validation_dashboard():
-    return send_from_directory('.', 'ml_validation_dashboard.html')
+    return send_from_directory('.', 'ml_validation_enhanced_dashboard.html')
+
+@app.route('/ml-validation-enhanced')
+def ml_validation_enhanced():
+    return send_from_directory('.', 'ml_validation_enhanced_dashboard.html')
 
 @app.route('/fda-compliance-dashboard')
 def fda_compliance_dashboard():
@@ -697,6 +709,16 @@ def fda_compliance_dashboard():
 @app.route('/unified-validation-dashboard')
 def unified_validation_dashboard():
     return send_from_directory('.', 'unified_validation_dashboard.html')
+
+@app.route('/enhanced-compliance-dashboard')
+def enhanced_compliance_dashboard():
+    """Serve the enhanced compliance dashboard with detailed evidence tracking"""
+    return send_from_directory('.', 'enhanced_compliance_v2.html')
+
+@app.route('/unified-compliance-dashboard')
+def unified_compliance_dashboard():
+    """Serve the unified compliance dashboard with validation design and evidence tracking"""
+    return send_from_directory('.', 'unified_compliance_dashboard.html')
 
 @app.route('/ml-config')
 def ml_config():

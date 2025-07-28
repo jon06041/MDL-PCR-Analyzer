@@ -29,3 +29,13 @@ This project uses consolidated documentation for maintainability:
 - **Automated Reporting**: Real-time results table and chart visualization
 
 For detailed documentation, see the consolidated markdown files listed above.
+we need this for Amazon and Entra:
+
+Info for Entra integration:
+
+Client_ID: 6345cabe-25c6-4f2d-a81f-dbc6f392f234
+Client_secret: aaee4e07-3143-4df5-a1f9-7c306a227677
+access_token_url= https://login.microsoftonline.com/5d79b88b-9063-46f3-92a6-41f3807a3d60/oauth2/v2.0/token
+authorize_url= https://login.microsoftonline.com/5d79b88b-9063-46f3-92a6-41f3807a3d60/oauth2/v2.0/authorize
+
+Let me know the redirect URL I should use. 

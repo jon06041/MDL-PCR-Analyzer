@@ -33,6 +33,45 @@
    - Add ML model validation history
    - Connect ML training events to compliance evidence
 
+### 🚀 **NEW: Integrated ML Model Validation Workflow** (July 28, 2025)
+
+**MAJOR FEATURE IMPLEMENTED**: Complete ML validation workflow integrated into unified compliance dashboard with 3-step manual confirmation process.
+
+**Key Features Implemented**:
+
+#### **1. Enhanced ML Run Management System**
+- ✅ **3-Step Workflow**: Log Runs → Confirm Runs → Record Accuracy (after every confirm)
+- ✅ **Manual Confirmation Required**: Only confirmed runs added to validation list
+- ✅ **Automatic Accuracy Recording**: Accuracy calculated and recorded immediately after confirmation
+- ✅ **Database Tracking**: Separate tables for pending (ml_run_logs) and confirmed runs (ml_confirmed_runs)
+- ✅ **Integrated Dashboard**: ML validation tab within unified compliance dashboard
+
+#### **2. ML Validation Workflow Components**
+- ✅ **MLRunManager Class**: Core workflow management with database persistence
+- ✅ **ML Run API**: Flask blueprint with 5 endpoints for complete workflow management
+- ✅ **Enhanced Dashboard**: Bootstrap interface with visual workflow steps
+- ✅ **Real-time Statistics**: Pending/confirmed/rejected counts and average accuracy
+- ✅ **Evidence Integration**: ML validation activities connected to compliance tracking
+
+#### **3. Unified Dashboard Integration**
+- ✅ **Single Entry Point**: One button on main page leads to unified compliance dashboard
+- ✅ **ML Validation Tab**: Integrated alongside compliance tracking, evidence management
+- ✅ **Cross-Reference**: ML validation evidence linked to FDA compliance requirements
+- ✅ **Consolidated Reporting**: All validation activities in single dashboard view
+
+**API Endpoints Added**:
+- `POST /api/ml-runs/log` - Log new validation run
+- `GET /api/ml-runs/pending` - Get pending runs for confirmation
+- `POST /api/ml-runs/confirm` - Confirm or reject pending runs
+- `GET /api/ml-runs/confirmed` - Get confirmed runs with accuracy data
+- `GET /api/ml-runs/statistics` - Get workflow statistics
+
+**User Workflow**:
+1. **Log Run**: Record validation run details (file, pathogen, samples, notes)
+2. **Review & Confirm**: Manual review of logged runs, confirm/reject based on results
+3. **Automatic Accuracy**: System records accuracy immediately after confirmation
+4. **Dashboard View**: All activities visible in unified compliance dashboard
+
 ### 🚀 **NEW: Database Backup & ML Validation System** (July 28, 2025)
 
 **MAJOR FEATURE IMPLEMENTED**: Comprehensive database backup, recovery, and ML validation tracking system to prevent data loss and ensure ML model integrity.

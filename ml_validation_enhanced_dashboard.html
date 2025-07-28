@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ML Model Validation Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .validation-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem 0;
+            margin-bottom: 2rem;
+        }
+        .stat-card {
+            background: white;
+            border-radius: 10px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 1rem;
+            transition: transform 0.2s;
+        }
+        .stat-card:hover {
+            transform: translateY(-2px);
+        }
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+        .pending-run {
+            border-left: 4px solid #ffc107;
+            background-color: #fff3cd;
+        }
+        .confirmed-run {
+            border-left: 4px solid #28a745;
+            background-color: #d4edda;
+        }
+        .rejected-run {
+            border-left: 4px solid #dc3545;
+            background-color: #f8d7da;
+        }
+        .run-card {
+            margin-bottom: 1rem;
+            padding: 1rem;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+        .accuracy-badge {
+            font-size: 0.9rem;
+            padding: 0.4rem 0.8rem;
+        }
+        .btn-confirm {
+            background-color: #28a745;
+            border-color: #28a745;
+        }
+        .btn-reject {
+            background-color: #dc3545;
+            border-color: #dc3545;
+        }
+        .workflow-steps {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 2rem 0;
+        }
+        .workflow-step {
+            flex: 1;
+            text-align: center;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin: 0 0.5rem;
+            position: relative;
+        }
+        .workflow-step.active {
+            background: #007bff;
+            color: white;
+        }
+        .workflow-step::after {
+            content: '→';
+            position: absolute;
+            right: -1rem;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 1.5rem;
+            color: #6c757d;
+        }
+        .workflow-step:last-child::after {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="validation-header">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-md-6">
+                    <h1><i class="fas fa-brain"></i> ML Model Validation</h1>
+                    <p class="mb-0">Log → Confirm → Record Accuracy Workflow</p>
+                </div>
+                <div class="col-md-6 text-md-end">
+                    <button class="btn btn-light" onclick="refreshDashboard()">
+                        <i class="fas fa-refresh"></i> Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Workflow Steps -->
+        <div class="workflow-steps">
+            <div class="workflow-step">
+                <i class="fas fa-clipboard-list fa-2x mb-2"></i>
+                <h5>1. Log Runs</h5>
+                <small>Record completed runs</small>
+            </div>
+            <div class="workflow-step">
+                <i class="fas fa-check-circle fa-2x mb-2"></i>
+                <h5>2. Confirm Runs</h5>
+                <small>"All samples completed properly?"</small>
+            </div>
+            <div class="workflow-step">
+                <i class="fas fa-chart-line fa-2x mb-2"></i>
+                <h5>3. Record Accuracy</h5>
+                <small>Calculate & track performance</small>
+            </div>
+        </div>
+
+        <!-- Statistics Cards -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-value text-warning" id="pendingCount">-</div>
+                    <div class="text-muted">Pending Confirmation</div>
+                    <i class="fas fa-clock text-warning float-end"></i>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-value text-success" id="confirmedCount">-</div>
+                    <div class="text-muted">Confirmed Runs</div>
+                    <i class="fas fa-check text-success float-end"></i>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-value text-danger" id="rejectedCount">-</div>
+                    <div class="text-muted">Rejected Runs</div>
+                    <i class="fas fa-times text-danger float-end"></i>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-value text-primary" id="avgAccuracy">-</div>
+                    <div class="text-muted">Average Accuracy</div>
+                    <i class="fas fa-percentage text-primary float-end"></i>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Tabs -->
+        <ul class="nav nav-tabs" id="mainTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="pending-tab" data-bs-toggle="tab" data-bs-target="#pending" type="button" role="tab">
+                    <i class="fas fa-clock"></i> Pending Confirmation (<span id="pendingTabCount">0</span>)
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="confirmed-tab" data-bs-toggle="tab" data-bs-target="#confirmed" type="button" role="tab">
+                    <i class="fas fa-check"></i> Confirmed Runs
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="log-new-tab" data-bs-toggle="tab" data-bs-target="#log-new" type="button" role="tab">
+                    <i class="fas fa-plus"></i> Log New Run
+                </button>
+            </li>
+        </ul>
+
+        <div class="tab-content" id="mainTabContent">
+            <!-- Pending Confirmation Tab -->
+            <div class="tab-pane fade show active" id="pending" role="tabpanel">
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h5><i class="fas fa-clock text-warning"></i> Runs Waiting for Confirmation</h5>
+                        <small class="text-muted">Review each run and confirm if "all samples completed with proper results"</small>
+                    </div>
+                    <div class="card-body">
+                        <div id="pendingRunsList">
+                            <div class="text-center text-muted">
+                                <i class="fas fa-spinner fa-spin"></i> Loading pending runs...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Confirmed Runs Tab -->
+            <div class="tab-pane fade" id="confirmed" role="tabpanel">
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h5><i class="fas fa-check text-success"></i> Confirmed Runs with Accuracy Data</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="confirmedRunsList">
+                            <div class="text-center text-muted">
+                                <i class="fas fa-spinner fa-spin"></i> Loading confirmed runs...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Log New Run Tab -->
+            <div class="tab-pane fade" id="log-new" role="tabpanel">
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h5><i class="fas fa-plus text-primary"></i> Log New ML Run</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="logRunForm">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="runId" class="form-label">Run ID *</label>
+                                        <input type="text" class="form-control" id="runId" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="fileName" class="form-label">File Name *</label>
+                                        <input type="text" class="form-control" id="fileName" required>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label for="sessionId" class="form-label">Session ID</label>
+                                        <input type="text" class="form-control" id="sessionId">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label for="pathogenCode" class="form-label">Pathogen Code</label>
+                                        <input type="text" class="form-control" id="pathogenCode">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label for="totalSamples" class="form-label">Total Samples</label>
+                                        <input type="number" class="form-control" id="totalSamples" min="0">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="completedSamples" class="form-label">Completed Samples</label>
+                                        <input type="number" class="form-control" id="completedSamples" min="0">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="notes" class="form-label">Notes</label>
+                                        <textarea class="form-control" id="notes" rows="2"></textarea>
+                                    </div>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save"></i> Log Run
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let dashboardData = {};
+
+        function refreshDashboard() {
+            loadDashboardData();
+        }
+
+        function loadDashboardData() {
+            fetch('/api/ml-runs/dashboard-data')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        dashboardData = data;
+                        updateStatistics(data.statistics);
+                        updatePendingRuns(data.pending_runs);
+                        updateConfirmedRuns(data.recent_confirmed_runs);
+                    } else {
+                        console.error('Error loading dashboard data:', data.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+        }
+
+        function updateStatistics(stats) {
+            document.getElementById('pendingCount').textContent = stats.pending_confirmation;
+            document.getElementById('confirmedCount').textContent = stats.confirmed;
+            document.getElementById('rejectedCount').textContent = stats.rejected;
+            document.getElementById('avgAccuracy').textContent = (stats.average_accuracy * 100).toFixed(1) + '%';
+            document.getElementById('pendingTabCount').textContent = stats.pending_confirmation;
+        }
+
+        function updatePendingRuns(runs) {
+            const container = document.getElementById('pendingRunsList');
+            
+            if (runs.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center text-muted">
+                        <i class="fas fa-check-circle fa-3x mb-3"></i>
+                        <h5>No runs pending confirmation</h5>
+                        <p>All logged runs have been processed.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = runs.map(run => `
+                <div class="run-card pending-run">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <h6><i class="fas fa-file"></i> ${run.file_name}</h6>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <small><strong>Run ID:</strong> ${run.run_id}</small><br>
+                                    <small><strong>Date:</strong> ${new Date(run.run_date).toLocaleString()}</small>
+                                </div>
+                                <div class="col-md-6">
+                                    <small><strong>Samples:</strong> ${run.completed_samples}/${run.total_samples}</small><br>
+                                    <small><strong>Pathogen:</strong> ${run.pathogen_code || 'N/A'}</small>
+                                </div>
+                            </div>
+                            ${run.notes ? `<small class="text-muted"><i class="fas fa-sticky-note"></i> ${run.notes}</small>` : ''}
+                        </div>
+                        <div class="col-md-4 text-end">
+                            <div class="btn-group" role="group">
+                                <button class="btn btn-confirm text-white" onclick="confirmRun(${run.id}, true)">
+                                    <i class="fas fa-check"></i> Confirm
+                                </button>
+                                <button class="btn btn-reject text-white" onclick="showRejectModal(${run.id})">
+                                    <i class="fas fa-times"></i> Reject
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function updateConfirmedRuns(runs) {
+            const container = document.getElementById('confirmedRunsList');
+            
+            if (runs.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center text-muted">
+                        <i class="fas fa-chart-line fa-3x mb-3"></i>
+                        <h5>No confirmed runs yet</h5>
+                        <p>Confirmed runs with accuracy data will appear here.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = runs.map(run => `
+                <div class="run-card confirmed-run">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <h6><i class="fas fa-file"></i> ${run.file_name}</h6>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <small><strong>Run ID:</strong> ${run.run_id}</small><br>
+                                    <small><strong>Confirmed:</strong> ${new Date(run.confirmed_at).toLocaleString()}</small><br>
+                                    <small><strong>By:</strong> ${run.confirmed_by}</small>
+                                </div>
+                                <div class="col-md-6">
+                                    <small><strong>Predictions:</strong> ${run.correct_predictions}/${run.total_predictions}</small><br>
+                                    <small><strong>Overrides:</strong> ${run.expert_overrides}</small><br>
+                                    <small><strong>Pathogen:</strong> ${run.pathogen_code || 'N/A'}</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4 text-end">
+                            <span class="badge accuracy-badge ${getAccuracyBadgeClass(run.accuracy_score)}">
+                                Accuracy: ${(run.accuracy_score * 100).toFixed(1)}%
+                            </span><br>
+                            <small class="text-muted">
+                                P: ${(run.precision_score * 100).toFixed(1)}% | 
+                                R: ${(run.recall_score * 100).toFixed(1)}% | 
+                                F1: ${(run.f1_score * 100).toFixed(1)}%
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function getAccuracyBadgeClass(accuracy) {
+            if (accuracy >= 0.9) return 'bg-success';
+            if (accuracy >= 0.8) return 'bg-warning';
+            return 'bg-danger';
+        }
+
+        function confirmRun(runLogId, isConfirmed) {
+            const confirmedBy = prompt('Enter your name/ID:');
+            if (!confirmedBy) return;
+
+            fetch('/api/ml-runs/confirm', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    run_log_id: runLogId,
+                    confirmed_by: confirmedBy,
+                    is_confirmed: isConfirmed
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert(data.message);
+                    refreshDashboard();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error confirming run');
+            });
+        }
+
+        function showRejectModal(runLogId) {
+            const reason = prompt('Enter rejection reason:');
+            if (reason === null) return; // User cancelled
+
+            const confirmedBy = prompt('Enter your name/ID:');
+            if (!confirmedBy) return;
+
+            fetch('/api/ml-runs/confirm', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    run_log_id: runLogId,
+                    confirmed_by: confirmedBy,
+                    is_confirmed: false,
+                    rejection_reason: reason
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert(data.message);
+                    refreshDashboard();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error rejecting run');
+            });
+        }
+
+        // Log new run form
+        document.getElementById('logRunForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const formData = {
+                run_id: document.getElementById('runId').value,
+                file_name: document.getElementById('fileName').value,
+                session_id: document.getElementById('sessionId').value || null,
+                pathogen_code: document.getElementById('pathogenCode').value || null,
+                total_samples: parseInt(document.getElementById('totalSamples').value) || 0,
+                completed_samples: parseInt(document.getElementById('completedSamples').value) || 0,
+                notes: document.getElementById('notes').value || null
+            };
+
+            fetch('/api/ml-runs/log', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(formData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert(data.message);
+                    document.getElementById('logRunForm').reset();
+                    refreshDashboard();
+                    // Switch to pending tab
+                    document.getElementById('pending-tab').click();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error logging run');
+            });
+        });
+
+        // Load dashboard data on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadDashboardData();
+            
+            // Auto-refresh every 30 seconds
+            setInterval(loadDashboardData, 30000);
+        });
+    </script>
+</body>
+</html>

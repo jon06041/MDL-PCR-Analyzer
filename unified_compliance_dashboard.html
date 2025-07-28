@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Validation & Compliance Dashboard - MDL PCR Analyzer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .dashboard-container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            position: relative;
+        }
+
+        .header h1 {
+            font-size: 2.8em;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+
+        .header p {
+            font-size: 1.3em;
+            opacity: 0.9;
+        }
+
+        .compliance-score {
+            position: absolute;
+            top: 20px;
+            right: 30px;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 15px 25px;
+            border-radius: 50px;
+            backdrop-filter: blur(10px);
+        }
+
+        .score-number {
+            font-size: 2.2em;
+            font-weight: bold;
+        }
+
+        .score-label {
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
+        .controls {
+            padding: 20px 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        
+        .status-card {
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 1.5rem;
+            transition: transform 0.2s;
+        }
+        
+        .status-card:hover {
+            transform: translateY(-2px);
+        }
+        
+        .status-active { border-left: 5px solid #28a745; }
+        .status-partial { border-left: 5px solid #ffc107; }
+        .status-planned { border-left: 5px solid #17a2b8; }
+        .status-ready { border-left: 5px solid #6f42c1; }
+        
+        .evidence-badge {
+            font-size: 0.8em;
+            padding: 0.3rem 0.6rem;
+            border-radius: 15px;
+            margin: 0.2rem;
+            display: inline-block;
+        }
+        
+        .evidence-found { background: #d4edda; color: #155724; }
+        .evidence-missing { background: #f8d7da; color: #721c24; }
+        .evidence-partial { background: #fff3cd; color: #856404; }
+        
+        .regulation-section {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        .requirement-item {
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .requirement-item:hover {
+            border-color: #007bff;
+            box-shadow: 0 2px 4px rgba(0, 123, 255, 0.1);
+        }
+        
+        .requirement-expanded {
+            border-color: #007bff;
+            background: #f8f9ff;
+        }
+        
+        .implementation-feature {
+            background: #e3f2fd;
+            border-left: 3px solid #2196f3;
+            padding: 0.5rem 1rem;
+            margin: 0.5rem 0;
+            border-radius: 0 4px 4px 0;
+        }
+        
+        .evidence-detail {
+            background: #f1f8e9;
+            border: 1px solid #c3e6cb;
+            border-radius: 4px;
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+        
+        .metric-card {
+            text-align: center;
+            padding: 1.5rem;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .metric-number {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #007bff;
+        }
+        
+        .export-section {
+            background: #fff;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin: 2rem 0;
+        }
+        
+        .roadmap-item {
+            border-left: 4px solid #007bff;
+            background: #f8f9ff;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 0 4px 4px 0;
+        }
+        
+        .nav-pills .nav-link.active {
+            background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
+        }
+        
+        .tab-content {
+            margin-top: 2rem;
+            padding: 0 30px 30px 30px;
+        }
+
+        .dashboard-content {
+            background: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <div class="header">
+            <div class="compliance-score">
+                <div class="score-number" id="overallScore">-</div>
+                <div class="score-label">Overall Compliance</div>
+            </div>
+            <h1><i class="fas fa-shield-alt"></i> Validation & Compliance Dashboard</h1>
+            <p>Software-Trackable Regulatory Compliance for qPCR Analysis</p>
+        </div>
+
+        <div class="controls">
+            <div class="d-flex align-items-center gap-3">
+                <button class="btn btn-primary" onclick="refreshDashboard()">
+                    <i class="fas fa-sync-alt"></i> Refresh Data
+                </button>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="autoRefresh" checked>
+                    <label class="form-check-label" for="autoRefresh">Auto Refresh</label>
+                </div>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+                <span class="text-muted">Last Updated:</span>
+                <span id="lastUpdate" class="fw-bold">-</span>
+            </div>
+        </div>
+
+        <div class="dashboard-content">
+            <!-- Overall Metrics -->
+            <div class="container-fluid mt-4">
+                <div class="row mb-4">
+                    <div class="col-md-3">
+                        <div class="metric-card">
+                            <div class="metric-number" id="totalRequirements">-</div>
+                            <div class="text-muted">Total Requirements</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-card">
+                            <div class="metric-number text-success" id="activeTracking">-</div>
+                            <div class="text-muted">Currently Tracking</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-card">
+                            <div class="metric-number text-warning" id="readyToImplement">-</div>
+                            <div class="text-muted">Ready to Implement</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="metric-card">
+                            <div class="metric-number text-info" id="evidenceCollected">-</div>
+                            <div class="text-muted">Evidence Records</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Navigation Tabs -->
+                <ul class="nav nav-pills justify-content-center mb-4" id="complianceTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="overview-tab" data-bs-toggle="pill" data-bs-target="#overview" type="button" role="tab">
+                            <i class="fas fa-chart-pie"></i> Overview
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="organizations-tab" data-bs-toggle="pill" data-bs-target="#organizations" type="button" role="tab">
+                            <i class="fas fa-building"></i> By Organization
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="evidence-tab" data-bs-toggle="pill" data-bs-target="#evidence" type="button" role="tab">
+                            <i class="fas fa-file-alt"></i> Evidence Tracking
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="roadmap-tab" data-bs-toggle="pill" data-bs-target="#roadmap" type="button" role="tab">
+                            <i class="fas fa-road"></i> Implementation Roadmap
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="ml-validation-tab" data-bs-toggle="pill" data-bs-target="#ml-validation" type="button" role="tab">
+                            <i class="fas fa-brain"></i> ML Model Validation
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="export-tab" data-bs-toggle="pill" data-bs-target="#export" type="button" role="tab">
+                            <i class="fas fa-download"></i> Export Reports
+                        </button>
+                    </li>
+                </ul>
+
+                <!-- Tab Content -->
+                <div class="tab-content" id="complianceTabContent">
+                    <!-- Overview Tab -->
+                    <div class="tab-pane fade show active" id="overview" role="tabpanel">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="status-card status-active">
+                                    <div class="card-body">
+                                        <h5 class="card-title text-success">
+                                            <i class="fas fa-check-circle"></i> Currently Tracking
+                                        </h5>
+                                        <p class="card-text">Requirements actively being monitored through app usage</p>
+                                        <div id="activeRequirements"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="status-card status-partial">
+                                    <div class="card-body">
+                                        <h5 class="card-title text-warning">
+                                            <i class="fas fa-clock"></i> Partial Implementation
+                                        </h5>
+                                        <p class="card-text">Requirements with some tracking in place</p>
+                                        <div id="partialRequirements"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="status-card status-ready">
+                                    <div class="card-body">
+                                        <h5 class="card-title text-primary">
+                                            <i class="fas fa-rocket"></i> Ready to Implement
+                                        </h5>
+                                        <p class="card-text">Technical implementation ready, will track when features added</p>
+                                        <div id="readyRequirements"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="status-card status-planned">
+                                    <div class="card-body">
+                                        <h5 class="card-title text-info">
+                                            <i class="fas fa-calendar-alt"></i> Planned Features
+                                        </h5>
+                                        <p class="card-text">Will track when user management features are implemented</p>
+                                        <div id="plannedRequirements"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Organizations Tab -->
+                    <div class="tab-pane fade" id="organizations" role="tabpanel">
+                        <div id="organizationRequirements"></div>
+                    </div>
+
+                    <!-- Evidence Tab -->
+                    <div class="tab-pane fade" id="evidence" role="tabpanel">
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle"></i>
+                            <strong>Evidence Tracking:</strong> Shows what evidence is being collected for each requirement and compliance gaps.
+                        </div>
+                        <div id="evidenceTracking"></div>
+                    </div>
+
+                    <!-- Roadmap Tab -->
+                    <div class="tab-pane fade" id="roadmap" role="tabpanel">
+                        <div class="alert alert-primary">
+                            <i class="fas fa-map"></i>
+                            <strong>Implementation Roadmap:</strong> Features to implement for complete compliance tracking.
+                        </div>
+                        <div id="implementationRoadmap"></div>
+                    </div>
+
+                    <!-- ML Model Validation Tab -->
+                    <div class="tab-pane fade" id="ml-validation" role="tabpanel">
+                        <div class="ml-validation-section">
+                            <h4><i class="fas fa-brain"></i> ML Model Validation Workflow</h4>
+                            <p>Manage ML model validation with a 3-step confirmation process: Log → Confirm → Record Accuracy</p>
+                            
+                            <!-- Workflow Status Cards -->
+                            <div class="row mb-4">
+                                <div class="col-md-3">
+                                    <div class="card text-center border-primary">
+                                        <div class="card-body">
+                                            <i class="fas fa-plus-circle fa-2x text-primary mb-2"></i>
+                                            <h6>Step 1: Log Runs</h6>
+                                            <p class="small text-muted">Record validation run details</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="card text-center border-warning">
+                                        <div class="card-body">
+                                            <i class="fas fa-eye fa-2x text-warning mb-2"></i>
+                                            <h6>Step 2: Confirm Runs</h6>
+                                            <p class="small text-muted">Manual review and confirmation</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="card text-center border-success">
+                                        <div class="card-body">
+                                            <i class="fas fa-check-circle fa-2x text-success mb-2"></i>
+                                            <h6>Step 3: Record Accuracy</h6>
+                                            <p class="small text-muted">Automatic accuracy calculation</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="card text-center border-info">
+                                        <div class="card-body">
+                                            <h5 id="mlOverallAccuracy" class="text-info">0%</h5>
+                                            <h6>Average Accuracy</h6>
+                                            <p class="small text-muted">Confirmed runs only</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Statistics Row -->
+                            <div class="row mb-4">
+                                <div class="col-md-3">
+                                    <div class="status-card status-partial">
+                                        <div class="card-body text-center">
+                                            <h3 id="mlPendingCount" class="text-warning">0</h3>
+                                            <p class="card-text">Pending Runs</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="status-card status-active">
+                                        <div class="card-body text-center">
+                                            <h3 id="mlConfirmedCount" class="text-success">0</h3>
+                                            <p class="card-text">Confirmed Runs</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="status-card">
+                                        <div class="card-body text-center">
+                                            <h3 id="mlRejectedCount" class="text-danger">0</h3>
+                                            <p class="card-text">Rejected Runs</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="status-card status-ready">
+                                        <div class="card-body text-center">
+                                            <h3 id="mlConfirmationRate" class="text-info">0%</h3>
+                                            <p class="card-text">Confirmation Rate</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Log New Run Section -->
+                            <div class="card mb-4">
+                                <div class="card-header">
+                                    <h5><i class="fas fa-plus"></i> Log New Validation Run</h5>
+                                </div>
+                                <div class="card-body">
+                                    <form id="logRunForm" class="row g-3">
+                                        <div class="col-md-4">
+                                            <label for="runId" class="form-label">Run ID *</label>
+                                            <input type="text" class="form-control" id="runId" required>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label for="fileName" class="form-label">File Name *</label>
+                                            <input type="text" class="form-control" id="fileName" required>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label for="pathogenCode" class="form-label">Pathogen Code</label>
+                                            <input type="text" class="form-control" id="pathogenCode">
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label for="totalSamples" class="form-label">Total Samples</label>
+                                            <input type="number" class="form-control" id="totalSamples" min="0">
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label for="completedSamples" class="form-label">Completed Samples</label>
+                                            <input type="number" class="form-control" id="completedSamples" min="0">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label for="runNotes" class="form-label">Notes</label>
+                                            <input type="text" class="form-control" id="runNotes" placeholder="Optional validation notes">
+                                        </div>
+                                        <div class="col-12">
+                                            <button type="submit" class="btn btn-primary">
+                                                <i class="fas fa-plus"></i> Log Run
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+
+                            <!-- Pending Runs for Confirmation -->
+                            <div class="card mb-4">
+                                <div class="card-header">
+                                    <h5><i class="fas fa-clock"></i> Pending Runs for Confirmation</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div id="pendingRunsList">
+                                        <p class="text-muted text-center">No pending runs</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Confirmed Runs with Accuracy -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h5><i class="fas fa-check-circle"></i> Confirmed Runs with Recorded Accuracy</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="table-responsive">
+                                        <table class="table table-hover">
+                                            <thead>
+                                                <tr>
+                                                    <th>Run ID</th>
+                                                    <th>File Name</th>
+                                                    <th>Pathogen</th>
+                                                    <th>Samples</th>
+                                                    <th>Accuracy</th>
+                                                    <th>Confirmed</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="confirmedRunsTable">
+                                                <tr>
+                                                    <td colspan="6" class="text-center text-muted">No confirmed runs</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Navigation to Legacy ML Dashboards -->
+                            <div class="card mt-4 border-info">
+                                <div class="card-header bg-info text-white">
+                                    <h5 class="mb-0"><i class="fas fa-link"></i> Additional ML Validation Tools</h5>
+                                </div>
+                                <div class="card-body">
+                                    <p class="card-text">Access additional ML validation and performance dashboards:</p>
+                                    <div class="btn-group" role="group">
+                                        <a href="/ml-validation-dashboard" class="btn btn-outline-info" target="_blank">
+                                            <i class="fas fa-chart-line"></i> ML Performance Dashboard
+                                        </a>
+                                        <a href="/qc-validation" class="btn btn-outline-info" target="_blank">
+                                            <i class="fas fa-vials"></i> QC Validation Dashboard
+                                        </a>
+                                        <a href="/ml-config" class="btn btn-outline-info" target="_blank">
+                                            <i class="fas fa-cogs"></i> ML Configuration
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Export Tab -->
+                    <div class="tab-pane fade" id="export" role="tabpanel">
+                        <div class="export-section">
+                            <h4><i class="fas fa-download"></i> Export Compliance Reports</h4>
+                            <p>Generate detailed compliance reports for regulatory submissions and audits.</p>
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="card">
+                                        <div class="card-body">
+                                            <h6 class="card-title">Compliance Summary Report</h6>
+                                            <p class="card-text">Overall compliance status with evidence summary</p>
+                                            <button class="btn btn-primary" onclick="exportComplianceReport('summary')">
+                                                <i class="fas fa-file-pdf"></i> Export PDF
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="card">
+                                        <div class="card-body">
+                                            <h6 class="card-title">Detailed Evidence Report</h6>
+                                            <p class="card-text">Complete evidence documentation with audit trails</p>
+                                            <button class="btn btn-success" onclick="exportComplianceReport('detailed')">
+                                                <i class="fas fa-file-excel"></i> Export Excel
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="row mt-3">
+                                <div class="col-md-6">
+                                    <div class="card">
+                                        <div class="card-body">
+                                            <h6 class="card-title">Organization-Specific Reports</h6>
+                                            <p class="card-text">Reports filtered by regulatory organization</p>
+                                            <select class="form-select mb-2" id="orgFilter">
+                                                <option value="all">All Organizations</option>
+                                                <option value="FDA">FDA</option>
+                                                <option value="CLIA">CLIA</option>
+                                                <option value="CAP">CAP</option>
+                                                <option value="ISO">ISO</option>
+                                            </select>
+                                            <button class="btn btn-info" onclick="exportOrganizationReport()">
+                                                <i class="fas fa-filter"></i> Export Filtered
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="card">
+                                        <div class="card-body">
+                                            <h6 class="card-title">Implementation Roadmap</h6>
+                                            <p class="card-text">Roadmap for future compliance features</p>
+                                            <button class="btn btn-secondary" onclick="exportRoadmapReport()">
+                                                <i class="fas fa-road"></i> Export Roadmap
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let complianceData = {};
+        let evidenceData = {};
+        let autoRefreshInterval;
+
+        // Load dashboard data on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshDashboard();
+            setupAutoRefresh();
+        });
+
+        function setupAutoRefresh() {
+            const autoRefreshCheckbox = document.getElementById('autoRefresh');
+            
+            function toggleAutoRefresh() {
+                if (autoRefreshCheckbox.checked) {
+                    autoRefreshInterval = setInterval(refreshDashboard, 30000); // 30 seconds
+                } else {
+                    if (autoRefreshInterval) {
+                        clearInterval(autoRefreshInterval);
+                    }
+                }
+            }
+            
+            autoRefreshCheckbox.addEventListener('change', toggleAutoRefresh);
+            toggleAutoRefresh(); // Initial setup
+        }
+
+        async function refreshDashboard() {
+            try {
+                // Load compliance requirements and evidence
+                const [requirementsResponse, evidenceResponse] = await Promise.all([
+                    fetch('/api/compliance/requirements-by-status'),
+                    fetch('/api/compliance/evidence-summary')
+                ]);
+
+                complianceData = await requirementsResponse.json();
+                evidenceData = await evidenceResponse.json();
+
+                updateMetrics();
+                updateOverviewTab();
+                updateOrganizationsTab();
+                updateEvidenceTab();
+                updateRoadmapTab();
+                updateLastRefresh();
+
+            } catch (error) {
+                console.error('Error loading compliance data:', error);
+                showAlert('Error loading compliance data', 'danger');
+            }
+        }
+
+        function updateLastRefresh() {
+            document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+        }
+
+        function updateMetrics() {
+            const total = Object.values(complianceData).reduce((sum, reqs) => sum + reqs.length, 0);
+            const active = complianceData.active?.length || 0;
+            const ready = complianceData.ready_to_implement?.length || 0;
+            const compliance = total > 0 ? Math.round(((active + (complianceData.partial?.length || 0)) / total) * 100) : 0;
+            
+            // Count total evidence records
+            const totalEvidence = Object.values(evidenceData).reduce((sum, evidence) => sum + (evidence.count || 0), 0);
+
+            document.getElementById('totalRequirements').textContent = total;
+            document.getElementById('activeTracking').textContent = active;
+            document.getElementById('readyToImplement').textContent = ready;
+            document.getElementById('evidenceCollected').textContent = totalEvidence;
+            document.getElementById('overallScore').textContent = compliance + '%';
+        }
+
+        function updateOverviewTab() {
+            updateRequirementSection('activeRequirements', complianceData.active || []);
+            updateRequirementSection('partialRequirements', complianceData.partial || []);
+            updateRequirementSection('readyRequirements', complianceData.ready_to_implement || []);
+            updateRequirementSection('plannedRequirements', complianceData.planned || []);
+        }
+
+        function updateRequirementSection(elementId, requirements) {
+            const element = document.getElementById(elementId);
+            if (!element) return;
+
+            if (requirements.length === 0) {
+                element.innerHTML = '<p class="text-muted"><em>No requirements in this category</em></p>';
+                return;
+            }
+
+            element.innerHTML = requirements.map(req => `
+                <div class="requirement-item" onclick="toggleRequirement('${req.code}')">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <strong>${req.title}</strong>
+                            <br><small class="text-muted">${req.organization} - ${req.section}</small>
+                        </div>
+                        <div class="evidence-badges">
+                            ${getEvidenceBadges(req.code)}
+                        </div>
+                    </div>
+                    <div id="detail-${req.code}" class="requirement-details" style="display: none;">
+                        <hr>
+                        <p><strong>Description:</strong> ${req.description}</p>
+                        <div class="evidence-detail">
+                            <h6>Evidence Type:</h6>
+                            <p>${req.evidence_type}</p>
+                            <h6>Tracked Events:</h6>
+                            <div class="d-flex flex-wrap">
+                                ${req.tracked_by.map(event => `
+                                    <span class="badge bg-secondary me-1 mb-1">${event}</span>
+                                `).join('')}
+                            </div>
+                        </div>
+                        ${req.implementation_features ? `
+                            <div class="mt-3">
+                                <h6>Implementation Features:</h6>
+                                ${req.implementation_features.map(feature => `
+                                    <div class="implementation-feature">${feature}</div>
+                                `).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function updateOrganizationsTab() {
+            const orgContainer = document.getElementById('organizationRequirements');
+            const orgData = {};
+
+            // Group requirements by organization
+            Object.values(complianceData).flat().forEach(req => {
+                if (!orgData[req.organization]) {
+                    orgData[req.organization] = [];
+                }
+                orgData[req.organization].push(req);
+            });
+
+            orgContainer.innerHTML = Object.entries(orgData).map(([org, reqs]) => `
+                <div class="regulation-section">
+                    <h3><i class="fas fa-building"></i> ${org}</h3>
+                    <div class="row">
+                        <div class="col-md-3">
+                            <div class="metric-card">
+                                <div class="metric-number">${reqs.length}</div>
+                                <div class="text-muted">Total Requirements</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="metric-card">
+                                <div class="metric-number text-success">${reqs.filter(r => getImplementationStatus(r) === 'active').length}</div>
+                                <div class="text-muted">Active</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="metric-card">
+                                <div class="metric-number text-warning">${reqs.filter(r => getImplementationStatus(r) === 'partial').length}</div>
+                                <div class="text-muted">Partial</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="metric-card">
+                                <div class="metric-number text-primary">${reqs.filter(r => ['ready_to_implement', 'planned'].includes(getImplementationStatus(r))).length}</div>
+                                <div class="text-muted">Planned</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        ${reqs.map(req => `
+                            <div class="requirement-item">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div>
+                                        <strong>${req.title}</strong>
+                                        <br><small class="text-muted">${req.section} - ${req.regulation_title}</small>
+                                        <br><small>${req.description}</small>
+                                    </div>
+                                    <div>
+                                        <span class="badge bg-${getStatusColor(getImplementationStatus(req))}">${getImplementationStatus(req)}</span>
+                                        ${getEvidenceBadges(req.code)}
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function updateEvidenceTab() {
+            const evidenceContainer = document.getElementById('evidenceTracking');
+            
+            evidenceContainer.innerHTML = Object.values(complianceData).flat().map(req => {
+                const evidence = evidenceData[req.code] || {};
+                const hasEvidence = evidence.count > 0;
+                
+                return `
+                    <div class="requirement-item">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div class="flex-grow-1">
+                                <h6>${req.title}</h6>
+                                <p class="text-muted mb-2">${req.organization} - ${req.section}</p>
+                                <p class="mb-2">${req.description}</p>
+                                
+                                <div class="evidence-detail">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <strong>Evidence Type:</strong><br>
+                                            <small>${req.evidence_type}</small>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <strong>Evidence Count:</strong><br>
+                                            <span class="badge ${hasEvidence ? 'bg-success' : 'bg-danger'} fs-6">
+                                                ${evidence.count || 0} records
+                                            </span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="mt-2">
+                                        <strong>Tracked Events:</strong><br>
+                                        ${req.tracked_by.map(event => {
+                                            const eventCount = evidence.events && evidence.events[event] || 0;
+                                            return `<span class="badge ${eventCount > 0 ? 'bg-success' : 'bg-secondary'} me-1 mb-1">${event} (${eventCount})</span>`;
+                                        }).join('')}
+                                    </div>
+                                    
+                                    ${evidence.latest_activity ? `
+                                        <div class="mt-2">
+                                            <strong>Latest Activity:</strong> ${new Date(evidence.latest_activity).toLocaleString()}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                            <div class="text-end">
+                                ${getEvidenceBadges(req.code)}
+                                <br>
+                                <button class="btn btn-sm btn-outline-primary mt-2" onclick="viewEvidence('${req.code}')">
+                                    <i class="fas fa-eye"></i> View Evidence
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function updateRoadmapTab() {
+            const roadmapContainer = document.getElementById('implementationRoadmap');
+            
+            const roadmapItems = Object.values(complianceData).flat()
+                .filter(req => req.implementation_features)
+                .sort((a, b) => {
+                    const order = { 'ready_to_implement': 1, 'planned': 2, 'partial': 3, 'active': 4 };
+                    return order[getImplementationStatus(a)] - order[getImplementationStatus(b)];
+                });
+
+            roadmapContainer.innerHTML = roadmapItems.map(req => `
+                <div class="roadmap-item">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <h6>${req.title}</h6>
+                        <span class="badge bg-${getStatusColor(getImplementationStatus(req))}">${getImplementationStatus(req)}</span>
+                    </div>
+                    <p class="text-muted mb-2">${req.organization} - ${req.description}</p>
+                    <div>
+                        <strong>Implementation Features:</strong>
+                        ${req.implementation_features.map(feature => `
+                            <div class="implementation-feature">${feature}</div>
+                        `).join('')}
+                    </div>
+                    <div class="mt-2">
+                        <strong>Will Track:</strong>
+                        ${req.tracked_by.map(event => `
+                            <span class="badge bg-info me-1">${event}</span>
+                        `).join('')}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Helper functions
+        function getImplementationStatus(req) {
+            // Find which category this requirement is in
+            for (const [status, reqs] of Object.entries(complianceData)) {
+                if (reqs.some(r => r.code === req.code)) {
+                    return status;
+                }
+            }
+            return 'unknown';
+        }
+
+        function getStatusColor(status) {
+            const colors = {
+                'active': 'success',
+                'partial': 'warning', 
+                'ready_to_implement': 'primary',
+                'planned': 'info',
+                'unknown': 'secondary'
+            };
+            return colors[status] || 'secondary';
+        }
+
+        function getEvidenceBadges(reqCode) {
+            const evidence = evidenceData[reqCode] || {};
+            const hasEvidence = evidence.count > 0;
+            
+            return `
+                <span class="evidence-badge ${hasEvidence ? 'evidence-found' : 'evidence-missing'}">
+                    ${hasEvidence ? 'Evidence Found' : 'No Evidence'}
+                </span>
+            `;
+        }
+
+        function toggleRequirement(reqCode) {
+            const detail = document.getElementById(`detail-${reqCode}`);
+            const item = detail.closest('.requirement-item');
+            
+            if (detail.style.display === 'none') {
+                detail.style.display = 'block';
+                item.classList.add('requirement-expanded');
+            } else {
+                detail.style.display = 'none';
+                item.classList.remove('requirement-expanded');
+            }
+        }
+
+        async function viewEvidence(reqCode) {
+            try {
+                const response = await fetch(`/api/compliance/evidence/${reqCode}`);
+                const evidence = await response.json();
+                
+                // Create modal to show evidence details
+                showEvidenceModal(reqCode, evidence);
+            } catch (error) {
+                console.error('Error loading evidence:', error);
+                showAlert('Error loading evidence details', 'danger');
+            }
+        }
+
+        function showEvidenceModal(reqCode, evidence) {
+            // Implementation for showing detailed evidence in a modal
+            alert(`Evidence for ${reqCode}:\n${JSON.stringify(evidence, null, 2)}`);
+        }
+
+        // Export functions
+        async function exportComplianceReport(type) {
+            try {
+                const response = await fetch(`/api/compliance/export/${type}`);
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `compliance_report_${type}_${new Date().toISOString().split('T')[0]}.${type === 'detailed' ? 'xlsx' : 'pdf'}`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                    showAlert('Report exported successfully', 'success');
+                } else {
+                    throw new Error('Export failed');
+                }
+            } catch (error) {
+                console.error('Error exporting report:', error);
+                showAlert('Error exporting report', 'danger');
+            }
+        }
+
+        async function exportOrganizationReport() {
+            const org = document.getElementById('orgFilter').value;
+            try {
+                const response = await fetch(`/api/compliance/export/organization/${org}`);
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `compliance_${org}_${new Date().toISOString().split('T')[0]}.pdf`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                    showAlert('Organization report exported successfully', 'success');
+                } else {
+                    throw new Error('Export failed');
+                }
+            } catch (error) {
+                console.error('Error exporting organization report:', error);
+                showAlert('Error exporting organization report', 'danger');
+            }
+        }
+
+        async function exportRoadmapReport() {
+            try {
+                const response = await fetch('/api/compliance/export/roadmap');
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `implementation_roadmap_${new Date().toISOString().split('T')[0]}.pdf`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                    showAlert('Roadmap exported successfully', 'success');
+                } else {
+                    throw new Error('Export failed');
+                }
+            } catch (error) {
+                console.error('Error exporting roadmap:', error);
+                showAlert('Error exporting roadmap', 'danger');
+            }
+        }
+
+        function showAlert(message, type) {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+            alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+            alertDiv.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            document.body.appendChild(alertDiv);
+            
+            setTimeout(() => {
+                if (alertDiv.parentNode) {
+                    alertDiv.parentNode.removeChild(alertDiv);
+                }
+            }, 5000);
+        }
+
+        // ML Validation Functions
+        async function loadMLValidationData() {
+            try {
+                // Load ML run statistics
+                const statsResponse = await fetch('/api/ml-runs/statistics');
+                if (statsResponse.ok) {
+                    const stats = await statsResponse.json();
+                    updateMLStatistics(stats);
+                }
+
+                // Load pending runs
+                const pendingResponse = await fetch('/api/ml-runs/pending');
+                if (pendingResponse.ok) {
+                    const pendingRuns = await pendingResponse.json();
+                    updatePendingRuns(pendingRuns);
+                }
+
+                // Load confirmed runs
+                const confirmedResponse = await fetch('/api/ml-runs/confirmed');
+                if (confirmedResponse.ok) {
+                    const confirmedRuns = await confirmedResponse.json();
+                    updateConfirmedRuns(confirmedRuns);
+                }
+            } catch (error) {
+                console.error('Error loading ML validation data:', error);
+            }
+        }
+
+        function updateMLStatistics(stats) {
+            document.getElementById('mlPendingCount').textContent = stats.pending_runs || 0;
+            document.getElementById('mlConfirmedCount').textContent = stats.confirmed_runs || 0;
+            document.getElementById('mlRejectedCount').textContent = stats.rejected_runs || 0;
+            document.getElementById('mlOverallAccuracy').textContent = `${stats.average_accuracy || 0}%`;
+            document.getElementById('mlConfirmationRate').textContent = `${stats.confirmation_rate || 0}%`;
+        }
+
+        function updatePendingRuns(runs) {
+            const container = document.getElementById('pendingRunsList');
+            
+            if (!runs || runs.length === 0) {
+                container.innerHTML = '<p class="text-muted text-center">No pending runs</p>';
+                return;
+            }
+
+            container.innerHTML = runs.map(run => `
+                <div class="card mb-2 border-warning">
+                    <div class="card-body">
+                        <div class="row align-items-center">
+                            <div class="col-md-8">
+                                <h6 class="card-title mb-1">${run.run_id}</h6>
+                                <p class="card-text mb-1">
+                                    <strong>File:</strong> ${run.file_name}<br>
+                                    <strong>Pathogen:</strong> ${run.pathogen_code || 'N/A'}<br>
+                                    <strong>Samples:</strong> ${run.completed_samples || 0}/${run.total_samples || 0}<br>
+                                    <strong>Logged:</strong> ${new Date(run.logged_at).toLocaleString()}
+                                </p>
+                                ${run.notes ? `<small class="text-muted">Notes: ${run.notes}</small>` : ''}
+                            </div>
+                            <div class="col-md-4 text-end">
+                                <button class="btn btn-success btn-sm me-2" onclick="confirmRun('${run.run_id}', true)">
+                                    <i class="fas fa-check"></i> Confirm
+                                </button>
+                                <button class="btn btn-danger btn-sm" onclick="confirmRun('${run.run_id}', false)">
+                                    <i class="fas fa-times"></i> Reject
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function updateConfirmedRuns(runs) {
+            const tbody = document.getElementById('confirmedRunsTable');
+            
+            if (!runs || runs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No confirmed runs</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = runs.map(run => `
+                <tr>
+                    <td><strong>${run.run_id}</strong></td>
+                    <td>${run.file_name}</td>
+                    <td><span class="badge bg-info">${run.pathogen_code || 'N/A'}</span></td>
+                    <td>${run.completed_samples || 0}/${run.total_samples || 0}</td>
+                    <td>
+                        <span class="badge ${run.accuracy_score >= 90 ? 'bg-success' : run.accuracy_score >= 70 ? 'bg-warning' : 'bg-danger'}">
+                            ${run.accuracy_score ? run.accuracy_score.toFixed(1) + '%' : 'N/A'}
+                        </span>
+                    </td>
+                    <td><small>${new Date(run.confirmed_at).toLocaleString()}</small></td>
+                </tr>
+            `).join('');
+        }
+
+        // Log new run form submission
+        document.addEventListener('DOMContentLoaded', function() {
+            const logRunForm = document.getElementById('logRunForm');
+            if (logRunForm) {
+                logRunForm.addEventListener('submit', async function(e) {
+                    e.preventDefault();
+                    
+                    const formData = {
+                        run_id: document.getElementById('runId').value,
+                        file_name: document.getElementById('fileName').value,
+                        pathogen_code: document.getElementById('pathogenCode').value,
+                        total_samples: parseInt(document.getElementById('totalSamples').value) || 0,
+                        completed_samples: parseInt(document.getElementById('completedSamples').value) || 0,
+                        notes: document.getElementById('runNotes').value
+                    };
+
+                    try {
+                        const response = await fetch('/api/ml-runs/log', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(formData)
+                        });
+
+                        const result = await response.json();
+                        
+                        if (result.success) {
+                            showAlert('success', 'Run logged successfully!');
+                            logRunForm.reset();
+                            loadMLValidationData(); // Refresh data
+                        } else {
+                            showAlert('danger', `Error: ${result.message}`);
+                        }
+                    } catch (error) {
+                        console.error('Error logging run:', error);
+                        showAlert('danger', 'Error logging run. Please try again.');
+                    }
+                });
+            }
+        });
+
+        async function confirmRun(runId, confirmed) {
+            try {
+                const response = await fetch('/api/ml-runs/confirm', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        run_id: runId,
+                        confirmed: confirmed
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    const action = confirmed ? 'confirmed' : 'rejected';
+                    showAlert('success', `Run ${runId} ${action} successfully!`);
+                    loadMLValidationData(); // Refresh data
+                } else {
+                    showAlert('danger', `Error: ${result.message}`);
+                }
+            } catch (error) {
+                console.error('Error confirming run:', error);
+                showAlert('danger', 'Error processing run confirmation. Please try again.');
+            }
+        }
+
+        // Load ML validation data when the ML tab is activated
+        document.addEventListener('DOMContentLoaded', function() {
+            const mlTab = document.getElementById('ml-validation-tab');
+            if (mlTab) {
+                mlTab.addEventListener('shown.bs.tab', function (e) {
+                    loadMLValidationData();
+                });
+            }
+        });
+    </script>
+</body>
+</html>
