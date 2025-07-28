@@ -362,6 +362,7 @@
                     updateSummaryMetrics(dashboardData);
                     updatePathogenModels(dashboardData.pathogen_models);
                     updateTeachingSummary(dashboardData.teaching_summary);
+                    updateExpertDecisions(dashboardData.teaching_summary);
                     updateLastUpdated(dashboardData.timestamp);
                 } else {
                     showError('Failed to load dashboard data: ' + (dashboardData.error || 'Unknown error'));

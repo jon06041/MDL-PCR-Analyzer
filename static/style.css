@@ -3888,3 +3888,166 @@ tr:hover::before {
     color: #17a2b8;
     font-weight: bold;
 }
+
+/* ML Notification Styles for Batch Re-evaluation */
+.ml-notification {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+    border-left: 5px solid #007bff;
+    animation: slideInFromRight 0.3s ease-out;
+}
+
+.ml-notification-info {
+    border-left-color: #17a2b8;
+}
+
+.ml-notification-success {
+    border-left-color: #28a745;
+}
+
+.ml-notification-warning {
+    border-left-color: #ffc107;
+}
+
+.ml-notification-error {
+    border-left-color: #dc3545;
+}
+
+.ml-notification-content {
+    display: flex;
+    align-items: flex-start;
+    padding: 20px;
+    gap: 15px;
+}
+
+.ml-notification-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.ml-notification-text {
+    flex: 1;
+    line-height: 1.5;
+}
+
+.ml-notification-text strong {
+    color: #2c3e50;
+    font-weight: 600;
+}
+
+.ml-notification-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 15px;
+    padding-top: 10px;
+    border-top: 1px solid #e9ecef;
+}
+
+.ml-notification-btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 14px;
+}
+
+.ml-notification-btn.primary {
+    background: #007bff;
+    color: white;
+}
+
+.ml-notification-btn.primary:hover {
+    background: #0056b3;
+    transform: translateY(-1px);
+}
+
+.ml-notification-btn.secondary {
+    background: #6c757d;
+    color: white;
+}
+
+.ml-notification-btn.secondary:hover {
+    background: #5a6268;
+    transform: translateY(-1px);
+}
+
+@keyframes slideInFromRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* ML Training Notification Banner */
+.ml-training-notification {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 10000;
+    max-width: 400px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+    animation: slideInFromRight 0.3s ease-out;
+}
+
+.ml-training-notification.success {
+    border-left: 4px solid #28a745;
+}
+
+.ml-training-notification.error {
+    border-left: 4px solid #dc3545;
+}
+
+.ml-training-notification.info {
+    border-left: 4px solid #17a2b8;
+}
+
+.notification-content {
+    padding: 15px;
+    position: relative;
+}
+
+.notification-content h6 {
+    margin: 0 0 8px 0;
+    color: #2c3e50;
+    font-weight: 600;
+}
+
+.notification-content p {
+    margin: 0;
+    color: #6c757d;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.close-notification {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: none;
+    border: none;
+    font-size: 18px;
+    color: #adb5bd;
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.close-notification:hover {
+    color: #495057;
+}

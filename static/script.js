@@ -5668,9 +5668,26 @@ function populateResultsTable(individualResults) {
             '-';
 
         
-        // --- Curve Class badge (from new script/classifier) ---
+        // --- Curve Class badge (prioritize ML classification over older curve_classification) ---
         let curveClassBadgeHTML = '-';
-        if (typeof result.curve_classification === 'object' && result.curve_classification.classification) {
+        
+        // First check for ML classification (preferred)
+        if (result.ml_classification && result.ml_classification.classification) {
+            const classMap = {
+                'STRONG_POSITIVE': 'curve-strong-pos',
+                'POSITIVE': 'curve-pos',
+                'WEAK_POSITIVE': 'curve-weak-pos',
+                'NEGATIVE': 'curve-neg',
+                'INDETERMINATE': 'curve-indet',
+                'SUSPICIOUS': 'curve-suspicious'
+            };
+            const badgeClass = classMap[result.ml_classification.classification] || 'curve-other';
+            const displayText = result.ml_classification.classification.replace('_', ' ');
+            const confidence = result.ml_classification.confidence ? ` (${(result.ml_classification.confidence * 100).toFixed(1)}%)` : '';
+            curveClassBadgeHTML = `<span class="curve-badge ${badgeClass}" title="ML: ${result.ml_classification.reasoning || 'ML Classification'}${confidence}">${displayText}</span>`;
+        }
+        // Fallback to older curve_classification if no ML classification
+        else if (typeof result.curve_classification === 'object' && result.curve_classification.classification) {
             const classMap = {
                 'STRONG_POSITIVE': 'curve-strong-pos',
                 'POSITIVE': 'curve-pos',
@@ -5680,9 +5697,9 @@ function populateResultsTable(individualResults) {
                 'SUSPICIOUS': 'curve-suspicious'
             };
             const badgeClass = classMap[result.curve_classification.classification] || 'curve-other';
-            curveClassBadgeHTML = `<span class="curve-badge ${badgeClass}" title="${result.curve_classification.reason || ''}">${result.curve_classification.classification.replace('_', ' ')}</span>`;
+            curveClassBadgeHTML = `<span class="curve-badge ${badgeClass}" title="${result.curve_classification.reason || 'Rule-based Classification'}">${result.curve_classification.classification.replace('_', ' ')}</span>`;
         } else if (typeof result.curve_classification === 'string') {
-            curveClassBadgeHTML = `<span class="curve-badge curve-other">${result.curve_classification}</span>`;
+            curveClassBadgeHTML = `<span class="curve-badge curve-other" title="Legacy Classification">${result.curve_classification}</span>`;
         }
 
         // --- Strict JS classification (NEG/POS/REDO) ---
@@ -5702,7 +5719,8 @@ function populateResultsTable(individualResults) {
         if (
             result.cqj && typeof result.cqj === 'object' && result.fluorophore &&
             result.cqj[result.fluorophore] !== undefined && result.cqj[result.fluorophore] !== null &&
-            !isNaN(result.cqj[result.fluorophore])
+            !isNaN(result.cqj[result.fluorophore]) && result.cqj[result.fluorophore] !== -999 &&
+            result.cqj[result.fluorophore] > 5 // Valid CQJ should be > cycle 5
         ) {
             cqjDisplay = Number(result.cqj[result.fluorophore]).toFixed(2);
             // console.log(`🔍 CQJ-DISPLAY - ${result.well}: CQJ ${cqjDisplay} for ${result.fluorophore} (raw: ${result.cqj[result.fluorophore]})`);
@@ -5714,12 +5732,14 @@ function populateResultsTable(individualResults) {
         if (
             result.calcj && typeof result.calcj === 'object' && result.fluorophore &&
             result.calcj[result.fluorophore] !== undefined && result.calcj[result.fluorophore] !== null &&
-            !isNaN(result.calcj[result.fluorophore])
+            !isNaN(result.calcj[result.fluorophore]) && result.calcj[result.fluorophore] !== -999 &&
+            result.calcj[result.fluorophore] > 0 // Valid CalcJ should be positive
         ) {
             calcjDisplay = Number(result.calcj[result.fluorophore]);
         } else if (
             result.calcj_value !== undefined && result.calcj_value !== null &&
-            !isNaN(result.calcj_value) && result.calcj_value !== 'N/A'
+            !isNaN(result.calcj_value) && result.calcj_value !== 'N/A' && 
+            result.calcj_value !== -999 && result.calcj_value > 0
         ) {
             calcjDisplay = Number(result.calcj_value);
         }
@@ -9443,7 +9463,8 @@ function generateResultsCSV() {
         let cqjText = 'N/A';
         if (result.cqj && typeof result.cqj === 'object' && result.fluorophore &&
             result.cqj[result.fluorophore] !== undefined && result.cqj[result.fluorophore] !== null &&
-            !isNaN(result.cqj[result.fluorophore])) {
+            !isNaN(result.cqj[result.fluorophore]) && result.cqj[result.fluorophore] !== -999 &&
+            result.cqj[result.fluorophore] > 5) { // Valid CQJ should be > cycle 5
             cqjText = Number(result.cqj[result.fluorophore]).toFixed(2);
         }
         
@@ -9451,7 +9472,8 @@ function generateResultsCSV() {
         let calcjText = 'N/A';
         if (result.calcj && typeof result.calcj === 'object' && result.fluorophore &&
             result.calcj[result.fluorophore] !== undefined && result.calcj[result.fluorophore] !== null &&
-            !isNaN(result.calcj[result.fluorophore])) {
+            !isNaN(result.calcj[result.fluorophore]) && result.calcj[result.fluorophore] !== -999 &&
+            result.calcj[result.fluorophore] > 0) { // Valid CalcJ should be positive
             const calcjValue = Number(result.calcj[result.fluorophore]);
             if (calcjValue > 0) {
                 // Convert 10^x to scientific notation (e.g., 10^4.25 = 1.78e+4)

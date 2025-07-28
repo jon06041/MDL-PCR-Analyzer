@@ -485,6 +485,12 @@ class MLFeedbackInterface {
         if (predictionDisplay) predictionDisplay.style.display = 'none';
         if (feedbackBtn) feedbackBtn.style.display = 'none';
         if (feedbackForm) feedbackForm.style.display = 'none';
+        
+        // CRITICAL FIX: Reset all button states when switching wells
+        this.resetButtonStates();
+        
+        // Reset any ongoing submission state
+        this.submissionInProgress = false;
         // Auto-analyze the curve if ML classification doesn't exist (only if ML is enabled)
         if (!wellData.ml_classification) {
             setTimeout(async () => {
@@ -738,6 +744,38 @@ class MLFeedbackInterface {
             // Default to enabled if we can't check
             return true;
         }
+    }
+
+    // CRITICAL FIX: Reset all button states when switching between wells
+    resetButtonStates() {
+        // Reset Submit Feedback button
+        const submitBtn = document.getElementById('submit-feedback-btn');
+        if (submitBtn) {
+            submitBtn.textContent = '✅ Submit Feedback';
+            submitBtn.disabled = false;
+            submitBtn.style.opacity = '1';
+        }
+        
+        // Reset Analyze with ML button
+        const analyzeBtn = document.getElementById('ml-analyze-btn');
+        if (analyzeBtn) {
+            analyzeBtn.textContent = '🔍 Analyze with ML';
+            analyzeBtn.disabled = false;
+            analyzeBtn.style.opacity = '1';
+        }
+        
+        // Reset any other ML-related buttons
+        const retrainBtn = document.getElementById('manual-retrain-btn');
+        if (retrainBtn) {
+            retrainBtn.disabled = false;
+            retrainBtn.style.opacity = '1';
+        }
+        
+        // Clear any selected radio buttons in the feedback form
+        const radioButtons = document.querySelectorAll('input[name="expert-classification"]');
+        radioButtons.forEach(radio => radio.checked = false);
+        
+        console.log('🔄 ML Feedback: Reset all button states');
     }
 
     // Update the display with visual analysis
@@ -1075,13 +1113,18 @@ class MLFeedbackInterface {
     extractNumericValue(value, channelHint = null) {
         if (value === null || value === undefined) {
             // For CQJ/CalcJ, null/None means no threshold crossing (negative well)
-            // Use a special value that the ML can recognize as "no crossing"
-            return -1; // -1 indicates no threshold crossing
+            // Use a special sentinel value that ML can recognize as "no crossing"
+            // -999 is clearly outside valid CQJ range (typically 5-50 cycles)
+            return -999; // -999 indicates no threshold crossing
         }
         
-        // If it's already a number, return it (but handle negative properly)
+        // If it's already a number, validate it's not an invalid marker
         if (typeof value === 'number') {
-            return value; // Keep the actual value, including negatives
+            // Check for invalid CQJ values that should never occur
+            if (value === -1 || value === 1 || (value > 0 && value <= 1) || value > 50) {
+                return -999; // Convert invalid values to our sentinel
+            }
+            return value; // Valid numeric value
         }
         
         // If it's a dictionary/object, extract the numeric value
@@ -1090,34 +1133,50 @@ class MLFeedbackInterface {
             if (channelHint && value[channelHint] !== undefined) {
                 const channelValue = value[channelHint];
                 if (channelValue === null || channelValue === undefined) {
-                    return -1; // No threshold crossing for this channel
+                    return -999; // No threshold crossing for this channel
                 }
-                return (typeof channelValue === 'number') ? channelValue : -1;
+                // Validate extracted channel value
+                if (typeof channelValue === 'number') {
+                    if (channelValue === -1 || channelValue === 1 || 
+                        (channelValue > 0 && channelValue <= 1) || channelValue > 50) {
+                        return -999; // Invalid CQJ value
+                    }
+                    return channelValue;
+                }
+                return -999;
             }
             
             // Otherwise, find the first valid numeric value or null
             for (const key in value) {
                 const val = value[key];
                 if (val === null || val === undefined) {
-                    return -1; // No threshold crossing
+                    return -999; // No threshold crossing
                 }
                 if (typeof val === 'number') {
+                    // Validate the value
+                    if (val === -1 || val === 1 || (val > 0 && val <= 1) || val > 50) {
+                        return -999; // Invalid CQJ value
+                    }
                     return val;
                 }
             }
             
-            // If all values are null/undefined, return -1
-            return -1;
+            // If all values are null/undefined, return sentinel
+            return -999;
         }
         
         // Try to parse as number
         const parsed = parseFloat(value);
         if (!isNaN(parsed)) {
+            // Validate parsed value
+            if (parsed === -1 || parsed === 1 || (parsed > 0 && parsed <= 1) || parsed > 50) {
+                return -999; // Invalid CQJ value
+            }
             return parsed;
         }
         
         // Default for unparseable values
-        return -1; // Assume no threshold crossing for unparseable values
+        return -999; // Assume no threshold crossing for unparseable values
     }
 
     isLinearIncrease(rfuData) {
@@ -2273,6 +2332,16 @@ class MLFeedbackInterface {
                     setTimeout(async () => {
                         await this.handleTrainingMilestone(result.training_samples);
                     }, 1000);
+                    
+                    // Intelligent batch re-evaluation for similar wells
+                    // Run this after training milestone handling
+                    setTimeout(async () => {
+                        await this.proposeAndExecuteBatchReEvaluation(
+                            wellKey,
+                            wellData,
+                            expertClassification
+                        );
+                    }, 2000);
                 } else {
                     throw new Error(result.error || 'Feedback submission failed');
                 }
@@ -3093,6 +3162,370 @@ class MLFeedbackInterface {
         
         // Log channel progress
         console.log(`📊 ML Channel Progress: ${statusText}`);
+    }
+
+    // Multichannel-aware batch re-evaluation system
+    async findSimilarWellsForBatchEvaluation(correctedWellKey, correctedWellData, expertClassification) {
+        try {
+            console.log(`🔍 Finding similar wells for batch re-evaluation after correction of ${correctedWellKey}`);
+            
+            // Extract key characteristics from corrected well
+            const correctedFluorophore = correctedWellData.fluorophore || correctedWellData.channel;
+            const correctedPathogen = this.extractPathogenFromWell(correctedWellData);
+            
+            if (!correctedFluorophore || !correctedPathogen) {
+                console.log('⚠️ Cannot identify fluorophore/pathogen for similarity matching');
+                return [];
+            }
+            
+            const similarWells = [];
+            const currentAnalysisResults = window.currentAnalysisResults || {};
+            
+            // Check if we have multichannel data
+            if (currentAnalysisResults.fluorophore_data) {
+                // Multichannel: look within same fluorophore/pathogen combination
+                for (const [fluorophore, fluorophoreData] of Object.entries(currentAnalysisResults.fluorophore_data)) {
+                    if (fluorophore !== correctedFluorophore) continue; // Only same channel
+                    
+                    for (const [wellKey, wellData] of Object.entries(fluorophoreData.well_data || {})) {
+                        if (wellKey === correctedWellKey) continue; // Skip the corrected well itself
+                        
+                        const wellPathogen = this.extractPathogenFromWell(wellData);
+                        if (wellPathogen !== correctedPathogen) continue; // Only same pathogen
+                        
+                        // Check if this well has an ML prediction that differs from expert classification
+                        const currentMLPrediction = wellData.ml_prediction;
+                        if (currentMLPrediction && currentMLPrediction !== expertClassification) {
+                            // Check if wells have similar characteristics
+                            if (this.areWellsSimilar(correctedWellData, wellData)) {
+                                similarWells.push({
+                                    wellKey,
+                                    wellData,
+                                    fluorophore,
+                                    pathogen: wellPathogen,
+                                    currentPrediction: currentMLPrediction,
+                                    reason: 'Similar characteristics within same pathogen/channel'
+                                });
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Single channel: look for similar wells in same pathogen
+                const wellDataMap = currentAnalysisResults.well_data || {};
+                for (const [wellKey, wellData] of Object.entries(wellDataMap)) {
+                    if (wellKey === correctedWellKey) continue;
+                    
+                    const wellPathogen = this.extractPathogenFromWell(wellData);
+                    if (wellPathogen !== correctedPathogen) continue;
+                    
+                    const currentMLPrediction = wellData.ml_prediction;
+                    if (currentMLPrediction && currentMLPrediction !== expertClassification) {
+                        if (this.areWellsSimilar(correctedWellData, wellData)) {
+                            similarWells.push({
+                                wellKey,
+                                wellData,
+                                fluorophore: correctedFluorophore,
+                                pathogen: wellPathogen,
+                                currentPrediction: currentMLPrediction,
+                                reason: 'Similar characteristics within same pathogen'
+                            });
+                        }
+                    }
+                }
+            }
+            
+            console.log(`📊 Found ${similarWells.length} similar wells for potential re-evaluation`);
+            return similarWells;
+            
+        } catch (error) {
+            console.error('Error finding similar wells:', error);
+            return [];
+        }
+    }
+
+    extractPathogenFromWell(wellData) {
+        // Extract pathogen from well data using multiple fallback methods
+        if (wellData.specific_pathogen) return wellData.specific_pathogen;
+        if (wellData.target) return wellData.target;
+        
+        // Try to derive from test code and fluorophore
+        const fluorophore = wellData.fluorophore || wellData.channel;
+        const currentExperimentPattern = (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null;
+        const testCode = (typeof extractTestCode === 'function' && currentExperimentPattern) ? 
+            extractTestCode(currentExperimentPattern) : null;
+            
+        if (testCode && fluorophore && typeof getPathogenTarget === 'function') {
+            try {
+                return getPathogenTarget(testCode, fluorophore);
+            } catch (error) {
+                console.log(`⚠️ Could not get pathogen target for ${testCode}/${fluorophore}`);
+            }
+        }
+        
+        return fluorophore || 'Unknown';
+    }
+
+    areWellsSimilar(well1, well2, similarityThreshold = 0.8) {
+        try {
+            // Compare key metrics to determine similarity
+            const metrics1 = {
+                amplitude: parseFloat(well1.amplitude) || 0,
+                r2_score: parseFloat(well1.r2_score) || 0,
+                snr: parseFloat(well1.snr) || 0,
+                steepness: parseFloat(well1.steepness) || 0,
+                baseline: parseFloat(well1.baseline) || 0
+            };
+            
+            const metrics2 = {
+                amplitude: parseFloat(well2.amplitude) || 0,
+                r2_score: parseFloat(well2.r2_score) || 0,
+                snr: parseFloat(well2.snr) || 0,
+                steepness: parseFloat(well2.steepness) || 0,
+                baseline: parseFloat(well2.baseline) || 0
+            };
+            
+            // Calculate similarity score based on normalized differences
+            let similarityScore = 0;
+            let validComparisons = 0;
+            
+            for (const metric of Object.keys(metrics1)) {
+                const val1 = metrics1[metric];
+                const val2 = metrics2[metric];
+                
+                if (val1 !== 0 || val2 !== 0) { // Only compare if at least one value is non-zero
+                    const maxVal = Math.max(Math.abs(val1), Math.abs(val2), 1); // Avoid division by zero
+                    const difference = Math.abs(val1 - val2) / maxVal;
+                    const metricSimilarity = Math.max(0, 1 - difference);
+                    similarityScore += metricSimilarity;
+                    validComparisons++;
+                }
+            }
+            
+            if (validComparisons === 0) return false;
+            
+            const avgSimilarity = similarityScore / validComparisons;
+            return avgSimilarity >= similarityThreshold;
+            
+        } catch (error) {
+            console.error('Error comparing well similarity:', error);
+            return false;
+        }
+    }
+
+    async proposeAndExecuteBatchReEvaluation(correctedWellKey, correctedWellData, expertClassification) {
+        try {
+            // Find similar wells that might benefit from re-evaluation
+            const similarWells = await this.findSimilarWellsForBatchEvaluation(
+                correctedWellKey, 
+                correctedWellData, 
+                expertClassification
+            );
+            
+            if (similarWells.length === 0) {
+                console.log('✅ No similar wells found requiring re-evaluation');
+                return;
+            }
+            
+            // Show confirmation dialog for batch re-evaluation
+            const confirmed = await this.showBatchReEvaluationConfirmation(
+                correctedWellKey,
+                expertClassification,
+                similarWells
+            );
+            
+            if (confirmed) {
+                await this.executeBatchReEvaluation(similarWells, expertClassification);
+            }
+            
+        } catch (error) {
+            console.error('Error in batch re-evaluation proposal:', error);
+        }
+    }
+
+    async showBatchReEvaluationConfirmation(correctedWellKey, expertClassification, similarWells) {
+        return new Promise((resolve) => {
+            const pathogenBreakdown = {};
+            const fluorophoreBreakdown = {};
+            
+            // Analyze the similar wells
+            similarWells.forEach(well => {
+                pathogenBreakdown[well.pathogen] = (pathogenBreakdown[well.pathogen] || 0) + 1;
+                fluorophoreBreakdown[well.fluorophore] = (fluorophoreBreakdown[well.fluorophore] || 0) + 1;
+            });
+            
+            const pathogenSummary = Object.entries(pathogenBreakdown)
+                .map(([pathogen, count]) => `${pathogen}: ${count}`)
+                .join(', ');
+            
+            const fluorophoreSummary = Object.entries(fluorophoreBreakdown)
+                .map(([fluoro, count]) => `${fluoro}: ${count}`)
+                .join(', ');
+            
+            const notificationHtml = `
+                <div class="ml-notification ml-notification-info" style="position: fixed; top: 20px; right: 20px; z-index: 10000; max-width: 500px;">
+                    <div class="ml-notification-content">
+                        <div class="ml-notification-icon">🔄</div>
+                        <div class="ml-notification-text">
+                            <strong>Intelligent Batch Re-evaluation</strong><br>
+                            <div style="margin: 8px 0;">
+                                ✏️ You corrected <strong>${correctedWellKey}</strong> to <strong>${expertClassification}</strong><br>
+                                🔍 Found <strong>${similarWells.length}</strong> similar wells with different ML predictions
+                            </div>
+                            <div style="font-size: 0.9em; color: #666; margin: 6px 0;">
+                                <strong>Channels:</strong> ${fluorophoreSummary}<br>
+                                <strong>Pathogens:</strong> ${pathogenSummary}
+                            </div>
+                            <div style="font-size: 0.85em; color: #888; margin-top: 6px;">
+                                💡 This will re-train the ML model with your correction and re-evaluate similar wells
+                            </div>
+                        </div>
+                        <div class="ml-notification-actions">
+                            <button class="ml-notification-btn primary" onclick="this.parentElement.parentElement.parentElement.acceptAction()">
+                                🚀 Re-evaluate Similar Wells
+                            </button>
+                            <button class="ml-notification-btn secondary" onclick="this.parentElement.parentElement.parentElement.declineAction()">
+                                ✋ Skip Batch Re-evaluation
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            const notificationDiv = document.createElement('div');
+            notificationDiv.innerHTML = notificationHtml;
+            const notification = notificationDiv.firstElementChild;
+            
+            notification.acceptAction = () => {
+                document.body.removeChild(notification);
+                resolve(true);
+            };
+            
+            notification.declineAction = () => {
+                document.body.removeChild(notification);
+                resolve(false);
+            };
+            
+            document.body.appendChild(notification);
+            
+            // Auto-hide after 15 seconds
+            setTimeout(() => {
+                if (document.body.contains(notification)) {
+                    notification.declineAction();
+                }
+            }, 15000);
+        });
+    }
+
+    async executeBatchReEvaluation(similarWells, expertClassification) {
+        try {
+            console.log(`🔄 Executing batch re-evaluation for ${similarWells.length} similar wells`);
+            
+            // Show progress notification
+            this.showTrainingNotification(
+                'Batch Re-evaluation In Progress',
+                `🔄 Re-evaluating ${similarWells.length} similar wells with updated ML model...`
+            );
+            
+            let reEvaluatedCount = 0;
+            let changedPredictions = 0;
+            const results = [];
+            
+            for (const similarWell of similarWells) {
+                try {
+                    // Re-analyze this well with the updated model
+                    const reAnalysisResult = await this.analyzeSingleWellWithML(
+                        similarWell.wellKey,
+                        similarWell.wellData
+                    );
+                    
+                    if (reAnalysisResult && reAnalysisResult.prediction) {
+                        reEvaluatedCount++;
+                        
+                        // Check if prediction changed
+                        if (reAnalysisResult.prediction !== similarWell.currentPrediction) {
+                            changedPredictions++;
+                            console.log(`📈 Well ${similarWell.wellKey}: ${similarWell.currentPrediction} → ${reAnalysisResult.prediction}`);
+                            
+                            // Update the well data with new prediction
+                            this.updateWellMLPrediction(similarWell.wellKey, reAnalysisResult, similarWell.fluorophore);
+                            
+                            results.push({
+                                wellKey: similarWell.wellKey,
+                                oldPrediction: similarWell.currentPrediction,
+                                newPrediction: reAnalysisResult.prediction,
+                                pathogen: similarWell.pathogen,
+                                fluorophore: similarWell.fluorophore
+                            });
+                        }
+                    }
+                } catch (error) {
+                    console.error(`Error re-evaluating well ${similarWell.wellKey}:`, error);
+                }
+            }
+            
+            // Update display to reflect changes
+            if (typeof updateAnalysisResultsDisplay === 'function') {
+                updateAnalysisResultsDisplay();
+            }
+            
+            // Show completion notification
+            let completionMessage;
+            if (changedPredictions > 0) {
+                completionMessage = `✅ Batch re-evaluation complete! ${changedPredictions} of ${reEvaluatedCount} wells had updated predictions.`;
+            } else {
+                completionMessage = `✅ Batch re-evaluation complete! All ${reEvaluatedCount} similar wells maintained their predictions.`;
+            }
+            
+            this.showTrainingNotification(
+                'Batch Re-evaluation Complete',
+                completionMessage
+            );
+            
+            console.log(`✅ Batch re-evaluation complete: ${changedPredictions}/${reEvaluatedCount} predictions changed`);
+            return results;
+            
+        } catch (error) {
+            console.error('Error executing batch re-evaluation:', error);
+            this.showTrainingNotification(
+                'Batch Re-evaluation Failed',
+                `❌ Error: ${error.message}`
+            );
+        }
+    }
+
+    updateWellMLPrediction(wellKey, mlResult, fluorophore) {
+        try {
+            const currentAnalysisResults = window.currentAnalysisResults || {};
+            
+            // Update multichannel data structure
+            if (currentAnalysisResults.fluorophore_data && fluorophore) {
+                if (currentAnalysisResults.fluorophore_data[fluorophore] && 
+                    currentAnalysisResults.fluorophore_data[fluorophore].well_data &&
+                    currentAnalysisResults.fluorophore_data[fluorophore].well_data[wellKey]) {
+                    
+                    const wellData = currentAnalysisResults.fluorophore_data[fluorophore].well_data[wellKey];
+                    wellData.ml_prediction = mlResult.prediction;
+                    wellData.ml_confidence = mlResult.confidence;
+                    if (mlResult.features) wellData.ml_features = mlResult.features;
+                    
+                    console.log(`✅ Updated ML prediction for ${fluorophore}/${wellKey}: ${mlResult.prediction}`);
+                }
+            }
+            
+            // Update single channel data structure
+            if (currentAnalysisResults.well_data && currentAnalysisResults.well_data[wellKey]) {
+                const wellData = currentAnalysisResults.well_data[wellKey];
+                wellData.ml_prediction = mlResult.prediction;
+                wellData.ml_confidence = mlResult.confidence;
+                if (mlResult.features) wellData.ml_features = mlResult.features;
+                
+                console.log(`✅ Updated ML prediction for ${wellKey}: ${mlResult.prediction}`);
+            }
+            
+        } catch (error) {
+            console.error(`Error updating ML prediction for ${wellKey}:`, error);
+        }
     }
 
     showTrainingNotification(title, message, type = 'info') {

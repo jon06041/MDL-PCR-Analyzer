@@ -2159,16 +2159,28 @@ def ml_validation_dashboard_api():
     try:
         from ml_validation_tracker import ml_tracker
         
-        # Get pathogen-specific model data
-        pathogen_data = ml_tracker.get_pathogen_dashboard_data()
+        # Get pathogen-specific model data with error handling
+        try:
+            pathogen_data = ml_tracker.get_pathogen_dashboard_data()
+        except Exception as e:
+            app.logger.error(f"Error getting pathogen dashboard data: {e}")
+            pathogen_data = {}
         
-        # Get expert teaching summary
-        teaching_summary = ml_tracker.get_expert_teaching_summary(days=30)
+        # Get expert teaching summary with error handling
+        try:
+            teaching_summary = ml_tracker.get_expert_teaching_summary(days=30)
+        except Exception as e:
+            app.logger.error(f"Error getting teaching summary: {e}")
+            teaching_summary = {}
         
-        # Get general ML stats
+        # Get general ML stats with error handling
         ml_stats_data = {}
         if ML_AVAILABLE and ml_classifier is not None:
-            ml_stats_data = ml_classifier.get_model_stats()
+            try:
+                ml_stats_data = ml_classifier.get_model_stats()
+            except Exception as e:
+                app.logger.error(f"Error getting ML stats: {e}")
+                ml_stats_data = {}
         
         return jsonify({
             'success': True,

@@ -52,9 +52,24 @@ class MLCurveClassifier:
         features['baseline'] = existing_metrics.get('baseline', 0)
         features['amplitude'] = existing_metrics.get('amplitude', 0)
         
-        # Add CQJ and CalcJ features
-        features['cqj'] = existing_metrics.get('cqj', 0)
-        features['calcj'] = existing_metrics.get('calcj', 0)
+        # Add CQJ and CalcJ features - handle invalid values properly
+        cqj_raw = existing_metrics.get('cqj')
+        calcj_raw = existing_metrics.get('calcj')
+        
+        # Validate CQJ - should never be 1, -1, or any unrealistic value
+        if (cqj_raw is None or cqj_raw == -1 or cqj_raw == 1 or 
+            (isinstance(cqj_raw, (int, float)) and (cqj_raw <= 1 or cqj_raw > 50))):
+            features['cqj'] = -999  # Use sentinel value to indicate invalid/no crossing
+        else:
+            features['cqj'] = cqj_raw
+            
+        # Validate CalcJ - should be None/invalid if CQJ is invalid
+        if (calcj_raw is None or calcj_raw == -1 or calcj_raw == 1 or
+            features['cqj'] == -999 or  # If CQJ invalid, CalcJ must be invalid too
+            (isinstance(calcj_raw, (int, float)) and calcj_raw <= 0)):
+            features['calcj'] = -999  # Use sentinel value to indicate invalid
+        else:
+            features['calcj'] = calcj_raw
         
         # Advanced curve analysis
         if len(rfu_data) > 5:
@@ -83,14 +98,130 @@ class MLCurveClassifier:
             # Peak characteristics
             features['derivative_peak'] = np.max(first_deriv)
             features['second_derivative_max'] = np.max(second_deriv)
+            
+            # Add 12 visual metrics for comprehensive curve analysis
+            visual_metrics = self._extract_visual_metrics(rfu_data, cycles)
+            features.update(visual_metrics)
+            
         else:
             # Default values for short curves
             for key in ['max_slope', 'max_slope_cycle', 'baseline_std', 'curve_auc',
                        'early_cycles_mean', 'late_cycles_mean', 'plateau_detection',
                        'curve_efficiency', 'derivative_peak', 'second_derivative_max']:
                 features[key] = 0
+            
+            # Default values for visual metrics
+            for i in range(12):
+                features[f'visual_{i+1}'] = 0.0
                 
         return features
+    
+    def _extract_visual_metrics(self, rfu_values, cycles):
+        """Extract 12 visual metrics that characterize qPCR curve shape and quality"""
+        visual_metrics = {}
+        
+        if len(rfu_values) < 5:
+            # Return default values for insufficient data
+            return {f'visual_{i+1}': 0.0 for i in range(12)}
+        
+        rfu_array = np.array(rfu_values)
+        cycles_array = np.array(cycles)
+        
+        try:
+            # Visual Metric 1: Baseline stability (variance in first 10 cycles)
+            baseline_cycles = min(10, len(rfu_values) // 3)
+            baseline_variance = np.var(rfu_array[:baseline_cycles]) if baseline_cycles > 1 else 0.0
+            visual_metrics['visual_1'] = baseline_variance
+            
+            # Visual Metric 2: Exponential phase steepness (max derivative)
+            if len(rfu_array) > 2:
+                derivatives = np.diff(rfu_array)
+                max_derivative = np.max(derivatives) if len(derivatives) > 0 else 0.0
+            else:
+                max_derivative = 0.0
+            visual_metrics['visual_2'] = max_derivative
+            
+            # Visual Metric 3: Plateau stability (variance in last 10 cycles)
+            plateau_cycles = min(10, len(rfu_values) // 3)
+            plateau_variance = np.var(rfu_array[-plateau_cycles:]) if plateau_cycles > 1 else 0.0
+            visual_metrics['visual_3'] = plateau_variance
+            
+            # Visual Metric 4: Curve smoothness (average of second derivatives)
+            if len(rfu_array) > 3:
+                second_derivatives = np.diff(rfu_array, n=2)
+                smoothness = np.mean(np.abs(second_derivatives)) if len(second_derivatives) > 0 else 0.0
+            else:
+                smoothness = 0.0
+            visual_metrics['visual_4'] = smoothness
+            
+            # Visual Metric 5: Signal trend (correlation with cycle numbers)
+            correlation = np.corrcoef(cycles_array, rfu_array)[0, 1] if len(cycles_array) > 1 else 0.0
+            visual_metrics['visual_5'] = correlation if not np.isnan(correlation) else 0.0
+            
+            # Visual Metric 6: Noise level (standard deviation / mean in plateau)
+            plateau_data = rfu_array[-plateau_cycles:]
+            noise_level = np.std(plateau_data) / np.mean(plateau_data) if len(plateau_data) > 1 and np.mean(plateau_data) > 0 else 0.0
+            visual_metrics['visual_6'] = noise_level if not np.isnan(noise_level) else 0.0
+            
+            # Visual Metric 7: Exponential phase length (cycles with derivative > 50% of max)
+            if len(derivatives) > 0 and max_derivative > 0:
+                exp_threshold = max_derivative * 0.5
+                exp_length = np.sum(derivatives > exp_threshold)
+            else:
+                exp_length = 0
+            visual_metrics['visual_7'] = float(exp_length)
+            
+            # Visual Metric 8: Curve asymmetry (difference between rise and plateau phases)
+            mid_point = len(rfu_array) // 2
+            rise_mean = np.mean(rfu_array[:mid_point]) if mid_point > 0 else 0.0
+            plateau_mean = np.mean(rfu_array[mid_point:]) if mid_point < len(rfu_array) else 0.0
+            asymmetry = plateau_mean - rise_mean
+            visual_metrics['visual_8'] = asymmetry
+            
+            # Visual Metric 9: Signal consistency (inverse of coefficient of variation)
+            cv = np.std(rfu_array) / np.mean(rfu_array) if np.mean(rfu_array) > 0 else float('inf')
+            consistency = 1.0 / (1.0 + cv) if cv != float('inf') else 0.0
+            visual_metrics['visual_9'] = consistency
+            
+            # Visual Metric 10: Cycle efficiency (RFU gain per cycle in exponential phase)
+            if len(derivatives) > 0:
+                exp_derivatives = derivatives[derivatives > max_derivative * 0.3]
+                efficiency = np.mean(exp_derivatives) if len(exp_derivatives) > 0 else 0.0
+            else:
+                efficiency = 0.0
+            visual_metrics['visual_10'] = efficiency
+            
+            # Visual Metric 11: Background drift (linear trend in first 15 cycles)
+            baseline_extended = min(15, len(rfu_values) // 2)
+            if baseline_extended > 2:
+                baseline_cycles_arr = cycles_array[:baseline_extended]
+                baseline_rfu_arr = rfu_array[:baseline_extended]
+                # Calculate linear regression slope
+                x_mean = np.mean(baseline_cycles_arr)
+                y_mean = np.mean(baseline_rfu_arr)
+                numerator = np.sum((baseline_cycles_arr - x_mean) * (baseline_rfu_arr - y_mean))
+                denominator = np.sum((baseline_cycles_arr - x_mean) ** 2)
+                drift = numerator / denominator if denominator > 0 else 0.0
+            else:
+                drift = 0.0
+            visual_metrics['visual_11'] = drift
+            
+            # Visual Metric 12: Saturation indicator (flatness in final cycles)
+            final_cycles = min(8, len(rfu_values) // 4)
+            if final_cycles > 1:
+                final_rfu = rfu_array[-final_cycles:]
+                saturation = 1.0 - (np.var(final_rfu) / (np.mean(final_rfu) + 1e-6))
+                saturation = max(0.0, min(1.0, saturation))  # Clamp between 0 and 1
+            else:
+                saturation = 0.0
+            visual_metrics['visual_12'] = saturation
+            
+        except Exception as e:
+            print(f"Warning: Error calculating visual metrics: {e}")
+            # Return default values on error
+            visual_metrics = {f'visual_{i+1}': 0.0 for i in range(12)}
+        
+        return visual_metrics
     
     def detect_log_phase(self, rfu_data):
         """Detect the exponential/log phase of amplification"""
@@ -139,6 +270,23 @@ class MLCurveClassifier:
             if pathogen == '' or pathogen == 'Unknown':
                 pathogen = None
         
+        # 🔧 SAFETY CHECK: Use rule-based classification for obviously negative curves
+        r2 = existing_metrics.get('r2', 0)
+        amplitude = existing_metrics.get('amplitude', 0)
+        snr = existing_metrics.get('snr', 0)
+        cqj = existing_metrics.get('cqj')  # Don't default to -1, use None if missing
+        
+        # Validate CQJ - it should never be 1, -1, or any invalid value
+        invalid_cqj = (cqj is None or 
+                       (isinstance(cqj, (int, float)) and (cqj == -1 or cqj == 1 or 
+                                                          (cqj > 0 and cqj <= 1) or cqj > 50 or cqj == -999)))
+        
+        # If curve is clearly negative, use rule-based classification instead of ML
+        if (r2 < 0.1 or amplitude < 5.0 or snr < 0.1 or invalid_cqj):
+            print(f"🔍 ML Debug: Obviously negative curve detected - using rule-based classification")
+            print(f"   Reason: r2={r2:.3f}, amplitude={amplitude:.2f}, snr={snr:.2f}, cqj={cqj}")
+            return self.fallback_classification(existing_metrics)
+        
         # Try pathogen-specific model first
         if pathogen and pathogen in self.pathogen_models:
             model = self.pathogen_models[pathogen]
@@ -168,6 +316,11 @@ class MLCurveClassifier:
             feature_vector_scaled = scaler.transform(feature_vector)
             prediction = model.predict(feature_vector_scaled)[0]
             confidence = np.max(model.predict_proba(feature_vector_scaled))
+            
+            # 🔧 VALIDATION CHECK: If ML predicts positive but curve looks negative, override with rule-based
+            if prediction in ['POSITIVE', 'STRONG_POSITIVE', 'WEAK_POSITIVE'] and (r2 < 0.1 or amplitude < 5.0):
+                print(f"🔍 ML Debug: ML predicted {prediction} but curve appears negative - using rule-based override")
+                return self.fallback_classification(existing_metrics)
             
             # Additional debug logging for prediction
             print(f"🔍 ML Debug: Prediction result: {prediction} (confidence: {confidence:.3f})")

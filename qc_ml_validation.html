@@ -319,6 +319,117 @@
             padding: 15px;
             z-index: 1000;
         }
+
+        .run-group {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        .run-header {
+            background: #e9ecef;
+            padding: 15px;
+            border-bottom: 1px solid #dee2e6;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .run-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #495057;
+        }
+
+        .run-subtitle {
+            font-size: 14px;
+            color: #6c757d;
+            margin-top: 2px;
+        }
+
+        .run-status {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 8px;
+        }
+
+        .run-stats {
+            font-size: 12px;
+            color: #666;
+            text-align: right;
+        }
+
+        .confirm-run-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            transition: all 0.3s;
+            min-width: 120px;
+        }
+
+        .confirm-run-btn:disabled {
+            background: #e9ecef;
+            color: #6c757d;
+            cursor: not-allowed;
+        }
+
+        .confirm-run-btn.ready {
+            background: #28a745;
+            color: white;
+        }
+
+        .confirm-run-btn.ready:hover {
+            background: #218838;
+        }
+
+        .confirm-run-btn.confirmed {
+            background: #17a2b8;
+            color: white;
+        }
+
+        .confirm-run-btn.partial {
+            background: #ffc107;
+            color: #212529;
+        }
+
+        .run-confirmation-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin-left: 8px;
+        }
+
+        .confirmation-pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .confirmation-confirmed {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .wells-container {
+            padding: 15px;
+        }
+
+        .wells-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 15px;
+        }
+        }
         
         .stats-header {
             font-weight: bold;

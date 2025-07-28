@@ -52,7 +52,7 @@ class MLValidationTracker:
             elif original_prediction == "UNKNOWN":
                 teaching_outcome = "new_knowledge_added"
             else:
-                teaching_outcome = "prediction_corrected"
+                teaching_outcome = "training_sample"
             
             # Calculate improvement score based on confidence and correction type
             improvement_score = confidence if teaching_outcome == "prediction_confirmed" else (1.0 - confidence)
@@ -245,7 +245,8 @@ class MLValidationTracker:
                     COUNT(*) as decisions_count,
                     AVG(improvement_score) as teaching_score,
                     SUM(CASE WHEN teaching_outcome = 'prediction_confirmed' THEN 1 ELSE 0 END) as confirmed,
-                    SUM(CASE WHEN teaching_outcome = 'prediction_corrected' THEN 1 ELSE 0 END) as corrected
+                    SUM(CASE WHEN teaching_outcome = 'prediction_corrected' THEN 1 ELSE 0 END) as corrected,
+                    SUM(CASE WHEN teaching_outcome = 'training_sample' THEN 1 ELSE 0 END) as training_samples
                 FROM ml_expert_decisions 
                 WHERE timestamp > datetime('now', '-30 days')
                 GROUP BY pathogen
