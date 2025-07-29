@@ -4,6 +4,50 @@
 
 The MDL PCR Analyzer includes an advanced Machine Learning (ML) curve classification system that can learn from expert feedback to improve qPCR result classification accuracy. This system uses a RandomForestClassifier trained on **30 hybrid features** (18 numerical + 12 visual pattern features) to predict classifications across **7 distinct classes**.
 
+## ML Validation Dashboard & Version Control (NEW - July 29, 2025)
+
+### Unified ML Validation Workflow
+The ML validation system has been integrated into a comprehensive dashboard that provides version control, pathogen-specific tracking, and streamlined validation workflows.
+
+#### Key Components:
+
+1. **Version Control System**
+   - Complete model evolution tracking with accuracy progression
+   - Version history timeline for each pathogen model (NGON, CTRACH, GENERAL_PCR)
+   - Training data sample counts and performance metrics
+   - Automated version comparison and trend analysis
+
+2. **Pathogen-Specific Performance Tracking**
+   - Individual model metrics for each pathogen type
+   - Accuracy trends and training progress monitoring
+   - Sample count tracking and validation run history
+   - Real-time performance statistics and alerts
+
+3. **3-Step Validation Workflow**
+   ```
+   Step 1: Auto-Captured → ML runs logged during analysis workflow
+   Step 2: Confirm Runs  → Expert validation: "All samples completed properly?"
+   Step 3: Track Performance → Version control and accuracy tracking by pathogen
+   ```
+
+4. **Enhanced API Endpoints**
+   ```javascript
+   /api/ml-runs/statistics      // Overall ML validation statistics
+   /api/ml-runs/pending        // Runs awaiting expert confirmation
+   /api/ml-runs/confirmed      // Confirmed runs with accuracy data
+   /api/ml-pathogen-models     // Version control and performance by pathogen
+   /api/ml-runs/confirm        // Expert confirmation endpoint (POST)
+   ```
+
+5. **Expert Decision Integration**
+   - Manual confirmation workflow for each validation run
+   - "All samples completed properly?" validation question
+   - Integration with existing expert review system
+   - Automatic accuracy calculation post-confirmation
+
+### Dashboard Access
+Access the unified ML validation dashboard at: `/unified-compliance-dashboard` → ML Model Validation tab
+
 ## Development Branches (July 2025)
 
 ### Current Branch Structure:

@@ -113,9 +113,9 @@
         <!-- Workflow Steps -->
         <div class="workflow-steps">
             <div class="workflow-step">
-                <i class="fas fa-clipboard-list fa-2x mb-2"></i>
-                <h5>1. Log Runs</h5>
-                <small>Record completed runs</small>
+                <i class="fas fa-brain fa-2x mb-2"></i>
+                <h5>1. Auto-Captured</h5>
+                <small>ML runs logged during analysis</small>
             </div>
             <div class="workflow-step">
                 <i class="fas fa-check-circle fa-2x mb-2"></i>
@@ -124,8 +124,8 @@
             </div>
             <div class="workflow-step">
                 <i class="fas fa-chart-line fa-2x mb-2"></i>
-                <h5>3. Record Accuracy</h5>
-                <small>Calculate & track performance</small>
+                <h5>3. Track Accuracy</h5>
+                <small>Performance by pathogen</small>
             </div>
         </div>
 
@@ -174,8 +174,8 @@
                 </button>
             </li>
             <li class="nav-item" role="presentation">
-                <button class="nav-link" id="log-new-tab" data-bs-toggle="tab" data-bs-target="#log-new" type="button" role="tab">
-                    <i class="fas fa-plus"></i> Log New Run
+                <button class="nav-link" id="pathogen-stats-tab" data-bs-toggle="tab" data-bs-target="#pathogen-stats" type="button" role="tab">
+                    <i class="fas fa-virus"></i> Pathogen Performance
                 </button>
             </li>
         </ul>
@@ -215,65 +215,18 @@
             </div>
 
             <!-- Log New Run Tab -->
-            <div class="tab-pane fade" id="log-new" role="tabpanel">
+            <div class="tab-pane fade" id="pathogen-stats" role="tabpanel">
                 <div class="card mt-3">
                     <div class="card-header">
-                        <h5><i class="fas fa-plus text-primary"></i> Log New ML Run</h5>
+                        <h5><i class="fas fa-virus text-info"></i> ML Performance by Pathogen</h5>
+                        <small class="text-muted">Accuracy and performance metrics for each pathogen type</small>
                     </div>
                     <div class="card-body">
-                        <form id="logRunForm">
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <div class="mb-3">
-                                        <label for="runId" class="form-label">Run ID *</label>
-                                        <input type="text" class="form-control" id="runId" required>
-                                    </div>
-                                </div>
-                                <div class="col-md-6">
-                                    <div class="mb-3">
-                                        <label for="fileName" class="form-label">File Name *</label>
-                                        <input type="text" class="form-control" id="fileName" required>
-                                    </div>
-                                </div>
+                        <div id="pathogenStatsList">
+                            <div class="text-center text-muted">
+                                <i class="fas fa-spinner fa-spin"></i> Loading pathogen performance data...
                             </div>
-                            <div class="row">
-                                <div class="col-md-4">
-                                    <div class="mb-3">
-                                        <label for="sessionId" class="form-label">Session ID</label>
-                                        <input type="text" class="form-control" id="sessionId">
-                                    </div>
-                                </div>
-                                <div class="col-md-4">
-                                    <div class="mb-3">
-                                        <label for="pathogenCode" class="form-label">Pathogen Code</label>
-                                        <input type="text" class="form-control" id="pathogenCode">
-                                    </div>
-                                </div>
-                                <div class="col-md-4">
-                                    <div class="mb-3">
-                                        <label for="totalSamples" class="form-label">Total Samples</label>
-                                        <input type="number" class="form-control" id="totalSamples" min="0">
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <div class="mb-3">
-                                        <label for="completedSamples" class="form-label">Completed Samples</label>
-                                        <input type="number" class="form-control" id="completedSamples" min="0">
-                                    </div>
-                                </div>
-                                <div class="col-md-6">
-                                    <div class="mb-3">
-                                        <label for="notes" class="form-label">Notes</label>
-                                        <textarea class="form-control" id="notes" rows="2"></textarea>
-                                    </div>
-                                </div>
-                            </div>
-                            <button type="submit" class="btn btn-primary">
-                                <i class="fas fa-save"></i> Log Run
-                            </button>
-                        </form>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -289,7 +242,8 @@
         }
 
         function loadDashboardData() {
-            fetch('/api/ml-runs/dashboard-data')
+            // Load ML validation runs that were automatically captured during analysis
+            fetch('/api/ml-validation/dashboard-data')
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
@@ -297,6 +251,7 @@
                         updateStatistics(data.statistics);
                         updatePendingRuns(data.pending_runs);
                         updateConfirmedRuns(data.recent_confirmed_runs);
+                        updatePathogenStats(data.pathogen_performance);
                     } else {
                         console.error('Error loading dashboard data:', data.error);
                     }
@@ -400,6 +355,53 @@
                                 P: ${(run.precision_score * 100).toFixed(1)}% | 
                                 R: ${(run.recall_score * 100).toFixed(1)}% | 
                                 F1: ${(run.f1_score * 100).toFixed(1)}%
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function updatePathogenStats(pathogenData) {
+            const container = document.getElementById('pathogenStatsList');
+            
+            if (!pathogenData || pathogenData.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center text-muted">
+                        <i class="fas fa-virus fa-3x mb-3"></i>
+                        <h5>No pathogen performance data yet</h5>
+                        <p>ML performance data will appear here after running analyses.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = pathogenData.map(pathogen => `
+                <div class="run-card">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <h6><i class="fas fa-virus"></i> ${pathogen.pathogen_code}</h6>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <small><strong>Total Predictions:</strong> ${pathogen.total_predictions}</small><br>
+                                    <small><strong>Correct:</strong> ${pathogen.correct_predictions}</small><br>
+                                    <small><strong>Expert Overrides:</strong> ${pathogen.expert_overrides}</small>
+                                </div>
+                                <div class="col-md-6">
+                                    <small><strong>Last Analysis:</strong> ${new Date(pathogen.last_analysis).toLocaleString()}</small><br>
+                                    <small><strong>Confirmed Runs:</strong> ${pathogen.confirmed_runs}</small><br>
+                                    <small><strong>Pending Runs:</strong> ${pathogen.pending_runs}</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4 text-end">
+                            <span class="badge accuracy-badge ${getAccuracyBadgeClass(pathogen.accuracy)}">
+                                ${(pathogen.accuracy * 100).toFixed(1)}% Accuracy
+                            </span><br>
+                            <small class="text-muted">
+                                P: ${(pathogen.precision * 100).toFixed(1)}% | 
+                                R: ${(pathogen.recall * 100).toFixed(1)}% | 
+                                F1: ${(pathogen.f1_score * 100).toFixed(1)}%
                             </small>
                         </div>
                     </div>

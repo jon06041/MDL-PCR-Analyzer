@@ -192,6 +192,103 @@
         .dashboard-content {
             background: white;
         }
+        
+        /* Workflow Steps */
+        .workflow-steps {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            text-align: center;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 2rem;
+            border-radius: 10px;
+            border: 1px solid #dee2e6;
+        }
+
+        .workflow-step {
+            flex: 1;
+            padding: 1rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+
+        .workflow-step:hover {
+            transform: translateY(-2px);
+        }
+
+        .workflow-step i {
+            color: #007bff;
+        }
+
+        /* Stat Cards */
+        .stat-card {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.2s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            line-height: 1;
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #007bff, #17a2b8);
+        }
+
+        /* Metrics for pathogen models */
+        .metric {
+            text-align: center;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 6px;
+            margin-bottom: 0.5rem;
+        }
+
+        .metric-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            line-height: 1;
+        }
+
+        .metric-label {
+            font-size: 0.8rem;
+            color: #6c757d;
+            margin-top: 0.25rem;
+        }
+
+        /* Version timeline */
+        .version-timeline {
+            border-left: 2px solid #007bff;
+            padding-left: 1rem;
+        }
+
+        .version-entry {
+            margin-bottom: 0.5rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .version-entry:last-child {
+            border-bottom: none;
+        }
     </style>
 </head>
 <body>
@@ -365,182 +462,127 @@
                     <!-- ML Model Validation Tab -->
                     <div class="tab-pane fade" id="ml-validation" role="tabpanel">
                         <div class="ml-validation-section">
-                            <h4><i class="fas fa-brain"></i> ML Model Validation Workflow</h4>
-                            <p>Manage ML model validation with a 3-step confirmation process: Log → Confirm → Record Accuracy</p>
+                            <h4><i class="fas fa-brain"></i> ML Model Validation & Version Control</h4>
+                            <p>Comprehensive ML model management with version tracking, pathogen-specific performance, and validation workflow</p>
                             
-                            <!-- Workflow Status Cards -->
+                            <!-- ML Validation Workflow Steps -->
+                            <div class="workflow-steps mb-4">
+                                <div class="workflow-step">
+                                    <i class="fas fa-brain fa-2x mb-2"></i>
+                                    <h6>1. Auto-Captured</h6>
+                                    <small>ML runs logged during analysis</small>
+                                </div>
+                                <div class="workflow-step">
+                                    <i class="fas fa-check-circle fa-2x mb-2"></i>
+                                    <h6>2. Confirm Runs</h6>
+                                    <small>"All samples completed properly?"</small>
+                                </div>
+                                <div class="workflow-step">
+                                    <i class="fas fa-chart-line fa-2x mb-2"></i>
+                                    <h6>3. Track Performance</h6>
+                                    <small>Version control & accuracy by pathogen</small>
+                                </div>
+                            </div>
+
+                            <!-- ML Statistics Cards -->
                             <div class="row mb-4">
                                 <div class="col-md-3">
-                                    <div class="card text-center border-primary">
+                                    <div class="stat-card">
+                                        <div class="stat-value text-warning" id="mlPendingCount">-</div>
+                                        <div class="text-muted">Pending Confirmation</div>
+                                        <i class="fas fa-clock text-warning float-end"></i>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="stat-card">
+                                        <div class="stat-value text-success" id="mlConfirmedCount">-</div>
+                                        <div class="text-muted">Confirmed Runs</div>
+                                        <i class="fas fa-check text-success float-end"></i>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="stat-card">
+                                        <div class="stat-value text-info" id="mlTotalModels">-</div>
+                                        <div class="text-muted">Active Pathogen Models</div>
+                                        <i class="fas fa-virus text-info float-end"></i>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="stat-card">
+                                        <div class="stat-value text-primary" id="mlAvgAccuracy">-</div>
+                                        <div class="text-muted">Average Accuracy</div>
+                                        <i class="fas fa-percentage text-primary float-end"></i>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- ML Validation Tabs -->
+                            <ul class="nav nav-pills mb-3" id="mlValidationTabs" role="tablist">
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link active" id="ml-pending-tab" data-bs-toggle="pill" data-bs-target="#ml-pending" type="button" role="tab">
+                                        <i class="fas fa-clock"></i> Pending Confirmation (<span id="mlPendingTabCount">0</span>)
+                                    </button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" id="ml-confirmed-tab" data-bs-toggle="pill" data-bs-target="#ml-confirmed" type="button" role="tab">
+                                        <i class="fas fa-check"></i> Confirmed Runs
+                                    </button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" id="ml-models-tab" data-bs-toggle="pill" data-bs-target="#ml-models" type="button" role="tab">
+                                        <i class="fas fa-virus"></i> Pathogen Models & Versions
+                                    </button>
+                                </li>
+                            </ul>
+
+                            <div class="tab-content" id="mlValidationTabContent">
+                                <!-- Pending Confirmation Tab -->
+                                <div class="tab-pane fade show active" id="ml-pending" role="tabpanel">
+                                    <div class="card">
+                                        <div class="card-header">
+                                            <h6><i class="fas fa-clock text-warning"></i> Runs Waiting for Confirmation</h6>
+                                            <small class="text-muted">Review each run and confirm if "all samples completed with proper results"</small>
+                                        </div>
                                         <div class="card-body">
-                                            <i class="fas fa-plus-circle fa-2x text-primary mb-2"></i>
-                                            <h6>Step 1: Log Runs</h6>
-                                            <p class="small text-muted">Record validation run details</p>
+                                            <div id="mlPendingRunsList">
+                                                <div class="text-center text-muted">
+                                                    <i class="fas fa-spinner fa-spin"></i> Loading pending runs...
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
-                                <div class="col-md-3">
-                                    <div class="card text-center border-warning">
+
+                                <!-- Confirmed Runs Tab -->
+                                <div class="tab-pane fade" id="ml-confirmed" role="tabpanel">
+                                    <div class="card">
+                                        <div class="card-header">
+                                            <h6><i class="fas fa-check text-success"></i> Confirmed Runs with Accuracy Data</h6>
+                                        </div>
                                         <div class="card-body">
-                                            <i class="fas fa-eye fa-2x text-warning mb-2"></i>
-                                            <h6>Step 2: Confirm Runs</h6>
-                                            <p class="small text-muted">Manual review and confirmation</p>
+                                            <div id="mlConfirmedRunsList">
+                                                <div class="text-center text-muted">
+                                                    <i class="fas fa-spinner fa-spin"></i> Loading confirmed runs...
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
-                                <div class="col-md-3">
-                                    <div class="card text-center border-success">
+
+                                <!-- Pathogen Models & Version Control Tab -->
+                                <div class="tab-pane fade" id="ml-models" role="tabpanel">
+                                    <div class="card">
+                                        <div class="card-header">
+                                            <h6><i class="fas fa-virus text-info"></i> Pathogen Model Performance & Version Control</h6>
+                                            <small class="text-muted">Version tracking, accuracy metrics, and training progress for each pathogen</small>
+                                        </div>
                                         <div class="card-body">
-                                            <i class="fas fa-check-circle fa-2x text-success mb-2"></i>
-                                            <h6>Step 3: Record Accuracy</h6>
-                                            <p class="small text-muted">Automatic accuracy calculation</p>
+                                            <div id="mlPathogenModels">
+                                                <div class="text-center text-muted">
+                                                    <i class="fas fa-spinner fa-spin"></i> Loading pathogen models...
+                                                </div>
+                                            </div>
                                         </div>
-                                    </div>
-                                </div>
-                                <div class="col-md-3">
-                                    <div class="card text-center border-info">
-                                        <div class="card-body">
-                                            <h5 id="mlOverallAccuracy" class="text-info">0%</h5>
-                                            <h6>Average Accuracy</h6>
-                                            <p class="small text-muted">Confirmed runs only</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Statistics Row -->
-                            <div class="row mb-4">
-                                <div class="col-md-3">
-                                    <div class="status-card status-partial">
-                                        <div class="card-body text-center">
-                                            <h3 id="mlPendingCount" class="text-warning">0</h3>
-                                            <p class="card-text">Pending Runs</p>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="col-md-3">
-                                    <div class="status-card status-active">
-                                        <div class="card-body text-center">
-                                            <h3 id="mlConfirmedCount" class="text-success">0</h3>
-                                            <p class="card-text">Confirmed Runs</p>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="col-md-3">
-                                    <div class="status-card">
-                                        <div class="card-body text-center">
-                                            <h3 id="mlRejectedCount" class="text-danger">0</h3>
-                                            <p class="card-text">Rejected Runs</p>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="col-md-3">
-                                    <div class="status-card status-ready">
-                                        <div class="card-body text-center">
-                                            <h3 id="mlConfirmationRate" class="text-info">0%</h3>
-                                            <p class="card-text">Confirmation Rate</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Log New Run Section -->
-                            <div class="card mb-4">
-                                <div class="card-header">
-                                    <h5><i class="fas fa-plus"></i> Log New Validation Run</h5>
-                                </div>
-                                <div class="card-body">
-                                    <form id="logRunForm" class="row g-3">
-                                        <div class="col-md-4">
-                                            <label for="runId" class="form-label">Run ID *</label>
-                                            <input type="text" class="form-control" id="runId" required>
-                                        </div>
-                                        <div class="col-md-4">
-                                            <label for="fileName" class="form-label">File Name *</label>
-                                            <input type="text" class="form-control" id="fileName" required>
-                                        </div>
-                                        <div class="col-md-4">
-                                            <label for="pathogenCode" class="form-label">Pathogen Code</label>
-                                            <input type="text" class="form-control" id="pathogenCode">
-                                        </div>
-                                        <div class="col-md-3">
-                                            <label for="totalSamples" class="form-label">Total Samples</label>
-                                            <input type="number" class="form-control" id="totalSamples" min="0">
-                                        </div>
-                                        <div class="col-md-3">
-                                            <label for="completedSamples" class="form-label">Completed Samples</label>
-                                            <input type="number" class="form-control" id="completedSamples" min="0">
-                                        </div>
-                                        <div class="col-md-6">
-                                            <label for="runNotes" class="form-label">Notes</label>
-                                            <input type="text" class="form-control" id="runNotes" placeholder="Optional validation notes">
-                                        </div>
-                                        <div class="col-12">
-                                            <button type="submit" class="btn btn-primary">
-                                                <i class="fas fa-plus"></i> Log Run
-                                            </button>
-                                        </div>
-                                    </form>
-                                </div>
-                            </div>
-
-                            <!-- Pending Runs for Confirmation -->
-                            <div class="card mb-4">
-                                <div class="card-header">
-                                    <h5><i class="fas fa-clock"></i> Pending Runs for Confirmation</h5>
-                                </div>
-                                <div class="card-body">
-                                    <div id="pendingRunsList">
-                                        <p class="text-muted text-center">No pending runs</p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Confirmed Runs with Accuracy -->
-                            <div class="card">
-                                <div class="card-header">
-                                    <h5><i class="fas fa-check-circle"></i> Confirmed Runs with Recorded Accuracy</h5>
-                                </div>
-                                <div class="card-body">
-                                    <div class="table-responsive">
-                                        <table class="table table-hover">
-                                            <thead>
-                                                <tr>
-                                                    <th>Run ID</th>
-                                                    <th>File Name</th>
-                                                    <th>Pathogen</th>
-                                                    <th>Samples</th>
-                                                    <th>Accuracy</th>
-                                                    <th>Confirmed</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody id="confirmedRunsTable">
-                                                <tr>
-                                                    <td colspan="6" class="text-center text-muted">No confirmed runs</td>
-                                                </tr>
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Navigation to Legacy ML Dashboards -->
-                            <div class="card mt-4 border-info">
-                                <div class="card-header bg-info text-white">
-                                    <h5 class="mb-0"><i class="fas fa-link"></i> Additional ML Validation Tools</h5>
-                                </div>
-                                <div class="card-body">
-                                    <p class="card-text">Access additional ML validation and performance dashboards:</p>
-                                    <div class="btn-group" role="group">
-                                        <a href="/ml-validation-dashboard" class="btn btn-outline-info" target="_blank">
-                                            <i class="fas fa-chart-line"></i> ML Performance Dashboard
-                                        </a>
-                                        <a href="/qc-validation" class="btn btn-outline-info" target="_blank">
-                                            <i class="fas fa-vials"></i> QC Validation Dashboard
-                                        </a>
-                                        <a href="/ml-config" class="btn btn-outline-info" target="_blank">
-                                            <i class="fas fa-cogs"></i> ML Configuration
-                                        </a>
                                     </div>
                                 </div>
                             </div>
@@ -1046,7 +1088,7 @@
             }, 5000);
         }
 
-        // ML Validation Functions
+        // ML Validation Functions - Enhanced with version control and pathogen models
         async function loadMLValidationData() {
             try {
                 // Load ML run statistics
@@ -1069,47 +1111,73 @@
                     const confirmedRuns = await confirmedResponse.json();
                     updateConfirmedRuns(confirmedRuns);
                 }
+
+                // Load pathogen models (version control data)
+                const modelsResponse = await fetch('/api/ml-pathogen-models');
+                if (modelsResponse.ok) {
+                    const models = await modelsResponse.json();
+                    updatePathogenModels(models);
+                }
             } catch (error) {
                 console.error('Error loading ML validation data:', error);
+                showAlert('danger', 'Error loading ML validation data');
             }
         }
 
         function updateMLStatistics(stats) {
-            document.getElementById('mlPendingCount').textContent = stats.pending_runs || 0;
-            document.getElementById('mlConfirmedCount').textContent = stats.confirmed_runs || 0;
-            document.getElementById('mlRejectedCount').textContent = stats.rejected_runs || 0;
-            document.getElementById('mlOverallAccuracy').textContent = `${stats.average_accuracy || 0}%`;
-            document.getElementById('mlConfirmationRate').textContent = `${stats.confirmation_rate || 0}%`;
+            document.getElementById('mlPendingCount').textContent = stats.pending_runs || '-';
+            document.getElementById('mlConfirmedCount').textContent = stats.confirmed_runs || '-';
+            document.getElementById('mlTotalModels').textContent = stats.total_models || '-';
+            document.getElementById('mlAvgAccuracy').textContent = `${stats.average_accuracy || 0}%`;
+            
+            // Update tab count
+            const pendingTabCount = document.getElementById('mlPendingTabCount');
+            if (pendingTabCount) {
+                pendingTabCount.textContent = stats.pending_runs || 0;
+            }
         }
 
         function updatePendingRuns(runs) {
-            const container = document.getElementById('pendingRunsList');
+            const container = document.getElementById('mlPendingRunsList');
             
             if (!runs || runs.length === 0) {
-                container.innerHTML = '<p class="text-muted text-center">No pending runs</p>';
+                container.innerHTML = `
+                    <div class="text-center text-muted py-4">
+                        <i class="fas fa-check-circle fa-3x mb-3"></i>
+                        <h5>No Pending Runs</h5>
+                        <p>All ML runs have been reviewed and confirmed.</p>
+                    </div>
+                `;
                 return;
             }
 
             container.innerHTML = runs.map(run => `
-                <div class="card mb-2 border-warning">
+                <div class="card mb-3 border-warning">
                     <div class="card-body">
                         <div class="row align-items-center">
                             <div class="col-md-8">
-                                <h6 class="card-title mb-1">${run.run_id}</h6>
-                                <p class="card-text mb-1">
-                                    <strong>File:</strong> ${run.file_name}<br>
-                                    <strong>Pathogen:</strong> ${run.pathogen_code || 'N/A'}<br>
-                                    <strong>Samples:</strong> ${run.completed_samples || 0}/${run.total_samples || 0}<br>
-                                    <strong>Logged:</strong> ${new Date(run.logged_at).toLocaleString()}
-                                </p>
-                                ${run.notes ? `<small class="text-muted">Notes: ${run.notes}</small>` : ''}
+                                <h6 class="card-title mb-2">
+                                    <i class="fas fa-brain text-primary"></i> ${run.run_id}
+                                </h6>
+                                <div class="run-details">
+                                    <p class="mb-1"><strong>File:</strong> ${run.file_name}</p>
+                                    <p class="mb-1"><strong>Pathogen:</strong> 
+                                        <span class="badge bg-info">${run.pathogen_code || 'Unknown'}</span>
+                                    </p>
+                                    <p class="mb-1"><strong>Samples:</strong> ${run.completed_samples || 0}/${run.total_samples || 0}</p>
+                                    <p class="mb-1"><strong>Logged:</strong> ${new Date(run.logged_at).toLocaleString()}</p>
+                                    ${run.notes ? `<small class="text-muted"><strong>Notes:</strong> ${run.notes}</small>` : ''}
+                                </div>
                             </div>
                             <div class="col-md-4 text-end">
+                                <div class="confirmation-question mb-2">
+                                    <small class="text-muted">"All samples completed with proper results?"</small>
+                                </div>
                                 <button class="btn btn-success btn-sm me-2" onclick="confirmRun('${run.run_id}', true)">
-                                    <i class="fas fa-check"></i> Confirm
+                                    <i class="fas fa-check"></i> Yes, Confirm
                                 </button>
                                 <button class="btn btn-danger btn-sm" onclick="confirmRun('${run.run_id}', false)">
-                                    <i class="fas fa-times"></i> Reject
+                                    <i class="fas fa-times"></i> No, Reject
                                 </button>
                             </div>
                         </div>
@@ -1119,70 +1187,129 @@
         }
 
         function updateConfirmedRuns(runs) {
-            const tbody = document.getElementById('confirmedRunsTable');
+            const container = document.getElementById('mlConfirmedRunsList');
             
             if (!runs || runs.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No confirmed runs</td></tr>';
+                container.innerHTML = `
+                    <div class="text-center text-muted py-4">
+                        <i class="fas fa-history fa-3x mb-3"></i>
+                        <h5>No Confirmed Runs</h5>
+                        <p>Confirmed ML validation runs will appear here.</p>
+                    </div>
+                `;
                 return;
             }
 
-            tbody.innerHTML = runs.map(run => `
-                <tr>
-                    <td><strong>${run.run_id}</strong></td>
-                    <td>${run.file_name}</td>
-                    <td><span class="badge bg-info">${run.pathogen_code || 'N/A'}</span></td>
-                    <td>${run.completed_samples || 0}/${run.total_samples || 0}</td>
-                    <td>
-                        <span class="badge ${run.accuracy_score >= 90 ? 'bg-success' : run.accuracy_score >= 70 ? 'bg-warning' : 'bg-danger'}">
-                            ${run.accuracy_score ? run.accuracy_score.toFixed(1) + '%' : 'N/A'}
-                        </span>
-                    </td>
-                    <td><small>${new Date(run.confirmed_at).toLocaleString()}</small></td>
-                </tr>
-            `).join('');
+            container.innerHTML = `
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead class="table-light">
+                            <tr>
+                                <th><i class="fas fa-id-badge"></i> Run ID</th>
+                                <th><i class="fas fa-file"></i> File</th>
+                                <th><i class="fas fa-virus"></i> Pathogen</th>
+                                <th><i class="fas fa-vial"></i> Samples</th>
+                                <th><i class="fas fa-percentage"></i> Accuracy</th>
+                                <th><i class="fas fa-calendar"></i> Confirmed</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${runs.map(run => `
+                                <tr>
+                                    <td><strong>${run.run_id}</strong></td>
+                                    <td>${run.file_name}</td>
+                                    <td><span class="badge bg-info">${run.pathogen_code || 'N/A'}</span></td>
+                                    <td>${run.completed_samples || 0}/${run.total_samples || 0}</td>
+                                    <td>
+                                        <span class="badge ${run.accuracy_score >= 90 ? 'bg-success' : run.accuracy_score >= 70 ? 'bg-warning' : 'bg-danger'}">
+                                            ${run.accuracy_score ? run.accuracy_score.toFixed(1) + '%' : 'N/A'}
+                                        </span>
+                                    </td>
+                                    <td><small>${new Date(run.confirmed_at).toLocaleString()}</small></td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
         }
 
-        // Log new run form submission
-        document.addEventListener('DOMContentLoaded', function() {
-            const logRunForm = document.getElementById('logRunForm');
-            if (logRunForm) {
-                logRunForm.addEventListener('submit', async function(e) {
-                    e.preventDefault();
-                    
-                    const formData = {
-                        run_id: document.getElementById('runId').value,
-                        file_name: document.getElementById('fileName').value,
-                        pathogen_code: document.getElementById('pathogenCode').value,
-                        total_samples: parseInt(document.getElementById('totalSamples').value) || 0,
-                        completed_samples: parseInt(document.getElementById('completedSamples').value) || 0,
-                        notes: document.getElementById('runNotes').value
-                    };
-
-                    try {
-                        const response = await fetch('/api/ml-runs/log', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify(formData)
-                        });
-
-                        const result = await response.json();
-                        
-                        if (result.success) {
-                            showAlert('success', 'Run logged successfully!');
-                            logRunForm.reset();
-                            loadMLValidationData(); // Refresh data
-                        } else {
-                            showAlert('danger', `Error: ${result.message}`);
-                        }
-                    } catch (error) {
-                        console.error('Error logging run:', error);
-                        showAlert('danger', 'Error logging run. Please try again.');
-                    }
-                });
+        function updatePathogenModels(models) {
+            const container = document.getElementById('mlPathogenModels');
+            
+            if (!models || models.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center text-muted py-4">
+                        <i class="fas fa-virus fa-3x mb-3"></i>
+                        <h5>No Pathogen Models</h5>
+                        <p>ML pathogen models and version data will appear here.</p>
+                    </div>
+                `;
+                return;
             }
-        });
+
+            container.innerHTML = models.map(model => `
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h6 class="mb-0">
+                            <i class="fas fa-virus text-info"></i> ${model.pathogen_code}
+                        </h6>
+                        <span class="badge bg-primary">v${model.model_version || '1.0'}</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-3">
+                                <div class="metric">
+                                    <div class="metric-value">${model.total_runs || 0}</div>
+                                    <div class="metric-label">Total Runs</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="metric">
+                                    <div class="metric-value">${model.confirmed_runs || 0}</div>
+                                    <div class="metric-label">Confirmed</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="metric">
+                                    <div class="metric-value text-success">${model.avg_accuracy ? model.avg_accuracy.toFixed(1) + '%' : 'N/A'}</div>
+                                    <div class="metric-label">Accuracy</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="metric">
+                                    <div class="metric-value text-info">${model.training_samples || 0}</div>
+                                    <div class="metric-label">Training Samples</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        ${model.version_history ? `
+                            <div class="mt-3">
+                                <h6><i class="fas fa-code-branch"></i> Version History</h6>
+                                <div class="version-timeline">
+                                    ${model.version_history.map(version => `
+                                        <div class="version-entry">
+                                            <span class="badge bg-secondary">v${version.version}</span>
+                                            <small class="text-muted ms-2">${new Date(version.created_at).toLocaleDateString()}</small>
+                                            ${version.accuracy ? `<span class="badge bg-success ms-2">${version.accuracy}%</span>` : ''}
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        ` : ''}
+                        
+                        ${model.last_updated ? `
+                            <div class="mt-2">
+                                <small class="text-muted">
+                                    <i class="fas fa-clock"></i> Last updated: ${new Date(model.last_updated).toLocaleString()}
+                                </small>
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `).join('');
+        }
 
         async function confirmRun(runId, confirmed) {
             try {
@@ -1202,7 +1329,7 @@
                 if (result.success) {
                     const action = confirmed ? 'confirmed' : 'rejected';
                     showAlert('success', `Run ${runId} ${action} successfully!`);
-                    loadMLValidationData(); // Refresh data
+                    loadMLValidationData(); // Refresh all data
                 } else {
                     showAlert('danger', `Error: ${result.message}`);
                 }

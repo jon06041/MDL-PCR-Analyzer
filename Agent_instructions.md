@@ -33,6 +33,51 @@
    - Add ML model validation history
    - Connect ML training events to compliance evidence
 
+### 🚀 **LATEST: Enhanced ML Validation Dashboard with Version Control** (July 29, 2025)
+
+**MAJOR UPGRADE COMPLETED**: Unified ML validation dashboard with comprehensive version control, pathogen-specific tracking, and streamlined workflow.
+
+**Key Enhancements Implemented**:
+
+#### **1. Unified ML Validation Dashboard Integration** ✅
+- ✅ **Single Entry Point**: All ML validation now accessible from unified compliance dashboard
+- ✅ **Removed Manual Log Run**: Eliminated manual logging form - focus on auto-captured runs
+- ✅ **Removed Standalone ML Dashboard**: No more external ML validation buttons/pages
+- ✅ **Tabbed Interface**: Pending Confirmation, Confirmed Runs, Pathogen Models & Versions
+
+#### **2. Version Control & Pathogen Management** ✅
+- ✅ **Pathogen Model Tracking**: Individual performance metrics for NGON, CTRACH, GENERAL_PCR
+- ✅ **Version History Timeline**: Complete model evolution with dates and accuracy progression
+- ✅ **Training Data Metrics**: Sample counts, model versions, and performance tracking
+- ✅ **Version Comparison**: Side-by-side version performance comparison
+
+#### **3. Enhanced Workflow Steps** ✅
+- ✅ **Step 1: Auto-Captured**: ML runs automatically logged during analysis workflow
+- ✅ **Step 2: Confirm Runs**: Simple "All samples completed properly?" confirmation
+- ✅ **Step 3: Track Performance**: Version control and accuracy tracking by pathogen
+
+#### **4. Comprehensive API Endpoints** ✅
+```javascript
+// New ML Validation API Endpoints
+/api/ml-runs/statistics          // Overall ML validation statistics
+/api/ml-runs/pending            // Runs awaiting confirmation  
+/api/ml-runs/confirmed          // Confirmed runs with accuracy data
+/api/ml-pathogen-models         // Version control and performance by pathogen
+/api/ml-runs/confirm            // Confirm/reject validation runs (POST)
+```
+
+#### **5. Enhanced User Experience** ✅
+- ✅ **Modern UI Components**: Workflow steps, stat cards, version timeline
+- ✅ **Real-time Statistics**: Pending count, confirmed runs, model performance
+- ✅ **Pathogen-Specific Views**: Individual model performance and version tracking
+- ✅ **Responsive Design**: Mobile-friendly with hover effects and animations
+
+#### **6. Visual Design Improvements** ✅
+- ✅ **Workflow Step Cards**: Clear 3-step progression with icons
+- ✅ **Stat Cards**: Gradient accents, icons, and hover animations
+- ✅ **Version Timeline**: Color-coded accuracy badges and chronological display
+- ✅ **Enhanced Tables**: Responsive design with status badges and formatting
+
 ### 🚀 **NEW: Integrated ML Model Validation Workflow** (July 28, 2025)
 
 **MAJOR FEATURE IMPLEMENTED**: Complete ML validation workflow integrated into unified compliance dashboard with 3-step manual confirmation process.

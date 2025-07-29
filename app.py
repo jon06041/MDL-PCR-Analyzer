@@ -3498,6 +3498,180 @@ def initialize_default_user():
 
 # ===== END FOLDER QUEUE ENDPOINTS =====
 
+
+# ML Validation API Endpoints for Unified Dashboard
+@app.route('/api/ml-runs/statistics', methods=['GET'])
+def get_ml_runs_statistics():
+    """Get ML validation run statistics"""
+    try:
+        # Mock data - this would normally come from ml_validation_manager
+        stats = {
+            'pending_runs': 3,
+            'confirmed_runs': 15,
+            'rejected_runs': 2,
+            'total_models': 4,
+            'average_accuracy': 87.5,
+            'confirmation_rate': 88.2
+        }
+        return jsonify(stats)
+    except Exception as e:
+        app.logger.error(f"Error getting ML runs statistics: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-runs/pending', methods=['GET'])
+def get_ml_runs_pending():
+    """Get pending ML validation runs"""
+    try:
+        # Mock data - this would normally come from database
+        pending_runs = [
+            {
+                'run_id': 'ML_VAL_20241224_001',
+                'file_name': 'sample_batch_042.xlsx',
+                'pathogen_code': 'NGON',
+                'total_samples': 96,
+                'completed_samples': 92,
+                'logged_at': '2024-12-24T10:30:00Z',
+                'notes': 'High throughput validation run'
+            },
+            {
+                'run_id': 'ML_VAL_20241224_002',
+                'file_name': 'clinical_samples_15.xlsx',
+                'pathogen_code': 'CTRACH',
+                'total_samples': 48,
+                'completed_samples': 45,
+                'logged_at': '2024-12-24T14:15:00Z',
+                'notes': 'Clinical validation batch'
+            },
+            {
+                'run_id': 'ML_VAL_20241224_003',
+                'file_name': 'qc_samples_daily.xlsx',
+                'pathogen_code': 'NGON',
+                'total_samples': 24,
+                'completed_samples': 24,
+                'logged_at': '2024-12-24T16:45:00Z',
+                'notes': None
+            }
+        ]
+        return jsonify(pending_runs)
+    except Exception as e:
+        app.logger.error(f"Error getting pending ML runs: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-runs/confirmed', methods=['GET'])
+def get_ml_runs_confirmed():
+    """Get confirmed ML validation runs"""
+    try:
+        # Mock data - this would normally come from database
+        confirmed_runs = [
+            {
+                'run_id': 'ML_VAL_20241223_001',
+                'file_name': 'batch_037.xlsx',
+                'pathogen_code': 'NGON',
+                'total_samples': 96,
+                'completed_samples': 94,
+                'accuracy_score': 92.5,
+                'confirmed_at': '2024-12-23T11:20:00Z'
+            },
+            {
+                'run_id': 'ML_VAL_20241223_002',
+                'file_name': 'clinical_batch_12.xlsx',
+                'pathogen_code': 'CTRACH',
+                'total_samples': 48,
+                'completed_samples': 47,
+                'accuracy_score': 89.1,
+                'confirmed_at': '2024-12-23T15:30:00Z'
+            },
+            {
+                'run_id': 'ML_VAL_20241222_001',
+                'file_name': 'validation_set_8.xlsx',
+                'pathogen_code': 'NGON',
+                'total_samples': 72,
+                'completed_samples': 72,
+                'accuracy_score': 95.8,
+                'confirmed_at': '2024-12-22T09:15:00Z'
+            }
+        ]
+        return jsonify(confirmed_runs)
+    except Exception as e:
+        app.logger.error(f"Error getting confirmed ML runs: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-pathogen-models', methods=['GET'])
+def get_ml_pathogen_models():
+    """Get pathogen model information with version control"""
+    try:
+        # Mock data with version control information
+        models = [
+            {
+                'pathogen_code': 'NGON',
+                'model_version': '2.1',
+                'total_runs': 45,
+                'confirmed_runs': 38,
+                'avg_accuracy': 92.7,
+                'training_samples': 1847,
+                'last_updated': '2024-12-20T08:30:00Z',
+                'version_history': [
+                    {'version': '2.1', 'created_at': '2024-12-20T08:30:00Z', 'accuracy': 92.7},
+                    {'version': '2.0', 'created_at': '2024-11-15T14:20:00Z', 'accuracy': 89.3},
+                    {'version': '1.9', 'created_at': '2024-10-08T11:45:00Z', 'accuracy': 87.1}
+                ]
+            },
+            {
+                'pathogen_code': 'CTRACH',
+                'model_version': '1.8',
+                'total_runs': 32,
+                'confirmed_runs': 28,
+                'avg_accuracy': 88.4,
+                'training_samples': 1203,
+                'last_updated': '2024-12-18T16:15:00Z',
+                'version_history': [
+                    {'version': '1.8', 'created_at': '2024-12-18T16:15:00Z', 'accuracy': 88.4},
+                    {'version': '1.7', 'created_at': '2024-11-22T10:30:00Z', 'accuracy': 85.9},
+                    {'version': '1.6', 'created_at': '2024-10-30T13:20:00Z', 'accuracy': 83.2}
+                ]
+            },
+            {
+                'pathogen_code': 'GENERAL_PCR',
+                'model_version': '3.0',
+                'total_runs': 67,
+                'confirmed_runs': 61,
+                'avg_accuracy': 90.1,
+                'training_samples': 2450,
+                'last_updated': '2024-12-22T12:00:00Z',
+                'version_history': [
+                    {'version': '3.0', 'created_at': '2024-12-22T12:00:00Z', 'accuracy': 90.1},
+                    {'version': '2.9', 'created_at': '2024-12-01T09:45:00Z', 'accuracy': 88.7},
+                    {'version': '2.8', 'created_at': '2024-11-10T14:30:00Z', 'accuracy': 86.3}
+                ]
+            }
+        ]
+        return jsonify(models)
+    except Exception as e:
+        app.logger.error(f"Error getting ML pathogen models: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-runs/confirm', methods=['POST'])
+def confirm_ml_run():
+    """Confirm or reject an ML validation run"""
+    try:
+        data = request.get_json()
+        run_id = data.get('run_id')
+        confirmed = data.get('confirmed')
+        
+        if not run_id:
+            return jsonify({'success': False, 'message': 'Run ID required'}), 400
+        
+        # Mock confirmation - this would normally update database
+        app.logger.info(f"ML run {run_id} {'confirmed' if confirmed else 'rejected'}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Run {run_id} successfully {"confirmed" if confirmed else "rejected"}'
+        })
+    except Exception as e:
+        app.logger.error(f"Error confirming ML run: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 if __name__ == '__main__':
     # Get port from environment variable or use default
     port = int(os.environ.get('PORT', 5000))

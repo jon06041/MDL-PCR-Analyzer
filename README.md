@@ -28,6 +28,17 @@ This project uses consolidated documentation for maintainability:
 - **Administrative Controls**: ML training data management and feedback system
 - **Automated Reporting**: Real-time results table and chart visualization
 
+### 🧠 **ML Validation Dashboard (NEW)**
+
+- **Unified Compliance & ML Validation**: Single dashboard for all validation workflows
+- **Version Control**: Complete model evolution tracking with accuracy progression
+- **Pathogen-Specific Performance**: Individual metrics for NGON, CTRACH, GENERAL_PCR models
+- **3-Step Workflow**: Auto-capture → Confirm runs → Track performance
+- **Real-time Statistics**: Pending confirmations, accuracy trends, training data metrics
+- **Expert Decision Tracking**: Manual confirmation workflow with "All samples completed properly?" validation
+
+Access the dashboard at: `http://localhost:5000/unified-compliance-dashboard`
+
 For detailed documentation, see the consolidated markdown files listed above.
 we need this for Amazon and Entra:
 
