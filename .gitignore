@@ -109,3 +109,6 @@ static/7-10-working*.js
 static/not sure what version script.js
 static/script_problematic_*.js
 static/script_working_old_backup_*.js
+
+# Test files folder
+test files/

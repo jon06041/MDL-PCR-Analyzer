@@ -197,6 +197,34 @@
 - ✅ Allows manual expert feedback training without ML interference
 - ✅ Proper timing ensures banner appears before processing
 
+### 🧹 **TEST FILES CLEANUP** (July 29, 2025)
+
+**COMPLETED**: Organized all test and debug files into centralized "test files" folder and updated .gitignore.
+
+**Files Moved to `/test files/` folder**:
+- **Test Python Scripts**: All `*test*.py`, `debug_*.py`, `minimal_test.py`, etc.
+- **Test HTML Files**: All `test_*.html`, `debug_*.html`, `simple_test.html`, etc.
+- **Test JavaScript Files**: All `test_*.js` files
+- **Console Log Scripts**: `comment_console_logs*.py`, `remove_console_logs*.py`
+- **Debug & Demo Files**: `*debug*.py`, `*demo*.py`, compliance test files
+
+**Updated .gitignore**:
+- Added `test files/` to .gitignore to prevent test files from being committed
+- Keeps repository clean while preserving test files for development
+
+**Production Files Preserved**:
+- ✅ `queue.html` - File Queue feature (functional application component)
+- ✅ `index.html` - Main application interface
+- ✅ `ml_config.html` - ML configuration dashboard
+- ✅ All compliance dashboard HTML files
+- ✅ All functional Python modules and JavaScript files
+
+**Verification**:
+- ✅ Application starts successfully after cleanup
+- ✅ All core features load properly (ML, compliance, validation)
+- ✅ Static files and API endpoints working correctly
+- ✅ Test files accessible in organized folder for development
+
 ### �🚀 **NEW: Database Backup & ML Validation System** (July 28, 2025)
 
 **MAJOR FEATURE IMPLEMENTED**: Comprehensive database backup, recovery, and ML validation tracking system to prevent data loss and ensure ML model integrity.
