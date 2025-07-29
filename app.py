@@ -2175,6 +2175,51 @@ def ml_stats():
         print(f"ML stats error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/update-well-classification', methods=['POST'])
+def update_well_classification():
+    """Update well classification based on expert feedback"""
+    try:
+        data = request.json
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+            
+        well_id = data.get('well_id')
+        new_classification = data.get('new_classification')
+        reason = data.get('reason', 'expert_feedback')
+        timestamp = data.get('timestamp')
+        
+        if not well_id or not new_classification:
+            return jsonify({'error': 'Well ID and classification required'}), 400
+        
+        # Update the stored analysis results if they exist
+        try:
+            # Track this as a compliance event using the existing function
+            metadata = {
+                'well_id': well_id,
+                'new_classification': new_classification,
+                'reason': reason,
+                'timestamp': timestamp or datetime.utcnow().isoformat(),
+                'event_type': 'expert_classification_update'
+            }
+            
+            track_ml_compliance('EXPERT_CLASSIFICATION_UPDATE', metadata)
+            
+            return jsonify({
+                'success': True,
+                'message': f'Well {well_id} classification updated to {new_classification}',
+                'well_id': well_id,
+                'new_classification': new_classification,
+                'reason': reason
+            })
+            
+        except Exception as e:
+            app.logger.error(f"Error updating well classification: {e}")
+            return jsonify({'error': 'Failed to update classification'}), 500
+        
+    except Exception as e:
+        print(f"Update well classification error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/ml-validation-dashboard', methods=['GET'])
 def ml_validation_dashboard_api():
     """Get comprehensive ML validation dashboard data with pathogen tracking"""
