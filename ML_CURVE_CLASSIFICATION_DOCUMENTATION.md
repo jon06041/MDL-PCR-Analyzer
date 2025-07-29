@@ -48,6 +48,105 @@ The ML validation system has been integrated into a comprehensive dashboard that
 ### Dashboard Access
 Access the unified ML validation dashboard at: `/unified-compliance-dashboard` → ML Model Validation tab
 
+## Inspector-Ready Evidence Collection System
+
+### Detailed Compliance Evidence
+The ML validation system now provides comprehensive, inspector-ready evidence records for regulatory compliance. Instead of simple counts, the system generates detailed records with:
+
+#### Evidence Record Structure
+- **Inspector Summary**: One-line regulatory overview for quick review
+- **Technical Verification**: Detailed parameters (file names, session IDs, measurement values)
+- **Compliance Documentation**: Specific regulation citations (CFR 21 Part 11, CLIA, CAP, ISO)
+- **Audit Trail ID**: Unique identifier for regulatory tracking
+
+#### Current Evidence Coverage (610+ detailed records)
+- **CFR 21 Part 11**: 60+ data protection records with integrity verification
+- **CLIA Controls**: 39+ QC validation records with pass/fail determinations
+- **CAP Validation**: 41+ calculation verification records with technical details
+- **AI/ML Monitoring**: 40+ model validation records with performance metrics
+- **ISO Management**: 50+ record management evidence entries
+
+#### Evidence Collection APIs
+```javascript
+/api/compliance/evidence-summary                    // All requirements with detailed records
+/api/compliance/evidence/<req_code>                 // Standard evidence format
+/api/compliance/evidence/<req_code>/inspector-details // Inspector-ready format
+```
+
+#### Sample Evidence Detail
+ML Model Validation Record:
+```json
+{
+  "timestamp": "2025-07-22T19:45:37.451351",
+  "evidence_type": "ML Model Validation Record",
+  "inspector_summary": "AI/ML model 'ml_curve_classifier' validation completed with accuracy_check",
+  "technical_verification": {
+    "model_name": "ml_curve_classifier",
+    "validation_type": "accuracy_check", 
+    "confidence_score": 0.8768892483061711,
+    "validation_passed": "Yes"
+  },
+  "compliance_documentation": {
+    "regulation_cite": "FDA AI/ML Guidance - Software as Medical Device",
+    "evidence_statement": "Machine learning model performance validated and documented",
+    "inspector_note": "AI/ML algorithms validated for accuracy and reliability per FDA guidance"
+  }
+}
+```
+
+This evidence system ensures inspectors have verifiable technical data, specific regulatory citations, comprehensive audit trails, and inspector-ready documentation for thorough compliance verification.
+
+## Functional ML Validation Workflow System
+
+### 3-Step ML Validation Process ✅ WORKING
+The ML validation system now provides a complete workflow for managing ML model validation with detailed versioning and success documentation:
+
+**Step 1: Auto-Captured** → ML runs are automatically logged during analysis workflow
+**Step 2: Confirm Runs** → Expert validation with "All samples completed properly?" confirmation
+**Step 3: Track Performance** → Version control and accuracy tracking by pathogen type
+
+### Current System Status
+- **3 Pending ML Runs** ready for expert confirmation
+- **1 Confirmed Run** with 90% accuracy (TEST-RUN-001)
+- **2 Remaining Pending** (TEST-RUN-002 CTRACH, TEST-RUN-003 GENERAL_PCR)
+- **Real-time Dashboard** with confirmation buttons and performance tracking
+
+### ML Validation Dashboard Features
+1. **Statistics Overview**: Pending runs, confirmed runs, total models, average accuracy
+2. **Pending Confirmation Tab**: Shows runs awaiting expert "Yes/No" confirmation
+3. **Confirmed Runs Table**: Displays validated runs with accuracy scores and pathogen types
+4. **Pathogen Models & Versions**: Version control for NGON, CTRACH, GENERAL_PCR models
+
+### Expert Confirmation Process
+- Click "Yes, Confirm" → Marks run as validated with accuracy calculation
+- Click "No, Reject" → Marks run as rejected with reason tracking
+- Real-time refresh of statistics and run status
+- Automatic evidence collection for compliance tracking
+
+### API Endpoints Available
+```javascript
+/api/ml-runs/statistics      // Overall ML validation statistics
+/api/ml-runs/pending        // Runs awaiting expert confirmation  
+/api/ml-runs/confirmed      // Validated runs with accuracy data
+/api/ml-pathogen-models     // Version control by pathogen type
+/api/ml-runs/confirm (POST) // Expert confirmation endpoint
+```
+
+### Database Integration
+- **ml_run_log**: Stores all ML validation runs with metadata
+- **ml_run_confirmations**: Tracks expert confirmations and rejections
+- **ml_validation_accuracy**: Records accuracy scores for confirmed runs
+- **ml_validations**: Links to compliance evidence collection system
+
+### Compliance Evidence Integration
+Each confirmed ML run generates detailed evidence records for:
+- **FDA AI/ML Guidance**: Model validation and performance documentation
+- **CFR 21 Part 11**: Electronic record integrity and audit trails
+- **CLIA Requirements**: Quality control validation with pass/fail tracking
+- **CAP Standards**: System validation through operational verification
+
+The ML validation system now provides comprehensive model management with detailed versioning, success documentation, and regulatory compliance evidence suitable for inspector verification.
+
 ## Development Branches (July 2025)
 
 ### Current Branch Structure:

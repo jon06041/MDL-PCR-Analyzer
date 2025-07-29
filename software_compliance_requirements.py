@@ -52,7 +52,8 @@ SOFTWARE_TRACKABLE_REQUIREMENTS = {
                 "title": "User Access Controls",
                 "description": "Limited system access to authorized individuals",
                 "section": "§ 11.10(e)",
-                "tracked_by": ["USER_LOGIN", "ACCESS_DENIED", "ROLE_ASSIGNED", "PERMISSION_CHECKED"],
+                "tracked_by": ["USER_LOGIN", "ACCESS_DENIED", "ROLE_ASSIGNED", "PERMISSION_CHECKED", 
+                               "USER_AUTHENTICATION", "IDENTITY_VERIFIED", "SESSION_STARTED", "SESSION_ENDED"],
                 "evidence_type": "User authentication and access control logs",
                 "auto_trackable": True,
                 "implementation_status": "planned",
@@ -60,8 +61,23 @@ SOFTWARE_TRACKABLE_REQUIREMENTS = {
                     "Role-based access control (Admin, QC Tech, Analyst, Viewer)",
                     "User authentication with login/logout tracking",
                     "Permission verification for sensitive operations",
-                    "Access attempt logging with success/failure tracking"
-                ]
+                    "Access attempt logging with success/failure tracking",
+                    "Entra ID (Azure AD) SSO integration",
+                    "Multi-factor authentication for privileged operations",
+                    "Conditional access policies based on location and device"
+                ],
+                "entra_integration": {
+                    "sso_enabled": True,
+                    "mfa_required": ["admin_actions", "ml_training", "compliance_export"],
+                    "conditional_access": ["device_compliance", "location_based", "risk_based"],
+                    "role_mapping": {
+                        "Lab Administrator": "admin",
+                        "QC Technician": "qc_tech", 
+                        "Research Analyst": "analyst",
+                        "Compliance Officer": "compliance",
+                        "Read-Only User": "viewer"
+                    }
+                }
             },
             "CFR_11_10_F": {
                 "code": "CFR_11_10_F",
@@ -141,7 +157,8 @@ SOFTWARE_TRACKABLE_REQUIREMENTS = {
                 "title": "Data Encryption in Transit",
                 "description": "All data transmissions must be encrypted",
                 "section": "Security Best Practices",
-                "tracked_by": ["HTTPS_ENFORCED", "SECURE_UPLOAD", "ENCRYPTED_COMMUNICATION"],
+                "tracked_by": ["HTTPS_ENFORCED", "SECURE_UPLOAD", "ENCRYPTED_COMMUNICATION", 
+                               "ENCRYPTION_APPLIED", "DATA_ENCRYPTED", "SECURE_TRANSMISSION", "TLS_VERIFIED"],
                 "evidence_type": "HTTPS usage and secure communication logging",
                 "auto_trackable": True,
                 "implementation_status": "ready_to_implement",
@@ -157,7 +174,8 @@ SOFTWARE_TRACKABLE_REQUIREMENTS = {
                 "title": "Data Encryption at Rest",
                 "description": "All stored data must be encrypted",
                 "section": "Security Best Practices",
-                "tracked_by": ["DATABASE_ENCRYPTED", "FILE_ENCRYPTED", "ENCRYPTION_KEY_ROTATED"],
+                "tracked_by": ["DATABASE_ENCRYPTED", "FILE_ENCRYPTED", "ENCRYPTION_KEY_ROTATED", 
+                               "ENCRYPTION_APPLIED", "DATA_ENCRYPTED", "SECURE_STORAGE", "KEY_MANAGEMENT"],
                 "evidence_type": "Database and file encryption status verification",
                 "auto_trackable": True,
                 "implementation_status": "ready_to_implement",
@@ -336,6 +354,112 @@ SOFTWARE_TRACKABLE_REQUIREMENTS = {
                 "tracked_by": ["ML_PREDICTION_MADE", "ML_FEEDBACK_SUBMITTED", "ML_ACCURACY_VALIDATED"],
                 "evidence_type": "ML prediction tracking and performance monitoring",
                 "auto_trackable": True
+            },
+            "AI_ML_TRAINING_VALIDATION": {
+                "code": "AI_ML_TRAINING_VALIDATION",
+                "title": "ML Model Training and Validation",
+                "description": "Validation of machine learning model training processes",
+                "section": "AI/ML Best Practices",
+                "tracked_by": ["ML_MODEL_TRAINED", "ML_MODEL_RETRAINED", "ML_ACCURACY_VALIDATED", 
+                               "ML_PERFORMANCE_TRACKING", "ML_VERSION_CONTROL"],
+                "evidence_type": "ML training logs, validation metrics, and version control",
+                "auto_trackable": True,
+                "implementation_status": "active",
+                "implementation_features": [
+                    "Automated ML model training with performance tracking",
+                    "Cross-validation and accuracy recording",
+                    "Model version control and rollback capabilities",
+                    "Training data provenance and audit trails"
+                ]
+            },
+            "AI_ML_AUDIT_COMPLIANCE": {
+                "code": "AI_ML_AUDIT_COMPLIANCE",
+                "title": "ML Audit Trail and Compliance",
+                "description": "Comprehensive audit trails for ML operations",
+                "section": "AI/ML Compliance",
+                "tracked_by": ["AUDIT_TRAIL_GENERATED", "COMPLIANCE_CHECK", "REGULATORY_EXPORT",
+                               "ML_MODEL_DEPLOYED", "ML_PREDICTION_LOGGED"],
+                "evidence_type": "ML audit trails and regulatory compliance documentation",
+                "auto_trackable": True,
+                "implementation_status": "active"
+            }
+        }
+    },
+    
+    # Entra ID Integration and Access Control
+    "ENTRA_ACCESS_CONTROL": {
+        "organization": "Microsoft/FDA",
+        "regulation": "Identity and Access Management",
+        "title": "Entra ID Integration for Compliance Access Control",
+        "trackable_requirements": {
+            "ENTRA_SSO_INTEGRATION": {
+                "code": "ENTRA_SSO_INTEGRATION",
+                "title": "Single Sign-On Integration",
+                "description": "Entra ID SSO for unified authentication",
+                "section": "Identity Management",
+                "tracked_by": ["USER_LOGIN", "USER_AUTHENTICATION", "SSO_TOKEN_VALIDATED", 
+                               "IDENTITY_VERIFIED", "SESSION_STARTED"],
+                "evidence_type": "SSO authentication logs and identity verification",
+                "auto_trackable": True,
+                "implementation_status": "planned",
+                "entra_features": {
+                    "sso_provider": "Azure AD / Entra ID",
+                    "token_validation": "JWT token verification",
+                    "session_management": "Secure session handling",
+                    "identity_mapping": "User identity to application roles"
+                }
+            },
+            "ENTRA_MFA_ENFORCEMENT": {
+                "code": "ENTRA_MFA_ENFORCEMENT", 
+                "title": "Multi-Factor Authentication",
+                "description": "MFA enforcement for sensitive operations",
+                "section": "Authentication Security",
+                "tracked_by": ["MFA_CHALLENGE_SENT", "MFA_VERIFIED", "MFA_FAILED", 
+                               "PRIVILEGED_ACCESS_ATTEMPTED"],
+                "evidence_type": "MFA verification logs and privileged access tracking",
+                "auto_trackable": True,
+                "implementation_status": "planned",
+                "mfa_triggers": [
+                    "ML model training operations",
+                    "Compliance data export",
+                    "System configuration changes",
+                    "User role modifications"
+                ]
+            },
+            "ENTRA_CONDITIONAL_ACCESS": {
+                "code": "ENTRA_CONDITIONAL_ACCESS",
+                "title": "Conditional Access Policies",
+                "description": "Risk-based and context-aware access control",
+                "section": "Conditional Access",
+                "tracked_by": ["CONDITIONAL_ACCESS_EVALUATED", "DEVICE_COMPLIANCE_CHECKED",
+                               "LOCATION_VERIFIED", "RISK_ASSESSMENT_PERFORMED"],
+                "evidence_type": "Conditional access evaluation and policy enforcement logs",
+                "auto_trackable": True,
+                "implementation_status": "planned",
+                "conditional_policies": [
+                    "Device compliance verification",
+                    "Geographic location restrictions",
+                    "Network security assessment",
+                    "User risk level evaluation"
+                ]
+            },
+            "ENTRA_ROLE_MANAGEMENT": {
+                "code": "ENTRA_ROLE_MANAGEMENT",
+                "title": "Role-Based Access Control",
+                "description": "Entra-integrated role and permission management",
+                "section": "Authorization",
+                "tracked_by": ["ROLE_ASSIGNED", "PERMISSION_CHECKED", "AUTHORIZATION_VERIFIED",
+                               "ROLE_ELEVATED", "PERMISSION_DENIED"],
+                "evidence_type": "Role assignment and permission verification logs",
+                "auto_trackable": True,
+                "implementation_status": "planned",
+                "role_definitions": {
+                    "Lab Administrator": ["full_system_access", "user_management", "compliance_export"],
+                    "QC Technician": ["qc_analysis", "quality_controls", "report_generation"],
+                    "Research Analyst": ["sample_analysis", "ml_training", "data_export"],
+                    "Compliance Officer": ["compliance_tracking", "audit_access", "regulatory_export"],
+                    "Read-Only User": ["view_results", "generate_reports"]
+                }
             }
         }
     }

@@ -208,15 +208,20 @@ class MLRunManager:
             'validation_results': validation_results
         }
     
-    def get_confirmed_runs(self):
+    def get_confirmed_runs(self, limit=None):
         """Get all confirmed runs with their accuracy data"""
         conn = self.get_db_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        query = '''
             SELECT * FROM ml_confirmed_runs 
             ORDER BY confirmed_at DESC
-        ''')
+        '''
+        
+        if limit:
+            query += f' LIMIT {int(limit)}'
+        
+        cursor.execute(query)
         
         runs = cursor.fetchall()
         conn.close()

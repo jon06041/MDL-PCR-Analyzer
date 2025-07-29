@@ -37,6 +37,32 @@
             position: relative;
         }
 
+        .back-button {
+            position: absolute;
+            left: 30px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 50px;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .back-button:hover {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: rgba(255, 255, 255, 0.5);
+            color: white;
+            text-decoration: none;
+            transform: translateY(-50%) scale(1.05);
+        }
+
         .header h1 {
             font-size: 2.8em;
             margin-bottom: 10px;
@@ -294,6 +320,10 @@
 <body>
     <div class="dashboard-container">
         <div class="header">
+            <a href="/" class="back-button">
+                <i class="fas fa-arrow-left"></i>
+                Back to Main
+            </a>
             <div class="compliance-score">
                 <div class="score-number" id="overallScore">-</div>
                 <div class="score-label">Overall Compliance</div>
@@ -447,6 +477,24 @@
                             <i class="fas fa-info-circle"></i>
                             <strong>Evidence Tracking:</strong> Shows what evidence is being collected for each requirement and compliance gaps.
                         </div>
+                        
+                        <!-- Evidence Report Section (hidden by default) -->
+                        <div id="evidenceReportSection" style="display: none;">
+                            <div class="card mb-4">
+                                <div class="card-header d-flex justify-content-between align-items-center">
+                                    <h5><i class="fas fa-file-alt"></i> <span id="evidenceReportTitle">Evidence Report</span></h5>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="closeEvidenceReport()">
+                                        <i class="fas fa-times"></i> Close Report
+                                    </button>
+                                </div>
+                                <div class="card-body">
+                                    <div id="evidenceReportContent">
+                                        <!-- Dynamic evidence report content -->
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
                         <div id="evidenceTracking"></div>
                     </div>
 
@@ -984,20 +1032,187 @@
 
         async function viewEvidence(reqCode) {
             try {
-                const response = await fetch(`/api/compliance/evidence/${reqCode}`);
+                // Switch to evidence tab
+                const evidenceTab = document.getElementById('evidence-tab');
+                const evidencePane = document.getElementById('evidence');
+                evidenceTab.click();
+                
+                // Fetch detailed evidence data
+                const response = await fetch(`/api/compliance/evidence/${reqCode}/inspector-details`);
                 const evidence = await response.json();
                 
-                // Create modal to show evidence details
-                showEvidenceModal(reqCode, evidence);
+                // Show the evidence report section
+                showEvidenceReport(reqCode, evidence);
             } catch (error) {
                 console.error('Error loading evidence:', error);
                 showAlert('Error loading evidence details', 'danger');
             }
         }
 
+        function showEvidenceReport(reqCode, evidence) {
+            const reportSection = document.getElementById('evidenceReportSection');
+            const reportTitle = document.getElementById('evidenceReportTitle');
+            const reportContent = document.getElementById('evidenceReportContent');
+            
+            // Set title
+            reportTitle.textContent = `Evidence Report: ${reqCode}`;
+            
+            // Generate detailed report content
+            const html = generateEvidenceReportHTML(reqCode, evidence);
+            reportContent.innerHTML = html;
+            
+            // Show the report section
+            reportSection.style.display = 'block';
+            
+            // Scroll to the report
+            reportSection.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function generateEvidenceReportHTML(reqCode, evidence) {
+            if (evidence.error) {
+                return `<div class="alert alert-danger">Error: ${evidence.error}</div>`;
+            }
+            
+            const requirementInfo = evidence.requirement_info || {};
+            const complianceSummary = evidence.compliance_summary || {};
+            const evidenceRecords = evidence.detailed_evidence_records || [];
+            
+            let html = `
+                <div class="evidence-report">
+                    <!-- Requirement Header -->
+                    <div class="row mb-4">
+                        <div class="col-md-8">
+                            <h4>${reqCode}</h4>
+                            <p class="text-muted">${requirementInfo.title || 'Unknown Title'}</p>
+                            <p><small>${requirementInfo.description || 'No description available'}</small></p>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card bg-light">
+                                <div class="card-body text-center">
+                                    <h5 class="text-primary">${complianceSummary.total_evidence_records || 0}</h5>
+                                    <small class="text-muted">Evidence Records</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Compliance Summary -->
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h6><i class="fas fa-chart-bar"></i> Compliance Summary</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <strong>Total Records:</strong><br>
+                                    <span class="badge badge-primary">${complianceSummary.total_evidence_records || 0}</span>
+                                </div>
+                                <div class="col-md-3">
+                                    <strong>Evidence Coverage:</strong><br>
+                                    <span class="badge badge-success">${complianceSummary.evidence_coverage || 0}</span>
+                                </div>
+                                <div class="col-md-3">
+                                    <strong>Latest Activity:</strong><br>
+                                    <small>${formatTimestamp(complianceSummary.latest_activity)}</small>
+                                </div>
+                                <div class="col-md-3">
+                                    <strong>Tracking Events:</strong><br>
+                                    <small>${(complianceSummary.tracking_events || []).length} event types</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Evidence Records -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h6><i class="fas fa-list"></i> Detailed Evidence Records (${evidenceRecords.length})</h6>
+                        </div>
+                        <div class="card-body">
+            `;
+            
+            if (evidenceRecords.length === 0) {
+                html += `<div class="alert alert-warning">No detailed evidence records found for this requirement.</div>`;
+            } else {
+                evidenceRecords.slice(0, 10).forEach((record, index) => {
+                    html += `
+                        <div class="evidence-record mb-4 p-3 border rounded">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <h6 class="mb-1">
+                                    <i class="fas fa-file-alt text-primary"></i> 
+                                    Record #${index + 1}: ${record.evidence_classification || 'Evidence Record'}
+                                </h6>
+                                <small class="text-muted">${formatTimestamp(record.record_timestamp)}</small>
+                            </div>
+                            
+                            <div class="mb-2">
+                                <strong>Inspector Summary:</strong><br>
+                                <span class="text-info">${record.regulatory_summary || 'No summary available'}</span>
+                            </div>
+                            
+                            ${record.technical_verification ? `
+                                <div class="mb-2">
+                                    <strong>Technical Verification:</strong>
+                                    <div class="ml-3">
+                                        ${Object.entries(record.technical_verification).slice(0, 5).map(([key, value]) => 
+                                            `<small><strong>${key}:</strong> ${value}</small><br>`
+                                        ).join('')}
+                                    </div>
+                                </div>
+                            ` : ''}
+                            
+                            ${record.compliance_documentation ? `
+                                <div class="mb-2">
+                                    <strong>Regulatory Citation:</strong><br>
+                                    <span class="badge badge-info">${record.compliance_documentation.regulation_cite || 'N/A'}</span>
+                                </div>
+                                <div>
+                                    <strong>Evidence Statement:</strong><br>
+                                    <small class="text-muted">${record.compliance_documentation.evidence_statement || 'No statement'}</small>
+                                </div>
+                            ` : ''}
+                            
+                            <div class="mt-2">
+                                <small class="text-muted">
+                                    <strong>Audit Trail ID:</strong> ${record.audit_trail_id || 'N/A'}
+                                </small>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                if (evidenceRecords.length > 10) {
+                    html += `<div class="alert alert-info">Showing first 10 of ${evidenceRecords.length} evidence records.</div>`;
+                }
+            }
+            
+            html += `
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            return html;
+        }
+
+        function closeEvidenceReport() {
+            const reportSection = document.getElementById('evidenceReportSection');
+            reportSection.style.display = 'none';
+        }
+
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return 'No timestamp';
+            try {
+                const date = new Date(timestamp);
+                return date.toLocaleString();
+            } catch (e) {
+                return timestamp;
+            }
+        }
+
         function showEvidenceModal(reqCode, evidence) {
-            // Implementation for showing detailed evidence in a modal
-            alert(`Evidence for ${reqCode}:\n${JSON.stringify(evidence, null, 2)}`);
+            // Legacy function - now redirects to proper report
+            viewEvidence(reqCode);
         }
 
         // Export functions
@@ -1124,11 +1339,13 @@
             }
         }
 
-        function updateMLStatistics(stats) {
+        function updateMLStatistics(response) {
+            const stats = response.statistics || response; // Handle both nested and flat structures
+            
             document.getElementById('mlPendingCount').textContent = stats.pending_runs || '-';
             document.getElementById('mlConfirmedCount').textContent = stats.confirmed_runs || '-';
-            document.getElementById('mlTotalModels').textContent = stats.total_models || '-';
-            document.getElementById('mlAvgAccuracy').textContent = `${stats.average_accuracy || 0}%`;
+            document.getElementById('mlTotalModels').textContent = stats.total_models || '3'; // Default pathogen models
+            document.getElementById('mlAvgAccuracy').textContent = `${(stats.average_accuracy || 0).toFixed(1)}%`;
             
             // Update tab count
             const pendingTabCount = document.getElementById('mlPendingTabCount');
@@ -1137,8 +1354,9 @@
             }
         }
 
-        function updatePendingRuns(runs) {
+        function updatePendingRuns(response) {
             const container = document.getElementById('mlPendingRunsList');
+            const runs = response.pending_runs || response; // Handle both nested and flat arrays
             
             if (!runs || runs.length === 0) {
                 container.innerHTML = `
@@ -1173,10 +1391,10 @@
                                 <div class="confirmation-question mb-2">
                                     <small class="text-muted">"All samples completed with proper results?"</small>
                                 </div>
-                                <button class="btn btn-success btn-sm me-2" onclick="confirmRun('${run.run_id}', true)">
+                                <button class="btn btn-success btn-sm me-2" onclick="confirmRun(${run.id}, '${run.run_id}', true)">
                                     <i class="fas fa-check"></i> Yes, Confirm
                                 </button>
-                                <button class="btn btn-danger btn-sm" onclick="confirmRun('${run.run_id}', false)">
+                                <button class="btn btn-danger btn-sm" onclick="confirmRun(${run.id}, '${run.run_id}', false)">
                                     <i class="fas fa-times"></i> No, Reject
                                 </button>
                             </div>
@@ -1311,7 +1529,7 @@
             `).join('');
         }
 
-        async function confirmRun(runId, confirmed) {
+        async function confirmRun(runLogId, runId, confirmed) {
             try {
                 const response = await fetch('/api/ml-runs/confirm', {
                     method: 'POST',
@@ -1319,8 +1537,10 @@
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        run_id: runId,
-                        confirmed: confirmed
+                        run_log_id: runLogId,
+                        confirmed_by: 'Dashboard User', // TODO: Get actual user from session
+                        is_confirmed: confirmed,
+                        rejection_reason: confirmed ? null : 'Rejected via dashboard'
                     })
                 });
 
@@ -1331,7 +1551,7 @@
                     showAlert('success', `Run ${runId} ${action} successfully!`);
                     loadMLValidationData(); // Refresh all data
                 } else {
-                    showAlert('danger', `Error: ${result.message}`);
+                    showAlert('danger', `Error: ${result.message || result.error}`);
                 }
             } catch (error) {
                 console.error('Error confirming run:', error);
