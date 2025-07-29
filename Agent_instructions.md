@@ -152,7 +152,52 @@
 3. **Automatic Accuracy**: System records accuracy immediately after confirmation
 4. **Dashboard View**: All activities visible in unified compliance dashboard
 
-### 🚀 **NEW: Database Backup & ML Validation System** (July 28, 2025)
+### � **CRITICAL FIX: ML Skip Analysis Functionality** (July 29, 2025)
+
+**PROBLEM FIXED**: ML predictions were running automatically even when users clicked "Skip" in the automatic ML analysis banner, causing unwanted override of existing classifications.
+
+**Root Cause Analysis**:
+1. **Timing Issue**: `enhanceResultsWithMLClassification` was called from `populateResultsTable` before the banner appeared
+2. **Automatic Override**: `populateResultsTable` automatically called ML enhancement at the end, overriding existing classifications  
+3. **Flow Problem**: Banner appeared after ML processing had already started on the backend
+
+**Solution Implemented**:
+
+#### **1. Fixed Banner Timing**
+**Files Modified**: `static/script.js`
+- Moved `checkForAutomaticMLAnalysis()` call BEFORE `populateResultsTable()` in both:
+  - `displayAnalysisResults()`
+  - `displayMultiFluorophoreResults()`
+- Removed duplicate ML checks that were causing timing conflicts
+- Added proper `await` to ensure banner appears first
+
+#### **2. Enhanced User Choice Tracking**
+**Files Modified**: `static/ml_feedback_interface.js`, `static/script.js`
+- Added `window.mlAutoAnalysisUserChoice` flag to track user decisions
+- Banner actions set flag to `'accepted'` or `'skipped'`
+- `enhanceResultsWithMLClassification` checks flag before running
+- Flag resets on new analysis sessions
+
+#### **3. Preserved Existing Classifications**
+**Files Modified**: `static/script.js`
+- Removed automatic `enhanceResultsWithMLClassification()` call from `populateResultsTable()`
+- Modified banner acceptance logic to trigger ML enhancement only when user accepts
+- Preserved rule-based classifications for fresh analysis
+- Preserved previous session classifications for loaded sessions
+
+**Expected Behavior Now**:
+- **Fresh Analysis**: Table shows rule-based classifications → Banner appears → Skip preserves rule-based, Start applies ML
+- **Loaded Session**: Table shows previous classifications → Banner appears → Skip preserves previous, Start applies new ML
+- **Manual Training**: Users can now skip automatic ML to focus on expert feedback training
+
+**Benefits**:
+- ✅ Respects user choice to skip automatic ML analysis
+- ✅ Preserves existing rule-based classifications
+- ✅ Maintains previous session data integrity  
+- ✅ Allows manual expert feedback training without ML interference
+- ✅ Proper timing ensures banner appears before processing
+
+### �🚀 **NEW: Database Backup & ML Validation System** (July 28, 2025)
 
 **MAJOR FEATURE IMPLEMENTED**: Comprehensive database backup, recovery, and ML validation tracking system to prevent data loss and ensure ML model integrity.
 
@@ -1444,6 +1489,7 @@ Test the emergency reset button (🔄 RESET EVERYTHING) in the app header before
 ### ✅ STEP 4: FOLLOW DOCUMENTATION POLICY
 - ✅ Update THIS file (`Agent_instructions.md`) with all findings
 - ❌ NEVER create standalone documentation files
+- ❌ AVOID creating excessive test files and documents - use manageable documents already in place
 - ✅ Include date stamps for all major changes
 - ✅ Archive old docs in `/docs/` folder only
 
