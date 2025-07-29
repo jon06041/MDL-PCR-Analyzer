@@ -4344,6 +4344,9 @@ async function performAnalysis() {
     // Reset ML analysis check flag for new analysis
     window.mlAnalysisChecked = false;
     
+    // Reset ML auto-analysis user choice for new analysis
+    window.mlAutoAnalysisUserChoice = null;
+    
     // console.log('🧹 [PRE-ANALYSIS] Data clearing complete - ready for fresh analysis');
     
     if (Object.keys(amplificationFiles).length === 0) {
@@ -4734,7 +4737,25 @@ async function displayAnalysisResults(results) {
     }
     
     populateWellSelector(individualResults);
-    populateResultsTable(individualResults);
+    
+    // Check for automatic ML analysis BEFORE populating table to show banner first
+    if (window.mlFeedbackInterface && results && results.individual_results && !window.mlAnalysisChecked) {
+        window.mlAnalysisChecked = true; // Set flag to prevent duplicate checks
+        
+        // Show ML banner first and wait for user choice before populating table
+        try {
+            await window.mlFeedbackInterface.checkForAutomaticMLAnalysis();
+            // Only populate table after ML banner has been handled
+            populateResultsTable(individualResults);
+        } catch (error) {
+            console.log('ML automatic analysis check failed:', error);
+            // Still populate table if ML check fails
+            populateResultsTable(individualResults);
+        }
+    } else {
+        // No ML check needed, populate table immediately
+        populateResultsTable(individualResults);
+    }
 
     // --- Force "Show All Curves" view and activate button after analysis loads ---
     setTimeout(() => {
@@ -4768,19 +4789,6 @@ async function displayAnalysisResults(results) {
 
     // Mark this as fresh analysis to ensure validation display shows
     currentAnalysisResults.freshAnalysis = true;
-
-    // Check for automatic ML analysis for loaded sessions too (only if not already checked)
-    if (window.mlFeedbackInterface && results && results.individual_results && !window.mlAnalysisChecked) {
-        window.mlAnalysisChecked = true; // Set flag to prevent duplicate checks
-        // Small delay to allow session to be fully processed
-        setTimeout(async () => {
-            try {
-                await window.mlFeedbackInterface.checkForAutomaticMLAnalysis();
-            } catch (error) {
-                console.log('ML automatic analysis check failed for loaded session:', error);
-            }
-        }, 3000);
-    }
 
     // Update pathogen channel validation status for fresh analysis
     await updatePathogenChannelStatusInBreakdown();
@@ -4962,7 +4970,25 @@ async function displayMultiFluorophoreResults(results) {
         // console.log('✅ All wells have sample names.');
     }
     populateWellSelector(results.individual_results);
-    populateResultsTable(results.individual_results);
+    
+    // Check for automatic ML analysis BEFORE populating table to show banner first
+    if (window.mlFeedbackInterface && results && results.individual_results && !window.mlAnalysisChecked) {
+        window.mlAnalysisChecked = true; // Set flag to prevent duplicate checks
+        
+        // Show ML banner first and wait for user choice before populating table
+        try {
+            await window.mlFeedbackInterface.checkForAutomaticMLAnalysis();
+            // Only populate table after ML banner has been handled
+            populateResultsTable(results.individual_results);
+        } catch (error) {
+            console.log('ML automatic analysis check failed for multichannel:', error);
+            // Still populate table if ML check fails
+            populateResultsTable(results.individual_results);
+        }
+    } else {
+        // No ML check needed, populate table immediately
+        populateResultsTable(results.individual_results);
+    }
     
     // Create control grids for multi-fluorophore analysis
     const testCode = extractTestCode(experimentPattern);
@@ -5062,20 +5088,6 @@ async function displayMultiFluorophoreResults(results) {
             createPathogenControlGrids(controlsByChannel, testCode);
         }
     }, 400);
-    
-    // Check for automatic ML analysis (for multichannel runs with trained models)
-    // Only check once per analysis session to prevent duplicate popups
-    if (window.mlFeedbackInterface && results && results.individual_results && !window.mlAnalysisChecked) {
-        window.mlAnalysisChecked = true; // Set flag to prevent duplicate checks
-        // Small delay to allow analysis results to be fully processed
-        setTimeout(async () => {
-            try {
-                await window.mlFeedbackInterface.checkForAutomaticMLAnalysis();
-            } catch (error) {
-                console.log('ML automatic analysis check failed for multichannel:', error);
-            }
-        }, 2000);
-    }
     
     document.getElementById('analysisSection').scrollIntoView({ behavior: 'smooth' });
 }
@@ -5613,7 +5625,20 @@ function populateWellSelector(individualResults) {
 
 // Automatically enhance all results with ML classification (curve-focused, change-responsive)
 async function enhanceResultsWithMLClassification(individualResults, force = false) {
+    console.log('🔍 ML Enhancement Debug:', {
+        userChoice: window.mlAutoAnalysisUserChoice,
+        force: force,
+        shouldSkip: window.mlAutoAnalysisUserChoice === 'skipped' && !force
+    });
+    
     if (!individualResults || typeof individualResults !== 'object') {
+        return;
+    }
+
+    // Check if user has explicitly skipped automatic ML analysis
+    // Allow forced analysis to bypass user choice (for parameter changes etc.)
+    if (window.mlAutoAnalysisUserChoice === 'skipped' && !force) {
+        console.log('🚫 ML Enhancement: User has skipped automatic ML analysis, not running enhancement');
         return;
     }
 
@@ -6070,10 +6095,8 @@ function populateResultsTable(individualResults) {
             filterTable();
         }
         
-        // Start ML enhancement in background after table is populated
-        enhanceResultsWithMLClassification(individualResults).catch(error => {
-            console.log('ML enhancement failed (non-blocking):', error.message);
-        });
+        // ML enhancement is now handled through the banner system in displayAnalysisResults
+        // No longer automatically run ML enhancement here to preserve existing classifications
     
 
     } catch (mainError) {
@@ -12720,19 +12743,44 @@ function buildModalNavigationList() {
     
     // Get all visible table rows (respecting current filters)
     const tableRows = document.querySelectorAll('#resultsTableBody tr');
+    console.log('🔄 Building modal navigation list from', tableRows.length, 'table rows');
     
-    tableRows.forEach(row => {
+    tableRows.forEach((row, index) => {
         if (row.style.display !== 'none') {
-            const wellKey = row.getAttribute('data-well-key'); // Use actual wellKey with fluorophore
-            const sampleName = row.cells[1].textContent; // Second column contains sample
+            let wellKey = row.getAttribute('data-well-key'); // Use actual wellKey with fluorophore
+            
+            // Fallback: if data-well-key is missing, try to construct it from cell content
+            if (!wellKey) {
+                const firstCell = row.querySelector('td:first-child');
+                if (firstCell) {
+                    const wellId = firstCell.textContent.trim();
+                    // For single channel runs, we need to add the fluorophore
+                    if (window.currentAnalysisResults && window.currentAnalysisResults.experiment_info) {
+                        const fluorophore = window.currentAnalysisResults.experiment_info.fluorophore || 'HEX';
+                        wellKey = `${wellId}_${fluorophore}`;
+                    } else {
+                        wellKey = wellId;
+                    }
+                    console.log('🔧 Constructed wellKey from cell content:', wellKey);
+                }
+            }
+            
+            const sampleName = row.cells[1] ? row.cells[1].textContent : 'Unknown Sample';
+            
             if (wellKey) {
                 modalNavigationList.push({
                     wellKey: wellKey,
                     sampleName: sampleName
                 });
+                console.log(`📋 Added to navigation: ${wellKey} (${sampleName})`);
+            } else {
+                console.warn('⚠️ Could not determine wellKey for row', index);
             }
         }
     });
+    
+    console.log('✅ Modal navigation list built with', modalNavigationList.length, 'items');
+    console.log('Navigation items:', modalNavigationList.map(item => item.wellKey));
 }
 
 function updateModalContent(wellKey) {

@@ -1261,7 +1261,50 @@ class MLFeedbackInterface {
         
         return uniqueId;
     }
-    
+
+    /**
+     * Force refresh the ML display in the modal with current data
+     */
+    refreshMLDisplayInModal() {
+        try {
+            console.log('🔄 Refreshing ML display in modal');
+            
+            if (!this.currentWellData || !this.currentWellKey) {
+                console.warn('No current well data for ML display refresh');
+                return;
+            }
+            
+            // Check if the well has expert classification or ML classification to display
+            const wellResult = window.currentAnalysisResults?.individual_results?.[this.currentWellKey];
+            if (wellResult) {
+                console.log('📊 Current well result for ML refresh:', {
+                    classification: wellResult.classification,
+                    curve_classification: wellResult.curve_classification,
+                    ml_classification: wellResult.ml_classification
+                });
+                
+                // If there's a curve classification (from expert feedback or ML), display it
+                if (wellResult.curve_classification) {
+                    this.displayExistingMLClassification(wellResult.curve_classification);
+                } else if (wellResult.ml_classification) {
+                    this.displayExistingMLClassification(wellResult.ml_classification);
+                } else {
+                    // Show the basic ML section but without a prediction
+                    const mlSection = document.getElementById('ml-feedback-section');
+                    if (mlSection) {
+                        mlSection.style.display = 'block';
+                    }
+                }
+                
+                // Also update the feedback form state
+                this.hideFeedbackForm();
+            }
+            
+        } catch (error) {
+            console.error('Error refreshing ML display in modal:', error);
+        }
+    }
+
     async checkIfSampleAlreadyTrained() {
         // Check if this exact sample has already been trained
         const sampleId = this.createUniqueSampleIdentifier();
@@ -1502,6 +1545,12 @@ class MLFeedbackInterface {
             return;
         }
         
+        // CRITICAL: Store the original ML prediction for comparison later
+        if (this.currentWellData && !this.currentWellData.original_ml_prediction) {
+            this.currentWellData.original_ml_prediction = mlClassification.classification;
+            console.log('📊 Stored original ML prediction:', mlClassification.classification);
+        }
+        
         const predictionDisplay = document.getElementById('ml-prediction-display');
         const classElement = document.getElementById('ml-prediction-class');
         const confidenceElement = document.getElementById('ml-prediction-confidence');
@@ -1696,6 +1745,12 @@ class MLFeedbackInterface {
         if (!prediction || !prediction.classification || prediction.confidence === undefined) {
             console.error('ML Feedback Interface: Invalid prediction data received:', prediction);
             return;
+        }
+        
+        // CRITICAL: Store the original ML prediction for comparison later
+        if (this.currentWellData && !this.currentWellData.original_ml_prediction) {
+            this.currentWellData.original_ml_prediction = prediction.classification;
+            console.log('📊 Stored original ML prediction:', prediction.classification);
         }
         
         const predictionDisplay = document.getElementById('ml-prediction-display');
@@ -2310,6 +2365,9 @@ class MLFeedbackInterface {
                     // Update the results table with the expert classification
                     await this.updateResultsTableAfterFeedback(expertClassification);
                     
+                    // CRITICAL: Persist the expert classification to the backend database
+                    await this.updateWellClassification(expertClassification, 'expert_feedback');
+                    
                     // Use non-blocking notification instead of alert
                     this.showTrainingNotification(
                         'Feedback Submitted!',
@@ -2326,6 +2384,9 @@ class MLFeedbackInterface {
                     
                     // Also fetch full stats to update everything else
                     await this.updateMLStats();
+                    
+                    // CRITICAL: Refresh the modal display to show expert classification
+                    this.refreshMLDisplayInModal();
                     
                     // Enhanced ML Training Strategy - handle this after a small delay
                     // to prevent popup conflicts
@@ -3195,7 +3256,18 @@ class MLFeedbackInterface {
                         
                         // Check if this well has an ML prediction that differs from expert classification
                         const currentMLPrediction = wellData.ml_prediction;
-                        if (currentMLPrediction && currentMLPrediction !== expertClassification) {
+                        const currentClassification = wellData.classification;
+                        
+                        // If expert corrected a SUSPICIOUS case, prioritize finding other SUSPICIOUS cases
+                        // with the same pathogen for re-evaluation
+                        const shouldReEvaluate = this.shouldWellBeReEvaluated(
+                            currentMLPrediction, 
+                            currentClassification, 
+                            expertClassification,
+                            correctedWellData.classification || correctedWellData.ml_prediction
+                        );
+                        
+                        if (shouldReEvaluate) {
                             // Check if wells have similar characteristics
                             if (this.areWellsSimilar(correctedWellData, wellData)) {
                                 similarWells.push({
@@ -3203,8 +3275,8 @@ class MLFeedbackInterface {
                                     wellData,
                                     fluorophore,
                                     pathogen: wellPathogen,
-                                    currentPrediction: currentMLPrediction,
-                                    reason: 'Similar characteristics within same pathogen/channel'
+                                    currentPrediction: currentMLPrediction || currentClassification,
+                                    reason: 'Similar characteristics within same pathogen/channel - expert correction applied'
                                 });
                             }
                         }
@@ -3220,15 +3292,26 @@ class MLFeedbackInterface {
                     if (wellPathogen !== correctedPathogen) continue;
                     
                     const currentMLPrediction = wellData.ml_prediction;
-                    if (currentMLPrediction && currentMLPrediction !== expertClassification) {
+                    const currentClassification = wellData.classification;
+                    
+                    // If expert corrected a SUSPICIOUS case, prioritize finding other SUSPICIOUS cases
+                    // with the same pathogen for re-evaluation
+                    const shouldReEvaluate = this.shouldWellBeReEvaluated(
+                        currentMLPrediction, 
+                        currentClassification, 
+                        expertClassification,
+                        correctedWellData.classification || correctedWellData.ml_prediction
+                    );
+                    
+                    if (shouldReEvaluate) {
                         if (this.areWellsSimilar(correctedWellData, wellData)) {
                             similarWells.push({
                                 wellKey,
                                 wellData,
                                 fluorophore: correctedFluorophore,
                                 pathogen: wellPathogen,
-                                currentPrediction: currentMLPrediction,
-                                reason: 'Similar characteristics within same pathogen'
+                                currentPrediction: currentMLPrediction || currentClassification,
+                                reason: 'Similar characteristics within same pathogen - expert correction applied'
                             });
                         }
                     }
@@ -3264,6 +3347,23 @@ class MLFeedbackInterface {
         }
         
         return fluorophore || 'Unknown';
+    }
+
+    shouldWellBeReEvaluated(currentMLPrediction, currentClassification, expertClassification, originalCorrectedClassification) {
+        // Priority 1: If expert corrected a SUSPICIOUS case, find all other SUSPICIOUS cases with same pathogen
+        if (originalCorrectedClassification === 'SUSPICIOUS') {
+            return (currentMLPrediction === 'SUSPICIOUS' || currentClassification === 'SUSPICIOUS');
+        }
+        
+        // Priority 2: If expert corrected any classification, find wells with same original classification
+        if (originalCorrectedClassification && 
+            (currentMLPrediction === originalCorrectedClassification || currentClassification === originalCorrectedClassification)) {
+            return true;
+        }
+        
+        // Priority 3: General case - find wells where current prediction differs from expert correction
+        return (currentMLPrediction && currentMLPrediction !== expertClassification) ||
+               (currentClassification && currentClassification !== expertClassification);
     }
 
     areWellsSimilar(well1, well2, similarityThreshold = 0.8) {
@@ -3504,6 +3604,21 @@ class MLFeedbackInterface {
                             // Update the results table immediately
                             this.updateTableCellWithMLPrediction(similarWell.wellKey, reAnalysisResult.prediction);
                             
+                            // CRITICAL: Persist the new ML prediction to the backend database
+                            try {
+                                // Temporarily store current context
+                                const tempWellKey = this.currentWellKey;
+                                this.currentWellKey = similarWell.wellKey;
+                                
+                                await this.updateWellClassification(reAnalysisResult.prediction, 'batch_ml_reeval');
+                                console.log(`✅ Persisted new prediction for ${similarWell.wellKey}: ${reAnalysisResult.prediction}`);
+                                
+                                // Restore original context
+                                this.currentWellKey = tempWellKey;
+                            } catch (persistError) {
+                                console.warn(`⚠️ Failed to persist prediction for ${similarWell.wellKey}:`, persistError);
+                            }
+                            
                             results.push({
                                 wellKey: similarWell.wellKey,
                                 oldPrediction: similarWell.currentPrediction,
@@ -3667,7 +3782,14 @@ class MLFeedbackInterface {
                             type: 'pathogen-specific',
                             pathogen: currentTestCode,
                             samples: currentPathogenModel.training_samples,
-                            onAccept: () => this.performBatchMLAnalysis(currentPathogenModel.training_samples, 'automatic'),
+                            onAccept: () => {
+                                // Run both batch analysis and table enhancement
+                                this.performBatchMLAnalysis(currentPathogenModel.training_samples, 'automatic');
+                                // Also enhance current table if available
+                                if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+                                    window.enhanceResultsWithMLClassification(window.currentAnalysisResults.individual_results, true);
+                                }
+                            },
                             onDecline: () => console.log('User declined automatic ML analysis')
                         });
                         
@@ -3682,7 +3804,14 @@ class MLFeedbackInterface {
                             pathogen: currentTestCode,
                             samples: totalTrainingCount,
                             stats: result.stats, // Pass the stats for breakdown
-                            onAccept: () => this.performBatchMLAnalysis(totalTrainingCount, 'cross-pathogen'),
+                            onAccept: () => {
+                                // Run both batch analysis and table enhancement
+                                this.performBatchMLAnalysis(totalTrainingCount, 'cross-pathogen');
+                                // Also enhance current table if available
+                                if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+                                    window.enhanceResultsWithMLClassification(window.currentAnalysisResults.individual_results, true);
+                                }
+                            },
                             onDecline: () => console.log('User declined cross-pathogen ML analysis')
                         });
                         
@@ -3845,11 +3974,17 @@ class MLFeedbackInterface {
         
         // Add action handlers
         notification.acceptAction = () => {
+            // Set flag to indicate user accepted automatic ML analysis
+            console.log('🟢 ML Banner: User ACCEPTED automatic ML analysis');
+            window.mlAutoAnalysisUserChoice = 'accepted';
             if (onAccept) onAccept();
             notification.remove();
         };
         
         notification.declineAction = () => {
+            // Set flag to indicate user declined/skipped automatic ML analysis
+            console.log('🔴 ML Banner: User SKIPPED automatic ML analysis');
+            window.mlAutoAnalysisUserChoice = 'skipped';
             if (onDecline) onDecline();
             notification.remove();
         };
@@ -4318,14 +4453,33 @@ class MLFeedbackInterface {
                 
                 const wellResult = window.currentAnalysisResults.individual_results[this.currentWellKey];
                 if (wellResult) {
+                    // Determine if this is an override or confirmation
+                    const originalMLPrediction = wellResult.ml_classification?.classification || 
+                                               wellResult.curve_classification?.classification ||
+                                               wellResult.original_ml_prediction;
+                    
+                    // Determine the appropriate method based on whether expert agrees with ML
+                    let methodType;
+                    if (originalMLPrediction && originalMLPrediction.toLowerCase() === expertClassification.toLowerCase()) {
+                        methodType = 'Confirmed ML';
+                    } else {
+                        methodType = 'Expert Decision';
+                    }
+                    
+                    console.log(`📊 Expert feedback type: ${methodType} (Original: ${originalMLPrediction}, Expert: ${expertClassification})`);
+                    
                     // Update the curve_classification with expert feedback
                     wellResult.curve_classification = {
                         classification: expertClassification,
                         confidence: 1.0, // Expert classification has 100% confidence
-                        method: 'expert_feedback',
+                        method: methodType,
+                        original_ml_prediction: originalMLPrediction,
                         pathogen: wellResult.target || wellResult.specific_pathogen || 'Unknown',
                         timestamp: new Date().toISOString()
                     };
+                    
+                    // CRITICAL FIX: Also update the main classification field
+                    wellResult.classification = expertClassification;
                     
                     // Also store as ml_classification for consistency
                     wellResult.ml_classification = wellResult.curve_classification;
@@ -4333,21 +4487,59 @@ class MLFeedbackInterface {
                     console.log('✅ Updated well data with expert classification:', {
                         wellKey: this.currentWellKey,
                         classification: expertClassification,
+                        method: methodType,
+                        originalPrediction: originalMLPrediction,
                         pathogen: wellResult.curve_classification.pathogen
                     });
                 }
             }
             
-            // Update the specific table cell directly
+            // Update the specific table cell directly - use multiple strategies
             this.updateTableCellWithClassification(this.currentWellKey, expertClassification);
+            
+            // CRITICAL FIX: Force refresh the entire results table to show changes
+            if (typeof window.refreshResultsTable === 'function') {
+                console.log('🔄 Force refreshing entire results table');
+                setTimeout(() => {
+                    window.refreshResultsTable();
+                }, 200);
+            }
             
             // Refresh the modal if it's currently showing this well
             if (window.currentModalWellKey === this.currentWellKey && 
                 typeof window.updateModalContent === 'function') {
                 console.log('🔄 Refreshing modal content after feedback submission');
+                
+                // CRITICAL FIX: Force update the global data first
+                if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+                    const wellResult = window.currentAnalysisResults.individual_results[this.currentWellKey];
+                    if (wellResult) {
+                        console.log('📊 Before modal refresh - well data:', {
+                            classification: wellResult.classification,
+                            curve_classification: wellResult.curve_classification,
+                            ml_classification: wellResult.ml_classification
+                        });
+                    }
+                }
+                
                 setTimeout(() => {
                     window.updateModalContent(this.currentWellKey);
-                }, 100); // Small delay to allow state to settle
+                    
+                    // CRITICAL FIX: Also force refresh the ML section in the modal
+                    if (this.isInitialized) {
+                        console.log('🔄 Force refreshing ML feedback interface after modal update');
+                        this.refreshMLDisplayInModal();
+                    }
+                    
+                    // CRITICAL FIX: Also rebuild modal navigation after content update
+                    if (typeof window.buildModalNavigationList === 'function') {
+                        window.buildModalNavigationList();
+                        if (typeof window.updateNavigationButtons === 'function') {
+                            window.updateNavigationButtons();
+                        }
+                        console.log('🔄 Rebuilt modal navigation - list length:', window.modalNavigationList ? window.modalNavigationList.length : 'undefined');
+                    }
+                }, 300); // Slightly longer delay to allow state to settle
             }
             
             // Get a fresh ML prediction for this well to show updated model performance
@@ -4370,12 +4562,116 @@ class MLFeedbackInterface {
      */
     updateTableCellWithClassification(wellKey, classification) {
         try {
-            const rows = document.querySelectorAll('#resultsTableBody tr[data-well-key="' + wellKey + '"]');
-            if (rows.length > 0) {
-                const row = rows[0];
-                const curveClassCell = row.cells[4]; // Curve Class column is index 4
+            console.log('🔄 Updating table cell for well:', wellKey, 'with classification:', classification);
+            console.log('📊 Current analysis results exist:', !!window.currentAnalysisResults);
+            
+            // Debug: Check what table rows actually exist
+            const allRows = document.querySelectorAll('#resultsTableBody tr, .results-table tbody tr, table tbody tr');
+            console.log('🔍 Total table rows found:', allRows.length);
+            
+            // Show first few rows for debugging
+            allRows.forEach((testRow, index) => {
+                if (index < 5) { // Only log first 5 rows
+                    const firstCell = testRow.querySelector('td:first-child');
+                    const wellText = firstCell ? firstCell.textContent.trim() : 'NO FIRST CELL';
+                    const dataWellKey = testRow.getAttribute('data-well-key');
+                    console.log(`   Row ${index}: firstCell="${wellText}", data-well-key="${dataWellKey}"`);
+                }
+            });
+            
+            // Try multiple strategies to find the table row
+            let row = null;
+            
+            // Strategy 1: By data-well-key attribute
+            const rowsByData = document.querySelectorAll('#resultsTableBody tr[data-well-key="' + wellKey + '"]');
+            if (rowsByData.length > 0) {
+                row = rowsByData[0];
+                console.log('✅ Found row by data-well-key attribute');
+            } else {
+                // Strategy 2: Search all rows for well ID in first cell
+                const allRows = document.querySelectorAll('#resultsTableBody tr, .results-table tbody tr, table tbody tr');
+                for (const testRow of allRows) {
+                    const firstCell = testRow.querySelector('td:first-child');
+                    if (firstCell && firstCell.textContent.trim() === wellKey) {
+                        row = testRow;
+                        console.log('✅ Found row by searching cell content');
+                        break;
+                    }
+                }
+                
+                // Strategy 3: Try to match just the well part (e.g., A10 from A10_HEX)
+                if (!row) {
+                    const wellPart = wellKey.split('_')[0];
+                    for (const testRow of allRows) {
+                        const firstCell = testRow.querySelector('td:first-child');
+                        if (firstCell && firstCell.textContent.trim() === wellPart) {
+                            row = testRow;
+                            console.log('✅ Found row by well part:', wellPart);
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            if (row) {
+                console.log('🔍 Found table row, now looking for curve class cell...');
+                console.log('📊 Row has', row.cells.length, 'cells');
+                
+                // Debug: Show all cell contents
+                for (let i = 0; i < Math.min(row.cells.length, 10); i++) {
+                    const cell = row.cells[i];
+                    console.log(`   Cell ${i}: "${cell.textContent.trim()}" (${cell.innerHTML.length} chars HTML)`);
+                }
+                
+                // Find the curve class column - try multiple column indices and search strategies
+                let curveClassCell = null;
+                
+                // Strategy 1: Look for existing curve badge
+                const existingBadge = row.querySelector('.curve-badge');
+                if (existingBadge) {
+                    curveClassCell = existingBadge.closest('td');
+                    console.log('✅ Found curve class cell by existing badge');
+                }
+                
+                // Strategy 2: Search by column indices  
+                if (!curveClassCell) {
+                    const cellIndices = [4, 5, 6, 7]; // Common positions for curve class column
+                    
+                    for (const index of cellIndices) {
+                        const testCell = row.cells[index];
+                        if (testCell) {
+                            // Check if this looks like a classification cell
+                            const cellText = testCell.textContent.toLowerCase();
+                            if (cellText.includes('positive') || cellText.includes('negative') || 
+                                cellText.includes('indeterminate') || cellText.includes('suspicious') ||
+                                cellText.includes('strong') || cellText.includes('weak') ||
+                                cellText.includes('unknown') || cellText.includes('ml') ||
+                                testCell.querySelector('.curve-badge')) {
+                                curveClassCell = testCell;
+                                console.log('✅ Found curve class cell at index:', index);
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                // Strategy 3: Look for any cell that might contain classification data
+                if (!curveClassCell) {
+                    for (let i = 0; i < row.cells.length; i++) {
+                        const cell = row.cells[i];
+                        const cellText = cell.textContent.toLowerCase();
+                        if (cellText.includes('unknown') && !cellText.includes('sample')) {
+                            curveClassCell = cell;
+                            console.log('✅ Found curve class cell by "unknown" content at index:', i);
+                            break;
+                        }
+                    }
+                }
                 
                 if (curveClassCell) {
+                    console.log('✅ Found curve class cell, updating...');
+                    console.log('📊 Before update - cell content:', curveClassCell.innerHTML);
+                    
                     const classMap = {
                         'STRONG_POSITIVE': 'curve-strong-pos',
                         'POSITIVE': 'curve-pos',
@@ -4387,17 +4683,64 @@ class MLFeedbackInterface {
                     
                     const badgeClass = classMap[classification] || 'curve-other';
                     const displayText = classification.replace('_', ' ');
+                    const newHTML = `<span class="curve-badge ${badgeClass}" title="Expert Classification: ${displayText}">✓ ${displayText}</span>`;
                     
-                    curveClassCell.innerHTML = `<span class="curve-badge ${badgeClass}" title="Expert Classification: ${displayText}">✓ ${displayText}</span>`;
+                    console.log('📊 New HTML content:', newHTML);
                     
-                    // Add a subtle highlight to show it was just updated
-                    curveClassCell.style.background = '#e8f5e8';
+                    // Update with expert feedback indicator
+                    curveClassCell.innerHTML = newHTML;
+                    
+                    console.log('📊 After update - cell content:', curveClassCell.innerHTML);
+                    
+                    // Add a prominent highlight to show it was just updated
+                    curveClassCell.style.background = '#d4edda';
+                    curveClassCell.style.border = '2px solid #28a745';
+                    curveClassCell.style.fontWeight = 'bold';
+                    
                     setTimeout(() => {
                         curveClassCell.style.background = '';
-                    }, 2000);
+                        curveClassCell.style.border = '';
+                        curveClassCell.style.fontWeight = '';
+                    }, 5000); // Keep highlight longer for visibility
                     
                     console.log('✅ Updated table cell for', wellKey, 'with classification:', classification);
+                    
+                    // CRITICAL: Also trigger a table refresh to ensure changes persist
+                    if (typeof window.refreshResultsTable === 'function') {
+                        console.log('🔄 Triggering table refresh after cell update');
+                        setTimeout(() => {
+                            window.refreshResultsTable();
+                        }, 100);
+                    }
+                } else {
+                    console.warn('❌ Could not find curve class cell in row for:', wellKey);
+                    console.log('📊 Available cells in row:');
+                    for (let i = 0; i < row.cells.length; i++) {
+                        console.log(`   Cell ${i}: "${row.cells[i].textContent.trim()}" (contains badge: ${!!row.cells[i].querySelector('.curve-badge')})`);
+                    }
                 }
+            } else {
+                console.error('❌ Could not find table row for well key:', wellKey);
+                console.log('🔍 Tried to find row with these strategies:');
+                console.log('   1. data-well-key attribute:', `"${wellKey}"`);
+                console.log('   2. First cell exact match:', `"${wellKey}"`);
+                console.log('   3. Well part match:', `"${wellKey.split('_')[0]}"`);
+                
+                // Show what rows actually exist for debugging
+                const allRowsDebug = document.querySelectorAll('#resultsTableBody tr');
+                console.log('📋 Actual rows in results table:');
+                allRowsDebug.forEach((testRow, index) => {
+                    const firstCell = testRow.querySelector('td:first-child');
+                    const dataWellKey = testRow.getAttribute('data-well-key');
+                    const wellText = firstCell ? firstCell.textContent.trim() : 'NO FIRST CELL';
+                    console.log(`   Row ${index}: "${wellText}" (data-well-key: "${dataWellKey}")`);
+                });
+                // List available rows for debugging
+                const availableRows = document.querySelectorAll('#resultsTableBody tr');
+                console.log('Available rows:', Array.from(availableRows).map(r => {
+                    const firstCell = r.querySelector('td:first-child');
+                    return firstCell ? firstCell.textContent.trim() : 'no-first-cell';
+                }));
             }
         } catch (error) {
             console.error('Failed to update table cell:', error);
