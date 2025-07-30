@@ -5951,11 +5951,28 @@ function populateResultsTable(individualResults) {
             '-';
 
         
-        // --- Curve Class badge (prioritize ML classification over older curve_classification) ---
+        // --- Curve Class badge (prioritize expert feedback, then ML, then rule-based) ---
         let curveClassBadgeHTML = '-';
         
-        // First check for ML classification (preferred)
-        if (result.ml_classification && result.ml_classification.classification) {
+        // First check for expert classification (highest priority)
+        if (result.curve_classification && 
+            result.curve_classification.classification &&
+            result.curve_classification.method === 'expert_feedback') {
+            
+            const classMap = {
+                'STRONG_POSITIVE': 'curve-strong-pos',
+                'POSITIVE': 'curve-pos',
+                'WEAK_POSITIVE': 'curve-weak-pos',
+                'NEGATIVE': 'curve-neg',
+                'INDETERMINATE': 'curve-indet',
+                'SUSPICIOUS': 'curve-suspicious'
+            };
+            const badgeClass = classMap[result.curve_classification.classification] || 'curve-other';
+            const displayText = result.curve_classification.classification.replace('_', ' ');
+            curveClassBadgeHTML = `<span class="curve-badge ${badgeClass}" title="Expert: ${result.curve_classification.reason || 'Expert Classification'}">${displayText} ✓</span>`;
+        }
+        // Second check for ML classification (preferred)
+        else if (result.ml_classification && result.ml_classification.classification) {
             const classMap = {
                 'STRONG_POSITIVE': 'curve-strong-pos',
                 'POSITIVE': 'curve-pos',
@@ -5967,7 +5984,7 @@ function populateResultsTable(individualResults) {
             const badgeClass = classMap[result.ml_classification.classification] || 'curve-other';
             const displayText = result.ml_classification.classification.replace('_', ' ');
             const confidence = result.ml_classification.confidence ? ` (${(result.ml_classification.confidence * 100).toFixed(1)}%)` : '';
-            curveClassBadgeHTML = `<span class="curve-badge ${badgeClass}" title="ML: ${result.ml_classification.reasoning || 'ML Classification'}${confidence}">${displayText}</span>`;
+            curveClassBadgeHTML = `<span class="curve-badge ${badgeClass}" title="ML: ${result.ml_classification.reasoning || 'ML Classification'}${confidence}">${displayText} 🤖</span>`;
         }
         // Fallback to older curve_classification if no ML classification
         else if (typeof result.curve_classification === 'object' && result.curve_classification.classification) {
@@ -8468,14 +8485,14 @@ function calculatePathogenBreakdownFromSessions(sessions) {
             if ((!fluorophore || fluorophore === 'Unknown') && 
                 session.pathogen_breakdown && 
                 session.pathogen_breakdown !== 'Unknown: 0.0%') {
-                const matches = session.pathogen_breakdown.match(/^(BVAB[123]|Cy5|FAM|HEX|Texas Red|Neisseria gonhorrea):/);
+                const matches = session.pathogen_breakdown.match(/^(BVAB[123]|Cy5|FAM|HEX|Texas Red|Neisseria gonorrhoeae):/);
                 if (matches) {
                     const pathogenTarget = matches[1];
                     // Map pathogen target back to fluorophore
                     if (pathogenTarget === 'BVAB1') fluorophore = 'HEX';
                     else if (pathogenTarget === 'BVAB2') fluorophore = 'FAM';
                     else if (pathogenTarget === 'BVAB3') fluorophore = 'Cy5';
-                    else if (pathogenTarget === 'Neisseria gonhorrea') fluorophore = 'HEX';
+                    else if (pathogenTarget === 'Neisseria gonorrhoeae') fluorophore = 'HEX';
                     else fluorophore = pathogenTarget;
                 }
             }
@@ -11550,7 +11567,7 @@ function getPathogenMappingForTest(testName) {
             'Cy5': 'Bifidobacterium breve'
         },
         'Ngon': {
-            'HEX': 'Neisseria gonhorrea'
+            'HEX': 'Neisseria gonorrhoeae'
         },
         'Cglab': {
             'FAM': 'Candida glabrata'
@@ -12819,15 +12836,9 @@ function updateNavigationButtons() {
         prevBtn.disabled = currentModalIndex <= 0;
         nextBtn.disabled = currentModalIndex >= modalNavigationList.length - 1;
         
-        // Update button text with position info (convert to 1-based indexing)
-        // Commented out position numbers per user request
-        // if (modalNavigationList.length > 1) {
-        //     prevBtn.textContent = `← Previous (${currentModalIndex + 1}/${modalNavigationList.length})`;
-        //     nextBtn.textContent = `Next (${currentModalIndex + 1}/${modalNavigationList.length}) →`;
-        // } else {
-            prevBtn.textContent = '← Previous';
-            nextBtn.textContent = 'Next →';
-        // }
+        // Update button text
+        prevBtn.textContent = '← Previous';
+        nextBtn.textContent = 'Next →';
     }
 }
 
@@ -12849,6 +12860,11 @@ function navigateModal(direction) {
 
 function updateModalDetails(wellResult) {
     const modalDetails = document.getElementById('modalDetails');
+    
+    if (!modalDetails) {
+        console.error('🔍 ERROR - modalDetails element not found!');
+        return;
+    }
     
     // Extract well ID - always prioritize current modal well key
     let wellId = 'Unknown';
@@ -12925,6 +12941,15 @@ function updateModalDetails(wellResult) {
     let resultText = 'REDO';
     let classificationSource = 'rule-based';
     
+    // Debug logging for modal result classification
+    console.log('🔍 MODAL-RESULT: Classification debug for', wellResult.well_id || 'unknown well', {
+        curve_classification: wellResult.curve_classification,
+        ml_classification: wellResult.ml_classification,
+        has_curve_classification: !!wellResult.curve_classification,
+        curve_method: wellResult.curve_classification?.method,
+        curve_classification_type: wellResult.curve_classification?.classification
+    });
+    
     // Check for expert classification first (highest priority)
     if (wellResult.curve_classification && 
         wellResult.curve_classification.classification &&
@@ -12932,6 +12957,8 @@ function updateModalDetails(wellResult) {
         
         resultText = wellResult.curve_classification.classification;
         classificationSource = 'expert_feedback';
+        
+        console.log('✅ MODAL-RESULT: Using EXPERT FEEDBACK classification:', resultText);
         
         // Map expert classifications to modal result classes
         const expertClassMap = {
@@ -13021,7 +13048,6 @@ function updateModalDetails(wellResult) {
                 <span class="modal-parameter-label">Result:</span>
                 <span class="modal-result-badge ${resultClass}" title="Classification source: ${classificationSource}">
                     ${resultText}
-                    ${classificationSource === 'expert_feedback' ? ' ✓' : classificationSource === 'ml_prediction' ? ' 🤖' : ''}
                 </span>
             </div>
             <div class="modal-parameter-item">
@@ -13058,7 +13084,17 @@ function updateModalDetails(wellResult) {
             </div>
             <div class="modal-parameter-item">
                 <span class="modal-parameter-label">CalcJ:</span>
-                <span class="modal-parameter-value">${wellResult.calcj && wellResult.calcj[fluorophore] ? wellResult.calcj[fluorophore].toExponential(2) : (wellResult.calcj_value && !isNaN(Number(wellResult.calcj_value)) ? Number(wellResult.calcj_value).toExponential(2) : 'N/A')}</span>
+                <span class="modal-parameter-value">${(() => {
+                    // Safe CalcJ value extraction with proper type checking
+                    if (wellResult.calcj && wellResult.calcj[fluorophore] && !isNaN(Number(wellResult.calcj[fluorophore]))) {
+                        const calcjValue = Number(wellResult.calcj[fluorophore]);
+                        return calcjValue > 0 ? calcjValue.toExponential(2) : 'N/A';
+                    } else if (wellResult.calcj_value && !isNaN(Number(wellResult.calcj_value))) {
+                        const calcjValue = Number(wellResult.calcj_value);
+                        return calcjValue > 0 ? calcjValue.toExponential(2) : 'N/A';
+                    }
+                    return 'N/A';
+                })()}</span>
             </div>
         </div>
     `;
@@ -13967,3 +14003,14 @@ async function trackFDACompliance(actionType, actionDetails = {}) {
 
 // Make trackFDACompliance globally available
 window.trackFDACompliance = trackFDACompliance;
+
+// Make refreshResultsTable globally available for ML feedback
+window.refreshResultsTable = function() {
+    console.log('🔄 Global refreshResultsTable called');
+    if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+        populateResultsTable(window.currentAnalysisResults.individual_results);
+        console.log('✅ Results table refreshed with current analysis results');
+    } else {
+        console.warn('No current analysis results available for table refresh');
+    }
+};

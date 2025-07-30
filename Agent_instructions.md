@@ -4,6 +4,188 @@
 
 ## 🎯 **CURRENT STATUS: Compliance System Fully Restored** (July 28, 2025)
 
+### 🧠 **ML CURVE CLASSIFICATION SYSTEM: COMPREHENSIVE OVERVIEW** (July 30, 2025)
+
+The MDL PCR Analyzer includes an advanced Machine Learning (ML) curve classification system that learns from expert feedback to improve qPCR result classification accuracy. This is a critical component for regulatory compliance and automated diagnostic accuracy.
+
+#### **🔬 ML Classification Architecture**
+
+**Model Type**: RandomForestClassifier with hybrid feature extraction
+**Training Features**: 30 hybrid features (18 numerical + 12 visual pattern features)
+**Classification Classes**: 7 distinct diagnostic categories
+**Model Persistence**: SQLite database with version control and pathogen-specific models
+
+#### **📊 7-Class Classification System**
+
+1. **STRONG_POSITIVE** - High amplitude (>1000 RFU), excellent S-curve characteristics, clear exponential phase
+2. **POSITIVE** - Clear positive amplification signal (500-1000 RFU), good curve quality
+3. **WEAK_POSITIVE** - Low but detectable positive signal (100-500 RFU), may require confirmation
+4. **INDETERMINATE** - Unclear biological result, ambiguous signal that cannot be confidently classified
+5. **REDO** - Technical issues or borderline amplitude (400-500 RFU), repeat test recommended
+6. **SUSPICIOUS** - Questionable result that may need further investigation or expert review
+7. **NEGATIVE** - No significant amplification signal (<100 RFU), flat baseline
+
+#### **🎯 Expert Decision Integration**
+
+**Expert Override System**:
+- Expert decisions override both ML and rule-based classifications
+- Display format: "👨‍⚕️ Expert Review" with "(Expert Decision)" confidence indicator
+- Storage: `expert_classification`, `expert_review_method`, `timestamp`
+- Priority: Expert classifications take precedence and display immediately
+
+**Feedback Collection**:
+- Real-time training data collection from expert corrections
+- Batch re-evaluation for similar wells after expert feedback
+- Automatic model retraining triggers at milestone sample counts (20, 50, 100+)
+
+#### **⚙️ Technical Implementation**
+
+**Key Files**:
+- `ml_curve_classifier.py` - Core ML training and prediction logic
+- `static/ml_feedback_interface.js` - Frontend ML interaction and feedback system
+- `app.py` - ML API endpoints for analysis and training
+- `ml_training_data.json` - Persistent training data storage
+- `ml_curve_classifier.pkl` - Trained model persistence
+
+**API Endpoints**:
+- `/api/ml-analyze-curve` - Single well ML prediction
+- `/api/ml-feedback` - Expert feedback submission and model retraining
+- `/api/ml-training-stats` - Model statistics and performance metrics
+- `/api/ml-cancel-batch` - Batch analysis cancellation
+- `/api/ml-reset-cancellation` - Reset cancellation flags
+
+#### **🔄 Batch Analysis & Cancellation**
+
+**Batch Processing Flow**:
+1. Automatic analysis triggers for trained models (20+ samples)
+2. Real-time progress tracking with skip/cancel capability
+3. Sequential well processing with immediate UI updates
+4. Server-side cancellation protection (409 responses)
+5. Client-side loop cancellation with proper cleanup
+
+**Cancellation Logic**:
+- Skip button available in both initial banner and running analysis notification
+- Immediate server cancellation request (`window.mlAutoAnalysisUserChoice = 'skipped'`)
+- Server-side flag (`app.config['ML_BATCH_CANCELLED'] = True`)
+- HTTP request protection and 409 status handling
+- Clean UI state restoration and progress notification removal
+
+#### **📈 Version Control & Performance Tracking**
+
+**Pathogen-Specific Models**:
+- Individual model tracking for NGON, CTRACH, GENERAL_PCR
+- Version history timeline with accuracy progression
+- Training data sample counts and performance metrics
+- Cross-pathogen analysis capability for insufficient training data
+
+**Validation Dashboard**:
+- Unified compliance dashboard integration (`/unified-compliance-dashboard`)
+- Pending confirmation workflow for ML validation runs
+- Expert confirmation: "All samples completed properly?"
+- Automated accuracy calculation and trend analysis
+
+#### **🛡️ Regulatory Compliance Integration**
+
+**Evidence Collection**:
+- ML model validation records for FDA AI/ML guidance compliance
+- Training data audit trails with technical verification
+- Performance validation documentation with confidence scores
+- Inspector-ready evidence format with regulation citations
+
+**Quality Assurance**:
+- Duplicate submission prevention (triple-layer protection)
+- Multichannel ML support for multi-fluorophore experiments
+- Automatic model validation and accuracy monitoring
+- Real-time performance alerts and degradation detection
+
+#### **🔧 Recent Enhancements (July 2025)**
+
+**Cancellation System Fixes**:
+- Added skip button to running analysis notifications
+- Enhanced server-side cancellation protection
+- Immediate cancellation request sending
+- Improved client-side loop exit logic
+
+**Multichannel Support**:
+- ML notifications for multi-fluorophore uploads (Cy5, FAM, HEX, Texas Red)
+- Enhanced `checkForAutomaticMLAnalysis()` for multichannel data
+- Cross-channel pattern recognition and validation
+
+**Training Data Management**:
+- Robust training data persistence with backup/restore
+- Version control for training data evolution
+- Pathogen-specific training sample tracking
+- Automated milestone analysis triggers
+
+#### **🧮 ML Feature Engineering (30 Hybrid Features)**
+
+**Numerical Features (18)**:
+- **Curve Quality**: R² Score, RMSE (goodness of fit metrics)
+- **Amplitude Metrics**: Amplitude, SNR (signal-to-noise ratio)
+- **Curve Shape**: Steepness, Midpoint, Baseline (S-curve geometry)
+- **Cycle Metrics**: Cq Value, CQJ, CalcJ (quantification cycles)
+- **Raw Data Stats**: Min/Max/Mean/Std RFU, Min/Max Cycles
+- **Advanced Metrics**: Dynamic Range, Efficiency (derived characteristics)
+
+**Visual Pattern Features (12)**:
+- **Shape Classification**: Curve type (flat, linear, s-curve, exponential, irregular)
+- **Baseline Analysis**: Baseline stability, variance and consistency
+- **Exponential Phase**: Exponential sharpness, steepness quality
+- **Plateau Analysis**: Plateau quality, consistency and flatness
+- **Curve Geometry**: S-curve symmetry around midpoint
+- **Noise Detection**: High-frequency noise characteristics
+- **Trend Analysis**: Directional consistency throughout curve
+- **Anomaly Detection**: Spike detection, oscillation patterns, dropout detection
+- **Comparative Metrics**: Relative amplitude, background separation
+
+#### **🎭 Visual Pattern Analysis Workflow**
+
+```
+RFU
+ ↑
+ │     ┌─── Plateau Level & Quality
+ │    ╱│
+ │   ╱ │ ← Amplitude & Exponential Sharpness
+ │  ╱  │
+ │ ╱   │ ← Steepness & Curve Symmetry
+ │╱    │   ← Noise Pattern Detection
+ └──────────────→ Cycles
+   ↑    ↑
+Baseline   Midpoint (Cq)
+Stability  
+```
+
+**Pattern Recognition Process**:
+1. **Shape Classification** - Identifies curve type (flat, linear, S-curve, exponential, irregular)
+2. **Baseline Stability** - Measures consistency of early cycles for noise detection
+3. **Exponential Sharpness** - Analyzes steepness of amplification phase
+4. **Plateau Quality** - Evaluates flatness and consistency of saturation phase
+5. **Curve Symmetry** - Assesses S-curve symmetry around inflection point
+6. **Anomaly Detection** - Identifies spikes, oscillations, and data dropouts
+
+#### **📋 Classification Decision Logic**
+
+**Rule-Based Classification (Initial/Fallback)**:
+- **STRONG_POSITIVE**: Amplitude > 1000 RFU, R² > 0.9, good S-curve
+- **POSITIVE**: Amplitude 500-1000 RFU, R² > 0.85, clear exponential
+- **WEAK_POSITIVE**: Amplitude 100-500 RFU, detectable signal
+- **INDETERMINATE**: Poor curve quality, ambiguous biological result
+- **REDO**: Technical issues, borderline amplitude (400-500 RFU)
+- **SUSPICIOUS**: Anomalies detected, questionable result quality
+- **NEGATIVE**: Amplitude < 100 RFU, flat baseline
+
+**ML Classification (Trained Model)**:
+- Uses all 30 features for RandomForestClassifier prediction
+- Confidence scoring with threshold-based acceptance
+- Cross-validation for model reliability assessment
+- Pathogen-specific model training and prediction
+
+**Expert Override System**:
+- Expert decisions immediately override all automated classifications
+- Display: "👨‍⚕️ Expert Review" with "(Expert Decision)" confidence
+- Persistent storage with audit trail and timestamp
+- Training data integration for continuous model improvement
+
 ### ✅ **MISSION ACCOMPLISHED: 77.1% Compliance Restored** (July 28, 2025)
 
 **ACHIEVEMENT SUMMARY**:

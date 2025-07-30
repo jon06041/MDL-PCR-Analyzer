@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, Response
 import json
 import os
 import re
@@ -1839,6 +1839,11 @@ def ml_analyze_curve():
     if not ML_AVAILABLE or ml_classifier is None:
         return jsonify({'error': 'ML classifier not available'}), 503
     
+    # Check for batch cancellation flag
+    if app.config.get('ML_BATCH_CANCELLED', False):
+        app.logger.info("ML analysis request cancelled due to batch cancellation")
+        return jsonify({'error': 'Analysis cancelled by user'}), 409
+    
     try:
         data = request.json
         if not data:
@@ -2259,6 +2264,44 @@ def ml_validation_dashboard_api():
         
     except Exception as e:
         app.logger.error(f"ML validation dashboard error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-cancel-batch', methods=['POST'])
+def cancel_ml_batch_analysis():
+    """Cancel ongoing batch ML analysis"""
+    try:
+        # Set a global flag that can be checked by ongoing analysis
+        app.config['ML_BATCH_CANCELLED'] = True
+        
+        # Log the cancellation
+        app.logger.info("ML batch analysis cancelled by user request")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Batch ML analysis cancellation requested'
+        })
+        
+    except Exception as e:
+        app.logger.error(f"ML batch cancellation error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-reset-cancellation', methods=['POST'])
+def reset_ml_batch_cancellation():
+    """Reset the batch ML analysis cancellation flag"""
+    try:
+        # Reset the cancellation flag
+        app.config['ML_BATCH_CANCELLED'] = False
+        
+        # Log the reset
+        app.logger.info("ML batch analysis cancellation flag reset")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Batch ML analysis cancellation flag reset'
+        })
+        
+    except Exception as e:
+        app.logger.error(f"ML batch cancellation reset error: {e}")
         return jsonify({'error': str(e)}), 500
 
 # ===== ML CONFIGURATION ENDPOINTS =====

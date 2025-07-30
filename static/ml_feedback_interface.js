@@ -2037,6 +2037,12 @@ class MLFeedbackInterface {
 
     async updateWellClassification(newClassification, reason) {
         try {
+            console.log('🔄 WELL-UPDATE: Starting well classification update:', {
+                wellKey: this.currentWellKey,
+                newClassification,
+                reason
+            });
+            
             const response = await fetch('/api/update-well-classification', {
                 method: 'POST',
                 headers: {
@@ -2056,15 +2062,44 @@ class MLFeedbackInterface {
 
             const result = await response.json();
             if (result.success) {
+                console.log('✅ WELL-UPDATE: Backend update successful');
+                
                 // Update local data
                 this.currentWellData.classification = newClassification;
+                
+                // CRITICAL: Update curve_classification data for modal to recognize expert feedback
+                this.currentWellData.curve_classification = {
+                    classification: newClassification,
+                    method: 'expert_feedback',
+                    confidence: 1.0,
+                    timestamp: new Date().toISOString(),
+                    expert_decision_type: reason === 'expert_feedback' ? 'Expert Decision' : 'Other'
+                };
+                
+                console.log('🔍 FEEDBACK-UPDATE: Set curve_classification data:', this.currentWellData.curve_classification);
                 
                 // Update global analysis results if available
                 if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
                     const globalWellData = window.currentAnalysisResults.individual_results[this.currentWellKey];
                     if (globalWellData) {
+                        console.log('🔄 WELL-UPDATE: Updating global well data...');
+                        
                         globalWellData.classification = newClassification;
+                        // CRITICAL: Also update curve_classification in global data
+                        globalWellData.curve_classification = {
+                            classification: newClassification,
+                            method: 'expert_feedback',
+                            confidence: 1.0,
+                            timestamp: new Date().toISOString(),
+                            expert_decision_type: reason === 'expert_feedback' ? 'Expert Decision' : 'Other'
+                        };
+                        
+                        console.log('✅ WELL-UPDATE: Updated global curve_classification for', this.currentWellKey, ':', globalWellData.curve_classification);
+                    } else {
+                        console.warn('⚠️ WELL-UPDATE: Global well data not found for key:', this.currentWellKey);
                     }
+                } else {
+                    console.warn('⚠️ WELL-UPDATE: No global analysis results available');
                 }
                 
                 console.log(`✅ Well classification updated to: ${newClassification}`);
@@ -2362,11 +2397,14 @@ class MLFeedbackInterface {
                     // Track this prediction for validation
                     await this.trackPredictionForValidation(wellData, expertClassification, submissionWellData);
                     
-                    // Update the results table with the expert classification
+                    // CRITICAL: FIRST persist the expert classification to both local and backend data
+                    await this.updateWellClassification(expertClassification, 'expert_feedback');
+                    
+                    // THEN update the results table with the expert classification
                     await this.updateResultsTableAfterFeedback(expertClassification);
                     
-                    // CRITICAL: Persist the expert classification to the backend database
-                    await this.updateWellClassification(expertClassification, 'expert_feedback');
+                    // FINALLY refresh the modal to show expert feedback (data is now updated)
+                    this.refreshModalAfterFeedback(expertClassification);
                     
                     // Use non-blocking notification instead of alert
                     this.showTrainingNotification(
@@ -2485,6 +2523,10 @@ class MLFeedbackInterface {
         console.log(`🔄 Performing ${analysisType} batch ML analysis with ${trainingCount} training samples`);
         
         try {
+            // Reset cancellation flag and notify server that new analysis is starting
+            window.mlAutoAnalysisUserChoice = null;
+            await this.resetBatchCancellationFlag();
+            
             // Remove the notification that prompted this action
             const existingNotification = document.getElementById('ml-available-notification');
             if (existingNotification) {
@@ -2624,6 +2666,32 @@ class MLFeedbackInterface {
             
             // Process wells sequentially to show real-time progress in result modals
             for (let i = 0; i < wellKeys.length; i++) {
+                // CRITICAL: Check if user clicked "Skip" during processing
+                if (window.mlAutoAnalysisUserChoice === 'skipped') {
+                    console.log('🛑 ML Batch Analysis: User clicked SKIP - aborting batch analysis');
+                    
+                    // Send immediate cancellation to server
+                    await this.sendBatchCancellationRequest();
+                    
+                    // Reset browser title
+                    document.title = 'qPCR Analyzer';
+                    
+                    // Hide progress notification
+                    const progressNotification = document.getElementById('ml-available-notification');
+                    if (progressNotification) {
+                        progressNotification.remove();
+                    }
+                    
+                    // Show cancellation message
+                    this.showTrainingNotification(
+                        'Analysis Cancelled',
+                        `✋ Batch ML analysis cancelled by user after processing ${i} of ${wellKeys.length} wells.`,
+                        'info'
+                    );
+                    
+                    return; // Exit the function early
+                }
+                
                 const wellKey = wellKeys[i];
                 const wellData = individualResults[wellKey];
                 const wellNum = i + 1;
@@ -2693,6 +2761,12 @@ class MLFeedbackInterface {
 
     async analyzeSingleWellWithML(wellKey, wellData) {
         try {
+            // CRITICAL: Check for cancellation before making any HTTP requests
+            if (window.mlAutoAnalysisUserChoice === 'skipped') {
+                console.log(`🛑 ML Analysis: Skipping ${wellKey} - user cancelled batch analysis`);
+                return null; // Return early, don't make HTTP request
+            }
+            
             // Extract pathogen information for this well
             const fluorophore = wellData.fluorophore || wellData.channel || '';
             const currentExperimentPattern = (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null;
@@ -2740,11 +2814,23 @@ class MLFeedbackInterface {
                 }
             };
             
+            // CRITICAL: Final cancellation check before making HTTP request
+            if (window.mlAutoAnalysisUserChoice === 'skipped') {
+                console.log(`🛑 ML Analysis: Skipping HTTP request for ${wellKey} - user cancelled during preparation`);
+                return null; // Return early, don't make HTTP request
+            }
+            
             const response = await fetch('/api/ml-analyze-curve', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(analysisData)
             });
+            
+            // Handle cancellation response from server
+            if (response.status === 409) {
+                console.log(`🛑 ML Analysis: Server cancelled analysis for ${wellKey}`);
+                return null; // Server-side cancellation, return early
+            }
             
             if (response.ok) {
                 const result = await response.json();
@@ -3583,6 +3669,12 @@ class MLFeedbackInterface {
             const results = [];
             
             for (const similarWell of similarWells) {
+                // CRITICAL: Check for cancellation before processing each well
+                if (window.mlAutoAnalysisUserChoice === 'skipped') {
+                    console.log(`🛑 Batch Re-evaluation: User cancelled - stopping after ${reEvaluatedCount} wells`);
+                    break; // Exit the loop early
+                }
+                
                 try {
                     // Re-analyze this well with the updated model
                     const reAnalysisResult = await this.analyzeSingleWellWithML(
@@ -3738,6 +3830,12 @@ class MLFeedbackInterface {
     async checkForAutomaticMLAnalysis() {
         // Check if we should automatically run ML analysis for this session
         // This is called when new analysis results are loaded
+        
+        // Check if user already declined/skipped automatic ML analysis
+        if (window.mlAutoAnalysisUserChoice === 'skipped') {
+            console.log('🔴 Auto-ML: User previously skipped automatic ML analysis, aborting');
+            return false;
+        }
         
         try {
             // Get current test code from the uploaded experiment
@@ -3985,6 +4083,10 @@ class MLFeedbackInterface {
             // Set flag to indicate user declined/skipped automatic ML analysis
             console.log('🔴 ML Banner: User SKIPPED automatic ML analysis');
             window.mlAutoAnalysisUserChoice = 'skipped';
+            
+            // Send cancellation request to server to stop any ongoing processing
+            this.sendBatchCancellationRequest();
+            
             if (onDecline) onDecline();
             notification.remove();
         };
@@ -4050,11 +4152,44 @@ class MLFeedbackInterface {
                         <div class="ml-progress-text" id="ml-progress-text">Initializing analysis...</div>
                     </div>
                 </div>
-                <div class="ml-notification-spinner">
-                    <div class="spinner-animation">🔄</div>
+                <div class="ml-notification-actions">
+                    <button class="ml-notification-btn secondary" onclick="this.parentElement.parentElement.parentElement.skipRunningAnalysis()">
+                        ✋ Skip Analysis
+                    </button>
                 </div>
             </div>
         `;
+        
+        // Add skip action handler to the notification
+        notification.skipRunningAnalysis = () => {
+            console.log('🛑 User clicked SKIP during running ML analysis');
+            
+            // Set the cancellation flag
+            window.mlAutoAnalysisUserChoice = 'skipped';
+            
+            // Send cancellation request to server immediately
+            this.sendBatchCancellationRequest();
+            
+            // Show immediate feedback
+            const progressText = document.getElementById('ml-progress-text');
+            if (progressText) {
+                progressText.textContent = 'Cancelling analysis...';
+            }
+            
+            // Remove the notification after a short delay
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.remove();
+                }
+                
+                // Show cancellation confirmation
+                this.showTrainingNotification(
+                    'Analysis Cancelled',
+                    '✋ ML batch analysis has been cancelled by user request.',
+                    'info'
+                );
+            }, 1000);
+        };
         
         // Add styles
         this.addNotificationStyles();
@@ -4472,7 +4607,8 @@ class MLFeedbackInterface {
                     wellResult.curve_classification = {
                         classification: expertClassification,
                         confidence: 1.0, // Expert classification has 100% confidence
-                        method: methodType,
+                        method: 'expert_feedback', // Use consistent method name that table expects
+                        expert_decision_type: methodType, // Store the decision type separately for logging
                         original_ml_prediction: originalMLPrediction,
                         pathogen: wellResult.target || wellResult.specific_pathogen || 'Unknown',
                         timestamp: new Date().toISOString()
@@ -4497,11 +4633,19 @@ class MLFeedbackInterface {
             // Update the specific table cell directly - use multiple strategies
             this.updateTableCellWithClassification(this.currentWellKey, expertClassification);
             
+            // CRITICAL FIX: Create a simple function to refresh just this row
+            this.refreshSingleTableRow(this.currentWellKey, expertClassification);
+            
             // CRITICAL FIX: Force refresh the entire results table to show changes
             if (typeof window.refreshResultsTable === 'function') {
                 console.log('🔄 Force refreshing entire results table');
                 setTimeout(() => {
                     window.refreshResultsTable();
+                }, 200);
+            } else if (typeof window.populateResultsTable === 'function') {
+                console.log('🔄 Re-populating results table with updated data');
+                setTimeout(() => {
+                    window.populateResultsTable(window.currentAnalysisResults.individual_results);
                 }, 200);
             }
             
@@ -4554,6 +4698,240 @@ class MLFeedbackInterface {
         } catch (error) {
             console.error('Failed to update results table after feedback:', error);
             // Non-critical error, don't throw
+        }
+    }
+
+    /**
+     * Immediately refreshes the modal to show expert feedback
+     */
+    refreshModalAfterFeedback(expertClassification) {
+        try {
+            console.log('🔄 MODAL-REFRESH: Refreshing modal after expert feedback:', expertClassification);
+            
+            // CRITICAL: Ensure the well data in memory has been updated first
+            if (this.currentWellData) {
+                this.currentWellData.curve_classification = {
+                    classification: expertClassification,
+                    method: 'expert_feedback',
+                    confidence: 1.0,
+                    timestamp: new Date().toISOString(),
+                    expert_decision_type: 'Expert Decision'
+                };
+                console.log('🔄 MODAL-REFRESH: Updated local well data curve_classification');
+            }
+            
+            // Verify the well data has been updated in global state
+            if (window.currentAnalysisResults && 
+                window.currentAnalysisResults.individual_results && 
+                this.currentWellKey) {
+                
+                const wellResult = window.currentAnalysisResults.individual_results[this.currentWellKey];
+                console.log('🔍 MODAL-REFRESH: Current well data after update:', {
+                    wellKey: this.currentWellKey,
+                    classification: wellResult?.classification,
+                    curve_classification: wellResult?.curve_classification,
+                    ml_classification: wellResult?.ml_classification,
+                    expertMethod: wellResult?.curve_classification?.method,
+                    expertClassification: wellResult?.curve_classification?.classification
+                });
+                
+                // Double-check that the expert feedback was properly saved
+                if (!wellResult?.curve_classification || 
+                    wellResult.curve_classification.method !== 'expert_feedback' ||
+                    wellResult.curve_classification.classification !== expertClassification) {
+                    
+                    console.warn('🚨 MODAL-REFRESH: Expert feedback not properly saved, forcing update...');
+                    // Force update the global data directly
+                    wellResult.curve_classification = {
+                        classification: expertClassification,
+                        method: 'expert_feedback',
+                        confidence: 1.0,
+                        timestamp: new Date().toISOString(),
+                        expert_decision_type: 'Expert Decision'
+                    };
+                    wellResult.classification = expertClassification;
+                    console.log('🔄 MODAL-REFRESH: Forced global data update completed');
+                }
+            }
+            
+            // Force immediate modal refresh if modal is open
+            if (window.currentModalWellKey === this.currentWellKey) {
+                console.log('🔄 MODAL-REFRESH: Modal is open for this well, refreshing immediately');
+                
+                // Update modal details directly with the updated data
+                if (typeof window.updateModalDetails === 'function' && 
+                    window.currentAnalysisResults && 
+                    window.currentAnalysisResults.individual_results) {
+                    
+                    const wellResult = window.currentAnalysisResults.individual_results[this.currentWellKey];
+                    if (wellResult) {
+                        console.log('🔄 MODAL-REFRESH: Calling updateModalDetails with expert data');
+                        window.updateModalDetails(wellResult);
+                    }
+                }
+                
+                // CRITICAL: Also directly update the result field in case of timing issues
+                this.updateModalResultField(expertClassification);
+                
+                // Also refresh the entire modal content as backup
+                if (typeof window.updateModalContent === 'function') {
+                    console.log('🔄 MODAL-REFRESH: Calling updateModalContent as backup');
+                    setTimeout(() => {
+                        window.updateModalContent(this.currentWellKey);
+                    }, 100);
+                }
+                
+                // Refresh the ML feedback interface display
+                setTimeout(() => {
+                    if (this.isInitialized) {
+                        console.log('🔄 MODAL-REFRESH: Refreshing ML feedback interface display');
+                        this.refreshMLDisplayInModal();
+                    }
+                }, 200);
+            } else {
+                console.log('🔍 MODAL-REFRESH: Modal not open for this well, skipping modal refresh');
+            }
+            
+            console.log('✅ MODAL-REFRESH: Modal refresh process completed');
+            
+        } catch (error) {
+            console.error('Error refreshing modal after feedback:', error);
+        }
+    }
+
+    /**
+     * Directly update the modal result field with expert classification
+     * @param {string} expertClassification - The expert classification result
+     */
+    updateModalResultField(expertClassification) {
+        try {
+            console.log('🎯 MODAL-RESULT: Directly updating modal result field to:', expertClassification);
+            
+            // Find the result badge in the modal
+            const resultBadge = document.querySelector('.modal-result-badge');
+            if (resultBadge) {
+                // Map expert classifications to modal result classes and text
+                const expertClassMap = {
+                    'STRONG_POSITIVE': { class: 'modal-result-pos', text: 'STRONG_POSITIVE' },
+                    'POSITIVE': { class: 'modal-result-pos', text: 'POSITIVE' },
+                    'WEAK_POSITIVE': { class: 'modal-result-pos', text: 'WEAK_POSITIVE' },
+                    'NEGATIVE': { class: 'modal-result-neg', text: 'NEGATIVE' },
+                    'INDETERMINATE': { class: 'modal-result-redo', text: 'INDETERMINATE' },
+                    'REDO': { class: 'modal-result-redo', text: 'REDO' },
+                    'SUSPICIOUS': { class: 'modal-result-redo', text: 'SUSPICIOUS' }
+                };
+                
+                const resultMapping = expertClassMap[expertClassification] || 
+                    { class: 'modal-result-redo', text: expertClassification };
+                
+                // Remove all existing modal result classes
+                resultBadge.classList.remove('modal-result-pos', 'modal-result-neg', 'modal-result-redo');
+                
+                // Add the new class and update text
+                resultBadge.classList.add(resultMapping.class);
+                resultBadge.textContent = resultMapping.text;
+                resultBadge.title = 'Classification source: expert_feedback';
+                
+                console.log('✅ MODAL-RESULT: Successfully updated result badge to:', resultMapping.text, 'with class:', resultMapping.class);
+            } else {
+                console.warn('⚠️ MODAL-RESULT: Result badge not found in modal');
+            }
+        } catch (error) {
+            console.error('Error updating modal result field:', error);
+        }
+    }
+
+    /**
+     * Refreshes a single table row instead of the entire table
+     */
+    refreshSingleTableRow(wellKey, expertClassification) {
+        try {
+            console.log('🔄 Refreshing single table row for:', wellKey, 'with classification:', expertClassification);
+            
+            // Find the table row
+            const tableBody = document.getElementById('resultsTableBody');
+            if (!tableBody) {
+                console.warn('Results table body not found');
+                return;
+            }
+            
+            // Find the row using multiple strategies
+            let targetRow = null;
+            
+            // Strategy 1: Find by data-well-key attribute
+            targetRow = tableBody.querySelector(`tr[data-well-key="${wellKey}"]`);
+            
+            // Strategy 2: Find by well ID in first cell
+            if (!targetRow) {
+                const rows = tableBody.querySelectorAll('tr');
+                for (const row of rows) {
+                    const firstCell = row.querySelector('td:first-child');
+                    if (firstCell && firstCell.textContent.trim() === wellKey) {
+                        targetRow = row;
+                        break;
+                    }
+                }
+            }
+            
+            // Strategy 3: Find by well part (e.g., A10 from A10_HEX)
+            if (!targetRow) {
+                const wellPart = wellKey.split('_')[0];
+                const rows = tableBody.querySelectorAll('tr');
+                for (const row of rows) {
+                    const firstCell = row.querySelector('td:first-child');
+                    if (firstCell && firstCell.textContent.trim() === wellPart) {
+                        targetRow = row;
+                        break;
+                    }
+                }
+            }
+            
+            if (targetRow) {
+                console.log('✅ Found target row, updating curve class cell...');
+                
+                // Find the curve class cell (column index 4 typically)
+                const curveClassCell = targetRow.cells[4]; // Curve Class is 5th column (index 4)
+                
+                if (curveClassCell) {
+                    // Create the expert feedback badge HTML
+                    const classMap = {
+                        'STRONG_POSITIVE': 'curve-strong-pos',
+                        'POSITIVE': 'curve-pos',
+                        'WEAK_POSITIVE': 'curve-weak-pos',
+                        'NEGATIVE': 'curve-neg',
+                        'INDETERMINATE': 'curve-indet',
+                        'SUSPICIOUS': 'curve-suspicious',
+                        'REDO': 'curve-indet'
+                    };
+                    
+                    const badgeClass = classMap[expertClassification] || 'curve-other';
+                    const displayText = expertClassification.replace('_', ' ');
+                    const newHTML = `<span class="curve-badge ${badgeClass}" title="Expert Classification: ${displayText}">${displayText} ✓</span>`;
+                    
+                    // Update the cell
+                    curveClassCell.innerHTML = newHTML;
+                    
+                    // Add visual highlight
+                    curveClassCell.style.background = '#d4edda';
+                    curveClassCell.style.border = '2px solid #28a745';
+                    curveClassCell.style.fontWeight = 'bold';
+                    
+                    setTimeout(() => {
+                        curveClassCell.style.background = '';
+                        curveClassCell.style.border = '';
+                        curveClassCell.style.fontWeight = '';
+                    }, 3000);
+                    
+                    console.log('✅ Successfully updated single table row curve class cell');
+                } else {
+                    console.warn('Could not find curve class cell in target row');
+                }
+            } else {
+                console.warn('Could not find target row for well:', wellKey);
+            }
+            
+        } catch (error) {
+            console.error('Error refreshing single table row:', error);
         }
     }
 
@@ -5037,6 +5415,67 @@ class MLFeedbackInterface {
         } catch (error) {
             console.error('❌ Error tracking prediction for validation:', error);
             // Don't throw error - validation tracking shouldn't break the main workflow
+        }
+    }
+    
+    async sendBatchCancellationRequest() {
+        /**
+         * Send cancellation request to server to stop ongoing batch ML analysis
+         */
+        try {
+            console.log('🛑 Sending batch cancellation request to server...');
+            
+            const response = await fetch('/api/ml-cancel-batch', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    timestamp: new Date().toISOString(),
+                    reason: 'user_requested_skip'
+                })
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                console.log('✅ Server cancellation request sent successfully:', result.message);
+            } else {
+                console.warn('⚠️ Failed to send cancellation request to server:', response.status);
+            }
+            
+        } catch (error) {
+            console.error('❌ Error sending batch cancellation request:', error);
+            // Non-blocking - cancellation request failure shouldn't break the UI
+        }
+    }
+    
+    async resetBatchCancellationFlag() {
+        /**
+         * Reset the batch cancellation flag on the server when starting new analysis
+         */
+        try {
+            console.log('🔄 Resetting batch cancellation flag on server...');
+            
+            const response = await fetch('/api/ml-reset-cancellation', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    timestamp: new Date().toISOString(),
+                    action: 'reset_cancellation_flag'
+                })
+            });
+            
+            if (response.ok) {
+                console.log('✅ Server cancellation flag reset successfully');
+            } else {
+                console.warn('⚠️ Failed to reset cancellation flag on server:', response.status);
+            }
+            
+        } catch (error) {
+            console.error('❌ Error resetting cancellation flag:', error);
+            // Non-blocking - flag reset failure shouldn't break the analysis
         }
     }
     

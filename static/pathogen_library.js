@@ -21,7 +21,7 @@ const PATHOGEN_LIBRARY = {
         "FAM": "Chlamydia trachomatis"
     },
     "Ngon": {
-        "HEX": "Neisseria gonhorrea"
+        "HEX": "Neisseria gonorrhoeae"
     },
     "Tvag": {
         "FAM": "Trichomonas vaginalis"
@@ -275,7 +275,7 @@ const PATHOGEN_LIBRARY = {
     },
     // Single-channel tests
     "Ngon": {
-        "HEX": "Neisseria gonhorrea"
+        "HEX": "Neisseria gonorrhoeae"
     },
     "Calb": {
         "HEX": "Candida albicans"

@@ -273,48 +273,48 @@ function determineControlType(wellKey, well) {
     
     // Method 1: Look for H-, M-, L- patterns (most reliable)
     if (sampleName.includes('H-')) {
-        console.log(`[CONTROL-DETECT] Found H control: ${wellKey} (H- pattern in: ${sampleName})`);
+        //console.log(`[CONTROL-DETECT] Found H control: ${wellKey} (H- pattern in: ${sampleName})`);
         return 'H';
     }
     if (sampleName.includes('M-')) {
-        console.log(`[CONTROL-DETECT] Found M control: ${wellKey} (M- pattern in: ${sampleName})`);
+        //console.log(`[CONTROL-DETECT] Found M control: ${wellKey} (M- pattern in: ${sampleName})`);
         return 'M';
     }
     if (sampleName.includes('L-')) {
-        console.log(`[CONTROL-DETECT] Found L control: ${wellKey} (L- pattern in: ${sampleName})`);
+        //console.log(`[CONTROL-DETECT] Found L control: ${wellKey} (L- pattern in: ${sampleName})`);
         return 'L';
     }
     
     // Method 2: Look for explicit concentration indicators
     if (upperSampleName.includes('1E7') || upperSampleName.includes('10E7') || upperSampleName.includes('1E+7')) {
-        console.log(`[CONTROL-DETECT] Found H control by concentration: ${wellKey} (sample: ${sampleName})`);
+        //console.log(`[CONTROL-DETECT] Found H control by concentration: ${wellKey} (sample: ${sampleName})`);
         return 'H';
     }
     if (upperSampleName.includes('1E5') || upperSampleName.includes('10E5') || upperSampleName.includes('1E+5')) {
-        console.log(`[CONTROL-DETECT] Found M control by concentration: ${wellKey} (sample: ${sampleName})`);
+        //console.log(`[CONTROL-DETECT] Found M control by concentration: ${wellKey} (sample: ${sampleName})`);
         return 'M';
     }
     if (upperSampleName.includes('1E3') || upperSampleName.includes('10E3') || upperSampleName.includes('1E+3')) {
-        console.log(`[CONTROL-DETECT] Found L control by concentration: ${wellKey} (sample: ${sampleName})`);
+        //console.log(`[CONTROL-DETECT] Found L control by concentration: ${wellKey} (sample: ${sampleName})`);
         return 'L';
     }
     
     // Method 3: Look for explicit control words (only if very clear)
     if (upperSampleName.includes('HIGH CONTROL') || upperSampleName.includes('POSITIVE CONTROL')) {
-        console.log(`[CONTROL-DETECT] Found H control by explicit name: ${wellKey} (sample: ${sampleName})`);
+        //console.log(`[CONTROL-DETECT] Found H control by explicit name: ${wellKey} (sample: ${sampleName})`);
         return 'H';
     }
     if (upperSampleName.includes('MEDIUM CONTROL') || upperSampleName.includes('MED CONTROL')) {
-        console.log(`[CONTROL-DETECT] Found M control by explicit name: ${wellKey} (sample: ${sampleName})`);
+        //console.log(`[CONTROL-DETECT] Found M control by explicit name: ${wellKey} (sample: ${sampleName})`);
         return 'M';
     }
     if (upperSampleName.includes('LOW CONTROL')) {
-        console.log(`[CONTROL-DETECT] Found L control by explicit name: ${wellKey} (sample: ${sampleName})`);
+        //console.log(`[CONTROL-DETECT] Found L control by explicit name: ${wellKey} (sample: ${sampleName})`);
         return 'L';
     }
     
     // DO NOT classify as control well - be very conservative
-    console.log(`[CONTROL-DETECT] Sample well (not control): ${wellKey} (sample: ${sampleName})`);
+    //console.log(`[CONTROL-DETECT] Sample well (not control): ${wellKey} (sample: ${sampleName})`);
     return null; // Not a control well
 }
 
@@ -394,7 +394,7 @@ function recalculateCQJValues() {
             // CRITICAL: If CQJ is null/N/A, CalcJ must also be null/N/A
             if (newCqj === null || newCqj === undefined) {
                 calcjResult = { calcj_value: 'N/A', method: 'no_threshold_crossing' };
-                console.log(`[CALCJ-FIX] Well ${wellKey}: No threshold crossing, CalcJ = N/A`);
+                //console.log(`[CALCJ-FIX] Well ${wellKey}: No threshold crossing, CalcJ = N/A`);
             } else {
                 // Check if this is a control well - if so, use FIXED concentration values
                 const controlType = determineControlType(wellKey, well);
@@ -410,16 +410,16 @@ function recalculateCQJValues() {
                             calcj_value: concValues[controlType], 
                             method: `fixed_${controlType.toLowerCase()}_control` 
                         };
-                        console.log(`[CALCJ-FIX] CONTROL Well ${wellKey} (${controlType}): Fixed CalcJ = ${concValues[controlType]} (CQJ: ${newCqj})`);
+                        //console.log(`[CALCJ-FIX] CONTROL Well ${wellKey} (${controlType}): Fixed CalcJ = ${concValues[controlType]} (CQJ: ${newCqj})`);
                     } else {
                         // Fallback to dynamic calculation if no fixed value available
                         calcjResult = calculateCalcjWithControls(well, threshold, results, testCode, channel);
-                        console.log(`[CALCJ-FIX] CONTROL Well ${wellKey} (${controlType}): No fixed value found, using dynamic calculation`);
+                        //console.log(`[CALCJ-FIX] CONTROL Well ${wellKey} (${controlType}): No fixed value found, using dynamic calculation`);
                     }
                 } else {
                     // Sample wells get dynamic calculation using control-based standard curve
                     calcjResult = calculateCalcjWithControls(well, threshold, results, testCode, channel);
-                    console.log(`[CALCJ-FIX] SAMPLE Well ${wellKey}: Dynamic CalcJ = ${calcjResult.calcj_value} (method: ${calcjResult.method}, CQJ: ${newCqj})`);
+                    //console.log(`[CALCJ-FIX] SAMPLE Well ${wellKey}: Dynamic CalcJ = ${calcjResult.calcj_value} (method: ${calcjResult.method}, CQJ: ${newCqj})`);
                 }
             }
             
@@ -562,11 +562,11 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
                 
                 if (consensus.length > 0) {
                     avgControlCqj[controlType] = consensus.reduce((sum, val) => sum + val, 0) / consensus.length;
-                    console.log(`[CALCJ-DEBUG] ${controlType} control consensus: ${avgControlCqj[controlType]} from [${consensus.join(', ')}] (excluded outliers: [${cqjList.filter(val => val < lowerBound || val > upperBound).join(', ')}])`);
+                    //console.log(`[CALCJ-DEBUG] ${controlType} control consensus: ${avgControlCqj[controlType]} from [${consensus.join(', ')}] (excluded outliers: [${cqjList.filter(val => val < lowerBound || val > upperBound).join(', ')}])`);
                 } else {
                     // All were outliers, use median as fallback
                     avgControlCqj[controlType] = median;
-                    console.log(`[CALCJ-DEBUG] ${controlType} control all outliers, using median: ${median}`);
+                    //console.log(`[CALCJ-DEBUG] ${controlType} control all outliers, using median: ${median}`);
                 }
             }
         }
@@ -574,14 +574,14 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
     
     // Check if we have enough controls for standard curve (REQUIRE H and L controls)
     if (!avgControlCqj.H || !avgControlCqj.L) {
-        console.warn(`[CALCJ-DEBUG] Missing required controls - H: ${avgControlCqj.H}, L: ${avgControlCqj.L}`);
+        //console.warn(`[CALCJ-DEBUG] Missing required controls - H: ${avgControlCqj.H}, L: ${avgControlCqj.L}`);
         return { calcj_value: 'N/A', method: 'missing_required_controls' };
     }
     
     // Get CQJ for current well
     const currentCqj = well.cqj_value;
     if (currentCqj === null || currentCqj === undefined) {
-        console.warn(`[CALCJ-DEBUG] Current well has no CQJ value`);
+        //console.warn(`[CALCJ-DEBUG] Current well has no CQJ value`);
         return { calcj_value: 'N/A', method: 'no_threshold_crossing' };
     }
     

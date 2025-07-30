@@ -451,7 +451,7 @@ function createTabbedPathogenGrids(container, testCode, controlData) {
         ];
     } else if (testCode === 'Ngon') {
         allPathogens = [
-            { name: 'Neisseria gonhorrea', fluorophore: 'HEX' }
+            { name: 'Neisseria gonorrhoeae', fluorophore: 'HEX' }
         ];
     } else if (testCode === 'Calb') {
         allPathogens = [
