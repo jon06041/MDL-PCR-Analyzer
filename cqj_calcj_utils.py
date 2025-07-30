@@ -10,12 +10,14 @@ try:
     from config_loader import CONCENTRATION_CONTROLS
 except ImportError:
     print("[CONFIG-WARNING] Could not import centralized config, using fallback values")
-    # Fallback values if config loader fails
+    # Fallback values if config loader fails - MUST match config/concentration_controls.json
     CONCENTRATION_CONTROLS = {
+        # Lacto has special lower concentrations
         'Lacto': {
-            'Cy5': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3},
-            'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'TexasRed': {'H': 1e7, 'M': 1e5, 'L': 1e3}
+            'Cy5': {'H': 1e6, 'M': 1e4, 'L': 1e2}, 'FAM': {'H': 1e6, 'M': 1e4, 'L': 1e2},
+            'HEX': {'H': 1e6, 'M': 1e4, 'L': 1e2}, 'TexasRed': {'H': 1e6, 'M': 1e4, 'L': 1e2}
         },
+        # Standard concentrations (1e7, 1e5, 1e3)
         'Calb': {'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 
         'Ctrach': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
         'Ngon': {'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}}, 
@@ -36,7 +38,24 @@ except ImportError:
         'GvagNY': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
         'MegasphaeraNY': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
         'LactoNY': {'Cy5': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}, 'TexasRed': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
-        'RNaseP': {'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}}
+        'RNaseP': {'HEX': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        'Mgen': {'FAM': {'H': 1e7, 'M': 1e5, 'L': 1e3}},
+        # BVPanel tests have higher concentrations (1e8, 1e6, 1e4)
+        'BVPanelPCR3': {
+            'FAM': {'H': 1e8, 'M': 1e6, 'L': 1e4}, 'HEX': {'H': 1e8, 'M': 1e6, 'L': 1e4},
+            'TexasRed': {'H': 1e8, 'M': 1e6, 'L': 1e4}, 'Cy5': {'H': 1e8, 'M': 1e6, 'L': 1e4}
+        },
+        'BVPanelPCR2': {
+            'FAM': {'H': 1e8, 'M': 1e6, 'L': 1e4}, 'HEX': {'H': 1e8, 'M': 1e6, 'L': 1e4},
+            'TexasRed': {'H': 1e8, 'M': 1e6, 'L': 1e4}, 'Cy5': {'H': 1e8, 'M': 1e6, 'L': 1e4}
+        },
+        'BVPanelPCR1': {
+            'FAM': {'H': 1e8, 'M': 1e6, 'L': 1e4}, 'HEX': {'H': 1e8, 'M': 1e6, 'L': 1e4},
+            'TexasRed': {'H': 1e8, 'M': 1e6, 'L': 1e4}, 'Cy5': {'H': 1e8, 'M': 1e6, 'L': 1e4}
+        },
+        'BVAB': {
+            'FAM': {'H': 1e8, 'M': 1e6, 'L': 1e4}, 'HEX': {'H': 1e8, 'M': 1e6, 'L': 1e4}, 'Cy5': {'H': 1e8, 'M': 1e6, 'L': 1e4}
+        }
     }
 
 def calculate_cqj_simple(rfu: List[float], cycles: List[float], threshold: float) -> Optional[float]:

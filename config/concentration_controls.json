@@ -1,28 +1,28 @@
 {
   "version": "1.0",
   "description": "CENTRALIZED concentration control values for qPCR analysis. Update this file to change control concentrations for all tests.",
-  "last_updated": "2025-07-25",
+  "last_updated": "2025-07-30",
   "controls": {
     "Lacto": {
       "Cy5": {
-        "H": 10000000.0,
-        "M": 100000.0,
-        "L": 1000.0
+        "H": 1000000.0,
+        "M": 10000.0,
+        "L": 100.0
       },
       "FAM": {
-        "H": 10000000.0,
-        "M": 100000.0,
-        "L": 1000.0
+        "H": 1000000.0,
+        "M": 10000.0,
+        "L": 100.0
       },
       "HEX": {
-        "H": 10000000.0,
-        "M": 100000.0,
-        "L": 1000.0
+        "H": 1000000.0,
+        "M": 10000.0,
+        "L": 100.0
       },
       "TexasRed": {
-        "H": 10000000.0,
-        "M": 100000.0,
-        "L": 1000.0
+        "H": 1000000.0,
+        "M": 10000.0,
+        "L": 100.0
       }
     },
     "Calb": {
@@ -196,12 +196,107 @@
         "M": 100000.0,
         "L": 1000.0
       }
+    },
+    "Mgen": {
+      "FAM": {
+        "H": 10000000.0,
+        "M": 100000.0,
+        "L": 1000.0
+      }
+    },
+    "BVPanelPCR3": {
+      "FAM": {
+        "H": 100000000.0,
+        "M": 1000000.0,
+        "L": 10000.0
+      },
+      "HEX": {
+        "H": 100000000.0,
+        "M": 1000000.0,
+        "L": 10000.0
+      },
+      "Texas Red": {
+        "H": 100000000.0,
+        "M": 1000000.0,
+        "L": 10000.0
+      },
+      "Cy5": {
+        "H": 100000000.0,
+        "M": 1000000.0,
+        "L": 10000.0
+      }
+    },
+    "BVPanelPCR2": {
+      "FAM": {
+        "H": 100000000.0,
+        "M": 1000000.0,
+        "L": 10000.0
+      },
+      "HEX": {
+        "H": 100000000.0,
+        "M": 1000000.0,
+        "L": 10000.0
+      },
+      "Texas Red": {
+        "H": 100000000.0,
+        "M": 1000000.0,
+        "L": 10000.0
+      },
+      "Cy5": {
+        "H": 100000000.0,
+        "M": 1000000.0,
+        "L": 10000.0
+      }
+    },
+    "BVPanelPCR1": {
+      "FAM": {
+        "H": 100000000.0,
+        "M": 1000000.0,
+        "L": 10000.0
+      },
+      "HEX": {
+        "H": 100000000.0,
+        "M": 1000000.0,
+        "L": 10000.0
+      },
+      "Texas Red": {
+        "H": 100000000.0,
+        "M": 1000000.0,
+        "L": 10000.0
+      },
+      "Cy5": {
+        "H": 100000000.0,
+        "M": 1000000.0,
+        "L": 10000.0
+      }
+    },
+    "BVAB": {
+      "FAM": {
+        "H": 100000000.0,
+        "M": 1000000.0,
+        "L": 10000.0
+      },
+      "HEX": {
+        "H": 100000000.0,
+        "M": 1000000.0,
+        "L": 10000.0
+      },
+      "Cy5": {
+        "H": 100000000.0,
+        "M": 1000000.0,
+        "L": 10000.0
+      }
     }
   },
   "notes": {
-    "H": "High concentration control (1e7)",
-    "M": "Medium concentration control (1e5)",
-    "L": "Low concentration control (1e3)",
+    "H": "High concentration control",
+    "M": "Medium concentration control", 
+    "L": "Low concentration control",
+    "concentration_patterns": {
+      "Lacto": "1e6, 1e4, 1e2 (lower concentrations)",
+      "BVPanel_tests": "1e8, 1e6, 1e4 (higher concentrations)",
+      "Most_others": "1e7, 1e5, 1e3 (standard concentrations)"
+    },
     "usage": "These values are used for fixed CalcJ values for control wells and as reference concentrations for sample standard curve calculations"
   }
 }
