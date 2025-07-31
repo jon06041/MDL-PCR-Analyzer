@@ -2501,7 +2501,10 @@ class MLFeedbackInterface {
             );
             
             if (shouldAnalyze) {
-                await this.performBatchMLAnalysis(trainingCount, 'initial');
+                // Check for cancellation before starting batch analysis
+                if (!this.isMLAnalysisCancelled() && window.mlAutoAnalysisUserChoice !== 'skipped') {
+                    await this.performBatchMLAnalysis(trainingCount, 'initial');
+                }
             }
             
             // Show future automation message
@@ -2521,7 +2524,10 @@ class MLFeedbackInterface {
             );
             
             if (shouldAnalyze) {
-                await this.performBatchMLAnalysis(trainingCount, 'milestone');
+                // Check for cancellation before starting batch analysis
+                if (!this.isMLAnalysisCancelled() && window.mlAutoAnalysisUserChoice !== 'skipped') {
+                    await this.performBatchMLAnalysis(trainingCount, 'milestone');
+                }
             }
             
         } else if (trainingCount > 20) {
@@ -2678,8 +2684,8 @@ class MLFeedbackInterface {
             // Process wells sequentially to show real-time progress in result modals
             for (let i = 0; i < wellKeys.length; i++) {
                 // CRITICAL: Check if user clicked "Skip" during processing
-                if (window.mlAutoAnalysisUserChoice === 'skipped') {
-                    //console.log('🛑 ML Batch Analysis: User clicked SKIP - aborting batch analysis');
+                if (this.isMLAnalysisCancelled()) {
+                    console.log('🛑 ML Batch Analysis: User cancelled - aborting batch analysis at well', i + 1, 'of', wellKeys.length);
                     
                     // Send immediate cancellation to server
                     await this.sendBatchCancellationRequest();
@@ -2712,8 +2718,20 @@ class MLFeedbackInterface {
                 
                 //console.log(`🔄 ML Analysis: Processing well ${wellNum}/${wellKeys.length} (${wellKey})`);
                 
+                // CRITICAL: Final check before individual well processing to prevent HTTP requests
+                if (this.isMLAnalysisCancelled() || window.mlAutoAnalysisUserChoice === 'skipped') {
+                    //console.log(`🛑 ML Batch Analysis: Cancellation detected before processing ${wellKey}, stopping batch`);
+                    break;
+                }
+                
                 // Process this single well
                 await this.analyzeSingleWellWithML(wellKey, wellData);
+                
+                // CRITICAL: Check for cancellation after well processing to stop batch immediately
+                if (this.isMLAnalysisCancelled() || window.mlAutoAnalysisUserChoice === 'skipped') {
+                    //console.log(`🛑 ML Batch Analysis: Cancellation detected after processing ${wellKey}, stopping batch`);
+                    break;
+                }
                 
                 // Update progress
                 const progress = Math.round(((wellNum) / wellKeys.length) * 100);
@@ -2773,8 +2791,8 @@ class MLFeedbackInterface {
     async analyzeSingleWellWithML(wellKey, wellData) {
         try {
             // CRITICAL: Check for cancellation before making any HTTP requests
-            if (window.mlAutoAnalysisUserChoice === 'skipped') {
-                //console.log(`🛑 ML Analysis: Skipping ${wellKey} - user cancelled batch analysis`);
+            if (this.isMLAnalysisCancelled()) {
+                console.log(`🛑 ML Analysis: Skipping ${wellKey} - user cancelled batch analysis`);
                 return null; // Return early, don't make HTTP request
             }
             
@@ -2829,6 +2847,12 @@ class MLFeedbackInterface {
             if (window.mlAutoAnalysisUserChoice === 'skipped') {
                 //console.log(`🛑 ML Analysis: Skipping HTTP request for ${wellKey} - user cancelled during preparation`);
                 return null; // Return early, don't make HTTP request
+            }
+            
+            // CRITICAL: Double-check cancellation before HTTP request
+            if (this.isMLAnalysisCancelled()) {
+                console.log(`🛑 ML Analysis: Request cancelled for ${wellKey} before HTTP call`);
+                return null;
             }
             
             const response = await fetch('/api/ml-analyze-curve', {
@@ -3512,6 +3536,11 @@ class MLFeedbackInterface {
 
     async executeAutomaticBatchReEvaluation(correctedWellKey, correctedWellData, expertClassification) {
         try {
+            // CRITICAL: Check for cancellation before starting batch re-evaluation
+            if (this.isMLAnalysisCancelled() || window.mlAutoAnalysisUserChoice === 'skipped') {
+                return;
+            }
+            
             // Find similar wells that might benefit from re-evaluation
             const similarWells = await this.findSimilarWellsForBatchEvaluation(
                 correctedWellKey, 
@@ -3562,6 +3591,11 @@ class MLFeedbackInterface {
 
     async proposeAndExecuteBatchReEvaluation(correctedWellKey, correctedWellData, expertClassification) {
         try {
+            // CRITICAL: Check for cancellation before starting batch re-evaluation
+            if (this.isMLAnalysisCancelled() || window.mlAutoAnalysisUserChoice === 'skipped') {
+                return;
+            }
+            
             // Find similar wells that might benefit from re-evaluation
             const similarWells = await this.findSimilarWellsForBatchEvaluation(
                 correctedWellKey, 
@@ -3666,7 +3700,10 @@ class MLFeedbackInterface {
 
     async executeBatchReEvaluation(similarWells, expertClassification) {
         try {
-            console.log(`🔄 Executing automatic batch re-evaluation for ${similarWells.length} similar wells`);
+            // CRITICAL: Check for cancellation before starting batch re-evaluation
+            if (this.isMLAnalysisCancelled() || window.mlAutoAnalysisUserChoice === 'skipped') {
+                return;
+            }
             
             // Show progress notification
             this.showTrainingNotification(
@@ -3681,17 +3718,35 @@ class MLFeedbackInterface {
             
             for (const similarWell of similarWells) {
                 // CRITICAL: Check for cancellation before processing each well
-                if (window.mlAutoAnalysisUserChoice === 'skipped') {
+                if (this.isMLAnalysisCancelled()) {
                     console.log(`🛑 Batch Re-evaluation: User cancelled - stopping after ${reEvaluatedCount} wells`);
                     break; // Exit the loop early
                 }
                 
+                // ADDITIONAL: Check window flag for immediate cancellation
+                if (window.mlAutoAnalysisUserChoice === 'skipped') {
+                    console.log(`🛑 Batch Re-evaluation: User skipped analysis via window flag after ${reEvaluatedCount} wells`);
+                    break;
+                }
+                
                 try {
+                    // CRITICAL: Final check before individual well processing to prevent HTTP requests
+                    if (this.isMLAnalysisCancelled() || window.mlAutoAnalysisUserChoice === 'skipped') {
+                        console.log(`🛑 Batch Re-evaluation: Cancellation detected before processing ${similarWell.wellKey}`);
+                        break;
+                    }
+                    
                     // Re-analyze this well with the updated model
                     const reAnalysisResult = await this.analyzeSingleWellWithML(
                         similarWell.wellKey,
                         similarWell.wellData
                     );
+                    
+                    // CRITICAL: Check for cancellation after well processing
+                    if (this.isMLAnalysisCancelled() || window.mlAutoAnalysisUserChoice === 'skipped') {
+                        console.log(`🛑 Batch Re-evaluation: Cancellation detected after processing ${similarWell.wellKey}`);
+                        break;
+                    }
                     
                     if (reAnalysisResult && reAnalysisResult.prediction) {
                         reEvaluatedCount++;
@@ -3892,6 +3947,11 @@ class MLFeedbackInterface {
                             pathogen: currentTestCode,
                             samples: currentPathogenModel.training_samples,
                             onAccept: () => {
+                                // Check for cancellation before starting batch analysis
+                                if (this.isMLAnalysisCancelled() || window.mlAutoAnalysisUserChoice === 'skipped') {
+                                    return;
+                                }
+                                
                                 // Run both batch analysis and table enhancement
                                 this.performBatchMLAnalysis(currentPathogenModel.training_samples, 'automatic');
                                 // Also enhance current table if available
@@ -3914,6 +3974,11 @@ class MLFeedbackInterface {
                             samples: totalTrainingCount,
                             stats: result.stats, // Pass the stats for breakdown
                             onAccept: () => {
+                                // Check for cancellation before starting batch analysis
+                                if (this.isMLAnalysisCancelled() || window.mlAutoAnalysisUserChoice === 'skipped') {
+                                    return;
+                                }
+                                
                                 // Run both batch analysis and table enhancement
                                 this.performBatchMLAnalysis(totalTrainingCount, 'cross-pathogen');
                                 // Also enhance current table if available
@@ -5258,6 +5323,12 @@ class MLFeedbackInterface {
      */
     async refreshMLPredictionInTable(wellKey) {
         try {
+            // Check for cancellation before making ML requests
+            if (this.isMLAnalysisCancelled()) {
+                console.log(`🛑 ML Refresh: Skipping ${wellKey} - user cancelled analysis`);
+                return;
+            }
+            
             if (!window.currentAnalysisResults || 
                 !window.currentAnalysisResults.individual_results || 
                 !window.currentAnalysisResults.individual_results[wellKey]) {

@@ -5652,7 +5652,7 @@ async function enhanceResultsWithMLClassification(individualResults, force = fal
         );
         
         if (hasMLClassification) {
-            console.log('ML classification already exists, skipping enhancement');
+            console.log('🔍 ML Enhancement: Results already have ML classification, skipping');
             return;
         }
     }
@@ -5660,65 +5660,93 @@ async function enhanceResultsWithMLClassification(individualResults, force = fal
     // Run ML enhancement in background without blocking UI
     setTimeout(async () => {
         try {
-            console.log('Starting ML curve-based enhancement for', resultsKeys.length, 'wells', force ? '(forced update)' : '');
+            console.log(`🤖 Starting ML enhancement for ${resultsKeys.length} wells`);
             
-            // Process each well for ML classification
-            for (const [wellKey, result] of Object.entries(individualResults)) {
+            for (let i = 0; i < resultsKeys.length; i++) {
+                // CRITICAL: Check for cancellation during processing
+                if (window.mlAutoAnalysisUserChoice === 'skipped') {
+                    console.log(`🛑 ML Enhancement: User cancelled analysis after ${i} wells processed`);
+                    break;
+                }
+                
+                const wellKey = resultsKeys[i];
+                const wellData = individualResults[wellKey];
+                
+                // CRITICAL: Final check before sending HTTP request
+                if (window.mlAutoAnalysisUserChoice === 'skipped') {
+                    console.log(`🛑 ML Enhancement: Skipping ${wellKey} - user cancelled`);
+                    break;
+                }
+                
+                // Prepare data for ML analysis
+                const fluorophore = wellData.fluorophore || wellData.channel || '';
+                const analysisData = {
+                    rfu_data: wellData.raw_rfu,
+                    cycles: wellData.raw_cycles,
+                    well_data: {
+                        well: wellData.well_id || wellKey,
+                        target: wellData.target || fluorophore,
+                        sample: wellData.sample || wellData.sample_name || '',
+                        classification: wellData.classification || 'UNKNOWN',
+                        channel: fluorophore
+                    },
+                    existing_metrics: {
+                        r2: wellData.r2_score || 0,
+                        steepness: wellData.steepness || 0,
+                        snr: wellData.snr || 0,
+                        amplitude: wellData.amplitude || 0,
+                        cqj: wellData.cqj || 0,
+                        calcj: wellData.calcj || 0,
+                        classification: wellData.classification || 'UNKNOWN'
+                    }
+                };
+                
+                // CRITICAL: One more cancellation check before fetch
+                if (window.mlAutoAnalysisUserChoice === 'skipped') {
+                    console.log(`🛑 ML Enhancement: Cancellation detected before HTTP request for ${wellKey}`);
+                    break;
+                }
+                
                 try {
-                    // Prepare well data for pathogen detection
-                    const wellData = {
-                        well: result.well_id || wellKey.split('_')[0],
-                        target: result.target || '',
-                        sample: result.sample || result.sample_name || '',
-                        classification: result.classification || 'UNKNOWN'
-                    };
-
-                    // Call ML API for classification
                     const response = await fetch('/api/ml-analyze-curve', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            rfu_data: result.raw_rfu,
-                            cycles: result.raw_cycles,
-                            well_data: wellData,
-                            existing_metrics: {
-                                r2: result.r2_score || 0,
-                                steepness: result.steepness || 0,
-                                snr: result.snr || 0,
-                                midpoint: result.midpoint || 0,
-                                baseline: result.baseline || 0,
-                                amplitude: result.amplitude || 0,
-                                classification: result.classification || 'UNKNOWN'
-                            }
-                        })
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(analysisData)
                     });
-
+                    
+                    // Handle server-side cancellation
+                    if (response.status === 409) {
+                        console.log(`🛑 ML Enhancement: Server cancelled analysis for ${wellKey}`);
+                        break;
+                    }
+                    
                     if (response.ok) {
-                        const mlResult = await response.json();
-                        if (mlResult.success && mlResult.prediction) {
-                            // Add ML classification to the result
-                            result.ml_classification = {
-                                classification: mlResult.prediction.classification,
-                                confidence: mlResult.prediction.confidence,
-                                method: mlResult.prediction.method,
-                                pathogen: mlResult.prediction.pathogen,
-                                cqj_calcj_metrics: mlResult.prediction.cqj_calcj_metrics
-                            };
-                            
-                            // Update the curve class cell in the table if it exists
-                            updateCurveClassCell(wellKey, mlResult.prediction);
+                        const result = await response.json();
+                        if (result.success && result.prediction) {
+                            wellData.ml_classification = result.prediction;
+                            // Update UI if this function exists
+                            if (typeof updateCurveClassCell === 'function') {
+                                updateCurveClassCell(wellKey, result.prediction);
+                            }
                         }
                     }
                 } catch (error) {
-                    console.log(`ML classification failed for ${wellKey}:`, error.message);
-                    // Continue with other wells even if one fails
+                    console.log(`ML Enhancement error for ${wellKey}:`, error.message);
                 }
+                
+                // Check for cancellation after processing well
+                if (window.mlAutoAnalysisUserChoice === 'skipped') {
+                    console.log(`🛑 ML Enhancement: Cancellation detected after processing ${wellKey}`);
+                    break;
+                }
+                
+                // Small delay to prevent overwhelming the server
+                await new Promise(resolve => setTimeout(resolve, 100));
             }
-            console.log('ML enhancement completed');
+            
+            console.log('🎉 ML Enhancement complete');
         } catch (error) {
-            console.log('ML enhancement batch failed:', error.message);
+            console.error('ML Enhancement failed:', error);
         }
     }, 100); // Small delay to ensure UI rendering completes first
 }
@@ -5763,7 +5791,10 @@ function triggerMLReClassification(reason = 'parameter change') {
         return;
     }
     
-    console.log('Triggering ML re-classification due to:', reason);
+    // Check for cancellation before triggering ML re-classification
+    if (window.mlAutoAnalysisUserChoice === 'skipped') {
+        return;
+    }
     
     // Force re-classification with current analysis results
     enhanceResultsWithMLClassification(currentAnalysisResults.individual_results, true);
