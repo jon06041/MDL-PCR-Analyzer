@@ -3210,6 +3210,11 @@ def log_fda_user_action():
             return jsonify({'error': 'FDA Compliance Manager not available'}), 503
         
         data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # Log the received data for debugging
+        app.logger.info(f"FDA compliance logging request: {data.get('action_type')} by {data.get('user_id')}")
         
         action_id = fda_compliance_manager.log_user_action(
             user_id=data.get('user_id', 'anonymous'),
@@ -3218,16 +3223,19 @@ def log_fda_user_action():
             resource_accessed=data.get('resource_accessed'),
             action_details=data.get('action_details'),
             success=data.get('success', True),
-            ip_address=request.remote_addr
+            ip_address=request.remote_addr,
+            session_id=data.get('session_id')
         )
         
         return jsonify({
             'success': True,
-            'action_id': action_id
+            'action_id': action_id,
+            'message': f'User action logged successfully (ID: {action_id})'
         })
         
     except Exception as e:
         app.logger.error(f"Error logging FDA user action: {str(e)}")
+        app.logger.error(f"Request data: {request.get_json() if request.get_json() else 'No JSON data'}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/fda-compliance/record-qc-run', methods=['POST'])

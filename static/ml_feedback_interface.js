@@ -2267,12 +2267,12 @@ class MLFeedbackInterface {
             );
             
             if (!shouldRetrain) {
-                console.log('🚫 ML Feedback: User cancelled duplicate sample training');
+                //console.log('🚫 ML Feedback: User cancelled duplicate sample training');
                 this.submissionInProgress = false; // Reset flag
                 return;
             }
             
-            console.log('⚠️ ML Feedback: User approved retraining duplicate sample');
+            //console.log('⚠️ ML Feedback: User approved retraining duplicate sample');
         }
 
         // Set submission flag
@@ -2531,7 +2531,7 @@ class MLFeedbackInterface {
     }
 
     async performBatchMLAnalysis(trainingCount, analysisType) {
-        console.log(`🔄 Performing ${analysisType} batch ML analysis with ${trainingCount} training samples`);
+        //console.log(`🔄 Performing ${analysisType} batch ML analysis with ${trainingCount} training samples`);
         
         try {
             // Reset cancellation flag and notify server that new analysis is starting
@@ -2647,7 +2647,7 @@ class MLFeedbackInterface {
                 }
                 
                 if (!individualResults) {
-                    console.error('ML Batch Analysis: Still no analysis results after waiting');
+                    //console.error('ML Batch Analysis: Still no analysis results after waiting');
                     
                     // Try to show a user-friendly error
                     this.showTrainingNotification(
@@ -2658,7 +2658,7 @@ class MLFeedbackInterface {
                     
                     throw new Error('No current analysis results available for batch processing. Please run a regular analysis first.');
                 } else {
-                    console.log('✅ ML Batch Analysis: Analysis results found after waiting');
+                    //console.log('✅ ML Batch Analysis: Analysis results found after waiting');
                 }
             }
             const wellKeys = Object.keys(individualResults);
@@ -2673,19 +2673,19 @@ class MLFeedbackInterface {
                 throw new Error('No wells found in current analysis results');
             }
             
-            console.log(`📊 Processing ${wellKeys.length} wells for batch ML analysis`);
+            //console.log(`📊 Processing ${wellKeys.length} wells for batch ML analysis`);
             
             // Process wells sequentially to show real-time progress in result modals
             for (let i = 0; i < wellKeys.length; i++) {
                 // CRITICAL: Check if user clicked "Skip" during processing
                 if (window.mlAutoAnalysisUserChoice === 'skipped') {
-                    console.log('🛑 ML Batch Analysis: User clicked SKIP - aborting batch analysis');
+                    //console.log('🛑 ML Batch Analysis: User clicked SKIP - aborting batch analysis');
                     
                     // Send immediate cancellation to server
                     await this.sendBatchCancellationRequest();
                     
                     // Reset browser title
-                    document.title = 'qPCR Analyzer';
+                    document.title = 'MDL PCR Analyzer';
                     
                     // Hide progress notification
                     const progressNotification = document.getElementById('ml-available-notification');
@@ -2710,7 +2710,7 @@ class MLFeedbackInterface {
                 // Update browser title to show progress
                 document.title = `ML Analysis: ${wellNum}/${wellKeys.length} wells`;
                 
-                console.log(`🔄 ML Analysis: Processing well ${wellNum}/${wellKeys.length} (${wellKey})`);
+                //console.log(`🔄 ML Analysis: Processing well ${wellNum}/${wellKeys.length} (${wellKey})`);
                 
                 // Process this single well
                 await this.analyzeSingleWellWithML(wellKey, wellData);
@@ -2724,8 +2724,8 @@ class MLFeedbackInterface {
             }
             
             // Reset browser title
-            document.title = 'qPCR Analyzer';
-            
+            document.title = 'MDL PCR Analyzer';
+
             // Complete batch analysis
             this.showBatchAnalysisProgress(false, trainingCount, analysisType);
             
@@ -2760,7 +2760,7 @@ class MLFeedbackInterface {
             console.log(`✅ Batch ML analysis complete: ${wellKeys.length} wells processed`);
             
         } catch (error) {
-            console.error('Batch ML analysis failed:', error);
+            //console.error('Batch ML analysis failed:', error);
             this.showBatchAnalysisProgress(false, trainingCount, analysisType);
             this.showTrainingNotification(
                 'Batch Analysis Failed',
@@ -2774,7 +2774,7 @@ class MLFeedbackInterface {
         try {
             // CRITICAL: Check for cancellation before making any HTTP requests
             if (window.mlAutoAnalysisUserChoice === 'skipped') {
-                console.log(`🛑 ML Analysis: Skipping ${wellKey} - user cancelled batch analysis`);
+                //console.log(`🛑 ML Analysis: Skipping ${wellKey} - user cancelled batch analysis`);
                 return null; // Return early, don't make HTTP request
             }
             
@@ -2827,7 +2827,7 @@ class MLFeedbackInterface {
             
             // CRITICAL: Final cancellation check before making HTTP request
             if (window.mlAutoAnalysisUserChoice === 'skipped') {
-                console.log(`🛑 ML Analysis: Skipping HTTP request for ${wellKey} - user cancelled during preparation`);
+                //console.log(`🛑 ML Analysis: Skipping HTTP request for ${wellKey} - user cancelled during preparation`);
                 return null; // Return early, don't make HTTP request
             }
             
@@ -2839,7 +2839,7 @@ class MLFeedbackInterface {
             
             // Handle cancellation response from server
             if (response.status === 409) {
-                console.log(`🛑 ML Analysis: Server cancelled analysis for ${wellKey}`);
+                //console.log(`🛑 ML Analysis: Server cancelled analysis for ${wellKey}`);
                 return null; // Server-side cancellation, return early
             }
             
@@ -2848,17 +2848,17 @@ class MLFeedbackInterface {
                 if (result.success && result.prediction) {
                     // Update the well data with ML predictions
                     wellData.ml_classification = result.prediction;
-                    console.log(`✅ ML analysis for ${wellKey}: ${result.prediction.classification} (${(result.prediction.confidence * 100).toFixed(1)}%)`);
-                    
+                    //console.log(`✅ ML analysis for ${wellKey}: ${result.prediction.classification} (${(result.prediction.confidence * 100).toFixed(1)}%)`);
+
                     // Update the table cell with the ML prediction
                     this.updateTableCellWithMLPrediction(wellKey, result.prediction);
                 } else {
-                    console.error(`ML analysis failed for ${wellKey}:`, result.error || 'No prediction returned');
+                    //console.error(`ML analysis failed for ${wellKey}:`, result.error || 'No prediction returned');
                 }
             }
             
         } catch (error) {
-            console.error(`Error analyzing ${wellKey} with ML:`, error);
+            //console.error(`Error analyzing ${wellKey} with ML:`, error);
         }
     }
 
@@ -5459,12 +5459,23 @@ class MLFeedbackInterface {
         }
     }
     
+    /**
+     * Check if ML analysis has been cancelled by the user
+     * This is a centralized check to prevent unnecessary ML requests
+     */
+    isMLAnalysisCancelled() {
+        return window.mlAutoAnalysisUserChoice === 'skipped';
+    }
+    
     async sendBatchCancellationRequest() {
         /**
          * Send cancellation request to server to stop ongoing batch ML analysis
          */
         try {
             console.log('🛑 Sending batch cancellation request to server...');
+            
+            // Set the client-side cancellation flag immediately
+            window.mlAutoAnalysisUserChoice = 'skipped';
             
             const response = await fetch('/api/ml-cancel-batch', {
                 method: 'POST',
@@ -5523,20 +5534,26 @@ class MLFeedbackInterface {
     async trackFDACompliance(actionType, actionDetails = {}) {
         /**
          * Track user actions for FDA compliance (21 CFR Part 11)
+         * Made future-proof for upcoming roles and user access system
          */
         try {
+            // Prepare compliance data with defaults for current system
+            // This will be enhanced when roles system is implemented
             const complianceData = {
-                user_id: 'laboratory_operator', // Could be made dynamic
-                user_role: 'operator',
+                user_id: actionDetails.user_id || 'laboratory_operator', // Will be dynamic with roles
+                user_role: actionDetails.user_role || 'operator', // Will be from user session
                 action_type: actionType,
-                resource_accessed: 'qpcr_analysis_system',
+                resource_accessed: actionDetails.resource_accessed || 'qpcr_analysis_system',
                 action_details: {
                     timestamp: new Date().toISOString(),
                     browser_info: navigator.userAgent,
                     session_id: window.currentSessionId || null,
+                    page_url: window.location.pathname,
                     ...actionDetails
                 },
-                success: true
+                success: actionDetails.success !== undefined ? actionDetails.success : true,
+                ip_address: actionDetails.ip_address || null, // Will be populated server-side
+                session_id: window.currentSessionId || null
             };
             
             const response = await fetch('/api/fda-compliance/log-user-action', {
@@ -5548,14 +5565,28 @@ class MLFeedbackInterface {
             });
             
             if (response.ok) {
-                console.log('📋 FDA compliance action logged:', actionType);
+                const result = await response.json();
+                console.log('📋 FDA compliance action logged:', actionType, result);
             } else {
-                console.warn('⚠️ Failed to log FDA compliance action:', response.status);
+                const errorText = await response.text();
+                console.warn('⚠️ Failed to log FDA compliance action:', response.status, errorText);
+                
+                // For development/debugging - log the error details
+                if (response.status === 500) {
+                    console.error('Server error details:', {
+                        actionType,
+                        complianceData,
+                        responseStatus: response.status,
+                        responseText: errorText
+                    });
+                }
             }
             
         } catch (error) {
             console.error('❌ Error logging FDA compliance action:', error);
+            console.error('Action details:', { actionType, actionDetails });
             // Non-blocking - compliance logging shouldn't break the main workflow
+            // This will be more robust when the roles system is implemented
         }
     }
     
