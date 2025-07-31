@@ -2,7 +2,50 @@
 
 # MDL-PCR-Analyzer: Comprehensive Agent Instructions & Progress Log
 
-## 🎯 **CURRENT STATUS: Compliance System Fully Restored** (July 28, 2025)
+## 🎯 **CURRENT STATUS: SNR Classification & Batch Analysis Fixed** (July 31, 2025)
+
+### ✅ **CRITICAL FIXES COMPLETED** (July 31, 2025)
+
+**MAJOR ISSUES RESOLVED**:
+
+#### **1. SNR Calculation Bug Fixed** ✅
+- **PROBLEM**: High-quality curves (R² = 0.9969) incorrectly classified as NEGATIVE due to SNR = 0.00
+- **ROOT CAUSE**: SNR calculation failed for stable baselines with low variation (std ≈ 0.77)
+- **SOLUTION**: Enhanced `check_signal_to_noise()` in `qpcr_analyzer.py` with proper fallback logic
+- **RESULT**: Excellent curves now get proper SNR values (>1000) and classify as POSITIVE/STRONG_POSITIVE
+- **FILES MODIFIED**: `qpcr_analyzer.py` (enhanced SNR calculation + added 'snr' field to results)
+
+#### **2. Batch ML Request Overflow Fixed** ✅
+- **PROBLEM**: 1536+ excessive ML requests after clicking "Skip Analysis" button
+- **ROOT CAUSE**: Batch cancellation flag not auto-resetting, causing persistent request loops
+- **SOLUTION**: Added auto-reset logic to both `ml_feedback_interface.js` and `script.js`
+- **RESULT**: "Skip Analysis" properly cancels batch operations without request overflow
+- **FILES MODIFIED**: `static/ml_feedback_interface.js`, `static/script.js`
+
+#### **3. 409 CONFLICT Error Resolution** ✅
+- **PROBLEM**: Individual ML analysis blocked by 409 CONFLICT errors after batch operations
+- **ROOT CAUSE**: URL encoding issues with pathogen names containing spaces
+- **SOLUTION**: Enhanced URL encoding in ML analysis requests
+- **RESULT**: Individual well analysis accessible even after batch operations
+- **FILES MODIFIED**: ML request handling in frontend JavaScript
+
+#### **4. Enhanced Rule-Based Classification Debugging** ✅
+- **ENHANCEMENT**: Added comprehensive debugging to `ml_curve_classifier.py` fallback system
+- **BENEFIT**: Better error tracking and classification failure diagnosis
+- **FILES MODIFIED**: `ml_curve_classifier.py` (added debugging to `fallback_classification()`)
+
+**VALIDATION RESULTS** (from `final_validation_test.py`):
+```
+✅ SNR calculation fix WORKING! (SNR: 1332.0 for high-quality curve)
+✅ Rule-based classification WORKING! (R²=0.9969 → POSITIVE classification)
+✅ SNR cutoff filtering WORKING! (SNR=1.5 → NEGATIVE as expected)
+```
+
+**TEST FILES**: All validation tests moved to `test files/` folder for organization.
+
+---
+
+## 🎯 **PREVIOUS STATUS: Compliance System Fully Restored** (July 28, 2025)
 
 ### 🧠 **ML CURVE CLASSIFICATION SYSTEM: COMPREHENSIVE OVERVIEW** (July 30, 2025)
 

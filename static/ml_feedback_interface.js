@@ -1702,7 +1702,8 @@ class MLFeedbackInterface {
                         cqj: this.extractNumericValue(this.currentWellData.cqj, channelData.channel),
                         calcj: this.extractNumericValue(this.currentWellData.calcj, channelData.channel),
                         classification: this.currentWellData.classification || 'UNKNOWN'
-                    }
+                    },
+                    is_batch_request: false  // Mark as individual request to bypass batch cancellation
                 })
             });
 
@@ -2776,6 +2777,9 @@ class MLFeedbackInterface {
             this.showTrainingNotification(completionTitle, completionMessage, 'success');
             
             console.log(`✅ Batch ML analysis complete: ${wellKeys.length} wells processed`);
+            
+            // Auto-reset cancellation flag after successful batch completion
+            await this.resetBatchCancellationFlag();
             
         } catch (error) {
             //console.error('Batch ML analysis failed:', error);

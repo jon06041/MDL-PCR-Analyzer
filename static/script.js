@@ -5746,6 +5746,26 @@ async function enhanceResultsWithMLClassification(individualResults, force = fal
             }
             
             console.log('🎉 ML Enhancement complete');
+            
+            // Auto-reset cancellation flag after batch completion (if not cancelled)
+            if (window.mlAutoAnalysisUserChoice !== 'skipped') {
+                try {
+                    const resetResponse = await fetch('/api/ml-reset-cancellation', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            timestamp: new Date().toISOString(),
+                            action: 'auto_reset_after_completion'
+                        })
+                    });
+                    if (resetResponse.ok) {
+                        console.log('✅ Auto-reset cancellation flag after batch completion');
+                    }
+                } catch (error) {
+                    console.log('Auto-reset cancellation flag failed (non-blocking):', error.message);
+                }
+            }
+            
         } catch (error) {
             console.error('ML Enhancement failed:', error);
         }

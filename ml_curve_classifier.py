@@ -352,29 +352,45 @@ class MLCurveClassifier:
     
     def fallback_classification(self, existing_metrics):
         """Fallback to rule-based classification"""
-        from curve_classification import classify_curve
-        
-        result = classify_curve(
-            existing_metrics.get('r2', 0),
-            existing_metrics.get('steepness', 0),
-            existing_metrics.get('snr', 0),
-            existing_metrics.get('midpoint', 0),
-            existing_metrics.get('baseline', 0),
-            existing_metrics.get('amplitude', 0)
-        )
-        
-        # Ensure all values are JSON serializable
-        result['method'] = 'Rule-based'
-        result['confidence'] = float(1.0 - result.get('confidence_penalty', 0))
-        
-        # Convert any numpy types to Python types
-        for key, value in result.items():
-            if isinstance(value, (np.integer, np.floating)):
-                result[key] = float(value)
-            elif isinstance(value, np.ndarray):
-                result[key] = value.tolist()
-                
-        return result
+        try:
+            from curve_classification import classify_curve
+            
+            print(f"🔍 ML Debug: Using fallback classification with metrics: {existing_metrics}")
+            
+            result = classify_curve(
+                existing_metrics.get('r2', 0),
+                existing_metrics.get('steepness', 0),
+                existing_metrics.get('snr', 0),
+                existing_metrics.get('midpoint', 0),
+                existing_metrics.get('baseline', 0),
+                existing_metrics.get('amplitude', 0)
+            )
+            
+            print(f"🔍 ML Debug: Rule-based classification result: {result}")
+            
+            # Ensure all values are JSON serializable
+            result['method'] = 'Rule-based'
+            result['confidence'] = float(1.0 - result.get('confidence_penalty', 0))
+            
+            # Convert any numpy types to Python types
+            for key, value in result.items():
+                if isinstance(value, (np.integer, np.floating)):
+                    result[key] = float(value)
+                elif isinstance(value, np.ndarray):
+                    result[key] = value.tolist()
+                    
+            print(f"🔍 ML Debug: Final fallback result: {result}")
+            return result
+            
+        except Exception as e:
+            print(f"❌ Fallback classification error: {e}")
+            # Ultimate fallback if rule-based classification fails
+            return {
+                'classification': 'NEGATIVE',
+                'confidence': 0.5,
+                'method': 'Emergency Fallback',
+                'reason': f'Rule-based classification failed: {e}'
+            }
     
     def add_training_sample(self, rfu_data, cycles, existing_metrics, expert_classification, well_id, pathogen=None):
         """Add a training sample from expert feedback"""
