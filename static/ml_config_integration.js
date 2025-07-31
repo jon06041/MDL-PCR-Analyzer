@@ -6,7 +6,7 @@
 // Example integration with existing qPCR analysis code
 async function checkMLEnabledForPathogen(pathogenCode, fluorophore) {
     try {
-        const response = await fetch(`/api/ml-config/check-enabled/${pathogenCode}/${fluorophore}`);
+        const response = await fetch(`/api/ml-config/check-enabled/${encodeURIComponent(pathogenCode)}/${encodeURIComponent(fluorophore)}`);
         const data = await response.json();
         
         if (data.success) {

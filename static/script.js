@@ -5698,7 +5698,8 @@ async function enhanceResultsWithMLClassification(individualResults, force = fal
                         cqj: wellData.cqj || 0,
                         calcj: wellData.calcj || 0,
                         classification: wellData.classification || 'UNKNOWN'
-                    }
+                    },
+                    is_batch_request: true  // Mark as batch request for cancellation logic
                 };
                 
                 // CRITICAL: One more cancellation check before fetch

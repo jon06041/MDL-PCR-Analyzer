@@ -7,6 +7,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import numpy as np
 from datetime import datetime
+from urllib.parse import unquote
 from qpcr_analyzer import process_csv_data, validate_csv_structure
 from models import db, AnalysisSession, WellResult, ExperimentStatistics
 from sqlalchemy.orm import DeclarativeBase
@@ -1839,9 +1840,10 @@ def ml_analyze_curve():
     if not ML_AVAILABLE or ml_classifier is None:
         return jsonify({'error': 'ML classifier not available'}), 503
     
-    # Check for batch cancellation flag
-    if app.config.get('ML_BATCH_CANCELLED', False):
-        app.logger.info("ML analysis request cancelled due to batch cancellation")
+    # Check for batch cancellation flag - only block batch requests, not individual requests
+    is_batch_request = data.get('is_batch_request', False) if request.json else False
+    if app.config.get('ML_BATCH_CANCELLED', False) and is_batch_request:
+        app.logger.info("ML batch analysis request cancelled due to batch cancellation")
         return jsonify({'error': 'Analysis cancelled by user'}), 409
     
     try:
@@ -2411,6 +2413,10 @@ def update_pathogen_ml_config(pathogen_code, fluorophore):
     try:
         from ml_config_manager import ml_config_manager
         
+        # URL decode parameters
+        pathogen_code = unquote(pathogen_code)
+        fluorophore = unquote(fluorophore)
+        
         data = request.get_json()
         enabled = data.get('enabled', True)
         
@@ -2442,6 +2448,9 @@ def get_pathogen_ml_config(pathogen_code):
     """Get ML configuration for specific pathogen"""
     try:
         from ml_config_manager import ml_config_manager
+        
+        # URL decode the pathogen code
+        pathogen_code = unquote(pathogen_code)
         
         fluorophore = request.args.get('fluorophore')
         configs = ml_config_manager.get_pathogen_ml_config(pathogen_code, fluorophore)
@@ -2584,6 +2593,10 @@ def check_ml_enabled(pathogen_code, fluorophore):
     """Check if ML is enabled for specific pathogen+fluorophore"""
     try:
         from ml_config_manager import ml_config_manager
+        
+        # URL decode parameters
+        pathogen_code = unquote(pathogen_code)
+        fluorophore = unquote(fluorophore)
         
         enabled = ml_config_manager.is_ml_enabled_for_pathogen(pathogen_code, fluorophore)
         

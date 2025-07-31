@@ -536,7 +536,7 @@ class MLFeedbackInterface {
             }
 
             // Get pathogen-specific ML configuration
-            const pathogenResponse = await fetch(`/api/ml_config/pathogen/${pathogenInfo.pathogen}`);
+            const pathogenResponse = await fetch(`/api/ml-config/pathogen/${encodeURIComponent(pathogenInfo.pathogen)}`);
             if (!pathogenResponse.ok) {
                 console.log('ML Config Check: Failed to get pathogen config, showing ML feedback');
                 return false; // Show ML feedback if we can't get pathogen config
@@ -4024,7 +4024,7 @@ class MLFeedbackInterface {
                 return true;
             }
             
-            const response = await fetch(`/api/ml-config/check-enabled/${pathogen}/${fluorophore}`);
+            const response = await fetch(`/api/ml-config/check-enabled/${encodeURIComponent(pathogen)}/${encodeURIComponent(fluorophore)}`);
             if (response.ok) {
                 const result = await response.json();
                 return result.enabled;
