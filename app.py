@@ -2180,6 +2180,89 @@ def ml_stats():
         print(f"ML stats error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/backup-manager')
+def backup_manager():
+    """Serve the backup management interface"""
+    return send_from_directory('.', 'backup_manager.html')
+
+@app.route('/api/db-backup', methods=['POST'])
+def create_database_backup():
+    """Create a manual database backup"""
+    try:
+        from database_backup_manager import DatabaseBackupManager
+        
+        data = request.json or {}
+        description = data.get('description', 'Manual backup via web interface')
+        backup_type = data.get('type', 'manual')
+        
+        backup_manager = DatabaseBackupManager()
+        backup_path, metadata = backup_manager.create_backup(backup_type, description)
+        
+        if backup_path:
+            return jsonify({
+                'success': True,
+                'backup_path': backup_path,
+                'description': description,
+                'size': metadata.get('backup_size', 0),
+                'timestamp': metadata.get('timestamp', '')
+            })
+        else:
+            return jsonify({'error': 'Backup creation failed'}), 500
+            
+    except Exception as e:
+        print(f"Database backup error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/db-backups', methods=['GET'])
+def list_database_backups():
+    """List available database backups"""
+    try:
+        from database_backup_manager import DatabaseBackupManager
+        
+        backup_manager = DatabaseBackupManager()
+        backups = backup_manager.list_backups()
+        
+        return jsonify({
+            'success': True,
+            'backups': backups
+        })
+        
+    except Exception as e:
+        print(f"List backups error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/db-restore', methods=['POST'])
+def restore_database_backup():
+    """Restore database from backup"""
+    try:
+        from database_backup_manager import DatabaseBackupManager
+        
+        data = request.json
+        if not data or not data.get('backup_file'):
+            return jsonify({'error': 'Backup file path required'}), 400
+            
+        backup_file = data['backup_file']
+        backup_manager = DatabaseBackupManager()
+        
+        # Verify backup file exists
+        if not os.path.exists(backup_file):
+            return jsonify({'error': f'Backup file not found: {backup_file}'}), 404
+            
+        success = backup_manager.restore_backup(backup_file)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': f'Database restored from {backup_file}',
+                'backup_file': backup_file
+            })
+        else:
+            return jsonify({'error': 'Database restore failed'}), 500
+            
+    except Exception as e:
+        print(f"Database restore error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/update-well-classification', methods=['POST'])
 def update_well_classification():
     """Update well classification based on expert feedback"""
@@ -3768,6 +3851,16 @@ if __name__ == '__main__':
     
     print(f"Starting qPCR Analyzer on {host}:{port}")
     print(f"Debug mode: {debug}")
+    
+    # Start automatic database backup scheduler
+    try:
+        from backup_scheduler import BackupScheduler
+        backup_scheduler = BackupScheduler()
+        backup_scheduler.run_in_background()
+        print("✅ Automatic database backup scheduler started")
+    except Exception as e:
+        print(f"⚠️  Warning: Could not start backup scheduler: {e}")
+        print("   Manual backups are still available via db_manager.py")
     
     # Start the Flask application - disable reloader to prevent multiple processes
     app.run(host=host, port=port, debug=debug, threaded=True, use_reloader=False)

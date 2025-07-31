@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Database Backup Manager - MDL-PCR-Analyzer</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 2.2em;
+            font-weight: 300;
+        }
+        
+        .content {
+            padding: 30px;
+        }
+        
+        .section {
+            margin-bottom: 40px;
+            padding: 25px;
+            border: 1px solid #e1e8ed;
+            border-radius: 10px;
+            background: #f8f9fa;
+        }
+        
+        .section h2 {
+            margin-top: 0;
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+        
+        .btn {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+            transition: all 0.3s ease;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(52, 152, 219, 0.3);
+        }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+        }
+        
+        .btn-warning {
+            background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
+        }
+        
+        .btn-danger {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+        }
+        
+        .backup-list {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: white;
+        }
+        
+        .backup-item {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .backup-item:last-child {
+            border-bottom: none;
+        }
+        
+        .backup-item:hover {
+            background: #f8f9fa;
+        }
+        
+        .backup-info {
+            flex: 1;
+        }
+        
+        .backup-name {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        .backup-details {
+            font-size: 0.9em;
+            color: #7f8c8d;
+            margin-top: 5px;
+        }
+        
+        .backup-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .status {
+            padding: 10px 15px;
+            border-radius: 6px;
+            margin: 10px 0;
+            display: none;
+        }
+        
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status.info {
+            background: #cce7ff;
+            color: #004085;
+            border: 1px solid #b3d7ff;
+        }
+        
+        .input-group {
+            margin: 15px 0;
+        }
+        
+        .input-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        .input-group input, .input-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+            color: #7f8c8d;
+        }
+        
+        .backup-status {
+            background: #e8f4f8;
+            border: 1px solid #bee5eb;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .backup-status h3 {
+            margin-top: 0;
+            color: #0c5460;
+        }
+        
+        .scheduler-info {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        
+        .scheduler-info strong {
+            color: #856404;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🗄️ Database Backup Manager</h1>
+            <p>Manage database backups for MDL-PCR-Analyzer</p>
+        </div>
+        
+        <div class="content">
+            <div class="backup-status">
+                <h3>📋 Automatic Backup Status</h3>
+                <div class="scheduler-info">
+                    <strong>✅ Automatic Backup Scheduler is Active</strong><br>
+                    • <strong>Hourly:</strong> Every hour (keeps last 24)<br>
+                    • <strong>Daily:</strong> Every day at 2:00 AM (keeps last 30)<br>
+                    • <strong>Weekly:</strong> Every Sunday at 3:00 AM (keeps last 12)<br>
+                    • <strong>Startup:</strong> When application starts
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>💾 Create Manual Backup</h2>
+                <div class="input-group">
+                    <label for="backup-description">Description:</label>
+                    <input type="text" id="backup-description" placeholder="Enter backup description (optional)">
+                </div>
+                <button class="btn btn-success" onclick="createBackup()">
+                    📦 Create Backup Now
+                </button>
+                <div id="backup-status" class="status"></div>
+            </div>
+            
+            <div class="section">
+                <h2>📚 Available Backups</h2>
+                <button class="btn" onclick="loadBackups()">🔄 Refresh List</button>
+                <div class="loading" id="loading">Loading backups...</div>
+                <div id="backup-list" class="backup-list"></div>
+            </div>
+            
+            <div class="section">
+                <h2>⚡ Quick Actions</h2>
+                <button class="btn" onclick="window.location.href='/'">🏠 Back to Main App</button>
+                <button class="btn btn-warning" onclick="showCommandLineHelp()">💻 Command Line Tools</button>
+            </div>
+            
+            <div id="cli-help" class="section" style="display: none;">
+                <h2>💻 Command Line Tools</h2>
+                <p>You can also manage backups using the command line:</p>
+                <pre style="background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 6px; overflow-x: auto;">
+# Create a backup
+python db_manager.py backup --desc "My backup description"
+
+# List all backups  
+python db_manager.py list
+
+# Restore from a backup
+python db_manager.py restore --file db_backups/backup_file.db
+
+# Show statistics
+python db_manager.py stats
+
+# Reset development data (with backup)
+python db_manager.py reset --dev
+                </pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showStatus(message, type) {
+            const status = document.getElementById('backup-status');
+            status.textContent = message;
+            status.className = `status ${type}`;
+            status.style.display = 'block';
+            
+            if (type === 'success') {
+                setTimeout(() => {
+                    status.style.display = 'none';
+                }, 5000);
+            }
+        }
+        
+        async function createBackup() {
+            const description = document.getElementById('backup-description').value || 'Manual backup via web interface';
+            
+            try {
+                showStatus('Creating backup...', 'info');
+                
+                const response = await fetch('/api/db-backup', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        description: description,
+                        type: 'manual'
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    const sizeStr = (result.size / (1024 * 1024)).toFixed(2);
+                    showStatus(`✅ Backup created successfully: ${result.backup_path} (${sizeStr} MB)`, 'success');
+                    document.getElementById('backup-description').value = '';
+                    loadBackups(); // Refresh the list
+                } else {
+                    showStatus(`❌ Backup failed: ${result.error}`, 'error');
+                }
+                
+            } catch (error) {
+                showStatus(`❌ Error creating backup: ${error.message}`, 'error');
+            }
+        }
+        
+        async function loadBackups() {
+            const loading = document.getElementById('loading');
+            const backupList = document.getElementById('backup-list');
+            
+            loading.style.display = 'block';
+            backupList.innerHTML = '';
+            
+            try {
+                const response = await fetch('/api/db-backups');
+                const result = await response.json();
+                
+                if (result.success && result.backups) {
+                    displayBackups(result.backups);
+                } else {
+                    backupList.innerHTML = '<div class="backup-item">No backups found</div>';
+                }
+                
+            } catch (error) {
+                backupList.innerHTML = `<div class="backup-item">Error loading backups: ${error.message}</div>`;
+            } finally {
+                loading.style.display = 'none';
+            }
+        }
+        
+        function displayBackups(backups) {
+            const backupList = document.getElementById('backup-list');
+            
+            if (backups.length === 0) {
+                backupList.innerHTML = '<div class="backup-item">No backups found</div>';
+                return;
+            }
+            
+            backupList.innerHTML = backups.map(backup => {
+                const size = backup.backup_size ? (backup.backup_size / (1024 * 1024)).toFixed(2) : 'Unknown';
+                const timestamp = backup.timestamp || 'Unknown';
+                const description = backup.description || 'No description';
+                const type = backup.backup_type || 'manual';
+                
+                return `
+                    <div class="backup-item">
+                        <div class="backup-info">
+                            <div class="backup-name">🗄️ ${timestamp} (${type})</div>
+                            <div class="backup-details">
+                                📝 ${description}<br>
+                                📊 Size: ${size} MB
+                            </div>
+                        </div>
+                        <div class="backup-actions">
+                            <button class="btn btn-warning" onclick="restoreBackup('${backup.file_path}')">
+                                🔄 Restore
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        async function restoreBackup(filePath) {
+            const confirmed = confirm(`⚠️ This will replace the current database with the backup from ${filePath}.\n\nThis action cannot be undone. Continue?`);
+            
+            if (!confirmed) return;
+            
+            try {
+                showStatus('Restoring backup...', 'info');
+                
+                const response = await fetch('/api/db-restore', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        backup_file: filePath
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showStatus(`✅ Database restored successfully from ${filePath}`, 'success');
+                    setTimeout(() => {
+                        alert('Database restored! Please restart the application for changes to take effect.');
+                    }, 1000);
+                } else {
+                    showStatus(`❌ Restore failed: ${result.error}`, 'error');
+                }
+                
+            } catch (error) {
+                showStatus(`❌ Error restoring backup: ${error.message}`, 'error');
+            }
+        }
+        
+        function showCommandLineHelp() {
+            const cliHelp = document.getElementById('cli-help');
+            if (cliHelp.style.display === 'none') {
+                cliHelp.style.display = 'block';
+            } else {
+                cliHelp.style.display = 'none';
+            }
+        }
+        
+        // Load backups when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            loadBackups();
+        });
+    </script>
+</body>
+</html>

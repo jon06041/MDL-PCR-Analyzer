@@ -1711,11 +1711,8 @@ class MLFeedbackInterface {
                 //console.log('ML Analysis: Received response:', result);
                 //console.log('ML Analysis: Features used CQJ:', result.prediction?.features_used?.cqj);
                 //console.log('ML Analysis: Features used CalcJ:', result.prediction?.features_used?.calcj);
-                
-                if (result.success) {
-                    this.displayMLResults(result);
-                    
-                    // Store ML classification in well data
+                // Store ML classification in well data
+                if (result.success && result.prediction) {
                     this.currentWellData.ml_classification = result.prediction;
                 } else {
                     throw new Error(result.error || 'ML analysis failed');
@@ -2231,9 +2228,17 @@ class MLFeedbackInterface {
     }
 
     async submitFeedback() {
+        // Check if batch ML analysis is currently running
+        const batchRunning = document.getElementById('ml-available-notification') !== null;
+        if (batchRunning) {
+            alert('⚠️ Batch ML analysis is currently running. Please wait for it to complete before submitting feedback to avoid database conflicts.');
+            return;
+        }
+
         // Prevent multiple simultaneous submissions
         if (this.submissionInProgress) {
             console.log('ML Feedback: Submission already in progress, ignoring duplicate request');
+            alert('⚠️ Feedback submission already in progress. Please wait for the current submission to complete.');
             return;
         }
         
@@ -2402,6 +2407,9 @@ class MLFeedbackInterface {
                     
                     // CRITICAL: FIRST persist the expert classification to both local and backend data
                     await this.updateWellClassification(expertClassification, 'expert_feedback');
+                    
+                    // IMMEDIATE: Update the UI elements to show the expert classification
+                    this.updateUIWithExpertClassification(expertClassification);
                     
                     // THEN update the results table with the expert classification
                     await this.updateResultsTableAfterFeedback(expertClassification);
@@ -4574,6 +4582,36 @@ class MLFeedbackInterface {
             } else {
                 trainingProgressElement.style.display = 'none';
             }
+        }
+    }
+
+    /**
+     * Updates the UI elements to immediately show the expert classification
+     */
+    updateUIWithExpertClassification(expertClassification) {
+        // Update the classification display in the modal
+        const classificationElements = document.querySelectorAll('.classification-display, .well-classification');
+        classificationElements.forEach(element => {
+            if (element.textContent.includes('SUSPICIOUS') || 
+                element.textContent.includes('NEGATIVE') || 
+                element.textContent.includes('POSITIVE')) {
+                element.textContent = expertClassification.replace('_', ' ');
+                element.className = `classification-badge ${this.getClassificationBadgeClass(expertClassification)}`;
+            }
+        });
+
+        // Update any curve classification displays
+        const curveClassElements = document.querySelectorAll('.curve-classification');
+        curveClassElements.forEach(element => {
+            element.textContent = expertClassification.replace('_', ' ');
+            element.className = `classification-badge ${this.getClassificationBadgeClass(expertClassification)}`;
+        });
+
+        // Update the main classification display if visible
+        const mainClassDisplay = document.querySelector('#modalDetails .classification-badge');
+        if (mainClassDisplay) {
+            mainClassDisplay.textContent = expertClassification.replace('_', ' ');
+            mainClassDisplay.className = `classification-badge ${this.getClassificationBadgeClass(expertClassification)}`;
         }
     }
 
