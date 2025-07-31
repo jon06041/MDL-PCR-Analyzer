@@ -4,10 +4,10 @@
 
 const CONCENTRATION_CONTROLS = {
     Lacto: {
-        Cy5: { H: 1e7, M: 1e5, L: 1e3 },
-        FAM: { H: 1e7, M: 1e5, L: 1e3 },
-        HEX: { H: 1e7, M: 1e5, L: 1e3 },
-        TexasRed: { H: 1e7, M: 1e5, L: 1e3 }
+        Cy5: { H: 1e6, M: 1e4, L: 1e2 },
+        FAM: { H: 1e6, M: 1e4, L: 1e2 },
+        HEX: { H: 1e6, M: 1e4, L: 1e2 },
+        TexasRed: { H: 1e6, M: 1e4, L: 1e2 }
     },
     Calb: {
         HEX: { H: 1e7, M: 1e5, L: 1e3 }
@@ -81,10 +81,27 @@ const CONCENTRATION_CONTROLS = {
         FAM: { H: 1e7, M: 1e5, L: 1e3 }
     },
     BVPanelPCR3: {
-        FAM: { H: 1e7, M: 1e5, L: 1e3 },
-        HEX: { H: 1e7, M: 1e5, L: 1e3 },
-        'Texas Red': { H: 1e7, M: 1e5, L: 1e3 },
-        Cy5: { H: 1e7, M: 1e5, L: 1e3 }
+        FAM: { H: 1e8, M: 1e6, L: 1e4 },
+        HEX: { H: 1e8, M: 1e6, L: 1e4 },
+        'Texas Red': { H: 1e8, M: 1e6, L: 1e4 },
+        Cy5: { H: 1e8, M: 1e6, L: 1e4 }
+    },
+    BVPanelPCR2: {
+        FAM: { H: 1e8, M: 1e6, L: 1e4 },
+        HEX: { H: 1e8, M: 1e6, L: 1e4 },
+        'Texas Red': { H: 1e8, M: 1e6, L: 1e4 },
+        Cy5: { H: 1e8, M: 1e6, L: 1e4 }
+    },
+    BVPanelPCR1: {
+        FAM: { H: 1e8, M: 1e6, L: 1e4 },
+        HEX: { H: 1e8, M: 1e6, L: 1e4 },
+        'Texas Red': { H: 1e8, M: 1e6, L: 1e4 },
+        Cy5: { H: 1e8, M: 1e6, L: 1e4 }
+    },
+    BVAB: {
+        FAM: { H: 1e8, M: 1e6, L: 1e4 },
+        HEX: { H: 1e8, M: 1e6, L: 1e4 },
+        Cy5: { H: 1e8, M: 1e6, L: 1e4 }
     },
     // ...repeat for all other tests/channels as needed...
 };
