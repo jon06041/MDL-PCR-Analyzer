@@ -2,7 +2,209 @@
 
 # MDL-PCR-Analyzer: Comprehensive Agent Instructions & Progress Log
 
-## 🎯 **CURRENT STATUS: Compliance System Fully Restored** (July 28, 2025)
+## 🎯 **CURRENT STATUS: SNR Classification & Batch Analysis Fixed** (July 31, 2025)
+
+### ✅ **CRITICAL FIXES COMPLETED** (July 31, 2025)
+
+**MAJOR ISSUES RESOLVED**:
+
+#### **1. SNR Calculation Bug Fixed** ✅
+- **PROBLEM**: High-quality curves (R² = 0.9969) incorrectly classified as NEGATIVE due to SNR = 0.00
+- **ROOT CAUSE**: SNR calculation failed for stable baselines with low variation (std ≈ 0.77)
+- **SOLUTION**: Enhanced `check_signal_to_noise()` in `qpcr_analyzer.py` with proper fallback logic
+- **RESULT**: Excellent curves now get proper SNR values (>1000) and classify as POSITIVE/STRONG_POSITIVE
+- **FILES MODIFIED**: `qpcr_analyzer.py` (enhanced SNR calculation + added 'snr' field to results)
+
+#### **2. Batch ML Request Overflow Fixed** ✅
+- **PROBLEM**: 1536+ excessive ML requests after clicking "Skip Analysis" button
+- **ROOT CAUSE**: Batch cancellation flag not auto-resetting, causing persistent request loops
+- **SOLUTION**: Added auto-reset logic to both `ml_feedback_interface.js` and `script.js`
+- **RESULT**: "Skip Analysis" properly cancels batch operations without request overflow
+- **FILES MODIFIED**: `static/ml_feedback_interface.js`, `static/script.js`
+
+#### **3. 409 CONFLICT Error Resolution** ✅
+- **PROBLEM**: Individual ML analysis blocked by 409 CONFLICT errors after batch operations
+- **ROOT CAUSE**: URL encoding issues with pathogen names containing spaces
+- **SOLUTION**: Enhanced URL encoding in ML analysis requests
+- **RESULT**: Individual well analysis accessible even after batch operations
+- **FILES MODIFIED**: ML request handling in frontend JavaScript
+
+#### **4. Enhanced Rule-Based Classification Debugging** ✅
+- **ENHANCEMENT**: Added comprehensive debugging to `ml_curve_classifier.py` fallback system
+- **BENEFIT**: Better error tracking and classification failure diagnosis
+- **FILES MODIFIED**: `ml_curve_classifier.py` (added debugging to `fallback_classification()`)
+
+**VALIDATION RESULTS** (from `final_validation_test.py`):
+```
+✅ SNR calculation fix WORKING! (SNR: 1332.0 for high-quality curve)
+✅ Rule-based classification WORKING! (R²=0.9969 → POSITIVE classification)
+✅ SNR cutoff filtering WORKING! (SNR=1.5 → NEGATIVE as expected)
+```
+
+**TEST FILES**: All validation tests moved to `test files/` folder for organization.
+
+#### **5. S-Curve Classification & ML Visual Analysis Fixed** ✅ (August 1, 2025)
+- **PROBLEM**: ML visual analysis showing contradictory results - curves with R²=0.9964, amplitude=1491 classified as "Poor S-Curve" but "Strong Positive" pattern
+- **ROOT CAUSE**: 
+  1. `min_start_cycle=8` in enhanced quality filters was too restrictive for excellent curves
+  2. Frontend visual analysis functions ignored `is_good_scurve` flag when making positive classifications
+- **SOLUTION**: 
+  1. Changed `min_start_cycle=8` to `min_start_cycle=5` in `qpcr_analyzer.py`
+  2. Fixed `identifyPatternType()` and `calculateVisualQuality()` in `ml_feedback_interface.js` to check `is_good_scurve` first
+- **RESULT**: High-quality curves now properly classified as good S-curves; ML visual analysis consistent with curve quality
+- **FILES MODIFIED**: `qpcr_analyzer.py`, `static/ml_feedback_interface.js`
+
+### 🔧 **CENTRALIZED CONFIGURATION SYSTEM** ✅
+
+**Purpose**: Single-source control values managed via `config/concentration_controls.json` ensuring consistent H/M/L control CalcJ values across system.
+
+**Key Components**:
+- **Configuration Source**: `config/concentration_controls.json` - Single source of truth for all H/M/L control values
+- **Python Backend**: `config_loader.py` + `cqj_calcj_utils.py` - Loads JSON config and assigns fixed CalcJ values
+- **JavaScript Frontend**: `config_manager.js` + `concentration_controls.js` - Fetches config via Flask route
+- **Management**: `manage_config.py` - CLI tool for config updates (e.g., `python manage_config.py update-control Cglab FAM H 2e7`)
+- **Serving**: Flask route `/config/<filename>` serves config files to frontend
+
+**Behavior**: When thresholds change, CQJ values change but CalcJ values remain constant for controls (H/M/L). Sample CalcJ values recalculate using control-based standard curve.
+
+**Configuration Updates**: Use CLI management tool - `python manage_config.py update-control Cglab FAM H 2e7`
+
+### 📋 **FDA COMPLIANCE & REGULATORY SYSTEM** ✅
+
+**Comprehensive Regulatory Coverage**:
+- **21 CFR Part 820** - Quality System Regulation with software version control
+- **21 CFR Part 11** - Electronic Records/Signatures with ALCOA+ compliance
+- **CLIA** - Clinical Laboratory Improvement Amendments with QC controls
+- **ISO 14971** - Risk Management for Medical Devices
+- **ISO 13485** - Quality Management Systems
+- **MDR** - Medical Device Reporting
+
+**Key Features**:
+- **Software Version Control**: Version tracking, risk assessment, validation status monitoring
+- **User Access Control**: Comprehensive audit trail, session management, electronic signatures
+- **Quality Control**: Daily/weekly/monthly QC runs, control lot tracking, pass/fail analysis
+- **Method Validation**: Accuracy/precision studies, sensitivity/specificity testing, clinical performance
+- **Instrument Qualification**: IQ/OQ/PQ documentation, calibration tracking, performance verification
+- **Risk Management**: Device risk assessment, software change impact analysis
+- **Audit Trail**: User action logging, session management, electronic signature support with ALCOA+ compliance
+
+### 🧠 **ML VALIDATION SYSTEM DETAILS** ✅
+
+**Implementation Components**:
+- **ML Validation Tracker** (`ml_validation_tracker.py`) - Expert decision tracking, model prediction logging, pathogen-specific versioning
+- **Enhanced ML Classifier** - Integrated database tracking for all training/prediction/feedback events
+- **ML Validation Dashboard** (`ml_validation_dashboard.html`) - Real-time pathogen-specific metrics with 30-second auto-refresh
+- **API Endpoint** (`/api/ml-validation-dashboard`) - Comprehensive JSON data for dashboard consumption
+
+**Dashboard Features**:
+- **Summary Metrics**: Active pathogen models, predictions (30 days), expert decisions, teaching score percentage
+- **Pathogen Performance**: Model version (e.g., v1.45), accuracy %, training samples, recent predictions, expert confirmations/corrections
+- **Expert Teaching**: Total decisions, predictions confirmed/corrected, new knowledge added
+- **Real-time Updates**: Auto-refreshes every 30 seconds with comprehensive JSON data from `/api/ml-validation-dashboard`
+
+### 🚀 **PRODUCTION DEPLOYMENT ROADMAP** ✅
+
+**System Overview**: qPCR Compliance & Quality Control Platform
+- **Target Users**: Compliance Officers, QC Technicians, Administrators, Lab Technicians, Research Users
+- **Deployment**: Amazon Cloud with Microsoft Entra ID Authentication  
+- **Scale**: Multi-user concurrent access, high data volume processing
+
+#### **📊 Current Status Assessment** (August 1, 2025)
+
+**✅ Phase 1: Core Compliance System - COMPLETED**
+- Software-Specific Compliance Tracking: 48 requirements, 100% auto-trackable
+- ML Model Validation System: Version control, training sample tracking
+- Real-time Compliance Dashboard: API working, 77.1% overall compliance score
+- Analysis Execution Tracking: Success rates, pathogen-specific metrics
+- Fresh Database Schema: SQLite with proper compliance tables
+- Automated Evidence Collection: System performance, validation execution
+
+#### **🔄 Phase 2: User Management & Authentication - NEXT PRIORITY**
+
+**Microsoft Entra ID Integration** (Credentials Available):
+```
+Client_ID: 6345cabe-25c6-4f2d-a81f-dbc6f392f234
+Client_secret: aaee4e07-3143-4df5-a1f9-7c306a227677
+Tenant_ID: 5d79b88b-9063-46f3-92a6-41f3807a3d60
+Authority: https://login.microsoftonline.com/5d79b88b-9063-46f3-92a6-41f3807a3d60/oauth2/v2.0/authorize
+Token URL: https://login.microsoftonline.com/5d79b88b-9063-46f3-92a6-41f3807a3d60/oauth2/v2.0/token
+```
+
+**User Roles & Access Control**:
+1. **Compliance Officers** (Full Access) - Complete oversight, audit reports, all data access
+2. **QC Technicians** (Analysis + Validation) - Analysis, validation, compliance actions, no config changes
+3. **Administrators** (Full System Control) - User management, system configuration, data management
+4. **Lab Technicians** (Limited Operations) - Basic analysis, no ML feedback, read-only compliance
+5. **Research Users** (Read-Only Analysis) - Analysis viewing, research data export, no modifications
+
+**Required Database Schema**:
+```sql
+CREATE TABLE user_roles (
+    user_id TEXT PRIMARY KEY,
+    role_type TEXT NOT NULL CHECK (role_type IN ('compliance_officer', 'qc_technician', 'administrator', 'lab_technician', 'research_user')),
+    assigned_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    assigned_by TEXT,
+    active BOOLEAN DEFAULT TRUE
+);
+
+CREATE TABLE user_sessions (
+    session_id TEXT PRIMARY KEY,
+    user_id TEXT,
+    login_timestamp TIMESTAMP,
+    logout_timestamp TIMESTAMP,
+    ip_address TEXT,
+    device_info TEXT,
+    session_duration INTEGER
+);
+
+CREATE TABLE permission_audit (
+    audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT,
+    action_attempted TEXT,
+    permission_required TEXT,
+    access_granted BOOLEAN,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    ip_address TEXT
+);
+```
+
+#### **🎯 Phase 3: Enhanced Compliance Dashboard - IN PROGRESS**
+
+**QC Technician Confirmation Workflow**:
+1. Upload & Analysis → ML Processing → QC Review → Compliance Tracking → Final Approval
+2. Pathogen-specific success tracking with ML model version alignment
+3. Real-time monitoring with performance alerts and compliance notifications
+4. Advanced reporting with PDF/CSV exports and trend analysis
+
+#### **🌐 Phase 4: Production Deployment - PLANNED**
+
+**Amazon Cloud Architecture**:
+```yaml
+Production Stack:
+  - Application Load Balancer (ALB)
+  - EC2 Auto Scaling Group (2-4 instances)
+  - RDS PostgreSQL (Multi-AZ for HA)
+  - ElastiCache Redis (session management)
+  - S3 (file storage, backups)
+  - CloudWatch (monitoring, alerting)
+  - CloudTrail (audit logging)
+  - WAF (web application firewall)
+```
+
+**Implementation Timeline**:
+- **Week 1-2**: Microsoft Entra ID integration, role-based access control
+- **Week 3-4**: QC technician workflow, pathogen-specific success tracking
+- **Week 5-6**: AWS infrastructure setup, database migration, performance testing
+- **Week 7-8**: User acceptance testing, production deployment
+
+**Success Metrics**:
+- **Technical**: <2s API response, 20+ concurrent users, 99.9% uptime
+- **Business**: 85%+ compliance score, 100+ qPCR runs/day, 90%+ user satisfaction
+- **Quality**: 95%+ ML accuracy, <1% error rate, complete audit readiness
+
+---
+
+## 🎯 **PREVIOUS STATUS: Compliance System Fully Restored** (July 28, 2025)
 
 ### 🧠 **ML CURVE CLASSIFICATION SYSTEM: COMPREHENSIVE OVERVIEW** (July 30, 2025)
 

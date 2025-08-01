@@ -1,0 +1,8 @@
+{
+  "backup_type": "pre_restore",
+  "timestamp": "20250731_010634",
+  "description": "Before restoring backup",
+  "original_size": 84496384,
+  "backup_size": 84496384,
+  "md5_hash": "5f058233566e9b0080e51fc3cca1fe68"
+}

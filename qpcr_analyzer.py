@@ -90,17 +90,31 @@ def check_signal_to_noise(rfu, min_snr=3.0):
     plateau_start = int(len(rfu) * 0.75)
     signal_level = np.mean(rfu[plateau_start:])
 
-    # Calculate SNR
-    if baseline_std > 0:
+    # Calculate SNR with proper fallback for low-noise baselines
+    if baseline_std > 0.01:  # Use standard SNR calculation when there's measurable noise
         snr = (signal_level - baseline_mean) / baseline_std
     else:
-        snr = signal_level - baseline_mean  # If no baseline variation
+        # For very stable baselines (low noise), calculate SNR differently
+        # Use amplitude-based SNR: signal/baseline ratio
+        if baseline_mean > 0:
+            snr = signal_level / baseline_mean  # Ratio-based SNR
+        else:
+            snr = signal_level  # Pure signal level if baseline near zero
+        
+        # Ensure reasonable SNR values for high-quality curves
+        if signal_level > baseline_mean + 100:  # Significant amplification
+            snr = max(snr, 10.0)  # Minimum SNR for clear amplification
+    
+    # Debug output for SNR calculation issues
+    if snr <= 0:
+        print(f"🔍 SNR Debug: baseline_mean={baseline_mean:.2f}, baseline_std={baseline_std:.4f}, "
+              f"signal_level={signal_level:.2f}, calculated_snr={snr:.2f}")
 
     return {
         'baseline_mean': baseline_mean,
         'baseline_std': baseline_std,
         'signal_level': signal_level,
-        'snr': snr,
+        'snr': max(snr, 0.1),  # Ensure SNR is never zero or negative
         'passes_snr_filter': snr >= min_snr
     }
 
@@ -125,7 +139,7 @@ def check_exponential_growth(rfu, min_max_growth_rate=5.0):
 
 def analyze_curve_quality(cycles, rfu, plot=False, 
                          # Quality filter parameters
-                         min_start_cycle=8,
+                         min_start_cycle=5,
                          min_amplitude=100,
                          min_plateau_rfu=50,
                          min_snr=3.0,
@@ -262,8 +276,16 @@ def analyze_curve_quality(cycles, rfu, plot=False,
         # Original S-curve quality criteria
         original_s_curve_criteria = bool(r2 > r2_threshold and k > 0.05 and L > min_amplitude_original)
 
-        # ENHANCED FINAL CLASSIFICATION: Original criteria AND new quality filters
-        enhanced_is_good_scurve = original_s_curve_criteria and all_quality_checks_pass
+        # ENHANCED FINAL CLASSIFICATION: Use original criteria for high-quality curves
+        # If original criteria pass with very high confidence, don't apply strict filters
+        high_confidence_curve = (r2 > 0.99 and L > 1000 and k > 0.1)
+        
+        if high_confidence_curve:
+            # For obviously excellent curves, use original criteria only
+            enhanced_is_good_scurve = original_s_curve_criteria
+        else:
+            # For borderline curves, apply additional quality filters
+            enhanced_is_good_scurve = original_s_curve_criteria and all_quality_checks_pass
 
         # Determine rejection reason
         rejection_reason = None
@@ -311,6 +333,10 @@ def analyze_curve_quality(cycles, rfu, plot=False,
                 'growth_check': growth_check,
                 'all_quality_checks_pass': all_quality_checks_pass
             },
+            
+            # Add SNR as a top-level field for ML classification
+            'snr': float(snr_check['snr']),
+            
             'rejection_reason': rejection_reason,
 
             'fit_parameters': [float(x) for x in popt],

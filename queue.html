@@ -1204,14 +1204,53 @@
                     // Restore queue data if available
                     if (savedQueue) {
                         const queueData = JSON.parse(savedQueue);
-                        // Convert the plain objects back to Map
-                        this.fileQueue = new Map(Object.entries(queueData));
-                        console.log(`Restored ${this.fileQueue.size} experiments from saved queue`);
+                        
+                        // Filter out excluded experiments when restoring from localStorage
+                        const excludedPatterns = [
+                            /end_point/i,
+                            /endpoint/i,
+                            /melt_curve/i,
+                            /meltcurve/i,
+                            /melting_curve/i,
+                            /plate_view/i,
+                            /plateview/i,
+                            /standard_curve/i,
+                            /standardcurve/i,
+                            /thermal_profile/i,
+                            /thermalprofile/i,
+                            /_tm_/i,
+                            /_derivative/i,
+                            /_peaks/i
+                        ];
+                        
+                        const filteredQueueData = {};
+                        let excludedCount = 0;
+                        
+                        for (const [experimentId, entry] of Object.entries(queueData)) {
+                            // Check if this experiment ID contains excluded patterns
+                            const isExcluded = excludedPatterns.some(pattern => pattern.test(experimentId));
+                            if (isExcluded) {
+                                console.log(`🚫 FILTERING OUT excluded experiment from localStorage: ${experimentId}`);
+                                excludedCount++;
+                            } else {
+                                filteredQueueData[experimentId] = entry;
+                            }
+                        }
+                        
+                        // Convert the filtered objects back to Map
+                        this.fileQueue = new Map(Object.entries(filteredQueueData));
+                        console.log(`Restored ${this.fileQueue.size} experiments from saved queue (${excludedCount} excluded)`);
                         this.updateQueueDisplay();
                         this.updateStatistics();
                         
                         if (this.fileQueue.size > 0) {
                             this.showNotification(`Restored ${this.fileQueue.size} experiments from previous session`, 'success');
+                        }
+                        
+                        if (excludedCount > 0) {
+                            this.showNotification(`Filtered out ${excludedCount} excluded experiments from cached data`, 'info');
+                            // Save the cleaned queue data back to localStorage to prevent re-loading excluded entries
+                            this.saveQueueData();
                         }
                     }
                 } catch (error) {
@@ -1413,8 +1452,9 @@
                 const summaryPattern = /(.+?)[-_\s]*(\d+)[-_\s]*([A-Z0-9]+).*summary.*\.csv$/i;
                 const alternativeSummaryPattern = /(.+)summary(.+)\.csv$/i;
                 
-                // Additional patterns for common PCR file formats
-                const broadAmplificationPattern = /(.+?)(?:quantification|amplification|results?).*\.csv$/i;
+                // Additional patterns for common PCR file formats  
+                // Make broad pattern more restrictive - only match files that actually contain amplification keywords
+                const broadAmplificationPattern = /(.+?)(?:quantification|amplification|results).*\.csv$/i;
                 const broadSummaryPattern = /(.+?)summary.*\.csv$/i;
                 
                 let amplificationCount = 0;
@@ -1429,7 +1469,32 @@
                         continue;
                     }
                     
-                    console.log(`Processing CSV file: ${fileName}`);
+                    console.log(`📁 Processing CSV file: ${fileName}`);
+                    
+                    // FIRST: Skip files that are explicitly NOT amplification files (before any other processing)
+                    const excludedPatterns = [
+                        /end_point/i,
+                        /endpoint/i,
+                        /melt_curve/i,
+                        /meltcurve/i,
+                        /melting_curve/i,
+                        /plate_view/i,
+                        /plateview/i,
+                        /standard_curve/i,
+                        /standardcurve/i,
+                        /thermal_profile/i,
+                        /thermalprofile/i,
+                        /_tm_/i,
+                        /_derivative/i,
+                        /_peaks/i
+                    ];
+                    
+                    const isExcludedFile = excludedPatterns.some(pattern => pattern.test(fileName));
+                    if (isExcludedFile) {
+                        console.log(`🚫 EXCLUDED FILE: ${fileName} - Will not be processed as amplification`);
+                        otherCsvCount++;
+                        continue;
+                    }
                     
                     // Check if it's a summary file (multiple patterns)
                     let summaryMatch = fileName.match(summaryPattern);
@@ -1470,17 +1535,30 @@
                         amplificationCount++;
                         const [, testName, runId, instrument] = ampMatch;
                         experimentId = `${testName.trim()}_${runId}_${instrument}`;
-                        console.log(`Identified as amplification file (pattern match): ${fileName} -> ${experimentId}`);
+                        console.log(`✅ Identified as amplification file (pattern match): ${fileName} -> ${experimentId}`);
                     } else if (fileName.match(broadAmplificationPattern)) {
+                        // Files reaching here have already passed exclusion check
                         amplificationCount++;
                         // For broader pattern, create experiment ID from filename
                         const basePattern = /^(.+?)(?:[-_\s]*(?:quantification|amplification|results?))/i;
                         const baseMatch = fileName.match(basePattern);
                         experimentId = baseMatch ? baseMatch[1].trim().replace(/\s+/g, '_') : fileName.replace(/\.csv$/i, '').trim();
-                        console.log(`Identified as amplification file (broad pattern): ${fileName} -> ${experimentId}`);
+                        console.log(`📋 Identified as amplification file (broad pattern): ${fileName} -> ${experimentId}`);
+                    } else {
+                        // This file doesn't match any amplification patterns
+                        console.log(`❌ File does not match amplification patterns: ${fileName}`);
                     }
                     
                     if (experimentId) {
+                        // FINAL SAFETY CHECK: Ensure excluded files never get processed even if they somehow got an experimentId
+                        const finalExclusionCheck = excludedPatterns.some(pattern => pattern.test(fileName));
+                        if (finalExclusionCheck) {
+                            console.log(`🛑 CRITICAL: Excluded file ${fileName} somehow got experimentId ${experimentId} - BLOCKING!`);
+                            otherCsvCount++;
+                            continue; // Skip this file completely
+                        }
+                        
+                        console.log(`🔧 Processing experimentId: ${experimentId} for file: ${fileName}`);
                         if (!amplificationFiles.has(experimentId)) {
                             amplificationFiles.set(experimentId, []);
                         }

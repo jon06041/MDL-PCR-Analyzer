@@ -91,7 +91,7 @@ class MLConfigManager {
 
     async togglePathogenML(pathogenCode, fluorophore, enabled, notes = '') {
         try {
-            const response = await fetch(`/api/ml-config/pathogen/${pathogenCode}/${fluorophore}`, {
+            const response = await fetch(`/api/ml-config/pathogen/${encodeURIComponent(pathogenCode)}/${encodeURIComponent(fluorophore)}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -176,7 +176,7 @@ class MLConfigManager {
 
     async checkMLEnabled(pathogenCode, fluorophore) {
         try {
-            const response = await fetch(`/api/ml-config/check-enabled/${pathogenCode}/${fluorophore}`);
+            const response = await fetch(`/api/ml-config/check-enabled/${encodeURIComponent(pathogenCode)}/${encodeURIComponent(fluorophore)}`);
             const data = await response.json();
             
             return data.success ? data.enabled : true; // Default to enabled

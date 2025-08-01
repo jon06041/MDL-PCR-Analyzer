@@ -49,4 +49,14 @@ Client_secret: aaee4e07-3143-4df5-a1f9-7c306a227677
 access_token_url= https://login.microsoftonline.com/5d79b88b-9063-46f3-92a6-41f3807a3d60/oauth2/v2.0/token
 authorize_url= https://login.microsoftonline.com/5d79b88b-9063-46f3-92a6-41f3807a3d60/oauth2/v2.0/authorize
 
+## Production Deployment
+
+For production deployment information, including:
+- User roles and authentication (Microsoft Entra ID)
+- Amazon Cloud architecture 
+- Implementation timeline and success metrics
+- Database migration and security requirements
+
+See the **Production Deployment Roadmap** section in [`Agent_instructions.md`](Agent_instructions.md).
+
 Let me know the redirect URL I should use. 

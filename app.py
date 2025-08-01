@@ -7,6 +7,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import numpy as np
 from datetime import datetime
+from urllib.parse import unquote
 from qpcr_analyzer import process_csv_data, validate_csv_structure
 from models import db, AnalysisSession, WellResult, ExperimentStatistics
 from sqlalchemy.orm import DeclarativeBase
@@ -494,21 +495,31 @@ if database_url and database_url.startswith("mysql"):
     }
     print("Using MySQL database for production")
 else:
-    # Development SQLite configuration
-    sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
-    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{sqlite_path}"
-    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-        "pool_recycle": 300,
-        "pool_pre_ping": True,
-        "pool_timeout": 30,
-        "pool_size": 10,
-        "max_overflow": 20,
-        "connect_args": {
-            "timeout": 30,
-            "check_same_thread": False
+    # Development SQLite configuration - Use in-memory for no file locks
+    if os.environ.get("USE_MEMORY_DB") == "true":
+        app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+        app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+            "pool_pre_ping": True,
+            "connect_args": {
+                "check_same_thread": False
+            }
         }
-    }
-    print(f"Using SQLite database for development: {sqlite_path}")
+        print("Using in-memory SQLite database (no file locks)")
+    else:
+        sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
+        app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{sqlite_path}"
+        app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+            "pool_recycle": 300,
+            "pool_pre_ping": True,
+            "pool_timeout": 30,
+            "pool_size": 10,
+            "max_overflow": 20,
+            "connect_args": {
+                "timeout": 30,
+                "check_same_thread": False
+            }
+        }
+        print(f"Using SQLite database for development: {sqlite_path}")
 
 db.init_app(app)
 
@@ -617,13 +628,27 @@ def track_compliance_automatically(event_type, event_data, user_id='user'):
 # Enhanced compliance tracking functions for specific software events
 def track_ml_compliance(event_type, ml_data, user_id='user'):
     """Track ML model validation compliance events"""
-    enhanced_data = {
-        **ml_data,
-        'timestamp': datetime.utcnow().isoformat(),
-        'compliance_category': 'ML_Validation',
-        'software_component': 'ml_classifier'
-    }
-    return track_compliance_automatically(event_type, enhanced_data, user_id)
+    try:
+        # TEMPORARY FIX: Disable ML compliance tracking by default to prevent server crashes
+        # during ML feedback submission. The compliance system causes overload when processing
+        # hundreds of simultaneous ML predictions. Can be re-enabled with ENABLE_ML_COMPLIANCE=true
+        enable_ml_compliance = os.getenv('ENABLE_ML_COMPLIANCE', 'false').lower() == 'true'
+        
+        if not enable_ml_compliance:
+            print(f"🔧 ML Compliance tracking temporarily disabled for {event_type} (crash prevention)")
+            return []
+        
+        # Normal compliance tracking (only when explicitly enabled)
+        enhanced_data = {
+            **ml_data,
+            'timestamp': datetime.utcnow().isoformat(),
+            'compliance_category': 'ML_Validation',
+            'software_component': 'ml_classifier'
+        }
+        return track_compliance_automatically(event_type, enhanced_data, user_id)
+    except Exception as e:
+        print(f"Error in ML compliance tracking: {e}")
+        return []
 
 def track_analysis_compliance(session_id, analysis_data, user_id='user'):
     """Track qPCR analysis execution compliance"""
@@ -1839,15 +1864,16 @@ def ml_analyze_curve():
     if not ML_AVAILABLE or ml_classifier is None:
         return jsonify({'error': 'ML classifier not available'}), 503
     
-    # Check for batch cancellation flag
-    if app.config.get('ML_BATCH_CANCELLED', False):
-        app.logger.info("ML analysis request cancelled due to batch cancellation")
-        return jsonify({'error': 'Analysis cancelled by user'}), 409
-    
     try:
         data = request.json
         if not data:
             return jsonify({'error': 'No data provided'}), 400
+        
+        # Check for batch cancellation flag - only block batch requests, not individual requests
+        is_batch_request = data.get('is_batch_request', False)
+        if app.config.get('ML_BATCH_CANCELLED', False) and is_batch_request:
+            app.logger.info("ML batch analysis request cancelled due to batch cancellation")
+            return jsonify({'error': 'Analysis cancelled by user'}), 409
             
         rfu_data = data.get('rfu_data', [])
         cycles = data.get('cycles', [])
@@ -2180,6 +2206,89 @@ def ml_stats():
         print(f"ML stats error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/backup-manager')
+def backup_manager():
+    """Serve the backup management interface"""
+    return send_from_directory('.', 'backup_manager.html')
+
+@app.route('/api/db-backup', methods=['POST'])
+def create_database_backup():
+    """Create a manual database backup"""
+    try:
+        from database_backup_manager import DatabaseBackupManager
+        
+        data = request.json or {}
+        description = data.get('description', 'Manual backup via web interface')
+        backup_type = data.get('type', 'manual')
+        
+        backup_manager = DatabaseBackupManager()
+        backup_path, metadata = backup_manager.create_backup(backup_type, description)
+        
+        if backup_path:
+            return jsonify({
+                'success': True,
+                'backup_path': backup_path,
+                'description': description,
+                'size': metadata.get('backup_size', 0),
+                'timestamp': metadata.get('timestamp', '')
+            })
+        else:
+            return jsonify({'error': 'Backup creation failed'}), 500
+            
+    except Exception as e:
+        print(f"Database backup error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/db-backups', methods=['GET'])
+def list_database_backups():
+    """List available database backups"""
+    try:
+        from database_backup_manager import DatabaseBackupManager
+        
+        backup_manager = DatabaseBackupManager()
+        backups = backup_manager.list_backups()
+        
+        return jsonify({
+            'success': True,
+            'backups': backups
+        })
+        
+    except Exception as e:
+        print(f"List backups error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/db-restore', methods=['POST'])
+def restore_database_backup():
+    """Restore database from backup"""
+    try:
+        from database_backup_manager import DatabaseBackupManager
+        
+        data = request.json
+        if not data or not data.get('backup_file'):
+            return jsonify({'error': 'Backup file path required'}), 400
+            
+        backup_file = data['backup_file']
+        backup_manager = DatabaseBackupManager()
+        
+        # Verify backup file exists
+        if not os.path.exists(backup_file):
+            return jsonify({'error': f'Backup file not found: {backup_file}'}), 404
+            
+        success = backup_manager.restore_backup(backup_file)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': f'Database restored from {backup_file}',
+                'backup_file': backup_file
+            })
+        else:
+            return jsonify({'error': 'Database restore failed'}), 500
+            
+    except Exception as e:
+        print(f"Database restore error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/update-well-classification', methods=['POST'])
 def update_well_classification():
     """Update well classification based on expert feedback"""
@@ -2328,6 +2437,10 @@ def update_pathogen_ml_config(pathogen_code, fluorophore):
     try:
         from ml_config_manager import ml_config_manager
         
+        # URL decode parameters
+        pathogen_code = unquote(pathogen_code)
+        fluorophore = unquote(fluorophore)
+        
         data = request.get_json()
         enabled = data.get('enabled', True)
         
@@ -2359,6 +2472,9 @@ def get_pathogen_ml_config(pathogen_code):
     """Get ML configuration for specific pathogen"""
     try:
         from ml_config_manager import ml_config_manager
+        
+        # URL decode the pathogen code
+        pathogen_code = unquote(pathogen_code)
         
         fluorophore = request.args.get('fluorophore')
         configs = ml_config_manager.get_pathogen_ml_config(pathogen_code, fluorophore)
@@ -2501,6 +2617,10 @@ def check_ml_enabled(pathogen_code, fluorophore):
     """Check if ML is enabled for specific pathogen+fluorophore"""
     try:
         from ml_config_manager import ml_config_manager
+        
+        # URL decode parameters
+        pathogen_code = unquote(pathogen_code)
+        fluorophore = unquote(fluorophore)
         
         enabled = ml_config_manager.is_ml_enabled_for_pathogen(pathogen_code, fluorophore)
         
@@ -3127,6 +3247,11 @@ def log_fda_user_action():
             return jsonify({'error': 'FDA Compliance Manager not available'}), 503
         
         data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # Log the received data for debugging
+        app.logger.info(f"FDA compliance logging request: {data.get('action_type')} by {data.get('user_id')}")
         
         action_id = fda_compliance_manager.log_user_action(
             user_id=data.get('user_id', 'anonymous'),
@@ -3135,16 +3260,19 @@ def log_fda_user_action():
             resource_accessed=data.get('resource_accessed'),
             action_details=data.get('action_details'),
             success=data.get('success', True),
-            ip_address=request.remote_addr
+            ip_address=request.remote_addr,
+            session_id=data.get('session_id')
         )
         
         return jsonify({
             'success': True,
-            'action_id': action_id
+            'action_id': action_id,
+            'message': f'User action logged successfully (ID: {action_id})'
         })
         
     except Exception as e:
         app.logger.error(f"Error logging FDA user action: {str(e)}")
+        app.logger.error(f"Request data: {request.get_json() if request.get_json() else 'No JSON data'}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/fda-compliance/record-qc-run', methods=['POST'])
@@ -3768,6 +3896,16 @@ if __name__ == '__main__':
     
     print(f"Starting qPCR Analyzer on {host}:{port}")
     print(f"Debug mode: {debug}")
+    
+    # Start automatic database backup scheduler
+    try:
+        from backup_scheduler import BackupScheduler
+        backup_scheduler = BackupScheduler()
+        backup_scheduler.run_in_background()
+        print("✅ Automatic database backup scheduler started")
+    except Exception as e:
+        print(f"⚠️  Warning: Could not start backup scheduler: {e}")
+        print("   Manual backups are still available via db_manager.py")
     
     # Start the Flask application - disable reloader to prevent multiple processes
     app.run(host=host, port=port, debug=debug, threaded=True, use_reloader=False)

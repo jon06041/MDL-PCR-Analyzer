@@ -129,7 +129,7 @@ window.PATHOGEN_FIXED_THRESHOLDS = {
     "FAM": { linear: 350, log: 350 },
     "HEX": { linear: 350, log: 350 },
     "Texas Red": { linear: 200, log: 200 },
-    "CY5": { linear: 350, log: 350 }
+    "Cy5": { linear: 350, log: 350 }
   },
   "BVPanelPCR3": { 
     "CY5": { linear: 100, log: 100 },      // Fixed: CY5 (uppercase)
