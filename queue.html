@@ -1461,6 +1461,34 @@
                 let summaryCount = 0;
                 let otherCsvCount = 0;
                 
+                // DEFINE EXCLUSION PATTERNS FIRST (before the loop to avoid scope issues)
+                const excludedPatterns = [
+                    /end_point/i,
+                    /endpoint/i,
+                    /_end_point/i,        // Enhanced: catch files like "..._End_Point"
+                    /_endpoint/i,         // Enhanced: catch files like "..._EndPoint"
+                    /melt_curve/i,
+                    /meltcurve/i,
+                    /melting_curve/i,
+                    /_melt_curve/i,       // Enhanced: catch files like "..._Melt_Curve"
+                    /_melting_curve/i,    // Enhanced: catch files like "..._Melting_Curve"
+                    /plate_view/i,
+                    /plateview/i,
+                    /_plate_view/i,       // Enhanced: catch files like "..._Plate_View"
+                    /standard_curve/i,
+                    /standardcurve/i,
+                    /_standard_curve/i,   // Enhanced: catch files like "..._Standard_Curve"
+                    /thermal_profile/i,
+                    /thermalprofile/i,
+                    /_thermal_profile/i,  // Enhanced: catch files like "..._Thermal_Profile"
+                    /_tm_/i,
+                    /_derivative/i,
+                    /_peaks/i,
+                    /analysis_overview/i, // Additional: catch analysis overview files
+                    /plate_setup/i,       // Additional: catch plate setup files
+                    /run_information/i    // Additional: catch run information files
+                ];
+
                 for (const file of files) {
                     const fileName = file.name || file.webkitRelativePath?.split('/').pop() || file.relativePath || '';
                     
@@ -1471,12 +1499,21 @@
                     
                     console.log(`📁 Processing CSV file: ${fileName}`);
                     
+                    // FIRST: Skip files that are explicitly NOT amplification files (before any other processing)
+                    const matchedPatterns = excludedPatterns.filter(pattern => pattern.test(fileName));
+                    if (matchedPatterns.length > 0) {
+                        console.log(`🚫 EXCLUDED FILE: ${fileName} - Matched patterns:`, matchedPatterns.map(p => p.toString()));
+                        otherCsvCount++;
+                        continue;
+                    }
+                    
                     // SPECIAL DEBUG: Test specific problematic files
                     if (fileName.includes('End_Point') || fileName.includes('Melt_Curve') || fileName.includes('Plate_View')) {
                         console.log(`🔍 SPECIAL DEBUG: Found problematic file type: ${fileName}`);
                         console.log(`   - Contains End_Point: ${fileName.includes('End_Point')}`);
                         console.log(`   - Contains Melt_Curve: ${fileName.includes('Melt_Curve')}`);
                         console.log(`   - Contains Plate_View: ${fileName.includes('Plate_View')}`);
+                        console.log(`   - Should have been excluded by patterns above!`);
                         
                         // Test each exclusion pattern individually
                         excludedPatterns.forEach((pattern, index) => {
@@ -1485,50 +1522,6 @@
                                 console.log(`   - Pattern ${index} (${pattern.toString()}) MATCHES`);
                             }
                         });
-                    }
-                    
-                    // FIRST: Skip files that are explicitly NOT amplification files (before any other processing)
-                    const excludedPatterns = [
-                        /end_point/i,
-                        /endpoint/i,
-                        /_end_point/i,        // Enhanced: catch files like "..._End_Point"
-                        /_endpoint/i,         // Enhanced: catch files like "..._EndPoint"
-                        /melt_curve/i,
-                        /meltcurve/i,
-                        /melting_curve/i,
-                        /_melt_curve/i,       // Enhanced: catch files like "..._Melt_Curve"
-                        /_melting_curve/i,    // Enhanced: catch files like "..._Melting_Curve"
-                        /plate_view/i,
-                        /plateview/i,
-                        /_plate_view/i,       // Enhanced: catch files like "..._Plate_View"
-                        /standard_curve/i,
-                        /standardcurve/i,
-                        /_standard_curve/i,   // Enhanced: catch files like "..._Standard_Curve"
-                        /thermal_profile/i,
-                        /thermalprofile/i,
-                        /_thermal_profile/i,  // Enhanced: catch files like "..._Thermal_Profile"
-                        /_tm_/i,
-                        /_derivative/i,
-                        /_peaks/i,
-                        /analysis_overview/i, // Additional: catch analysis overview files
-                        /plate_setup/i,       // Additional: catch plate setup files
-                        /run_information/i    // Additional: catch run information files
-                    ];
-                    
-                    // Enhanced debugging for excluded files
-                    console.log(`📋 Checking exclusion for file: ${fileName}`);
-                    const matchedPatterns = excludedPatterns.filter(pattern => pattern.test(fileName));
-                    if (matchedPatterns.length > 0) {
-                        console.log(`🚫 EXCLUDED FILE: ${fileName} - Matched patterns:`, matchedPatterns.map(p => p.toString()));
-                        otherCsvCount++;
-                        continue;
-                    }
-                    
-                    const isExcludedFile = excludedPatterns.some(pattern => pattern.test(fileName));
-                    if (isExcludedFile) {
-                        console.log(`🚫 EXCLUDED FILE: ${fileName} - Will not be processed as amplification`);
-                        otherCsvCount++;
-                        continue;
                     }
                     
                     // Check if it's a summary file (multiple patterns)
