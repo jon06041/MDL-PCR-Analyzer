@@ -1563,9 +1563,16 @@ class MLFeedbackInterface {
     displayExistingMLClassification(mlClassification) {
         // Add validation for ML classification data
         if (!mlClassification || !mlClassification.classification || mlClassification.confidence === undefined) {
-            //console.warn('ML Feedback Interface: Invalid ML classification data:', mlClassification);
+            console.warn('ML Feedback Interface: Invalid ML classification data:', mlClassification);
             return;
         }
+        
+        console.log('🔄 DISPLAY-ML: Displaying ML classification:', {
+            classification: mlClassification.classification,
+            method: mlClassification.method,
+            confidence: mlClassification.confidence,
+            isExpertFeedback: mlClassification.method === 'expert_feedback'
+        });
         
         // CRITICAL: Store the original ML prediction for comparison later
         if (this.currentWellData && !this.currentWellData.original_ml_prediction) {
@@ -1587,8 +1594,14 @@ class MLFeedbackInterface {
             classElement.textContent = mlClassification.classification.replace('_', ' ');
             classElement.className = `classification-badge ${this.getClassificationBadgeClass(mlClassification.classification)}`;
             
-            confidenceElement.textContent = `(${(mlClassification.confidence * 100).toFixed(1)}% confidence)`;
-            methodElement.textContent = mlClassification.method || 'ML';
+            // CRITICAL FIX: Handle expert feedback classifications differently
+            if (mlClassification.method === 'expert_feedback') {
+                confidenceElement.textContent = '(Expert Decision)';
+                methodElement.textContent = 'Expert Review';
+            } else {
+                confidenceElement.textContent = `(${(mlClassification.confidence * 100).toFixed(1)}% confidence)`;
+                methodElement.textContent = mlClassification.method || 'ML';
+            }
             
             if (mlClassification.pathogen && pathogenElement && pathogenContext) {
                 pathogenElement.textContent = mlClassification.pathogen;
@@ -2434,8 +2447,19 @@ class MLFeedbackInterface {
                     // THEN update the results table with the expert classification
                     await this.updateResultsTableAfterFeedback(expertClassification);
                     
-                    // FINALLY refresh the modal to show expert feedback (data is now updated)
-                    this.refreshModalAfterFeedback(expertClassification);
+                    // CRITICAL FIX: Add a small delay to ensure data propagation before modal refresh
+                    setTimeout(() => {
+                        console.log('🔄 MODAL-REFRESH: About to refresh modal after expert feedback');
+                        console.log('🔍 MODAL-REFRESH: Current well curve_classification:', this.currentWellData?.curve_classification);
+                        
+                        // Refresh the modal to show expert feedback (data is now updated)
+                        this.refreshModalAfterFeedback(expertClassification);
+                        
+                        // Refresh the ML display to show expert classification
+                        this.refreshMLDisplayInModal();
+                        
+                        console.log('✅ MODAL-REFRESH: Modal refresh completed');
+                    }, 100);
                     
                     // Use non-blocking notification instead of alert
                     this.showTrainingNotification(
@@ -2453,9 +2477,6 @@ class MLFeedbackInterface {
                     
                     // Also fetch full stats to update everything else
                     await this.updateMLStats();
-                    
-                    // CRITICAL: Refresh the modal display to show expert classification
-                    this.refreshMLDisplayInModal();
                     
                     // Enhanced ML Training Strategy - handle this after a small delay
                     // to prevent popup conflicts
@@ -4700,6 +4721,31 @@ class MLFeedbackInterface {
         if (mainClassDisplay) {
             mainClassDisplay.textContent = expertClassification.replace('_', ' ');
             mainClassDisplay.className = `classification-badge ${this.getClassificationBadgeClass(expertClassification)}`;
+        }
+
+        // CRITICAL FIX: Update the ML section in the modal (highlighted area from screenshot)
+        const mlPredictionClass = document.getElementById('ml-prediction-class');
+        const mlPredictionConfidence = document.getElementById('ml-prediction-confidence');
+        const mlPredictionMethod = document.getElementById('ml-prediction-method');
+
+        if (mlPredictionClass) {
+            mlPredictionClass.textContent = expertClassification.replace('_', ' ');
+            mlPredictionClass.className = `classification-badge ${this.getClassificationBadgeClass(expertClassification)}`;
+        }
+
+        if (mlPredictionConfidence) {
+            mlPredictionConfidence.textContent = '(Expert Decision)';
+        }
+
+        if (mlPredictionMethod) {
+            mlPredictionMethod.textContent = 'Expert Review';
+        }
+
+        // CRITICAL FIX: Update sample details result field in modal
+        const resultElement = document.querySelector('#modalDetails .result-value, .modal-result-badge');
+        if (resultElement) {
+            resultElement.textContent = expertClassification.replace('_', ' ');
+            resultElement.className = `result-badge ${this.getClassificationBadgeClass(expertClassification)}`;
         }
     }
 
