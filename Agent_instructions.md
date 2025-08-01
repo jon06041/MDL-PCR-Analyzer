@@ -43,6 +43,17 @@
 
 **TEST FILES**: All validation tests moved to `test files/` folder for organization.
 
+#### **5. S-Curve Classification & ML Visual Analysis Fixed** ✅ (August 1, 2025)
+- **PROBLEM**: ML visual analysis showing contradictory results - curves with R²=0.9964, amplitude=1491 classified as "Poor S-Curve" but "Strong Positive" pattern
+- **ROOT CAUSE**: 
+  1. `min_start_cycle=8` in enhanced quality filters was too restrictive for excellent curves
+  2. Frontend visual analysis functions ignored `is_good_scurve` flag when making positive classifications
+- **SOLUTION**: 
+  1. Changed `min_start_cycle=8` to `min_start_cycle=5` in `qpcr_analyzer.py`
+  2. Fixed `identifyPatternType()` and `calculateVisualQuality()` in `ml_feedback_interface.js` to check `is_good_scurve` first
+- **RESULT**: High-quality curves now properly classified as good S-curves; ML visual analysis consistent with curve quality
+- **FILES MODIFIED**: `qpcr_analyzer.py`, `static/ml_feedback_interface.js`
+
 ### 🔧 **CENTRALIZED CONFIGURATION SYSTEM** ✅
 
 **Purpose**: Single-source control values managed via `config/concentration_controls.json` ensuring consistent H/M/L control CalcJ values across system.
