@@ -495,21 +495,31 @@ if database_url and database_url.startswith("mysql"):
     }
     print("Using MySQL database for production")
 else:
-    # Development SQLite configuration
-    sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
-    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{sqlite_path}"
-    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-        "pool_recycle": 300,
-        "pool_pre_ping": True,
-        "pool_timeout": 30,
-        "pool_size": 10,
-        "max_overflow": 20,
-        "connect_args": {
-            "timeout": 30,
-            "check_same_thread": False
+    # Development SQLite configuration - Use in-memory for no file locks
+    if os.environ.get("USE_MEMORY_DB") == "true":
+        app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+        app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+            "pool_pre_ping": True,
+            "connect_args": {
+                "check_same_thread": False
+            }
         }
-    }
-    print(f"Using SQLite database for development: {sqlite_path}")
+        print("Using in-memory SQLite database (no file locks)")
+    else:
+        sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
+        app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{sqlite_path}"
+        app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+            "pool_recycle": 300,
+            "pool_pre_ping": True,
+            "pool_timeout": 30,
+            "pool_size": 10,
+            "max_overflow": 20,
+            "connect_args": {
+                "timeout": 30,
+                "check_same_thread": False
+            }
+        }
+        print(f"Using SQLite database for development: {sqlite_path}")
 
 db.init_app(app)
 
