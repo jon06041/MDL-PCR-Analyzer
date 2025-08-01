@@ -627,14 +627,24 @@ def track_compliance_automatically(event_type, event_data, user_id='user'):
 
 # Enhanced compliance tracking functions for specific software events
 def track_ml_compliance(event_type, ml_data, user_id='user'):
-    """Track ML model validation compliance events"""
-    enhanced_data = {
-        **ml_data,
-        'timestamp': datetime.utcnow().isoformat(),
-        'compliance_category': 'ML_Validation',
-        'software_component': 'ml_classifier'
-    }
-    return track_compliance_automatically(event_type, enhanced_data, user_id)
+    """Track ML model validation compliance events - TEMPORARILY DISABLED TO PREVENT CRASHES"""
+    try:
+        # TEMPORARY FIX: Disable compliance tracking during ML operations to prevent server crashes
+        # This prevents the compliance system from overloading during batch ML operations
+        print(f"🔧 ML Compliance tracking temporarily disabled for {event_type} (crash prevention)")
+        return []
+        
+        # Original code (disabled):
+        # enhanced_data = {
+        #     **ml_data,
+        #     'timestamp': datetime.utcnow().isoformat(),
+        #     'compliance_category': 'ML_Validation',
+        #     'software_component': 'ml_classifier'
+        # }
+        # return track_compliance_automatically(event_type, enhanced_data, user_id)
+    except Exception as e:
+        print(f"Error in ML compliance tracking: {e}")
+        return []
 
 def track_analysis_compliance(session_id, analysis_data, user_id='user'):
     """Track qPCR analysis execution compliance"""
