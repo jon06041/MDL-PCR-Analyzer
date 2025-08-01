@@ -139,7 +139,7 @@ def check_exponential_growth(rfu, min_max_growth_rate=5.0):
 
 def analyze_curve_quality(cycles, rfu, plot=False, 
                          # Quality filter parameters
-                         min_start_cycle=8,
+                         min_start_cycle=5,
                          min_amplitude=100,
                          min_plateau_rfu=50,
                          min_snr=3.0,
@@ -276,8 +276,16 @@ def analyze_curve_quality(cycles, rfu, plot=False,
         # Original S-curve quality criteria
         original_s_curve_criteria = bool(r2 > r2_threshold and k > 0.05 and L > min_amplitude_original)
 
-        # ENHANCED FINAL CLASSIFICATION: Original criteria AND new quality filters
-        enhanced_is_good_scurve = original_s_curve_criteria and all_quality_checks_pass
+        # ENHANCED FINAL CLASSIFICATION: Use original criteria for high-quality curves
+        # If original criteria pass with very high confidence, don't apply strict filters
+        high_confidence_curve = (r2 > 0.99 and L > 1000 and k > 0.1)
+        
+        if high_confidence_curve:
+            # For obviously excellent curves, use original criteria only
+            enhanced_is_good_scurve = original_s_curve_criteria
+        else:
+            # For borderline curves, apply additional quality filters
+            enhanced_is_good_scurve = original_s_curve_criteria and all_quality_checks_pass
 
         # Determine rejection reason
         rejection_reason = None

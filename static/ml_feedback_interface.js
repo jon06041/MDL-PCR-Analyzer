@@ -657,6 +657,14 @@ class MLFeedbackInterface {
         const amplitude = wellData.amplitude || 0;
         const snr = wellData.snr || 0;
         const hasAnomalies = wellData.anomalies && wellData.anomalies.length > 0;
+        const isGoodSCurve = wellData.is_good_scurve;
+
+        // CRITICAL FIX: Check is_good_scurve FIRST before any positive classification
+        if (!isGoodSCurve) {
+            if (amplitude < 200) return 'Negative/Background';
+            if (amplitude < 500) return 'Poor Quality Signal';
+            return 'High Amplitude/Poor Shape';  // High amplitude but poor S-curve shape
+        }
 
         if (amplitude < 200) return 'Negative/Background';
         if (hasAnomalies) {
@@ -667,6 +675,7 @@ class MLFeedbackInterface {
             return 'Anomalous';
         }
         
+        // Only classify as positive if we have a good S-curve
         if (amplitude > 1000 && snr > 15) return 'Strong Positive';
         if (amplitude > 500 && snr > 8) return 'Clear Positive';
         if (amplitude > 300 && snr > 4) return 'Weak Positive';
@@ -677,6 +686,16 @@ class MLFeedbackInterface {
         const r2Score = wellData.r2_score || 0;
         const snr = wellData.snr || 0;
         const amplitude = wellData.amplitude || 0;
+        const isGoodSCurve = wellData.is_good_scurve;
+        
+        // CRITICAL FIX: Poor S-curve quality should override metric-based quality
+        if (!isGoodSCurve) {
+            // Even with good metrics, poor S-curve = poor overall quality
+            if (r2Score > 0.9 && amplitude > 1000) {
+                return 'Good Metrics/Poor Shape';  // Acknowledge good metrics but poor shape
+            }
+            return 'Poor';  // Poor S-curve = poor quality regardless of other metrics
+        }
         
         let qualityScore = 0;
         
