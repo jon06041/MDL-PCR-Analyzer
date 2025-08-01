@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MDL PCR Analyzer - Enhanced</title>
+    <!-- Add favicon or logo -->
+    <link rel="icon" type="image/png" href="/static/images/logo.png">
     <script src="/static/pathogen_library.js?v=1751381539"></script>
     <script src="static/formatNumber.js"></script>
     <!-- Load concentration controls for H/M/L CalcJ calculations -->
@@ -47,6 +49,8 @@
 <body>
     <div class="container">
         <div class="header">
+            <!-- Optional: Add a logo/image here -->
+            <!-- <img src="/static/images/your-logo.png" alt="Company Logo" style="height: 50px; margin-bottom: 10px;"> -->
             <h1>🧬 MDL PCR Analyzer - Enhanced</h1>
             <p>Upload your CFX Manager CSV file to analyze amplification curves with flexible cycle counts</p>
             <div class="features">
@@ -62,6 +66,8 @@
         <div class="upload-section">
             <div class="instructions-box">
                 <h3>📋 Upload Instructions</h3>
+                <!-- Optional: Add workflow diagram -->
+                <!-- <img src="/static/images/workflow-diagram.png" alt="Analysis Workflow" style="width: 100%; max-width: 400px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px;"> -->
                 <p><strong>CFX Manager Export:</strong> Open .pcrd → Quantification tab → Export All Data Sheets → CSV Format</p>
                 <p><strong>Multi-Channel Support:</strong> Upload multiple "Quantification Amplification Results" CSV files - one for each fluorophore (Cy5, FAM, HEX, Texas Red) with pattern: testName_1234567_CFX123456.csv</p>
                 <p><strong>Cycle Threshold Comparison:</strong> Upload the "Quantification Summary" CSV file for cycle threshold comparison (Required) - system automatically matches wells and fluorophores to display correct sample names and Cq values</p>

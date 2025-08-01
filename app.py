@@ -1840,16 +1840,16 @@ def ml_analyze_curve():
     if not ML_AVAILABLE or ml_classifier is None:
         return jsonify({'error': 'ML classifier not available'}), 503
     
-    # Check for batch cancellation flag - only block batch requests, not individual requests
-    is_batch_request = data.get('is_batch_request', False) if request.json else False
-    if app.config.get('ML_BATCH_CANCELLED', False) and is_batch_request:
-        app.logger.info("ML batch analysis request cancelled due to batch cancellation")
-        return jsonify({'error': 'Analysis cancelled by user'}), 409
-    
     try:
         data = request.json
         if not data:
             return jsonify({'error': 'No data provided'}), 400
+        
+        # Check for batch cancellation flag - only block batch requests, not individual requests
+        is_batch_request = data.get('is_batch_request', False)
+        if app.config.get('ML_BATCH_CANCELLED', False) and is_batch_request:
+            app.logger.info("ML batch analysis request cancelled due to batch cancellation")
+            return jsonify({'error': 'Analysis cancelled by user'}), 409
             
         rfu_data = data.get('rfu_data', [])
         cycles = data.get('cycles', [])
