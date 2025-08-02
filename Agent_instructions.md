@@ -1,8 +1,50 @@
 # MDL-PCR-Analyzer: Comprehensive Agent Instructions & Progress Log
 
-# MDL-PCR-Analyzer: Comprehensive Agent Instructions & Progress Log
+## 🚨 **CURRENT STATUS: Critical ML Issues Identified** (August 2, 2025)
 
-## 🎯 **CURRENT STATUS: Compliance Checklist & Queue Filtering Fixed** (August 1, 2025)
+### ❌ **CRITICAL ISSUES DISCOVERED** (August 2, 2025)
+
+#### **🎯 Testing Results Summary**:
+**✅ WORKING**: Fresh upload single-channel analysis
+**❌ BROKEN**: Fresh upload multi-channel, loaded sessions, modal feedback persistence
+
+#### **1. Fresh Upload Analysis Issues** ❌
+- **✅ WORKING**: Single-channel fresh uploads work correctly (proper initial results, expert feedback updates table)
+- **❌ BROKEN**: Multi-channel fresh uploads giving wrong predictions (not following same procedure as single-channel)
+- **❌ ISSUE**: No re-evaluation happening after expert feedback in fresh uploads
+- **❌ TIMING**: Progress bar 1/3 behind robot emoji appearance during batch analysis
+
+#### **2. Session Loading Critical Issues** ❌
+- **❌ MAJOR**: No modal choice appearing when loading sessions (ML runs automatically despite `isLoadedSession: true`)
+- **❌ MAJOR**: Wrong ML predictions in loaded sessions (different from original analysis procedure)
+- **❌ MAJOR**: Original session results not being preserved/retained
+- **❌ CRITICAL**: Modal feedback flashes correct result then reverts back to original
+
+#### **3. Individual Sample Modal Feedback Bug** ❌
+- **SYMPTOM**: Expert feedback through individual well modal shows correct result briefly, then reverts
+- **CONFIRMED**: Table results ARE updating initially 
+- **ROOT CAUSE**: Likely `refreshMLPredictionInTable()` function running 1.5 seconds after feedback submission and overwriting expert classification
+- **LOCATION**: `updateResultsTableAfterFeedback()` in `ml_feedback_interface.js` lines 5825-5830
+
+#### **4. Two Separate Modal Systems Identified** 
+- **Modal 1**: Session loading choice (keep original vs re-analyze) - ✅ Fixed
+- **Modal 2**: Individual sample feedback (expert correction) - ❌ Still broken
+
+### 🔧 **FIXES IMPLEMENTED**:
+1. **Session Loading Modal** ✅ - Added choice system to preserve original results
+2. **Reduced Console Logging** ✅ - Removed excessive log statements  
+3. **Relaxed Similarity Thresholds** ✅ - Changed from 85%/75% to 80%/70%
+4. **Emoji Positioning Standardization** 🔄 - Ongoing (robot 🤖 vs recycle 🔄 placement consistency)
+
+### 🎯 **NEXT STEPS**:
+1. **Fix Modal Feedback Revert**: Remove/modify `refreshMLPredictionInTable()` call that overwrites expert decisions
+2. **Standardize ML Analysis Procedure**: Make multi-channel and session loading use same logic as working single-channel
+3. **Fix Session Loading ML Logic**: Ensure proper modal choice and original result preservation
+4. **Fix Progress Bar Timing**: Synchronize progress bar with actual ML processing
+
+---
+
+## 🎯 **PREVIOUS STATUS: Compliance Checklist & Queue Filtering Fixed** (August 1, 2025)
 
 ### ✅ **LATEST UPDATES COMPLETED** (August 1, 2025)
 

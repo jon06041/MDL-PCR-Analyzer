@@ -4,6 +4,7 @@ import os
 import re
 import traceback
 import logging
+import time
 from logging.handlers import RotatingFileHandler
 import numpy as np
 from datetime import datetime
@@ -568,12 +569,14 @@ except Exception as e:
     print(f"Warning: Could not initialize ML Configuration Manager: {e}")
     ml_config_manager = None
 
-# Initialize ML validation manager
+# Initialize ML validation manager - TEMPORARILY DISABLED to prevent database conflicts
+# The safe_compliance_tracker now handles ML compliance tracking without conflicts
 try:
-    from ml_validation_manager import MLModelValidationManager
-    sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
-    ml_validation_manager = MLModelValidationManager(sqlite_path)
-    print("ML Model Validation Manager initialized")
+    # DISABLED: from ml_validation_manager import MLModelValidationManager
+    # DISABLED: sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
+    # DISABLED: ml_validation_manager = MLModelValidationManager(sqlite_path)
+    ml_validation_manager = None  # Disabled to prevent database locking conflicts
+    print("ML Model Validation Manager DISABLED (using safe_compliance_tracker instead)")
 except Exception as e:
     print(f"Warning: Could not initialize ML Model Validation Manager: {e}")
     ml_validation_manager = None
@@ -601,53 +604,45 @@ create_threshold_routes(app)
 
 def track_compliance_automatically(event_type, event_data, user_id='user'):
     """
-    Automatically track compliance events based on software usage
+    Automatically track compliance events using safe non-blocking approach
     Maps real software activities to SOFTWARE-SPECIFIC compliance requirements
     Only tracks compliance that can be satisfied by running this qPCR analysis software
     """
-    if not unified_compliance_manager:
-        return
-    
     try:
-        # Enhanced mapping for software-specific compliance tracking
-        updated_requirements = unified_compliance_manager.track_compliance_event(
-            event_type=event_type,
-            event_data=event_data,
-            user_id=user_id
-        )
+        # Use the new safe, non-blocking compliance tracker
+        from safe_compliance_tracker import track_compliance_event_safe
         
-        if updated_requirements:
-            print(f"✓ Compliance updated for {len(updated_requirements)} requirements: {', '.join(updated_requirements)}")
+        success = track_compliance_event_safe(event_type, event_data, user_id)
         
-        return updated_requirements
+        if success:
+            print(f"✓ Compliance queued safely: {event_type}")
+            return [f"queued_{event_type}"]  # Return indicator for compatibility
+        else:
+            print(f"⚠️ Compliance queue full for: {event_type}")
+            return []
         
     except Exception as e:
-        print(f"Error tracking compliance for {event_type}: {e}")
+        print(f"Error in safe compliance tracking: {e}")
         return []
 
 # Enhanced compliance tracking functions for specific software events
 def track_ml_compliance(event_type, ml_data, user_id='user'):
-    """Track ML model validation compliance events"""
+    """Track ML model validation compliance events using safe non-blocking approach"""
     try:
-        # TEMPORARY FIX: Disable ML compliance tracking by default to prevent server crashes
-        # during ML feedback submission. The compliance system causes overload when processing
-        # hundreds of simultaneous ML predictions. Can be re-enabled with ENABLE_ML_COMPLIANCE=true
-        enable_ml_compliance = os.getenv('ENABLE_ML_COMPLIANCE', 'false').lower() == 'true'
+        # Use the new safe, non-blocking compliance tracker
+        from safe_compliance_tracker import track_ml_compliance_safe
         
-        if not enable_ml_compliance:
-            print(f"🔧 ML Compliance tracking temporarily disabled for {event_type} (crash prevention)")
-            return []
+        success = track_ml_compliance_safe(event_type, ml_data, user_id)
         
-        # Normal compliance tracking (only when explicitly enabled)
-        enhanced_data = {
-            **ml_data,
-            'timestamp': datetime.utcnow().isoformat(),
-            'compliance_category': 'ML_Validation',
-            'software_component': 'ml_classifier'
-        }
-        return track_compliance_automatically(event_type, enhanced_data, user_id)
+        if success:
+            print(f"✓ ML Compliance queued safely: {event_type}")
+        else:
+            print(f"⚠️ ML Compliance queue full for: {event_type}")
+            
+        return []  # Return empty list for compatibility
+        
     except Exception as e:
-        print(f"Error in ML compliance tracking: {e}")
+        print(f"Error in safe ML compliance tracking: {e}")
         return []
 
 def track_analysis_compliance(session_id, analysis_data, user_id='user'):
@@ -2994,62 +2989,41 @@ def get_ml_validation_dashboard_data():
 
 @app.route('/api/ml-validation/track-prediction', methods=['POST'])
 def track_ml_prediction():
-    """Track an ML prediction and any expert override"""
+    """Track an ML prediction and any expert override - DISABLED to prevent database conflicts"""
     try:
-        if not ml_validation_manager:
-            return jsonify({'error': 'ML validation manager not initialized'}), 500
+        # TEMPORARILY DISABLED: This endpoint was causing database constraint failures
+        # The safe_compliance_tracker now handles ML tracking without conflicts
         
         data = request.get_json()
         
-        # Get or create performance record
-        model_version = ml_validation_manager.get_active_model_version(
-            model_type=data.get('model_type', 'general_pcr'),
-            pathogen_code=data.get('pathogen_code'),
-            fluorophore=data.get('fluorophore')
-        )
+        # Use safe compliance tracking instead
+        from safe_compliance_tracker import track_ml_compliance_safe
         
-        if not model_version:
-            # Create a default model version if none exists
-            model_version_id = ml_validation_manager.create_new_model_version(
-                model_type=data.get('model_type', 'general_pcr'),
-                version_number='v1.0',
-                pathogen_code=data.get('pathogen_code'),
-                fluorophore=data.get('fluorophore'),
-                trained_by='system'
-            )
-        else:
-            model_version_id = model_version['id']
-        
-        # Get or create performance tracking record
-        performance_id = ml_validation_manager.record_ml_performance(
-            model_version_id=model_version_id,
-            run_file_name=data.get('run_file_name', 'unknown'),
-            session_id=data.get('session_id'),
-            pathogen_code=data.get('pathogen_code'),
-            fluorophore=data.get('fluorophore'),
-            test_type=data.get('test_type')
-        )
-        
-        # Track the specific prediction
-        prediction_id = ml_validation_manager.track_prediction(
-            performance_id=performance_id,
-            well_id=data.get('well_id'),
-            sample_name=data.get('sample_name'),
-            pathogen_code=data.get('pathogen_code'),
-            fluorophore=data.get('fluorophore'),
-            ml_prediction=data.get('ml_prediction'),
-            ml_confidence=data.get('ml_confidence'),
-            expert_decision=data.get('expert_decision'),
-            final_classification=data.get('final_classification'),
-            model_version_used=model_version.get('version_number') if model_version else 'v1.0',
-            feature_data=data.get('feature_data')
-        )
-        
-        return jsonify({
-            'success': True,
-            'prediction_id': prediction_id,
-            'performance_id': performance_id
+        success = track_ml_compliance_safe('ML_PREDICTION_TRACKED', {
+            'well_id': data.get('well_id'),
+            'sample_name': data.get('sample_name'),
+            'pathogen_code': data.get('pathogen_code'),
+            'fluorophore': data.get('fluorophore'),
+            'ml_prediction': data.get('ml_prediction'),
+            'ml_confidence': data.get('ml_confidence'),
+            'expert_decision': data.get('expert_decision'),
+            'final_classification': data.get('final_classification'),
+            'model_type': data.get('model_type', 'general_pcr'),
+            'session_id': data.get('session_id'),
+            'run_file_name': data.get('run_file_name', 'unknown')
         })
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'ML prediction tracked safely via compliance system',
+                'prediction_id': f"safe_{data.get('well_id', 'unknown')}_{int(time.time())}"
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'Failed to queue ML prediction tracking'
+            }), 500
         
     except Exception as e:
         app.logger.error(f"Error tracking ML prediction: {str(e)}")
