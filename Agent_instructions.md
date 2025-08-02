@@ -212,7 +212,7 @@ CREATE TABLE permission_audit (
 Production Stack:
   - Application Load Balancer (ALB)
   - EC2 Auto Scaling Group (2-4 instances)
-  - RDS PostgreSQL (Multi-AZ for HA)
+  - RDS MySQL 8.0 (Multi-AZ for HA)
   - ElastiCache Redis (session management)
   - S3 (file storage, backups)
   - CloudWatch (monitoring, alerting)
@@ -220,11 +220,28 @@ Production Stack:
   - WAF (web application firewall)
 ```
 
+**Database Migration Strategy**:
+```yaml
+MySQL Migration Plan:
+  - Current: SQLite (84MB+ with compliance data)
+  - Target: AWS RDS MySQL 8.0 (db.t3.medium)
+  - Migration: Schema conversion + data export/import
+  - Backup: Automated RDS snapshots + S3 backup scripts
+  - Connection: Environment variable DATABASE_URL (already supported)
+```
+
 **Implementation Timeline**:
 - **Week 1-2**: Microsoft Entra ID integration, role-based access control
 - **Week 3-4**: QC technician workflow, pathogen-specific success tracking
-- **Week 5-6**: AWS infrastructure setup, database migration, performance testing
+- **Week 5-6**: AWS infrastructure setup, MySQL RDS migration, performance testing
 - **Week 7-8**: User acceptance testing, production deployment
+
+**Database Migration Plan**:
+- **Day 1-2**: RDS MySQL setup, security groups, parameter groups
+- **Day 3**: Schema conversion (SQLite → MySQL syntax)
+- **Day 4**: Data export/import and validation
+- **Day 5**: Backup system rewrite for `mysqldump` + RDS snapshots
+- **Day 6**: Performance testing and optimization
 
 **Success Metrics**:
 - **Technical**: <2s API response, 20+ concurrent users, 99.9% uptime
