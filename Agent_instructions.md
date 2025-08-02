@@ -1,46 +1,67 @@
 # MDL-PCR-Analyzer: Comprehensive Agent Instructions & Progress Log
 
-## 🚨 **CURRENT STATUS: Critical ML Issues Identified** (August 2, 2025)
+## 🚨 **CURRENT STATUS: ML Batch Analysis Critical Failure** (August 2, 2025)
 
-### ❌ **CRITICAL ISSUES DISCOVERED** (August 2, 2025)
+### 🔴 **EMERGENCY STATUS: REVERTED TO SAFE COMMIT d2c9fb8** 
+
+#### **📍 SAFE COMMIT REFERENCE**: `d2c9fb8`
+- **✅ CONFIRMED WORKING**: Fresh single-channel uploads with ML batch analysis and feedback submission
+- **✅ WORKING FEATURES**: Initial ML predictions, expert feedback mechanism, rule-based fallback
+- **🎯 BASELINE**: This commit represents the last known working state for core ML functionality
+
+#### **🚨 CURRENT CRITICAL ISSUES** (Post-Revert Status)
+1. **❌ ML Batch Analysis Completely Broken**: Current implementation predicts nothing close to correct
+2. **❌ Rule-Based Superior to ML**: Initial rule-based analysis is far superior to ML predictions (major red flag)
+3. **❌ Fresh Single-Channel Regression**: Even basic fresh upload ML analysis now failing
+4. **⚠️ VS Code Memory Issues**: Development environment freezing, requiring weekly reinstalls (potential memory leak)
+
+#### **🎯 ARCHITECTURAL GOAL**: Unified ML Function
+**TARGET**: Create one unified function to handle:
+- ML batch analysis for fresh uploads
+- ML feedback submission and table updates
+- Session loading with ML re-analysis option
+- Consistent wellKey handling and table refresh logic
+
+#### **📊 CURRENT STATUS SUMMARY**:
+- **✅ WORKING IN d2c9fb8**: Fresh single-channel ML analysis and feedback
+- **❌ BROKEN EVERYWHERE**: All current ML prediction logic
+- **🔧 ATTEMPTED**: Unified table update logic and wellKey matching
+- **⚠️ ENVIRONMENT**: VS Code stability issues (potential memory leak investigation needed)
+
+#### **🛠️ ARCHITECTURAL NOTES**:
+- **Problem**: Multiple code paths for ML analysis created maintenance nightmare
+- **Solution Attempted**: Unify `enhanceResultsWithMLClassification()` and batch analysis logic
+- **Current Status**: Unified approach broke working functionality
+- **Next Approach**: Start from d2c9fb8 and make minimal, targeted changes only
+
+### ❌ **PREVIOUS ISSUES IDENTIFIED** (Pre-Revert Context)
 
 #### **🎯 Testing Results Summary**:
-**✅ WORKING**: Fresh upload single-channel analysis
+**✅ WORKING**: Fresh upload single-channel analysis (in d2c9fb8)
 **❌ BROKEN**: Fresh upload multi-channel, loaded sessions, modal feedback persistence
 
 #### **1. Fresh Upload Analysis Issues** ❌
-- **✅ WORKING**: Single-channel fresh uploads work correctly (proper initial results, expert feedback updates table)
-- **❌ BROKEN**: Multi-channel fresh uploads giving wrong predictions (not following same procedure as single-channel)
+- **✅ WAS WORKING**: Single-channel fresh uploads in d2c9fb8
+- **❌ BROKEN**: Multi-channel fresh uploads giving wrong predictions
 - **❌ ISSUE**: No re-evaluation happening after expert feedback in fresh uploads
 - **❌ TIMING**: Progress bar 1/3 behind robot emoji appearance during batch analysis
 
 #### **2. Session Loading Critical Issues** ❌
-- **❌ MAJOR**: No modal choice appearing when loading sessions (ML runs automatically despite `isLoadedSession: true`)
-- **❌ MAJOR**: Wrong ML predictions in loaded sessions (different from original analysis procedure)
+- **❌ MAJOR**: No modal choice appearing when loading sessions
+- **❌ MAJOR**: Wrong ML predictions in loaded sessions
 - **❌ MAJOR**: Original session results not being preserved/retained
 - **❌ CRITICAL**: Modal feedback flashes correct result then reverts back to original
 
 #### **3. Individual Sample Modal Feedback Bug** ❌
 - **SYMPTOM**: Expert feedback through individual well modal shows correct result briefly, then reverts
-- **CONFIRMED**: Table results ARE updating initially 
-- **ROOT CAUSE**: Likely `refreshMLPredictionInTable()` function running 1.5 seconds after feedback submission and overwriting expert classification
-- **LOCATION**: `updateResultsTableAfterFeedback()` in `ml_feedback_interface.js` lines 5825-5830
+- **ROOT CAUSE**: `refreshMLPredictionInTable()` function overwriting expert classification after 1.5 seconds
 
-#### **4. Two Separate Modal Systems Identified** 
-- **Modal 1**: Session loading choice (keep original vs re-analyze) - ✅ Fixed
-- **Modal 2**: Individual sample feedback (expert correction) - ❌ Still broken
-
-### 🔧 **FIXES IMPLEMENTED**:
-1. **Session Loading Modal** ✅ - Added choice system to preserve original results
-2. **Reduced Console Logging** ✅ - Removed excessive log statements  
-3. **Relaxed Similarity Thresholds** ✅ - Changed from 85%/75% to 80%/70%
-4. **Emoji Positioning Standardization** 🔄 - Ongoing (robot 🤖 vs recycle 🔄 placement consistency)
-
-### 🎯 **NEXT STEPS**:
-1. **Fix Modal Feedback Revert**: Remove/modify `refreshMLPredictionInTable()` call that overwrites expert decisions
-2. **Standardize ML Analysis Procedure**: Make multi-channel and session loading use same logic as working single-channel
-3. **Fix Session Loading ML Logic**: Ensure proper modal choice and original result preservation
-4. **Fix Progress Bar Timing**: Synchronize progress bar with actual ML processing
+### 🎯 **NEXT AGENT INSTRUCTIONS**:
+1. **START FROM d2c9fb8**: Always available as working baseline
+2. **INVESTIGATE MEMORY LEAKS**: Check for potential VS Code environment issues
+3. **MINIMAL CHANGES ONLY**: Make targeted fixes without breaking working single-channel logic
+4. **UNIFIED ARCHITECTURE**: Work toward single ML function but test every step
+5. **RULE-BASED FALLBACK**: Ensure rule-based analysis remains superior when ML fails
 
 ---
 
