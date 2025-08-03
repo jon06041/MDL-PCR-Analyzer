@@ -113,25 +113,44 @@ def calculate_cqj(well, threshold):
         print(f"[CQJ-DEBUG] Well {well_id}: Insufficient data after skipping first 5 cycles")
         return None
     
+    # Find all valid threshold crossings, ignoring early crossings before cycle 5
+    well_id = well.get('well_id') or well.get('wellKey') or well.get('well_key') or 'UNKNOWN'
+    
+    # Look for the first valid positive threshold crossing starting from cycle 5
     for i in range(start_index, len(raw_rfu)):
         if raw_rfu[i] >= threshold:
-            # Check if this is the first valid cycle we're examining
+            # Check if this is the first valid cycle we're examining (cycle 5)
             if i == start_index:
-                # If cycle 5 (first valid cycle) already exceeds threshold, 
-                # this is likely baseline noise or pre-amplification artifact - return None
-                well_id = well.get('well_id') or well.get('wellKey') or well.get('well_key') or 'UNKNOWN'
-                print(f"[CQJ-DEBUG] Well {well_id}: Cycle 5 already above threshold ({raw_rfu[i]} >= {threshold}), ignoring as baseline noise")
-                return None
-            x0 = raw_cycles[i - 1]
-            x1 = raw_cycles[i]
-            y0 = raw_rfu[i - 1]
-            y1 = raw_rfu[i]
-            if y1 == y0:
-                return x1  # avoid div by zero
-            interpolated = x0 + (threshold - y0) * (x1 - x0) / (y1 - y0)
-            well_id = well.get('well_id') or well.get('wellKey') or well.get('well_key') or 'UNKNOWN'
-            print(f"[CQJ-DEBUG] Well {well_id}: CQJ={interpolated:.2f} (threshold crossing between cycles {x0}-{x1})")
-            return interpolated
+                # If cycle 5 already exceeds threshold, check if previous cycle was below
+                # If so, this could be a valid crossing; if not, it's likely baseline noise
+                if raw_rfu[i - 1] < threshold:
+                    # Valid crossing from below threshold to above threshold
+                    x0 = raw_cycles[i - 1]
+                    x1 = raw_cycles[i]
+                    y0 = raw_rfu[i - 1]
+                    y1 = raw_rfu[i]
+                    if y1 == y0:
+                        interpolated = x1
+                    else:
+                        interpolated = x0 + (threshold - y0) * (x1 - x0) / (y1 - y0)
+                    print(f"[CQJ-DEBUG] Well {well_id}: CQJ={interpolated:.2f} (threshold crossing at cycle 5, from {y0:.2f} to {y1:.2f})")
+                    return interpolated
+                else:
+                    # Cycle 5 already above threshold and previous cycle was also above - skip this
+                    print(f"[CQJ-DEBUG] Well {well_id}: Cycle 5 already above threshold ({raw_rfu[i]} >= {threshold}), but previous cycle was also above - continuing search")
+                    continue
+            else:
+                # Normal threshold crossing after cycle 5
+                x0 = raw_cycles[i - 1]
+                x1 = raw_cycles[i]
+                y0 = raw_rfu[i - 1]
+                y1 = raw_rfu[i]
+                if y1 == y0:
+                    interpolated = x1
+                else:
+                    interpolated = x0 + (threshold - y0) * (x1 - x0) / (y1 - y0)
+                print(f"[CQJ-DEBUG] Well {well_id}: CQJ={interpolated:.2f} (threshold crossing between cycles {x0}-{x1})")
+                return interpolated
     
     well_id = well.get('well_id') or well.get('wellKey') or well.get('well_key') or 'UNKNOWN'
     print(f"[CQJ-DEBUG] Well {well_id}: No threshold crossing found (max RFU: {max(raw_rfu) if raw_rfu else 'N/A'})")

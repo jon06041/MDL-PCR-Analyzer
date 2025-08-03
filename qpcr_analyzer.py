@@ -496,7 +496,16 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
         # Ensure fluorophore/channel is present for each well
         channel_name = data.get('fluorophore')
         if not channel_name:
-            channel_name = 'FAM'
+            # Extract fluorophore from well_id if available (e.g., "A1_HEX" -> "HEX")
+            if '_' in well_id and len(well_id.split('_')) >= 2:
+                potential_fluorophore = well_id.split('_')[-1]
+                # Validate it's a known fluorophore
+                if potential_fluorophore in ['FAM', 'HEX', 'Texas Red', 'Cy5', 'TexasRed']:
+                    channel_name = potential_fluorophore
+                else:
+                    channel_name = 'Unknown'
+            else:
+                channel_name = 'Unknown'  # Don't default to FAM
             data['fluorophore'] = channel_name
 
         # Store cycle info from first well - convert to Python types

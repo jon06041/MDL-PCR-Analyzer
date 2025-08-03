@@ -515,9 +515,15 @@ function updateThresholdInputFromState() {
         // Default to first available channel
         if (window.stableChannelThresholds) {
             const channels = Object.keys(window.stableChannelThresholds);
-            channel = channels.length > 0 ? channels[0] : 'FAM';
+            channel = channels.length > 0 ? channels[0] : 'Unknown';
         } else {
-            channel = 'FAM';
+            // Try to detect fluorophore from current analysis results
+            if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+                const firstWell = Object.values(window.currentAnalysisResults.individual_results)[0];
+                channel = firstWell?.fluorophore || 'Unknown';
+            } else {
+                channel = 'Unknown';
+            }
         }
     }
     
@@ -624,7 +630,9 @@ function initializeThresholdStateHandlers() {
                     applyManualThreshold(value);
                 } else if (window.setChannelThreshold) {
                     const channel = window.appState.currentFluorophore !== 'all' ? 
-                                   window.appState.currentFluorophore : 'FAM';
+                                   window.appState.currentFluorophore : 
+                                   (window.currentAnalysisResults?.individual_results ? 
+                                    Object.values(window.currentAnalysisResults.individual_results)[0]?.fluorophore || 'Unknown' : 'Unknown');
                     window.setChannelThreshold(channel, window.appState.currentScaleMode, value);
                 }
                 
@@ -5680,6 +5688,79 @@ async function enhanceResultsWithMLClassification(individualResults, force = fal
                 
                 // Prepare data for ML analysis
                 const fluorophore = wellData.fluorophore || wellData.channel || '';
+                
+                // 🔧 CRITICAL FIX: Extract CQJ/CalcJ values correctly for both single and multi-channel
+                let cqjValue = null;
+                let calcjValue = null;
+                
+                // For single-channel results: values are in cqj_value/calcj_value fields
+                if (wellData.cqj_value !== undefined && wellData.cqj_value !== null) {
+                    cqjValue = wellData.cqj_value;
+                } else if (wellData.cqj && typeof wellData.cqj === 'object' && fluorophore) {
+                    // For multi-channel results: CQJ is an object keyed by fluorophore
+                    cqjValue = wellData.cqj[fluorophore];
+                    
+                    // 🔧 FLUOROPHORE KEY MISMATCH FIX: If the expected fluorophore key doesn't exist,
+                    // try to find CQJ value under any available key (handles cases where CQJ is stored under 'FAM' but well is 'HEX')
+                    if (cqjValue === undefined || cqjValue === null) {
+                        const availableKeys = Object.keys(wellData.cqj);
+                        if (availableKeys.length > 0) {
+                            cqjValue = wellData.cqj[availableKeys[0]]; // Use the first available key
+                        }
+                    }
+                } else if (typeof wellData.cqj === 'number') {
+                    // Fallback: direct numeric value
+                    cqjValue = wellData.cqj;
+                }
+                
+                if (wellData.calcj_value !== undefined && wellData.calcj_value !== null) {
+                    calcjValue = wellData.calcj_value;
+                } else if (wellData.calcj && typeof wellData.calcj === 'object' && fluorophore) {
+                    // For multi-channel results: CalcJ is an object keyed by fluorophore
+                    calcjValue = wellData.calcj[fluorophore];
+                    
+                    // 🔧 FLUOROPHORE KEY MISMATCH FIX: If the expected fluorophore key doesn't exist,
+                    // try to find CalcJ value under any available key (handles cases where CalcJ is stored under 'FAM' but well is 'HEX')
+                    if (calcjValue === undefined || calcjValue === null) {
+                        const availableKeys = Object.keys(wellData.calcj);
+                        if (availableKeys.length > 0) {
+                            calcjValue = wellData.calcj[availableKeys[0]]; // Use the first available key
+                        }
+                    }
+                } else if (typeof wellData.calcj === 'number') {
+                    // Fallback: direct numeric value
+                    calcjValue = wellData.calcj;
+                }
+                
+                // CRITICAL: Don't default to 0 - preserve null/undefined for ML classifier
+                // Only convert to number if we have a valid numeric value
+                if (cqjValue !== null && cqjValue !== undefined && typeof cqjValue !== 'number') {
+                    if (typeof cqjValue === 'string' && !isNaN(parseFloat(cqjValue))) {
+                        cqjValue = parseFloat(cqjValue);
+                    } else {
+                        cqjValue = null;  // Keep as null instead of defaulting to 0
+                    }
+                }
+                
+                if (calcjValue !== null && calcjValue !== undefined && typeof calcjValue !== 'number') {
+                    if (typeof calcjValue === 'string' && !isNaN(parseFloat(calcjValue))) {
+                        calcjValue = parseFloat(calcjValue);
+                    } else {
+                        calcjValue = null;  // Keep as null instead of defaulting to 0
+                    }
+                }
+                
+                console.log(`🔍 ML-SINGLE-CHANNEL Debug for ${wellKey}:`, {
+                    fluorophore: fluorophore,
+                    singleChannelCqj: wellData.cqj_value,
+                    singleChannelCalcj: wellData.calcj_value,
+                    multiChannelCqj: wellData.cqj,
+                    multiChannelCalcj: wellData.calcj,
+                    finalCqj: cqjValue,
+                    finalCalcj: calcjValue,
+                    amplitude: wellData.amplitude
+                });
+                
                 const analysisData = {
                     rfu_data: wellData.raw_rfu,
                     cycles: wellData.raw_cycles,
@@ -5695,8 +5776,8 @@ async function enhanceResultsWithMLClassification(individualResults, force = fal
                         steepness: wellData.steepness || 0,
                         snr: wellData.snr || 0,
                         amplitude: wellData.amplitude || 0,
-                        cqj: wellData.cqj || 0,
-                        calcj: wellData.calcj || 0,
+                        cqj: cqjValue,  // Use correctly extracted value
+                        calcj: calcjValue,  // Use correctly extracted value
                         classification: wellData.classification || 'UNKNOWN'
                     },
                     is_batch_request: true  // Mark as batch request for cancellation logic
@@ -7330,6 +7411,18 @@ function combineMultiFluorophoreResultsSQL(allResults) {
             // fluorophoreCount: combined.fluorophore_count
         // }
     // });
+    
+    // 🔧 ML FIX: Apply ML classification to combined multi-channel results
+    // This ensures multi-channel uploads get the same ML enhancement as single-channel
+    if (typeof enhanceResultsWithMLClassification === 'function' && combined.individual_results) {
+        console.log('🔍 ML-MULTICHANNEL: Applying ML classification to combined results');
+        try {
+            // Run ML enhancement on combined results (force=true to ensure it runs)
+            enhanceResultsWithMLClassification(combined.individual_results, true);
+        } catch (error) {
+            console.warn('ML enhancement failed for multi-channel combine:', error);
+        }
+    }
     
     return combined;
 }
@@ -9252,6 +9345,42 @@ transformedResults.individual_results[wellKey] = {
     // Add missing threshold_value field for threshold annotations
     threshold_value: well.threshold_value ? parseFloat(well.threshold_value) : null,
     
+    // 🔍 Add CQJ and CalcJ fields from database for ML classification
+    cqj: well.cqj || {},
+    calcj: well.calcj || {},
+    
+    // 🔍 CRITICAL FIX: Calculate SNR from raw data for individual session loading
+    snr: (() => {
+        try {
+            const raw_rfu = well.raw_rfu ? (Array.isArray(well.raw_rfu) ? well.raw_rfu : JSON.parse(well.raw_rfu)) : [];
+            if (raw_rfu.length < 10) return 0; // Need sufficient data points
+            
+            // Calculate baseline (first 5-10 cycles) and signal (max value)
+            const baselineData = raw_rfu.slice(0, Math.min(10, Math.floor(raw_rfu.length * 0.3)));
+            const baselineMean = baselineData.reduce((sum, val) => sum + parseFloat(val), 0) / baselineData.length;
+            const baselineStd = Math.sqrt(baselineData.reduce((sum, val) => sum + Math.pow(parseFloat(val) - baselineMean, 2), 0) / baselineData.length);
+            const signalLevel = Math.max(...raw_rfu.map(val => parseFloat(val)));
+            
+            // Calculate SNR with fallback logic (same as qpcr_analyzer.py)
+            let snr;
+            if (baselineStd > 0.01) {
+                snr = (signalLevel - baselineMean) / baselineStd;
+            } else {
+                if (baselineMean > 10) {
+                    snr = signalLevel / baselineMean;
+                } else {
+                    snr = signalLevel;
+                }
+                if (signalLevel > 1000) {
+                    snr = Math.max(snr, 10.0);
+                }
+            }
+            return Math.max(snr, 0.1); // Ensure SNR is never zero or negative
+        } catch (e) {
+            return 0;
+        }
+    })(),
+    
     // 🔍 THRESHOLD-DEBUG: Log threshold_value during history loading
     _debug_threshold: {
         original_threshold: well.threshold_value,
@@ -9280,6 +9409,12 @@ transformedResults.individual_results[wellKey] = {
         
         // Set analysis results for proper display (permanent for history loading)
         setAnalysisResults(transformedResults, 'history-session-load');
+        
+        // 🔍 ML ENHANCEMENT: Trigger ML classification for session data
+        if (typeof enhanceResultsWithMLClassification === 'function' && transformedResults.individual_results) {
+            console.log('🔍 ML Enhancement: Triggering ML classification for loaded session');
+            enhanceResultsWithMLClassification(transformedResults.individual_results, true);
+        }
         
         // IMMEDIATE: Initialize thresholds as soon as individual session results are available
         if (window.initializeChannelThresholds) {
@@ -13654,11 +13789,41 @@ function processCombinedSessionData(sessionDataArray) {
                 steepness: parseFloat(well.steepness) || 0,
                 midpoint: parseFloat(well.midpoint) || 0,
                 baseline: parseFloat(well.baseline) || 0,
+                // CRITICAL FIX: Include SNR from database - was missing!
+                snr: parseFloat(well.snr) || 0,
                 data_points: parseInt(well.data_points) || 0,
                 cycle_range: well.cycle_range,
                 sample: well.sample_name,
                 sample_name: well.sample_name,
                 cq_value: well.cq_value ? parseFloat(well.cq_value) : null,
+                
+                // CRITICAL FIX: Include CQJ/CalcJ data from database for ML classification
+                cqj: (() => {
+                    try {
+                        if (well.cqj && typeof well.cqj === 'string') {
+                            return JSON.parse(well.cqj);
+                        } else if (well.cqj && typeof well.cqj === 'object') {
+                            return well.cqj;
+                        }
+                        return {};
+                    } catch (e) {
+                        console.warn('Failed to parse CQJ for well', well.well_id, ':', well.cqj);
+                        return {};
+                    }
+                })(),
+                calcj: (() => {
+                    try {
+                        if (well.calcj && typeof well.calcj === 'string') {
+                            return JSON.parse(well.calcj);
+                        } else if (well.calcj && typeof well.calcj === 'object') {
+                            return well.calcj;
+                        }
+                        return {};
+                    } catch (e) {
+                        console.warn('Failed to parse CalcJ for well', well.well_id, ':', well.calcj);
+                        return {};
+                    }
+                })(),
                 
                 // Parse complex fields
                 anomalies: (() => {
@@ -13806,6 +13971,24 @@ function processCombinedSessionData(sessionDataArray) {
         displayMultiFluorophoreResults(combinedResults);
     } else {
         displayAnalysisResults(combinedResults);
+    }
+    
+    // CRITICAL FIX: Trigger ML enhancement for session-loaded data
+    if (window.mlFeedbackInterface && combinedIndividualResults) {
+        console.log('🤖 SESSION-ML: Triggering ML enhancement for session-loaded data');
+        setTimeout(async () => {
+            try {
+                // Check if ML enhancement should be triggered
+                if (window.enhanceResultsWithMLClassification) {
+                    await window.enhanceResultsWithMLClassification(combinedIndividualResults, false);
+                    console.log('✅ SESSION-ML: ML enhancement completed for session data');
+                } else {
+                    console.warn('⚠️ SESSION-ML: enhanceResultsWithMLClassification function not available');
+                }
+            } catch (error) {
+                console.error('❌ SESSION-ML: ML enhancement failed for session data:', error);
+            }
+        }, 500); // Small delay to allow UI to render first
     }
     
     // Store session data globally for pathogen target extraction

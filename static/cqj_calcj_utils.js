@@ -70,8 +70,15 @@ function calculateThresholdCrossing(rfuArray, cyclesArray, threshold) {
         return null; // N/A for poor quality curves
     }
     
-    // Find ALL threshold crossings (both directions)
+    // Find ALL threshold crossings starting from cycle 5, but be more permissive about early crossings
     const crossings = [];
+    
+    // Check if data starts above threshold (early crossing case)
+    let startedAboveThreshold = false;
+    if (startCycle < numericRfu.length && numericRfu[startCycle] >= numericThreshold) {
+        startedAboveThreshold = true;
+        console.log(`[CQJ-DEBUG] Data starts above threshold at cycle ${startCycle}, looking for next crossing pattern`);
+    }
     
     for (let i = startCycle + 1; i < numericRfu.length; i++) {
         const prevRfu = numericRfu[i - 1];
@@ -103,6 +110,34 @@ function calculateThresholdCrossing(rfuArray, cyclesArray, threshold) {
                 rfuBefore: prevRfu,
                 rfuAfter: currentRfu
             });
+        }
+    }
+    
+    // Special case: if we started above threshold, look for the first proper positive crossing
+    // (going from below to above after potentially going below threshold first)
+    if (startedAboveThreshold && crossings.length > 0) {
+        // Find the first positive crossing that happens after any negative crossing
+        const negativeCrossings = crossings.filter(c => c.direction === 'negative');
+        const positiveCrossings = crossings.filter(c => c.direction === 'positive');
+        
+        if (negativeCrossings.length > 0 && positiveCrossings.length > 0) {
+            // Find positive crossings that come after the first negative crossing
+            const firstNegativeCycle = negativeCrossings[0].cycle;
+            const validPositiveCrossings = positiveCrossings.filter(c => c.cycle > firstNegativeCycle);
+            
+            if (validPositiveCrossings.length > 0) {
+                // Use the first valid positive crossing after the curve went below threshold
+                const firstValidCrossing = validPositiveCrossings[0];
+                console.log(`[CQJ-DEBUG] Found valid positive crossing after early crossing: ${firstValidCrossing.cycle}`);
+                return firstValidCrossing.cycle;
+            }
+        }
+        
+        // If no valid pattern found, fall back to the last positive crossing
+        if (positiveCrossings.length > 0) {
+            const lastPositiveCrossing = positiveCrossings[positiveCrossings.length - 1];
+            console.log(`[CQJ-DEBUG] Using last positive crossing as fallback: ${lastPositiveCrossing.cycle}`);
+            return lastPositiveCrossing.cycle;
         }
     }
     

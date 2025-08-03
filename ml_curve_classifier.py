@@ -52,24 +52,62 @@ class MLCurveClassifier:
         features['baseline'] = existing_metrics.get('baseline', 0)
         features['amplitude'] = existing_metrics.get('amplitude', 0)
         
-        # Add CQJ and CalcJ features - handle invalid values properly
+        # Add CQJ and CalcJ features - handle invalid values properly but be less restrictive for high-amplitude positives
         cqj_raw = existing_metrics.get('cqj')
         calcj_raw = existing_metrics.get('calcj')
         
-        # Validate CQJ - should never be 1, -1, or any unrealistic value
-        if (cqj_raw is None or cqj_raw == -1 or cqj_raw == 1 or 
-            (isinstance(cqj_raw, (int, float)) and (cqj_raw <= 1 or cqj_raw > 50))):
-            features['cqj'] = -999  # Use sentinel value to indicate invalid/no crossing
+        # Get amplitude to check for high-amplitude positives that might have challenging CQJ
+        amplitude = existing_metrics.get('amplitude', 0)
+        
+        # 🔧 CRITICAL DEBUG: Log what we received
+        print(f"🔍 ML Feature Debug: amplitude={amplitude}, cqj_raw={cqj_raw} (type: {type(cqj_raw)}), calcj_raw={calcj_raw} (type: {type(calcj_raw)})")
+        print(f"🔍 ML Feature Debug: existing_metrics keys: {list(existing_metrics.keys())}")
+        print(f"🔍 ML Feature Debug: raw existing_metrics: {existing_metrics}")
+        
+        # More permissive CQJ validation for high-amplitude samples
+        # High amplitude (>100) samples are likely positive even with challenging CQJ values
+        if amplitude > 100:
+            # For high-amplitude samples, be more permissive with CQJ validation
+            # Only reject truly invalid values, not early crossings
+            invalid_cqj = (cqj_raw is None or 
+                           (isinstance(cqj_raw, (int, float)) and 
+                            (cqj_raw == -1 or cqj_raw == -999 or 
+                             cqj_raw < 0 or cqj_raw > 60)))
+        else:
+            # For low-amplitude samples, maintain stricter validation
+            # CQJ < 5 cycles indicates artifact/noise, not genuine amplification
+            invalid_cqj = (cqj_raw is None or 
+                           (isinstance(cqj_raw, (int, float)) and 
+                            (cqj_raw == -1 or cqj_raw == -999 or 
+                             cqj_raw < 0 or cqj_raw < 5 or cqj_raw > 60)))
+        
+        # Assign CQJ to features
+        if invalid_cqj:
+            features['cqj'] = -999  # Use sentinel value for invalid CQJ
+            print(f"🔍 ML Feature Debug: CQJ marked invalid: {cqj_raw} -> -999")
         else:
             features['cqj'] = cqj_raw
+            print(f"🔍 ML Feature Debug: CQJ valid: {cqj_raw}")
             
-        # Validate CalcJ - should be None/invalid if CQJ is invalid
-        if (calcj_raw is None or calcj_raw == -1 or calcj_raw == 1 or
-            features['cqj'] == -999 or  # If CQJ invalid, CalcJ must be invalid too
-            (isinstance(calcj_raw, (int, float)) and calcj_raw <= 0)):
+        # More permissive CalcJ validation for high-amplitude samples
+        if amplitude > 100:
+            # For high-amplitude samples, be more permissive
+            invalid_calcj = (calcj_raw is None or calcj_raw == -1 or
+                            features['cqj'] == -999 or  # If CQJ invalid, CalcJ must be invalid too
+                            (isinstance(calcj_raw, (int, float)) and calcj_raw <= 0))
+        else:
+            # For low-amplitude samples, maintain stricter validation
+            # CalcJ < 5 corresponds to CQJ < 5 (early artifacts)
+            invalid_calcj = (calcj_raw is None or calcj_raw == -1 or calcj_raw == 1 or
+                            features['cqj'] == -999 or  # If CQJ invalid, CalcJ must be invalid too
+                            (isinstance(calcj_raw, (int, float)) and (calcj_raw <= 0 or calcj_raw < 5)))
+        
+        if invalid_calcj:
             features['calcj'] = -999  # Use sentinel value to indicate invalid
+            print(f"🔍 ML Feature Debug: CalcJ marked invalid: {calcj_raw} -> -999")
         else:
             features['calcj'] = calcj_raw
+            print(f"🔍 ML Feature Debug: CalcJ valid: {calcj_raw}")
         
         # Advanced curve analysis
         if len(rfu_data) > 5:
@@ -276,13 +314,30 @@ class MLCurveClassifier:
         snr = existing_metrics.get('snr', 0)
         cqj = existing_metrics.get('cqj')  # Don't default to -1, use None if missing
         
-        # Validate CQJ - it should never be 1, -1, or any invalid value
-        invalid_cqj = (cqj is None or 
-                       (isinstance(cqj, (int, float)) and (cqj == -1 or cqj == 1 or 
-                                                          (cqj > 0 and cqj <= 1) or cqj > 50 or cqj == -999)))
+        # Validate CQJ - reject early artifacts (< 5 cycles) and invalid values
+        # But be more permissive for high-amplitude samples
+        if amplitude > 100:
+            # High-amplitude samples: only reject truly invalid CQJ values
+            invalid_cqj = (cqj is None or 
+                           (isinstance(cqj, (int, float)) and (cqj == -1 or cqj == -999 or 
+                                                              cqj < 0 or cqj > 50)))
+        else:
+            # Low-amplitude samples: maintain strict CQJ validation
+            # CQJ < 5 cycles indicates artifact/noise, not genuine amplification
+            invalid_cqj = (cqj is None or 
+                           (isinstance(cqj, (int, float)) and (cqj == -1 or cqj == 1 or 
+                                                              cqj < 5 or cqj > 50 or cqj == -999)))
+        
+        # Enhanced negative curve detection: be more lenient for high-amplitude samples
+        if amplitude > 100:
+            # For high-amplitude samples, don't use CQJ as a disqualifier
+            is_clearly_negative = (r2 < 0.05 or amplitude < 20.0 or snr < 0.05)
+        else:
+            # For low-amplitude samples, use stricter criteria including CQJ
+            is_clearly_negative = (r2 < 0.1 or amplitude < 5.0 or snr < 0.1 or invalid_cqj)
         
         # If curve is clearly negative, use rule-based classification instead of ML
-        if (r2 < 0.1 or amplitude < 5.0 or snr < 0.1 or invalid_cqj):
+        if is_clearly_negative:
             print(f"🔍 ML Debug: Obviously negative curve detected - using rule-based classification")
             print(f"   Reason: r2={r2:.3f}, amplitude={amplitude:.2f}, snr={snr:.2f}, cqj={cqj}")
             return self.fallback_classification(existing_metrics)
@@ -317,10 +372,42 @@ class MLCurveClassifier:
             prediction = model.predict(feature_vector_scaled)[0]
             confidence = np.max(model.predict_proba(feature_vector_scaled))
             
-            # 🔧 VALIDATION CHECK: If ML predicts positive but curve looks negative, override with rule-based
-            if prediction in ['POSITIVE', 'STRONG_POSITIVE', 'WEAK_POSITIVE'] and (r2 < 0.1 or amplitude < 5.0):
-                print(f"🔍 ML Debug: ML predicted {prediction} but curve appears negative - using rule-based override")
-                return self.fallback_classification(existing_metrics)
+            # 🔧 VALIDATION CHECK: Validate ML prediction against rule-based criteria
+            # Don't rely on amplitude alone - require multiple positive features
+            cqj_val = features.get('cqj', -999)
+            calcj_val = features.get('calcj', -999) 
+            snr = features.get('snr', 0)
+            
+            # Check if we have valid CQJ/CalcJ data
+            has_valid_cqj = cqj_val != -999 and cqj_val > 0
+            has_valid_calcj = calcj_val != -999 and calcj_val > 0
+            
+            # For positive predictions, ensure we have supporting evidence beyond just amplitude
+            if prediction in ['POSITIVE', 'STRONG_POSITIVE', 'WEAK_POSITIVE']:
+                # Require at least 2 of these 3 positive indicators:
+                # 1. Good curve fit (R2 > 0.8)
+                # 2. Valid CQJ or CalcJ
+                # 3. Decent SNR (> 3)
+                positive_indicators = 0
+                if r2 > 0.8:
+                    positive_indicators += 1
+                if has_valid_cqj or has_valid_calcj:
+                    positive_indicators += 1
+                if snr > 3:
+                    positive_indicators += 1
+                    
+                if positive_indicators < 2:
+                    print(f"🔍 ML Debug: ML predicted {prediction} but insufficient positive indicators "
+                          f"(R2={r2:.3f}, CQJ={cqj_val}, CalcJ={calcj_val}, SNR={snr:.2f}) - using rule-based")
+                    return self.fallback_classification(existing_metrics)
+            
+            # For negative predictions on high-amplitude samples, double-check with rule-based
+            if (prediction == 'NEGATIVE' and amplitude > 100 and r2 > 0.8):
+                print(f"🔍 ML Debug: ML predicted NEGATIVE for high-amplitude sample - double-checking with rule-based")
+                rule_result = self.fallback_classification(existing_metrics)
+                if rule_result.get('classification') in ['POSITIVE', 'STRONG_POSITIVE', 'WEAK_POSITIVE']:
+                    print(f"🔍 ML Debug: Rule-based suggests positive - using rule-based result")
+                    return rule_result
             
             # Additional debug logging for prediction
             print(f"🔍 ML Debug: Prediction result: {prediction} (confidence: {confidence:.3f})")

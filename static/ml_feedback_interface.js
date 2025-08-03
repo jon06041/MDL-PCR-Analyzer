@@ -1620,6 +1620,49 @@ class MLFeedbackInterface {
         const analyzeBtn = document.getElementById('ml-analyze-btn');
         let originalButtonState = null;
         
+        // CRITICAL FIX: Add status indicator for individual ML analysis to show robot emoji
+        const currentFluorophore = this.currentWellData?.fluorophore || this.currentWellData?.channel || 'Unknown';
+        let statusIndicator = null;
+        
+        // Find or create status indicator for this fluorophore
+        if (currentFluorophore !== 'Unknown') {
+            statusIndicator = document.getElementById(`ml-status-indicator-${currentFluorophore}`);
+            if (!statusIndicator) {
+                // Create temporary status indicator in curve class column
+                const wellKey = this.currentWellKey;
+                if (wellKey) {
+                    const rows = document.querySelectorAll('#resultsTableBody tr[data-well-key="' + wellKey + '"]');
+                    if (rows.length > 0) {
+                        const row = rows[0];
+                        const curveClassCell = row.cells[4]; // Assuming curve class is column 4
+                        if (curveClassCell) {
+                            // Add temporary processing indicator to table cell
+                            const tempIndicator = document.createElement('span');
+                            tempIndicator.className = 'ml-status-indicator status-processing';
+                            tempIndicator.id = `temp-ml-indicator-${wellKey}`;
+                            tempIndicator.style.cssText = `
+                                display: inline-block;
+                                width: 20px;
+                                height: 20px;
+                                border-radius: 50%;
+                                background: #2196F3;
+                                color: white;
+                                font-size: 12px;
+                                margin-left: 5px;
+                                vertical-align: middle;
+                            `;
+                            tempIndicator.innerHTML = '🤖';
+                            curveClassCell.appendChild(tempIndicator);
+                            statusIndicator = tempIndicator;
+                        }
+                    }
+                }
+            } else {
+                // Update existing status indicator to processing
+                this.updateMLChannelStatus(currentFluorophore, 'processing', 'Analyzing curve...');
+            }
+        }
+        
         // Store original button state and set to analyzing FIRST
         if (analyzeBtn) {
             originalButtonState = {
@@ -3206,6 +3249,11 @@ class MLFeedbackInterface {
                 .ml-status-indicator.status-processing {
                     background: #2196F3;
                     color: white;
+                }
+                
+                .ml-status-indicator.status-processing::after {
+                    content: "🤖";
+                    font-size: 14px;
                 }
                 
                 .ml-status-indicator.status-completed {
@@ -5412,8 +5460,8 @@ class MLFeedbackInterface {
                 target: wellResult.target || wellResult.specific_pathogen || '',
                 sample: wellResult.sample || wellResult.sample_name || '',
                 classification: 'UNKNOWN', // Ask for fresh prediction
-                channel: wellResult.fluorophore || wellResult.channel || 'FAM',
-                fluorophore: wellResult.fluorophore || wellResult.channel || 'FAM'
+                channel: wellResult.fluorophore || wellResult.channel || 'Unknown',
+                fluorophore: wellResult.fluorophore || wellResult.channel || 'Unknown'
             };
 
             // Get fresh ML prediction

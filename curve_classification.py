@@ -30,12 +30,19 @@ def classify_curve(r2, steepness, snr, midpoint, baseline, amplitude):
     """
     confidence_penalty = 0.0
     flag_for_review = False
+    
     # Sharp curves with low SNR might be noise
     if steepness > 0.8 and snr < 5:
         return {"classification": "SUSPICIOUS", "reason": "Possible noise spike", "confidence_penalty": confidence_penalty, "flag_for_review": True}
+    
+    # Very high amplitude with poor curve characteristics should be suspicious
+    if amplitude > 500 and (r2 < 0.8 or snr < 3):
+        return {"classification": "SUSPICIOUS", "reason": "High amplitude but poor curve quality", "confidence_penalty": 0.8, "flag_for_review": True}
+    
     # Midpoint should be reasonable for your cycle range
     if midpoint < 10 or midpoint > 45:
         confidence_penalty = 0.5  # Reduce confidence
+    
     # Baseline should be relatively low compared to amplitude
     if amplitude != 0:
         baseline_ratio = baseline / amplitude
