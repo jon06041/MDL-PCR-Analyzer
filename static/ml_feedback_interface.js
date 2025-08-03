@@ -8,7 +8,9 @@ class MLFeedbackInterface {
         this.isInitialized = false;
         this.mlStats = null;
         this.submissionInProgress = false; // Flag to prevent duplicate submissions
+        this.recentFeedbackSubmission = false; // Flag to prevent auto-analysis after feedback
         this.trainedSamples = new Set(); // Track samples that have already been trained
+        this.sessionMLResults = {}; // Cache ML results within current session
         
         // Progress tracking for batch ML analysis
         this.batchProgress = {
@@ -491,9 +493,69 @@ class MLFeedbackInterface {
         
         // Reset any ongoing submission state
         this.submissionInProgress = false;
-        // Auto-analyze the curve if ML classification doesn't exist (only if ML is enabled)
-        if (!wellData.ml_classification) {
+    /**
+     * Check if well already has existing ML results to preserve session data
+     */
+    hasExistingMLResults(wellKey, wellData) {
+        // Check multiple possible sources for existing ML results
+        
+        // 1. Check if ML classification exists in well data
+        if (wellData.ml_classification && wellData.ml_classification.classification) {
+            console.log('ML Results: Found ml_classification in well data');
+            return wellData.ml_classification;
+        }
+        
+        // 2. Check if curve_classification with ML method exists
+        if (wellData.curve_classification && 
+            (wellData.curve_classification.method === 'ML' || 
+             wellData.curve_classification.method === 'ml_prediction' ||
+             wellData.curve_classification.method === 'expert_feedback')) {
+            console.log('ML Results: Found curve_classification with ML/expert method');
+            return wellData.curve_classification;
+        }
+        
+        // 3. Check global analysis results for this well
+        if (window.currentAnalysisResults && 
+            window.currentAnalysisResults.individual_results &&
+            window.currentAnalysisResults.individual_results[wellKey]) {
+            
+            const globalWellData = window.currentAnalysisResults.individual_results[wellKey];
+            if (globalWellData.ml_classification && globalWellData.ml_classification.classification) {
+                console.log('ML Results: Found ml_classification in global results');
+                return globalWellData.ml_classification;
+            }
+        }
+        
+        // 4. Check if this well was processed in current session (stored in instance cache)
+        if (this.sessionMLResults && this.sessionMLResults[wellKey]) {
+            console.log('ML Results: Found results in session cache');
+            return this.sessionMLResults[wellKey];
+        }
+        
+        return false;
+    }
+
+    // Auto-analyze the curve if ML classification doesn't exist (only if ML is enabled)
+        // CRITICAL: Don't auto-analyze if we just submitted feedback to prevent conflicts
+        // ALSO: Preserve existing ML results - only analyze if no ML results exist at all
+        if (!wellData.ml_classification && !this.recentFeedbackSubmission) {
+            // Check if this well already has ML results stored in the session
+            const hasExistingMLResults = this.hasExistingMLResults(wellKey, wellData);
+            
+            if (hasExistingMLResults) {
+                console.log('ML Analysis: Found existing ML results, skipping auto-analysis to preserve session data');
+                // Display the existing results instead of re-analyzing
+                this.displayExistingMLClassification(wellData.ml_classification || hasExistingMLResults);
+                return;
+            }
+            
             setTimeout(async () => {
+                // Double-check that feedback wasn't submitted during the timeout
+                if (this.recentFeedbackSubmission) {
+                    console.log('ML Analysis: Skipping auto-analysis - recent feedback submission');
+                    return;
+                }
+                
                 // Check if ML feedback should be hidden before auto-analysis
                 const shouldHide = await this.shouldHideMLFeedback();
                 if (shouldHide) {
@@ -501,8 +563,27 @@ class MLFeedbackInterface {
                     return;
                 }
                 
+                // Final check for existing results after timeout
+                const stillNeedsAnalysis = !this.hasExistingMLResults(wellKey, wellData);
+                if (!stillNeedsAnalysis) {
+                    console.log('ML Analysis: Results appeared during timeout, skipping analysis');
+                    return;
+                }
+                
                 if (this.currentWellData && this.currentWellKey) {
-                    this.analyzeCurveWithML();
+                    // Only auto-analyze on first visit to a well, not every modal open
+                    const isFirstVisit = !this.sessionMLResults[this.currentWellKey];
+                    if (isFirstVisit) {
+                        console.log('ML Analysis: First visit to well, proceeding with auto-analysis');
+                        this.analyzeCurveWithML();
+                    } else {
+                        console.log('ML Analysis: Well already analyzed in session, skipping auto-analysis');
+                        // Display existing results instead
+                        const existingResults = this.sessionMLResults[this.currentWellKey];
+                        if (existingResults) {
+                            this.displayExistingMLClassification(existingResults);
+                        }
+                    }
                 } else {
                     console.warn('ML Analysis: Well data not ready for auto-analysis, skipping');
                 }
@@ -1617,7 +1698,19 @@ class MLFeedbackInterface {
     async analyzeCurveWithML() {
         console.log('ML Analysis: Starting analysis...');
         
+        // CRITICAL: Prevent multiple simultaneous ML analyses
+        if (this.submissionInProgress) {
+            console.log('ML Analysis: Submission already in progress, skipping analysis');
+            return;
+        }
+        
+        // Check if analyze button is already disabled (analysis in progress)
         const analyzeBtn = document.getElementById('ml-analyze-btn');
+        if (analyzeBtn && analyzeBtn.disabled) {
+            console.log('ML Analysis: Analysis already in progress (button disabled), skipping');
+            return;
+        }
+        
         let originalButtonState = null;
         
         // CRITICAL FIX: Add status indicator for individual ML analysis to show robot emoji
@@ -1790,6 +1883,15 @@ class MLFeedbackInterface {
                 // Store ML classification in well data
                 if (result.success && result.prediction) {
                     this.currentWellData.ml_classification = result.prediction;
+                    
+                    // CRITICAL FIX: Display ML results and show feedback button
+                    this.displayMLResults(result);
+                    console.log('✅ ML Analysis: Results displayed and feedback button shown');
+                    
+                    // Update status indicator to completed
+                    if (currentFluorophore !== 'Unknown') {
+                        this.updateMLChannelStatus(currentFluorophore, 'completed', 'Analysis complete');
+                    }
                 } else {
                     throw new Error(result.error || 'ML analysis failed');
                 }
@@ -1800,7 +1902,21 @@ class MLFeedbackInterface {
         } catch (error) {
             console.error('ML analysis error:', error);
             console.warn('ML Analysis failed:', error.message);
+            
+            // Update status indicator to failed
+            if (currentFluorophore !== 'Unknown') {
+                this.updateMLChannelStatus(currentFluorophore, 'failed', 'Analysis failed');
+            }
         } finally {
+            // Clean up temporary status indicator
+            if (statusIndicator && statusIndicator.id && statusIndicator.id.startsWith('temp-ml-indicator-')) {
+                try {
+                    statusIndicator.remove();
+                } catch (e) {
+                    // Ignore cleanup errors
+                }
+            }
+            
             // Restore button state properly
             if (analyzeBtn) {
                 if (originalButtonState) {
@@ -1827,6 +1943,12 @@ class MLFeedbackInterface {
         if (this.currentWellData && !this.currentWellData.original_ml_prediction) {
             this.currentWellData.original_ml_prediction = prediction.classification;
             console.log('📊 Stored original ML prediction:', prediction.classification);
+        }
+        
+        // Cache ML results in session to prevent re-analysis
+        if (this.currentWellKey) {
+            this.sessionMLResults[this.currentWellKey] = prediction;
+            console.log('💾 Cached ML results for session:', this.currentWellKey);
         }
         
         const predictionDisplay = document.getElementById('ml-prediction-display');
@@ -1880,8 +2002,13 @@ class MLFeedbackInterface {
                 }
             }
             
+            // CRITICAL FIX: Ensure feedback button is always shown after successful ML analysis
             if (feedbackBtn) {
                 feedbackBtn.style.display = 'inline-block';
+                feedbackBtn.style.visibility = 'visible';
+                console.log('✅ ML Feedback: Feedback button made visible after analysis');
+            } else {
+                console.error('❌ ML Feedback: Feedback button element not found');
             }
             
             // Update the results table with the ML prediction
@@ -2351,8 +2478,9 @@ class MLFeedbackInterface {
             //console.log('⚠️ ML Feedback: User approved retraining duplicate sample');
         }
 
-        // Set submission flag
+        // Set submission flag and prevent auto-analysis
         this.submissionInProgress = true;
+        this.recentFeedbackSubmission = true;
 
         // Enhanced well data recovery - try multiple sources
         let wellKey = this.currentWellKey;
@@ -2490,7 +2618,7 @@ class MLFeedbackInterface {
                     // THEN update the results table with the expert classification
                     await this.updateResultsTableAfterFeedback(expertClassification);
                     
-                    // CRITICAL FIX: Add a small delay to ensure data propagation before modal refresh
+                    // CRITICAL FIX: Reduce delay to minimize conflicts and ensure quicker UI updates
                     setTimeout(() => {
                         console.log('🔄 MODAL-REFRESH: About to refresh modal after expert feedback');
                         console.log('🔍 MODAL-REFRESH: Current well curve_classification:', this.currentWellData?.curve_classification);
@@ -2502,7 +2630,7 @@ class MLFeedbackInterface {
                         this.refreshMLDisplayInModal();
                         
                         console.log('✅ MODAL-REFRESH: Modal refresh completed');
-                    }, 100);
+                    }, 50); // Reduced from 100ms to 50ms
                     
                     // Use non-blocking notification instead of alert
                     this.showTrainingNotification(
@@ -2527,8 +2655,11 @@ class MLFeedbackInterface {
                         await this.handleTrainingMilestone(result.training_samples);
                     }, 1000);
                     
-                    // Automatic batch re-evaluation for similar wells
-                    // Run this after training milestone handling
+                    // DISABLED: Automatic batch re-evaluation to prevent unwanted ML analyses
+                    // This was causing ML analysis to trigger on other wells automatically
+                    // which interfered with user control and button states
+                    console.log('🚫 Automatic batch re-evaluation disabled to prevent unwanted ML analyses');
+                    /*
                     setTimeout(async () => {
                         await this.executeAutomaticBatchReEvaluation(
                             wellKey,
@@ -2536,6 +2667,7 @@ class MLFeedbackInterface {
                             expertClassification
                         );
                     }, 2000);
+                    */
                 } else {
                     throw new Error(result.error || 'Feedback submission failed');
                 }
@@ -2551,14 +2683,31 @@ class MLFeedbackInterface {
                 'error'
             );
         } finally {
-            // Reset submission flag
+            // Reset submission flag FIRST
             this.submissionInProgress = false;
             
-            // Reset button text without disabling it
+            // Clear the recent feedback flag after a delay to prevent immediate auto-analysis
+            setTimeout(() => {
+                this.recentFeedbackSubmission = false;
+                console.log('✅ ML Feedback: Recent feedback flag cleared, auto-analysis re-enabled');
+            }, 2000); // Wait 2 seconds before allowing auto-analysis again
+            
+            // Ensure proper button state restoration
             if (submitBtn) {
                 submitBtn.textContent = '✅ Submit Feedback';
-                // Don't disable the button - let user submit again if needed
+                submitBtn.disabled = false; // Explicitly enable the button
+                submitBtn.style.opacity = '1'; // Ensure button is fully visible
             }
+            
+            // Also ensure the ML analyze button is properly reset
+            const analyzeBtn = document.getElementById('ml-analyze-btn');
+            if (analyzeBtn) {
+                analyzeBtn.disabled = false;
+                analyzeBtn.textContent = '🔍 Analyze with ML';
+                analyzeBtn.style.opacity = '1';
+            }
+            
+            console.log('✅ ML Feedback: Button states properly reset after submission');
         }
     }
 
@@ -4977,37 +5126,30 @@ class MLFeedbackInterface {
                 }
             }
             
-            // Force immediate modal refresh if modal is open
+            // SIMPLIFIED: Only update the ML display without triggering full modal refresh
+            // This prevents the modal content from disappearing
             if (window.currentModalWellKey === this.currentWellKey) {
-                console.log('🔄 MODAL-REFRESH: Modal is open for this well, refreshing immediately');
+                console.log('🔄 MODAL-REFRESH: Modal is open for this well, updating ML display only');
                 
-                // Update modal details directly with the updated data
-                if (typeof window.updateModalDetails === 'function' && 
-                    window.currentAnalysisResults && 
-                    window.currentAnalysisResults.individual_results) {
-                    
-                    const wellResult = window.currentAnalysisResults.individual_results[this.currentWellKey];
-                    if (wellResult) {
-                        console.log('🔄 MODAL-REFRESH: Calling updateModalDetails with expert data');
-                        window.updateModalDetails(wellResult);
-                    }
-                }
+                // Just update the ML display to show the expert classification
+                this.displayExistingMLClassification({
+                    classification: expertClassification,
+                    method: 'expert_feedback',
+                    confidence: 1.0,
+                    pathogen: this.currentWellData?.ml_classification?.pathogen || 'Unknown'
+                });
                 
-                // CRITICAL: Also directly update the result field in case of timing issues
+                // Also update the result field directly
                 this.updateModalResultField(expertClassification);
                 
-                // Also refresh the entire modal content as backup
-                if (typeof window.updateModalContent === 'function') {
-                    console.log('🔄 MODAL-REFRESH: Calling updateModalContent as backup');
-                    setTimeout(() => {
-                        window.updateModalContent(this.currentWellKey);
-                    }, 100);
-                }
-                
-                // Refresh the ML feedback interface display
-                setTimeout(() => {
-                    if (this.isInitialized) {
-                        console.log('🔄 MODAL-REFRESH: Refreshing ML feedback interface display');
+                console.log('✅ MODAL-REFRESH: ML display updated with expert classification');
+            }
+            
+        } catch (error) {
+            console.error('Error refreshing modal after feedback:', error);
+            // Don't throw - this should not break the feedback submission
+        }
+    }
                         this.refreshMLDisplayInModal();
                     }
                 }, 200);
