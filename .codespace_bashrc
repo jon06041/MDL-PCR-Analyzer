@@ -1,0 +1,8 @@
+# Auto-activate virtual environment for MDL-PCR-Analyzer
+if [ -d "/workspaces/MDL-PCR-Analyzer/.venv" ] && [ -z "$VIRTUAL_ENV" ]; then
+    echo "🐍 Auto-activating Python virtual environment..."
+    cd /workspaces/MDL-PCR-Analyzer
+    source .venv/bin/activate
+    echo "✅ Virtual environment activated: $VIRTUAL_ENV"
+    echo "💡 Run './auto_startup.sh' to start the Flask app with MySQL"
+fi

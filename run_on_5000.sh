@@ -29,4 +29,10 @@ fi
 
 # Start the app on port 5000
 echo "Starting app on port 5000..."
-PORT=5000 python app.py
+PORT=5000 #!/bin/bash
+
+# Quick start script - uses the comprehensive auto-start script
+echo "🚀 Quick starting MDL-PCR-Analyzer on port 5000..."
+
+# Run the comprehensive startup script
+./start_app.sh

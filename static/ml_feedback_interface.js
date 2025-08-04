@@ -535,7 +535,8 @@ class MLFeedbackInterface {
         return false;
     }
 
-    // Auto-analyze the curve if ML classification doesn't exist (only if ML is enabled)
+    updateWellModal(wellKey, wellData) {
+        // Auto-analyze the curve if ML classification doesn't exist (only if ML is enabled)
         // CRITICAL: Don't auto-analyze if we just submitted feedback to prevent conflicts
         // ALSO: Preserve existing ML results - only analyze if no ML results exist at all
         if (!wellData.ml_classification && !this.recentFeedbackSubmission) {

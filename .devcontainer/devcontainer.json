@@ -1,0 +1,25 @@
+{
+  "name": "MDL-PCR-Analyzer",
+  "dockerFile": "Dockerfile",
+  "forwardPorts": [5000, 3306],
+  "portsAttributes": {
+    "5000": {
+      "label": "Flask App",
+      "onAutoForward": "notify"
+    },
+    "3306": {
+      "label": "MySQL"
+    }
+  },
+  "postCreateCommand": "pip install -r requirements.txt && pip install python-dotenv pymysql",
+  "postStartCommand": "sudo service mysql start",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.flake8",
+        "ms-vscode.vscode-json"
+      ]
+    }
+  }
+}

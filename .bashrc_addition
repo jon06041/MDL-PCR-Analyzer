@@ -1,0 +1,21 @@
+# Auto-activate virtual environment for MDL-PCR-Analyzer
+if [[ "$PWD" == "/workspaces/MDL-PCR-Analyzer"* ]] && [[ "$VIRTUAL_ENV" == "" ]]; then
+    if [[ -f "/workspaces/MDL-PCR-Analyzer/.venv/bin/activate" ]]; then
+        echo "🐍 Auto-activating Python virtual environment..."
+        source /workspaces/MDL-PCR-Analyzer/.venv/bin/activate
+        echo "✅ Virtual environment activated"
+    fi
+fi
+
+# Auto-export environment variables for MySQL
+export DATABASE_URL="mysql+pymysql://qpcr_user:qpcr_password@localhost:3306/qpcr_analysis?charset=utf8mb4"
+export MYSQL_HOST="localhost"
+export MYSQL_PORT="3306"
+export MYSQL_USER="qpcr_user"
+export MYSQL_PASSWORD="qpcr_password"
+export MYSQL_DATABASE="qpcr_analysis"
+
+# Convenient aliases
+alias start-app="./auto_startup.sh"
+alias quick-start="cd /workspaces/MDL-PCR-Analyzer && ./auto_startup.sh"
+alias mysql-connect="mysql -u qpcr_user -pqpcr_password -h 127.0.0.1 qpcr_analysis"

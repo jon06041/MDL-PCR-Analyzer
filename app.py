@@ -9,6 +9,7 @@ from logging.handlers import RotatingFileHandler
 import numpy as np
 from datetime import datetime
 from urllib.parse import unquote
+from dotenv import load_dotenv
 from qpcr_analyzer import process_csv_data, validate_csv_structure
 from models import db, AnalysisSession, WellResult, ExperimentStatistics
 from sqlalchemy.orm import DeclarativeBase
@@ -21,6 +22,9 @@ from unified_compliance_manager import UnifiedComplianceManager
 from database_management_api import db_mgmt_bp
 from enhanced_compliance_api import compliance_api
 from ml_run_api import ml_run_api
+
+# Load environment variables immediately at startup
+load_dotenv()
 
 def safe_json_dumps(value, default=None):
     """Helper function to safely serialize to JSON, avoiding double-encoding"""
@@ -483,30 +487,122 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY") or "qpcr_analyzer_secret_key
 quota_exceeded = False
 
 # Database configuration for both development (SQLite) and production (MySQL)
+# Priority: DATABASE_URL > .env variables > SQLite fallback
 database_url = os.environ.get("DATABASE_URL")
+
+# If DATABASE_URL is not set, try to construct it from individual env vars
+if not database_url:
+    mysql_host = os.environ.get("MYSQL_HOST", "localhost")
+    mysql_port = os.environ.get("MYSQL_PORT", "3306")
+    mysql_user = os.environ.get("MYSQL_USER", "qpcr_user")
+    mysql_password = os.environ.get("MYSQL_PASSWORD", "qpcr_password")
+    mysql_database = os.environ.get("MYSQL_DATABASE", "qpcr_analysis")
+    
+    # Try to construct MySQL URL from individual components
+    if all([mysql_host, mysql_port, mysql_user, mysql_password, mysql_database]):
+        database_url = f"mysql+pymysql://{mysql_user}:{mysql_password}@{mysql_host}:{mysql_port}/{mysql_database}?charset=utf8mb4"
+        print(f"✓ Constructed MySQL URL from environment variables")
+
 if database_url and database_url.startswith("mysql"):
-    # Production MySQL configuration
-    app.config["SQLALCHEMY_DATABASE_URI"] = database_url
-    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-        "pool_recycle": 300,
-        "pool_pre_ping": True,
-        "pool_size": 10,
-        "max_overflow": 20,
-        "pool_timeout": 30,
-    }
-    print("Using MySQL database for production")
-else:
-    # Development SQLite configuration - Use in-memory for no file locks
-    if os.environ.get("USE_MEMORY_DB") == "true":
-        app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+    # FORCE MySQL configuration - NO SQLite fallback unless explicitly requested
+    try:
+        app.config["SQLALCHEMY_DATABASE_URI"] = database_url
         app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+            "pool_recycle": 300,
             "pool_pre_ping": True,
+            "pool_size": 10,
+            "max_overflow": 20,
+            "pool_timeout": 30,
             "connect_args": {
-                "check_same_thread": False
+                "autocommit": True
             }
         }
-        print("Using in-memory SQLite database (no file locks)")
+        print("✅ Using MySQL database for production")
+        print(f"📊 MySQL connection: {database_url.split('@')[1] if '@' in database_url else 'configured'}")
+        mysql_configured = True
+    except Exception as e:
+        print(f"❌ CRITICAL: MySQL configuration failed: {e}")
+        print("🔧 This is a CRITICAL ERROR - MySQL MUST work")
+        print("💡 Check MySQL service status and database credentials")
+        raise Exception(f"MySQL configuration failed: {e}")
+elif database_url:
+    print(f"⚠️ DATABASE_URL found but not MySQL format: {database_url}")
+    mysql_configured = False
+else:
+    mysql_configured = False
+
+# Only allow SQLite if MySQL is explicitly disabled or in development mode
+if not mysql_configured:
+    if os.environ.get("FORCE_SQLITE") == "true" or os.environ.get("DEVELOPMENT_MODE") == "true":
+        print("⚠️ WARNING: Using SQLite fallback (explicitly requested)")
+        # Development SQLite configuration
+        if os.environ.get("USE_MEMORY_DB") == "true":
+            app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+            app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+                "pool_pre_ping": True,
+                "connect_args": {
+                    "check_same_thread": False
+                }
+            }
+            print("⚠️ Using in-memory SQLite database (no file locks)")
+        else:
+            sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
+            app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{sqlite_path}"
+            app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+                "pool_recycle": 300,
+                "pool_pre_ping": True,
+                "pool_timeout": 30,
+                "pool_size": 10,
+                "max_overflow": 20,
+                "connect_args": {
+                    "timeout": 30,
+                    "check_same_thread": False
+                }
+            }
+            print(f"⚠️ Using SQLite database for development: {sqlite_path}")
     else:
+        print("❌ CRITICAL ERROR: MySQL not configured and SQLite fallback disabled")
+        print("🔧 Expected MySQL configuration but none found")
+        print("💡 Set FORCE_SQLITE=true if you want to use SQLite instead")
+        print("💡 Or ensure MySQL is running and DATABASE_URL is set correctly")
+        raise Exception("MySQL required but not configured")
+        print(f"⚠️ Fallback to SQLite database for development: {sqlite_path}")
+        if database_url:
+            print("💡 MySQL connection failed, using SQLite fallback")
+
+db.init_app(app)
+
+# Create tables for database
+with app.app_context():
+    try:
+        # Configure SQLite for better concurrency and performance
+        if not database_url or not database_url.startswith("mysql") or mysql_configured == False:
+            from sqlalchemy import text as sql_text
+            try:
+                # Set SQLite pragmas for better concurrency and performance
+                db.session.execute(sql_text('PRAGMA journal_mode = WAL;'))        # Write-Ahead Logging
+                db.session.execute(sql_text('PRAGMA synchronous = NORMAL;'))      # Faster writes
+                db.session.execute(sql_text('PRAGMA cache_size = 10000;'))        # Larger cache
+                db.session.execute(sql_text('PRAGMA temp_store = MEMORY;'))       # Memory temp store
+                db.session.execute(sql_text('PRAGMA busy_timeout = 30000;'))      # 30 second timeout
+                db.session.execute(sql_text('PRAGMA foreign_keys = ON;'))         # Enable foreign keys
+                db.session.commit()
+                print("✅ SQLite performance optimizations applied")
+            except Exception as e:
+                print(f"⚠️ Warning: Could not apply SQLite optimizations: {e}")
+        
+        # Create all tables
+        db.create_all()
+        
+        if mysql_configured:
+            print("✅ MySQL database tables initialized")
+        else:
+            print("✅ SQLite database tables initialized")
+            
+    except Exception as e:
+        print(f"⚠️ Database initialization error: {e}")
+        print("🔄 Attempting SQLite fallback...")
+        # Force SQLite fallback
         sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
         app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{sqlite_path}"
         app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
@@ -520,29 +616,12 @@ else:
                 "check_same_thread": False
             }
         }
-        print(f"Using SQLite database for development: {sqlite_path}")
-
-db.init_app(app)
-
-# Create tables for database
-with app.app_context():
-    # Configure SQLite for better concurrency and performance
-    if not database_url or not database_url.startswith("mysql"):
-        from sqlalchemy import text as sql_text
         try:
-            # Set SQLite pragmas for better concurrency and performance
-            db.session.execute(sql_text('PRAGMA journal_mode = WAL;'))        # Write-Ahead Logging
-            db.session.execute(sql_text('PRAGMA synchronous = NORMAL;'))      # Faster writes
-            db.session.execute(sql_text('PRAGMA cache_size = 10000;'))        # Larger cache
-            db.session.execute(sql_text('PRAGMA temp_store = MEMORY;'))       # Memory temp store
-            db.session.execute(sql_text('PRAGMA busy_timeout = 30000;'))      # 30 second timeout
-            db.session.execute(sql_text('PRAGMA foreign_keys = ON;'))         # Enable foreign keys
-            db.session.commit()
-            print("SQLite performance optimizations applied")
-        except Exception as e:
-            print(f"Warning: Could not apply SQLite optimizations: {e}")
-    
-    db.create_all()
+            db.create_all()
+            print("✅ SQLite fallback database initialized successfully")
+        except Exception as fallback_error:
+            print(f"❌ Critical: Even SQLite fallback failed: {fallback_error}")
+            raise
 
 # Register database management blueprint
 app.register_blueprint(db_mgmt_bp)
