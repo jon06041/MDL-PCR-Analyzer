@@ -493,6 +493,8 @@ class MLFeedbackInterface {
         
         // Reset any ongoing submission state
         this.submissionInProgress = false;
+    }
+
     /**
      * Check if well already has existing ML results to preserve session data
      */
@@ -5151,19 +5153,6 @@ class MLFeedbackInterface {
             // Don't throw - this should not break the feedback submission
         }
     }
-                        this.refreshMLDisplayInModal();
-                    }
-                }, 200);
-            } else {
-                console.log('🔍 MODAL-REFRESH: Modal not open for this well, skipping modal refresh');
-            }
-            
-            console.log('✅ MODAL-REFRESH: Modal refresh process completed');
-            
-        } catch (error) {
-            console.error('Error refreshing modal after feedback:', error);
-        }
-    }
 
     /**
      * Directly update the modal result field with expert classification
@@ -5725,71 +5714,6 @@ class MLFeedbackInterface {
         }
     }
     
-    async trackPredictionForValidation(wellData, expertClassification, submissionWellData) {
-        /**
-         * Track ML prediction and expert override for validation system
-         */
-        try {
-            const trackingData = {
-                well_id: submissionWellData.well,
-                sample_name: submissionWellData.sample,
-                pathogen_code: submissionWellData.specific_pathogen || submissionWellData.pathogen,
-                fluorophore: submissionWellData.fluorophore,
-                ml_prediction: wellData.ml_classification ? wellData.ml_classification.classification : 'UNKNOWN',
-                ml_confidence: wellData.ml_classification ? wellData.ml_classification.confidence : 0,
-                expert_decision: expertClassification,
-                final_classification: expertClassification,
-                run_file_name: window.currentAnalysisResults ? 
-                    (window.currentAnalysisResults.metadata ? window.currentAnalysisResults.metadata.filename : 'unknown.csv') : 
-                    'unknown.csv',
-                session_id: window.currentSessionId || null,
-                test_type: submissionWellData.test_code || this.extractTestCode(),
-                model_version_used: wellData.ml_classification ? wellData.ml_classification.model_version : 'v1.0',
-                feature_data: {
-                    amplitude: wellData.amplitude || 0,
-                    r2_score: wellData.r2_score || 0,
-                    steepness: wellData.steepness || 0,
-                    snr: wellData.snr || 0,
-                    midpoint: wellData.midpoint || 0,
-                    baseline: wellData.baseline || 0,
-                    cqj: this.extractNumericValue(wellData.cqj),
-                    calcj: this.extractNumericValue(wellData.calcj)
-                }
-            };
-            
-            console.log('📊 Tracking prediction for validation:', trackingData);
-            
-            const response = await fetch('/api/ml-validation/track-prediction', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(trackingData)
-            });
-            
-            if (response.ok) {
-                const result = await response.json();
-                console.log('✅ Prediction tracked for validation:', result);
-                
-                // Also track for FDA compliance (21 CFR Part 11)
-                await this.trackFDACompliance('ml_prediction_override', {
-                    well_id: trackingData.well_id,
-                    pathogen_code: trackingData.pathogen_code,
-                    ml_prediction: trackingData.ml_prediction,
-                    expert_decision: trackingData.expert_decision,
-                    confidence: trackingData.ml_confidence
-                });
-                
-            } else {
-                console.warn('⚠️ Failed to track prediction for validation:', response.status);
-            }
-            
-        } catch (error) {
-            console.error('❌ Error tracking prediction for validation:', error);
-            // Don't throw error - validation tracking shouldn't break the main workflow
-        }
-    }
-    
     /**
      * Check if ML analysis has been cancelled by the user
      * This is a centralized check to prevent unnecessary ML requests
@@ -5797,7 +5721,7 @@ class MLFeedbackInterface {
     isMLAnalysisCancelled() {
         return window.mlAutoAnalysisUserChoice === 'skipped';
     }
-    
+
     async sendBatchCancellationRequest() {
         /**
          * Send cancellation request to server to stop ongoing batch ML analysis
