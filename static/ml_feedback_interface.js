@@ -1288,29 +1288,165 @@ class MLFeedbackInterface {
      */
     refreshMLDisplayInModal() {
         try {
-            //console.log('🔄 Refreshing ML display in modal');
+            console.log('🔄 MODAL-REFRESH: Refreshing ML display in modal for key:', this.currentWellKey);
             
-            if (!this.currentWellData || !this.currentWellKey) {
-                //console.warn('No current well data for ML display refresh');
-                return;
+            // CRITICAL FIX: Check if ML section exists in modal, recreate if missing
+            let mlSection = document.getElementById('ml-feedback-section');
+            if (!mlSection) {
+                console.log('� MODAL-REFRESH: ML section missing from modal, recreating...');
+                this.createMLSectionInModal();
+                mlSection = document.getElementById('ml-feedback-section');
+                
+                if (!mlSection) {
+                    console.error('❌ MODAL-REFRESH: Failed to create ML section in modal');
+                    return;
+                }
+                console.log('✅ MODAL-REFRESH: ML section recreated successfully');
+            }
+            
+            // ENHANCED FIX: If internal state is not set, try to determine current well from global state
+            let workingWellKey = this.currentWellKey;
+            let workingWellData = this.currentWellData;
+            
+            if (!workingWellData || !workingWellKey) {
+                console.log('🔍 MODAL-REFRESH: Internal state missing, trying to determine from global state...');
+                
+                // Try to get current well from global modal state
+                if (window.currentModalWellKey) {
+                    workingWellKey = window.currentModalWellKey;
+                    console.log('🔍 MODAL-REFRESH: Using global modal well key:', workingWellKey);
+                }
+                
+                // Try to get well data from global analysis results
+                if (workingWellKey && window.currentAnalysisResults?.individual_results) {
+                    workingWellData = window.currentAnalysisResults.individual_results[workingWellKey];
+                    if (workingWellData) {
+                        console.log('✅ MODAL-REFRESH: Found well data from global state');
+                        // Update internal state for future calls
+                        this.currentWellKey = workingWellKey;
+                        this.currentWellData = workingWellData;
+                    }
+                }
+            }
+            
+            // If we still don't have well data, at least we recreated the ML section
+            if (!workingWellData || !workingWellKey) {
+                console.warn('🚨 MODAL-REFRESH: No current well data available for ML display refresh', {
+                    hasWellData: !!workingWellData,
+                    wellKey: workingWellKey,
+                    hasInternalWellData: !!this.currentWellData,
+                    internalWellKey: this.currentWellKey,
+                    globalModalKey: window.currentModalWellKey
+                });
+                // Don't return early - at least we recreated the ML section
+                console.log('✅ MODAL-REFRESH: ML section restored even without complete well data');
             }
             
             // Check if the well has expert classification or ML classification to display
-            const wellResult = window.currentAnalysisResults?.individual_results?.[this.currentWellKey];
-            if (wellResult) {
-                /*
-                console.log('📊 Current well result for ML refresh:', {
-                    classification: wellResult.classification,
-                    curve_classification: wellResult.curve_classification,
-                    ml_classification: wellResult.ml_classification
+            const wellResult = window.currentAnalysisResults?.individual_results?.[workingWellKey];
+            
+            // CRITICAL: For multichannel, try different key variations to handle format inconsistencies
+            let actualWellResult = wellResult;
+            let actualWellKey = workingWellKey;
+            
+            if (!wellResult && workingWellKey && workingWellKey.includes('_')) {
+                console.log('🔍 MODAL-REFRESH: Well not found, trying key variations for multichannel...');
+                const keyVariations = this.generateMultichannelVariations(workingWellKey);
+                
+                for (const variation of keyVariations) {
+                    const varResult = window.currentAnalysisResults?.individual_results?.[variation];
+                    if (varResult) {
+                        console.log('✅ MODAL-REFRESH: Found well data using key variation:', variation);
+                        actualWellResult = varResult;
+                        actualWellKey = variation;
+                        // Update our current key to match what's actually in the data
+                        workingWellKey = variation;
+                        this.currentWellKey = variation;
+                        break;
+                    }
+                }
+                
+                if (!actualWellResult) {
+                    console.log('🔍 MODAL-REFRESH: No well data found for any key variation');
+                }
+            }
+            
+            if (actualWellResult) {
+                console.log('📊 MODAL-REFRESH: Current well result for ML refresh:', {
+                    wellKey: workingWellKey,
+                    classification: actualWellResult.classification,
+                    curve_classification: actualWellResult.curve_classification,
+                    ml_classification: actualWellResult.ml_classification,
+                    hasExpertFeedback: actualWellResult.curve_classification?.method === 'expert_feedback' || 
+                                      actualWellResult.ml_classification?.method === 'Expert Review'
                 });
-                */
-                // If there's a curve classification (from expert feedback or ML), display it
-                if (wellResult.curve_classification) {
-                    this.displayExistingMLClassification(wellResult.curve_classification);
-                } else if (wellResult.ml_classification) {
-                    this.displayExistingMLClassification(wellResult.ml_classification);
+                
+                // CRITICAL: Check memory for expert feedback FIRST before well result
+                let expertFeedbackToDisplay = null;
+                
+                // Priority 1: Check if we have expert feedback in memory (most recent)
+                if (this.currentWellData && this.currentWellData.curve_classification && 
+                    (this.currentWellData.curve_classification.method === 'expert_feedback' ||
+                     this.currentWellData.curve_classification.method === 'Expert Review')) {
+                    expertFeedbackToDisplay = this.currentWellData.curve_classification;
+                    console.log('✅ MODAL-REFRESH: Using expert feedback from memory (currentWellData)');
+                } else if (this.currentWellData && this.currentWellData.ml_classification && 
+                          (this.currentWellData.ml_classification.method === 'Expert Review' ||
+                           this.currentWellData.ml_classification.expert_review_method === 'ml_feedback_interface')) {
+                    expertFeedbackToDisplay = this.currentWellData.ml_classification;
+                    console.log('✅ MODAL-REFRESH: Using expert ml_classification from memory (currentWellData)');
+                }
+                // Priority 2: Check for fresh expert feedback in session storage (for fresh uploads)
+                else {
+                    const sessionKey = `expert_feedback_${workingWellKey}`;
+                    console.log('🔍 MODAL-REFRESH: Checking session storage with key:', sessionKey);
+                    const storedFeedback = sessionStorage.getItem(sessionKey);
+                    if (storedFeedback) {
+                        console.log('✅ MODAL-REFRESH: Found stored feedback in session storage:', storedFeedback);
+                        try {
+                            const parsedFeedback = JSON.parse(storedFeedback);
+                            // Check if it's recent (within last 30 seconds)
+                            const feedbackAge = Date.now() - new Date(parsedFeedback.timestamp).getTime();
+                            if (feedbackAge < 30000) {
+                                expertFeedbackToDisplay = parsedFeedback;
+                                console.log('✅ MODAL-REFRESH: Using expert feedback from session storage (fresh upload recovery)');
+                            } else {
+                                console.log('🔄 MODAL-REFRESH: Session storage feedback too old, removing');
+                                sessionStorage.removeItem(sessionKey);
+                            }
+                        } catch (e) {
+                            console.warn('⚠️ MODAL-REFRESH: Failed to parse stored feedback:', e);
+                            sessionStorage.removeItem(sessionKey);
+                        }
+                    } else {
+                        console.log('🔍 MODAL-REFRESH: No stored feedback found for key:', sessionKey);
+                    }
+                }
+                // Priority 3: Check well result for expert feedback 
+                if (!expertFeedbackToDisplay && actualWellResult.curve_classification && 
+                    (actualWellResult.curve_classification.method === 'expert_feedback' ||
+                     actualWellResult.curve_classification.method === 'Expert Review')) {
+                    expertFeedbackToDisplay = actualWellResult.curve_classification;
+                    console.log('✅ MODAL-REFRESH: Using expert curve_classification from well result');
+                } else if (!expertFeedbackToDisplay && actualWellResult.ml_classification && 
+                          (actualWellResult.ml_classification.method === 'Expert Review' ||
+                           actualWellResult.ml_classification.expert_review_method === 'ml_feedback_interface')) {
+                    expertFeedbackToDisplay = actualWellResult.ml_classification;
+                    console.log('✅ MODAL-REFRESH: Using expert ml_classification from well result');
+                }
+                
+                // Display expert feedback if found, otherwise fallback to regular classifications
+                if (expertFeedbackToDisplay) {
+                    console.log('🎯 MODAL-REFRESH: Displaying EXPERT FEEDBACK:', expertFeedbackToDisplay.classification);
+                    this.displayExistingMLClassification(expertFeedbackToDisplay);
+                } else if (actualWellResult.curve_classification) {
+                    console.log('📊 MODAL-REFRESH: Displaying regular curve_classification');
+                    this.displayExistingMLClassification(actualWellResult.curve_classification);
+                } else if (actualWellResult.ml_classification) {
+                    console.log('📊 MODAL-REFRESH: Displaying regular ml_classification');
+                    this.displayExistingMLClassification(actualWellResult.ml_classification);
                 } else {
+                    console.log('🔄 MODAL-REFRESH: No classification data, showing basic ML section');
                     // Show the basic ML section but without a prediction
                     const mlSection = document.getElementById('ml-feedback-section');
                     if (mlSection) {
@@ -1320,10 +1456,252 @@ class MLFeedbackInterface {
                 
                 // Also update the feedback form state
                 this.hideFeedbackForm();
+            } else {
+                console.warn('🚨 MODAL-REFRESH: No well result found for key:', workingWellKey);
+                console.log('📊 MODAL-REFRESH: Available keys:', window.currentAnalysisResults?.individual_results ? 
+                    Object.keys(window.currentAnalysisResults.individual_results) : 'No individual_results');
             }
             
         } catch (error) {
-            //console.error('Error refreshing ML display in modal:', error);
+            console.error('❌ MODAL-REFRESH: Error refreshing ML display in modal:', error);
+        }
+    }
+
+    /**
+     * Creates the ML section in the modal when it's missing after modal content refresh
+     */
+    createMLSectionInModal() {
+        try {
+            console.log('🔧 MODAL-CREATE: Creating ML section in modal...');
+            
+            // Look for the modal body to insert ML section between chart and details
+            const modalBody = document.querySelector('.modal-body');
+            const chartContainer = document.querySelector('.modal-chart-container');
+            const modalDetails = document.getElementById('modalDetails');
+            
+            if (!modalBody) {
+                console.error('❌ MODAL-CREATE: Modal body not found');
+                return false;
+            }
+
+            console.log('✅ MODAL-CREATE: Modal body found, creating ML section');
+            
+            // Create ML feedback section HTML (same as in original init)
+            const mlSection = document.createElement('div');
+            mlSection.id = 'ml-feedback-section';
+            mlSection.className = 'ml-feedback-container';
+            mlSection.innerHTML = `
+                <div class="ml-section">
+                    <h4>🤖 ML Curve Classification</h4>
+                    
+                    <!-- ML Prediction Display -->
+                    <div class="ml-prediction" id="ml-prediction-display" style="display: none;">
+                        <div class="prediction-info">
+                            <div class="prediction-result">
+                                <strong>ML Prediction:</strong> 
+                                <span id="ml-prediction-class" class="classification-badge">-</span>
+                                <span id="ml-prediction-confidence" class="confidence-score">-</span>
+                            </div>
+                            <div class="prediction-method">
+                                <small>Method: <span id="ml-prediction-method">-</span></small>
+                            </div>
+                            <div class="pathogen-context" id="pathogen-context" style="display: none;">
+                                <small>🧬 Pathogen: <span id="detected-pathogen">-</span></small>
+                            </div>
+                        </div>
+                        
+                        <!-- Classification Conflict Alert -->
+                        <div class="classification-conflict" id="classification-conflict" style="display: none;">
+                            <div class="conflict-header">
+                                <span class="conflict-icon">⚠️</span>
+                                <strong>Classification Conflict Detected</strong>
+                            </div>
+                            <div class="conflict-details">
+                                <div class="conflict-comparison">
+                                    <div class="conflict-item">
+                                        <span class="conflict-label">Rule-Based:</span>
+                                        <span id="rule-based-class" class="classification-badge">-</span>
+                                    </div>
+                                    <div class="conflict-vs">vs</div>
+                                    <div class="conflict-item">
+                                        <span class="conflict-label">ML Prediction:</span>
+                                        <span id="ml-conflict-class" class="classification-badge">-</span>
+                                    </div>
+                                </div>
+                                <div class="conflict-confidence">
+                                    <small>ML Confidence: <span id="conflict-confidence">-</span></small>
+                                </div>
+                            </div>
+                            <div class="conflict-actions">
+                                <button id="approve-ml-btn" class="ml-btn primary small">
+                                    ✅ Approve ML
+                                </button>
+                                <button id="keep-rule-btn" class="ml-btn secondary small">
+                                    📋 Keep Rule-Based
+                                </button>
+                                <button id="expert-review-btn" class="ml-btn warning small">
+                                    👨‍⚕️ Need Expert Review
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Visual Curve Analysis Display -->
+                        <div class="visual-curve-analysis" id="visual-curve-display" style="display: none;">
+                            <h6>👁️ Visual Curve Analysis</h6>
+                            <div class="visual-metrics-grid">
+                                <div class="visual-metric-item">
+                                    <span class="metric-label">Curve Shape:</span>
+                                    <span id="curve-shape-assessment">-</span>
+                                </div>
+                                <div class="visual-metric-item">
+                                    <span class="metric-label">Pattern Type:</span>
+                                    <span id="curve-pattern-type">-</span>
+                                </div>
+                                <div class="visual-metric-item">
+                                    <span class="metric-label">Visual Quality:</span>
+                                    <span id="visual-quality-score">-</span>
+                                </div>
+                                <div class="visual-metric-item">
+                                    <span class="metric-label">Similar Patterns:</span>
+                                    <span id="similar-patterns-count">-</span>
+                                </div>
+                            </div>
+                            <div class="curve-characteristics">
+                                <div class="characteristic-tags" id="curve-characteristics">
+                                    <!-- Dynamic tags for curve characteristics -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Analysis Buttons -->
+                    <div class="ml-actions">
+                        <button id="ml-analyze-btn" class="ml-btn primary">
+                            🔍 Analyze with ML
+                        </button>
+                        <button id="ml-feedback-btn" class="ml-btn secondary" style="display: none;">
+                            📝 Provide Feedback
+                        </button>
+                    </div>
+
+                    <!-- Feedback Form -->
+                    <div class="ml-feedback-form" id="ml-feedback-form" style="display: none;">
+                        <h5>Expert Classification Feedback</h5>
+                        <p>Current classification: <span id="current-classification">-</span></p>
+                        <p>Help improve the ML model by providing the correct classification:</p>
+                        
+                        <div class="classification-options">
+                            <label class="classification-option">
+                                <input type="radio" name="expert-classification" value="STRONG_POSITIVE">
+                                <span class="classification-label strong-positive">Strong Positive</span>
+                            </label>
+                            <label class="classification-option">
+                                <input type="radio" name="expert-classification" value="POSITIVE">
+                                <span class="classification-label positive">Positive</span>
+                            </label>
+                            <label class="classification-option">
+                                <input type="radio" name="expert-classification" value="WEAK_POSITIVE">
+                                <span class="classification-label weak-positive">Weak Positive</span>
+                            </label>
+                            <label class="classification-option">
+                                <input type="radio" name="expert-classification" value="INDETERMINATE">
+                                <span class="classification-label indeterminate">Indeterminate</span>
+                                <small style="display: block; color: #666; margin-top: 2px;">Unclear biological result, ambiguous signal that cannot be confidently classified</small>
+                            </label>
+                            <label class="classification-option">
+                                <input type="radio" name="expert-classification" value="REDO">
+                                <span class="classification-label redo">Redo</span>
+                                <small style="display: block; color: #666; margin-top: 2px;">Technical issues or borderline amplitude (400-500 RFU), repeat test recommended</small>
+                            </label>
+                            <label class="classification-option">
+                                <input type="radio" name="expert-classification" value="SUSPICIOUS">
+                                <span class="classification-label suspicious">Suspicious</span>
+                                <small style="display: block; color: #666; margin-top: 2px;">Questionable result that may need further investigation or expert review</small>
+                            </label>
+                            <label class="classification-option">
+                                <input type="radio" name="expert-classification" value="NEGATIVE">
+                                <span class="classification-label negative">Negative</span>
+                            </label>
+                        </div>
+
+                        <div class="feedback-actions">
+                            <button id="submit-feedback-btn" class="ml-btn primary">
+                                ✅ Submit Feedback
+                            </button>
+                            <button id="cancel-feedback-btn" class="ml-btn secondary">
+                                ❌ Cancel
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- ML Statistics -->
+                    <div class="ml-stats" id="ml-stats-display">
+                        <h5>ML Model Status</h5>
+                        <div class="stats-grid">
+                            <div class="stat-item">
+                                <span class="stat-label">Training Samples:</span>
+                                <span id="stat-training-samples">-</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Model Trained:</span>
+                                <span id="stat-model-trained">-</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Pathogen Models:</span>
+                                <span id="stat-pathogen-models">-</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Expert Review:</span>
+                                <span id="stat-expert-review-status">-</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Manual Retrain Button -->
+                        <div class="ml-actions" style="margin-top: 15px;">
+                            <button id="manual-retrain-btn" class="ml-btn secondary small" style="font-size: 0.9em;">
+                                🔄 Manual Retrain
+                            </button>
+                        </div>
+                        
+                        <div class="training-progress" id="training-progress" style="display: none;">
+                            <div class="progress-info">
+                                <small>Expert review available after 50+ training samples</small>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="training-progress-fill"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Insert ML section between chart and details (or at end of modal body)
+            if (chartContainer && modalDetails) {
+                modalBody.insertBefore(mlSection, modalDetails);
+                console.log('✅ MODAL-CREATE: ML section inserted between chart and details');
+            } else if (modalDetails) {
+                modalBody.insertBefore(mlSection, modalDetails);
+                console.log('✅ MODAL-CREATE: ML section inserted before modal details');
+            } else {
+                modalBody.appendChild(mlSection);
+                console.log('✅ MODAL-CREATE: ML section appended to modal body');
+            }
+            
+            // Re-attach event listeners
+            this.attachEventListeners();
+            
+            // Add visual analysis styles
+            this.addVisualAnalysisStyles();
+            
+            // Show the ML section
+            this.showMLSection();
+            
+            console.log('✅ MODAL-CREATE: ML section created and initialized successfully');
+            return true;
+            
+        } catch (error) {
+            console.error('❌ MODAL-CREATE: Error creating ML section in modal:', error);
+            return false;
         }
     }
 
@@ -1561,17 +1939,32 @@ class MLFeedbackInterface {
     }
 
     displayExistingMLClassification(mlClassification) {
-        // Add validation for ML classification data
-        if (!mlClassification || !mlClassification.classification || mlClassification.confidence === undefined) {
-            console.warn('ML Feedback Interface: Invalid ML classification data:', mlClassification);
+        console.log('🔄 DISPLAY-ML: Attempting to display ML classification:', mlClassification);
+        
+        // Add validation for ML classification data but be more forgiving
+        if (!mlClassification) {
+            console.warn('ML Feedback Interface: No ML classification data provided');
             return;
+        }
+        
+        // Even if classification or confidence is missing, try to show what we have
+        if (!mlClassification.classification) {
+            console.warn('ML Feedback Interface: Missing classification field, using fallback');
+            mlClassification.classification = 'UNKNOWN';
+        }
+        
+        if (mlClassification.confidence === undefined || mlClassification.confidence === null) {
+            console.warn('ML Feedback Interface: Missing confidence field, using fallback');
+            mlClassification.confidence = 0.0;
         }
         
         console.log('🔄 DISPLAY-ML: Displaying ML classification:', {
             classification: mlClassification.classification,
             method: mlClassification.method,
             confidence: mlClassification.confidence,
-            isExpertFeedback: mlClassification.method === 'expert_feedback'
+            isExpertFeedback: mlClassification.method === 'expert_feedback' || 
+                             mlClassification.method === 'Expert Review' ||
+                             mlClassification.expert_review_method === 'ml_feedback_interface'
         });
         
         // CRITICAL: Store the original ML prediction for comparison later
@@ -1595,7 +1988,10 @@ class MLFeedbackInterface {
             classElement.className = `classification-badge ${this.getClassificationBadgeClass(mlClassification.classification)}`;
             
             // CRITICAL FIX: Handle expert feedback classifications differently
-            if (mlClassification.method === 'expert_feedback') {
+            // Check for both backend formats: 'expert_feedback' and 'Expert Review'
+            if (mlClassification.method === 'expert_feedback' || 
+                mlClassification.method === 'Expert Review' ||
+                mlClassification.expert_review_method === 'ml_feedback_interface') {
                 confidenceElement.textContent = '(Expert Decision)';
                 methodElement.textContent = 'Expert Review';
             } else {
@@ -1723,6 +2119,8 @@ class MLFeedbackInterface {
                     rfu_data: rawRfu,
                     cycles: rawCycles,
                     well_data: wellData,
+                    session_id: window.currentSessionId || this.currentWellData.session_id || null, // Add session_id for persistence
+                    well_id: this.currentWellKey, // Add well_id for database lookup
                     existing_metrics: {
                         r2: this.currentWellData.r2_score || 0,
                         steepness: this.currentWellData.steepness || 0,
@@ -2073,7 +2471,16 @@ class MLFeedbackInterface {
             console.log('🔄 WELL-UPDATE: Starting well classification update:', {
                 wellKey: this.currentWellKey,
                 newClassification,
-                reason
+                reason,
+                sessionId: window.currentSessionId || this.currentWellData?.session_id
+            });
+            
+            // CRITICAL: Normalize well key to handle duplicated channels (A1_FAM_FAM -> A1_FAM)
+            const normalizedWellKey = this.normalizeWellKey(this.currentWellKey);
+            console.log('🔧 WELL-UPDATE: Using normalized well key for backend:', {
+                original: this.currentWellKey,
+                normalized: normalizedWellKey,
+                wasModified: normalizedWellKey !== this.currentWellKey
             });
             
             const response = await fetch('/api/update-well-classification', {
@@ -2082,7 +2489,8 @@ class MLFeedbackInterface {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    well_id: this.currentWellKey,
+                    well_id: normalizedWellKey, // Use normalized key for backend
+                    session_id: window.currentSessionId || this.currentWellData?.session_id || null,
                     new_classification: newClassification,
                     reason: reason,
                     timestamp: new Date().toISOString()
@@ -2109,6 +2517,23 @@ class MLFeedbackInterface {
                     expert_decision_type: reason === 'expert_feedback' ? 'Expert Decision' : 'Other'
                 };
                 
+                // CRITICAL: Store expert feedback in session storage for fresh upload recovery
+                const sessionKey = `expert_feedback_${this.currentWellKey}`;
+                const expertFeedbackData = {
+                    classification: newClassification,
+                    method: 'Expert Review',
+                    confidence: 1.0,
+                    expert_review_method: 'ml_feedback_interface',
+                    timestamp: new Date().toISOString(),
+                    wellKey: this.currentWellKey
+                };
+                try {
+                    sessionStorage.setItem(sessionKey, JSON.stringify(expertFeedbackData));
+                    console.log('💾 STORAGE: Saved expert feedback to session storage for fresh upload recovery');
+                } catch (e) {
+                    console.warn('⚠️ STORAGE: Failed to save expert feedback to session storage:', e);
+                }
+                
                 console.log('🔍 FEEDBACK-UPDATE: Set curve_classification data:', this.currentWellData.curve_classification);
                 
                 // Update global analysis results if available
@@ -2132,7 +2557,9 @@ class MLFeedbackInterface {
                         console.warn('⚠️ WELL-UPDATE: Global well data not found for key:', this.currentWellKey);
                     }
                 } else {
-                    console.warn('⚠️ WELL-UPDATE: No global analysis results available');
+                    console.warn('⚠️ WELL-UPDATE: No global analysis results available - attempting recovery');
+                    // Try to create/recover the global data structure
+                    this.createOrRecoverGlobalResults(newClassification);
                 }
                 
                 console.log(`✅ Well classification updated to: ${newClassification}`);
@@ -2865,6 +3292,8 @@ class MLFeedbackInterface {
             const analysisData = {
                 rfu_data: wellData.raw_rfu,
                 cycles: wellData.raw_cycles,
+                session_id: window.currentSessionId || wellData.session_id || null, // Add session_id for persistence
+                well_id: wellKey, // Add well_id for database lookup
                 well_data: {
                     well: wellData.well_id || wellKey.split('_')[0],
                     target: specificPathogen, // Use resolved pathogen
@@ -2885,7 +3314,8 @@ class MLFeedbackInterface {
                     cqj: this.extractNumericValue(wellData.cqj, fluorophore),
                     calcj: this.extractNumericValue(wellData.calcj, fluorophore),
                     classification: wellData.classification || 'UNKNOWN'
-                }
+                },
+                is_batch_request: true // Mark as batch request
             };
             
             // CRITICAL: Final cancellation check before making HTTP request
@@ -4790,6 +5220,31 @@ class MLFeedbackInterface {
                         timestamp: new Date().toISOString()
                     };
                     
+                    // CRITICAL: Store expert feedback in session storage for fresh upload recovery
+                    const sessionKey = `expert_feedback_${this.currentWellKey}`;
+                    const expertFeedbackData = {
+                        classification: expertClassification,
+                        method: 'Expert Review',
+                        confidence: 1.0,
+                        expert_review_method: 'ml_feedback_interface',
+                        timestamp: new Date().toISOString(),
+                        wellKey: this.currentWellKey
+                    };
+                    try {
+                        sessionStorage.setItem(sessionKey, JSON.stringify(expertFeedbackData));
+                        console.log('💾 STORAGE: Saved expert feedback to session storage for fresh upload recovery');
+                        console.log('🔑 STORAGE: Session key format:', sessionKey, '(well key format check)');
+                        console.log('🔍 STORAGE: Well key components:', {
+                            originalKey: this.currentWellKey,
+                            hasUnderscore: this.currentWellKey.includes('_'),
+                            channelFormat: this.currentWellKey.split('_').slice(1).join('_'),
+                            keyLength: this.currentWellKey.length,
+                            isDuplicatedChannel: this.checkForDuplicatedChannel(this.currentWellKey)
+                        });
+                    } catch (e) {
+                        console.warn('⚠️ STORAGE: Failed to save expert feedback to session storage:', e);
+                    }
+                    
                     // CRITICAL FIX: Also update the main classification field
                     wellResult.classification = expertClassification;
                     
@@ -4845,13 +5300,15 @@ class MLFeedbackInterface {
                 setTimeout(() => {
                     window.updateModalContent(this.currentWellKey);
                     
-                    // CRITICAL FIX: Also force refresh the ML section in the modal
+                    // CRITICAL FIX: Also force refresh the ML section in the modal after delay
                     if (this.isInitialized) {
                         console.log('🔄 Force refreshing ML feedback interface after modal update');
-                        this.refreshMLDisplayInModal();
+                        setTimeout(() => {
+                            this.refreshMLDisplayInModal();
+                        }, 200); // Additional delay to ensure expert data is preserved
                     }
                     
-                    // CRITICAL FIX: Also rebuild modal navigation after content update
+                    // CRITICAL FIX: Always rebuild modal navigation after content update (REVERTED)
                     if (typeof window.buildModalNavigationList === 'function') {
                         window.buildModalNavigationList();
                         if (typeof window.updateNavigationButtons === 'function') {
@@ -4859,7 +5316,7 @@ class MLFeedbackInterface {
                         }
                         console.log('🔄 Rebuilt modal navigation - list length:', window.modalNavigationList ? window.modalNavigationList.length : 'undefined');
                     }
-                }, 300); // Slightly longer delay to allow state to settle
+                }, 500); // Increased delay to ensure data persistence
             }
             
             // Get a fresh ML prediction for this well to show updated model performance
@@ -4884,19 +5341,25 @@ class MLFeedbackInterface {
         try {
             console.log('🔄 MODAL-REFRESH: Refreshing modal after expert feedback:', expertClassification);
             
-            // CRITICAL: Ensure the well data in memory has been updated first
-            if (this.currentWellData) {
-                this.currentWellData.curve_classification = {
-                    classification: expertClassification,
-                    method: 'expert_feedback',
-                    confidence: 1.0,
-                    timestamp: new Date().toISOString(),
-                    expert_decision_type: 'Expert Decision'
-                };
-                console.log('🔄 MODAL-REFRESH: Updated local well data curve_classification');
-            }
-            
-            // Verify the well data has been updated in global state
+                // CRITICAL: Ensure the well data in memory has been updated first
+                if (this.currentWellData) {
+                    this.currentWellData.curve_classification = {
+                        classification: expertClassification,
+                        method: 'expert_feedback',
+                        confidence: 1.0,
+                        timestamp: new Date().toISOString(),
+                        expert_decision_type: 'Expert Decision'
+                    };
+                    // ALSO set ml_classification to ensure it displays correctly
+                    this.currentWellData.ml_classification = {
+                        classification: expertClassification,
+                        method: 'Expert Review', // Match backend format
+                        confidence: 1.0,
+                        expert_review_method: 'ml_feedback_interface',
+                        timestamp: new Date().toISOString()
+                    };
+                    console.log('🔄 MODAL-REFRESH: Updated local well data with both curve_classification and ml_classification');
+                }            // Verify the well data has been updated in global state
             if (window.currentAnalysisResults && 
                 window.currentAnalysisResults.individual_results && 
                 this.currentWellKey) {
@@ -4904,6 +5367,10 @@ class MLFeedbackInterface {
                 const wellResult = window.currentAnalysisResults.individual_results[this.currentWellKey];
                 console.log('🔍 MODAL-REFRESH: Current well data after update:', {
                     wellKey: this.currentWellKey,
+                    wellExists: !!wellResult,
+                    availableKeys: Object.keys(window.currentAnalysisResults.individual_results).slice(0, 5),
+                    totalWells: Object.keys(window.currentAnalysisResults.individual_results).length,
+                    isMultichannel: this.currentWellKey.includes('_'),
                     classification: wellResult?.classification,
                     curve_classification: wellResult?.curve_classification,
                     ml_classification: wellResult?.ml_classification,
@@ -4911,13 +5378,63 @@ class MLFeedbackInterface {
                     expertClassification: wellResult?.curve_classification?.classification
                 });
                 
+                // CRITICAL: Check if the well key exists in the results
+                if (!wellResult) {
+                    console.error('🚨 MODAL-REFRESH: Well key not found in individual_results!', {
+                        searchKey: this.currentWellKey,
+                        availableKeys: Object.keys(window.currentAnalysisResults.individual_results),
+                        isMultichannel: this.currentWellKey.includes('_')
+                    });
+                    
+                    // Try to find the well by alternative keys for multichannel
+                    if (this.currentWellKey.includes('_')) {
+                        const baseWellId = this.currentWellKey.split('_')[0];
+                        console.log('🔍 MODAL-REFRESH: Searching for multichannel alternatives for base well:', baseWellId);
+                        
+                        // Look for any key that starts with the base well ID
+                        const matchingKeys = Object.keys(window.currentAnalysisResults.individual_results)
+                            .filter(key => key.startsWith(baseWellId));
+                        
+                        console.log('🔍 MODAL-REFRESH: Found matching keys:', matchingKeys);
+                        
+                        if (matchingKeys.length > 0) {
+                            // Use the first matching key as a fallback
+                            const fallbackKey = matchingKeys[0];
+                            const fallbackResult = window.currentAnalysisResults.individual_results[fallbackKey];
+                            console.log('⚠️ MODAL-REFRESH: Using fallback key:', fallbackKey);
+                            
+                            // Update the fallback result instead
+                            fallbackResult.curve_classification = {
+                                classification: expertClassification,
+                                method: 'expert_feedback',
+                                confidence: 1.0,
+                                timestamp: new Date().toISOString(),
+                                expert_decision_type: 'Expert Decision'
+                            };
+                            fallbackResult.ml_classification = {
+                                classification: expertClassification,
+                                method: 'Expert Review',
+                                confidence: 1.0,
+                                expert_review_method: 'ml_feedback_interface',
+                                timestamp: new Date().toISOString()
+                            };
+                            fallbackResult.classification = expertClassification;
+                            
+                            // Update the current well key to match what's actually in the data
+                            this.currentWellKey = fallbackKey;
+                            console.log('✅ MODAL-REFRESH: Updated currentWellKey to match data structure:', fallbackKey);
+                        }
+                    }
+                    return; // Don't proceed if we can't find the well data
+                }
+                
                 // Double-check that the expert feedback was properly saved
                 if (!wellResult?.curve_classification || 
                     wellResult.curve_classification.method !== 'expert_feedback' ||
                     wellResult.curve_classification.classification !== expertClassification) {
                     
                     console.warn('🚨 MODAL-REFRESH: Expert feedback not properly saved, forcing update...');
-                    // Force update the global data directly
+                    // Force update the global data directly with both formats
                     wellResult.curve_classification = {
                         classification: expertClassification,
                         method: 'expert_feedback',
@@ -4925,8 +5442,16 @@ class MLFeedbackInterface {
                         timestamp: new Date().toISOString(),
                         expert_decision_type: 'Expert Decision'
                     };
+                    // ALSO update ml_classification for proper display
+                    wellResult.ml_classification = {
+                        classification: expertClassification,
+                        method: 'Expert Review', // Backend format
+                        confidence: 1.0,
+                        expert_review_method: 'ml_feedback_interface',
+                        timestamp: new Date().toISOString()
+                    };
                     wellResult.classification = expertClassification;
-                    console.log('🔄 MODAL-REFRESH: Forced global data update completed');
+                    console.log('🔄 MODAL-REFRESH: Forced global data update completed with both formats');
                 }
             }
             
@@ -5740,7 +6265,175 @@ class MLFeedbackInterface {
         }
         return 'Unknown';
     }
+
+    // ===== GLOBAL DATA RECOVERY FUNCTIONS =====
+    
+    createOrRecoverGlobalResults(newClassification) {
+        console.log('🔄 RECOVERY: Attempting to create/recover global analysis results');
+        
+        try {
+            // Try to reconstruct the basic structure
+            if (!window.currentAnalysisResults) {
+                window.currentAnalysisResults = {
+                    individual_results: {}
+                };
+                console.log('✅ RECOVERY: Created empty global analysis results structure');
+            }
+            
+            if (!window.currentAnalysisResults.individual_results) {
+                window.currentAnalysisResults.individual_results = {};
+                console.log('✅ RECOVERY: Created empty individual_results structure');
+            }
+            
+            // Create basic well data structure
+            if (this.currentWellData && this.currentWellKey) {
+                console.log('🔄 RECOVERY: Creating well data for', this.currentWellKey);
+                
+                window.currentAnalysisResults.individual_results[this.currentWellKey] = {
+                    ...this.currentWellData,
+                    classification: newClassification,
+                    curve_classification: {
+                        classification: newClassification,
+                        method: 'expert_feedback',
+                        confidence: 1.0,
+                        timestamp: new Date().toISOString(),
+                        expert_decision_type: 'Expert Decision'
+                    },
+                    ml_classification: {
+                        classification: newClassification,
+                        method: 'Expert Review',
+                        confidence: 1.0,
+                        expert_review_method: 'ml_feedback_interface',
+                        timestamp: new Date().toISOString()
+                    }
+                };
+                
+                console.log('✅ RECOVERY: Created well data structure with expert feedback');
+                
+                // Force immediate refresh of the modal if it's open
+                this.refreshModalAfterFeedback(newClassification);
+            } else {
+                console.warn('⚠️ RECOVERY: No current well data available for recovery');
+            }
+            
+        } catch (error) {
+            console.error('❌ RECOVERY: Failed to create/recover global results:', error);
+        }
+    }
+
+    createOrRecoverWellData(newClassification, expertFeedbackData) {
+        console.log('🔄 RECOVERY: Attempting to create well data for', this.currentWellKey);
+        
+        try {
+            if (this.currentWellData && window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+                // Create the well data in the global structure
+                window.currentAnalysisResults.individual_results[this.currentWellKey] = {
+                    ...this.currentWellData,
+                    classification: newClassification,
+                    curve_classification: expertFeedbackData,
+                    ml_classification: {
+                        classification: newClassification,
+                        method: 'Expert Review',
+                        confidence: 1.0,
+                        expert_review_method: 'ml_feedback_interface',
+                        timestamp: new Date().toISOString()
+                    }
+                };
+                
+                console.log('✅ RECOVERY: Created missing well data with expert feedback');
+                
+                // Force immediate refresh of the modal if it's open
+                this.refreshModalAfterFeedback(newClassification);
+            } else {
+                console.warn('⚠️ RECOVERY: Missing required data for well recovery');
+            }
+            
+        } catch (error) {
+            console.error('❌ RECOVERY: Failed to create well data:', error);
+        }
+    }
+
+    // ===== MULTICHANNEL KEY FORMAT UTILITIES =====
+    
+    checkForDuplicatedChannel(wellKey) {
+        /**
+         * Check if the well key has duplicated channel format like A1_CY5_CY5
+         * This can happen when the fluorophore gets appended multiple times
+         */
+        if (!wellKey || !wellKey.includes('_')) {
+            return false;
+        }
+        
+        const parts = wellKey.split('_');
+        if (parts.length >= 3) {
+            // Check if last two parts are identical (case-insensitive)
+            const lastPart = parts[parts.length - 1].toUpperCase();
+            const secondLastPart = parts[parts.length - 2].toUpperCase();
+            
+            return lastPart === secondLastPart;
+        }
+        
+        return false;
+    }
+    
+    normalizeWellKey(wellKey) {
+        /**
+         * Normalize well key to remove duplicated channels
+         * A1_CY5_CY5 -> A1_CY5
+         * A1_FAM_FAM -> A1_FAM
+         */
+        if (!wellKey || !this.checkForDuplicatedChannel(wellKey)) {
+            return wellKey;
+        }
+        
+        const parts = wellKey.split('_');
+        // Remove the last part if it's a duplicate
+        const normalizedKey = parts.slice(0, -1).join('_');
+        
+        console.log('🔧 KEY-NORMALIZE: Fixed duplicated channel:', {
+            original: wellKey,
+            normalized: normalizedKey,
+            removed: parts[parts.length - 1]
+        });
+        
+        return normalizedKey;
+    }
+    
+    generateMultichannelVariations(wellKey) {
+        /**
+         * Generate possible variations of a multichannel well key to handle
+         * inconsistencies between data structures
+         * Returns array of possible keys to try
+         */
+        if (!wellKey || !wellKey.includes('_')) {
+            return [wellKey];
+        }
+        
+        const variations = [wellKey];
+        
+        // Add normalized version (remove duplicate)
+        const normalized = this.normalizeWellKey(wellKey);
+        if (normalized !== wellKey) {
+            variations.push(normalized);
+        }
+        
+        // Add duplicated version (in case data expects it)
+        if (!this.checkForDuplicatedChannel(wellKey)) {
+            const parts = wellKey.split('_');
+            if (parts.length >= 2) {
+                const channel = parts[parts.length - 1];
+                const duplicated = wellKey + '_' + channel;
+                variations.push(duplicated);
+            }
+        }
+        
+        console.log('🔀 KEY-VARIATIONS: Generated variations for', wellKey, ':', variations);
+        return variations;
+    }
 }
+
+// Expose the class for testing and manual instantiation
+window.MLFeedbackInterface = MLFeedbackInterface;
 
 // Initialize the ML feedback interface
 window.mlFeedbackInterface = new MLFeedbackInterface();

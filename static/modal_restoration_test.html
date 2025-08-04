@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Static ML Modal Restoration Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .test-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .test-results {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .failure {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .partial {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        .modal {
+            display: block;
+            position: relative;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .modal-body {
+            min-height: 200px;
+        }
+        .modal-chart-container {
+            background: #f8f9fa;
+            padding: 20px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        #modalDetails {
+            background: #e9ecef;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .log-output {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-family: monospace;
+            max-height: 400px;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+        .before-after {
+            display: flex;
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .state-box {
+            flex: 1;
+            padding: 15px;
+            border-radius: 8px;
+            border: 2px solid #ddd;
+        }
+        .before-state {
+            background: #e8f5e8;
+            border-color: #28a745;
+        }
+        .after-state {
+            background: #e3f2fd;
+            border-color: #007bff;
+        }
+    </style>
+</head>
+<body>
+    <h1>Static ML Modal Restoration Test</h1>
+    <p>Testing the enhanced refreshMLDisplayInModal method - no external dependencies needed!</p>
+
+    <div class="test-container">
+        <h3>🎯 Test Objective</h3>
+        <p>Verify that missing modal elements (feedback button, visual curve analysis, method, result display) can be restored using the enhanced <code>refreshMLDisplayInModal()</code> method with global state fallback.</p>
+        
+        <button onclick="runStaticTest()">🧪 Run Test</button>
+        <button onclick="clearLogs()">🗑️ Clear Logs</button>
+        
+        <div id="logOutput" class="log-output"></div>
+    </div>
+
+    <!-- Before/After Comparison -->
+    <div class="before-after">
+        <div class="state-box before-state">
+            <h4>BEFORE: Elements Present</h4>
+            <div id="beforeState">Initial state will be shown here</div>
+        </div>
+        <div class="state-box after-state">
+            <h4>AFTER: Elements Restored</h4>
+            <div id="afterState">Restoration result will be shown here</div>
+        </div>
+    </div>
+
+    <!-- Mock Modal Structure -->
+    <div id="testModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-body">
+                <div class="modal-chart-container">
+                    <h4>Chart Container</h4>
+                    <p>Mock chart visualization would be here</p>
+                </div>
+                <!-- ML section will be inserted here when created -->
+                <div id="modalDetails">
+                    <h4>Modal Details</h4>
+                    <p>Other modal content</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="testResults" class="test-results"></div>
+
+    <!-- Load ML Interface -->
+    <script src="ml_feedback_interface.js"></script>
+    <script>
+        // Mock fetch to prevent API calls
+        const originalFetch = window.fetch;
+        window.fetch = function(...args) {
+            console.log('🚫 MOCK: Intercepted fetch call to:', args[0]);
+            // Return a successful mock response
+            return Promise.resolve({
+                ok: true,
+                status: 200,
+                json: () => Promise.resolve({ 
+                    status: 'success',
+                    message: 'Mocked API response',
+                    data: {} 
+                }),
+                text: () => Promise.resolve('mocked response')
+            });
+        };
+
+        // Mock console.log to capture logs
+        const originalConsoleLog = console.log;
+        const originalConsoleError = console.error;
+        const originalConsoleWarn = console.warn;
+        let capturedLogs = [];
+
+        function mockConsole() {
+            console.log = function(...args) {
+                capturedLogs.push(['LOG', ...args]);
+                originalConsoleLog.apply(console, args);
+                updateLogDisplay();
+            };
+            console.error = function(...args) {
+                capturedLogs.push(['ERROR', ...args]);
+                originalConsoleError.apply(console, args);
+                updateLogDisplay();
+            };
+            console.warn = function(...args) {
+                capturedLogs.push(['WARN', ...args]);
+                originalConsoleWarn.apply(console, args);
+                updateLogDisplay();
+            };
+        }
+
+        function restoreConsole() {
+            console.log = originalConsoleLog;
+            console.error = originalConsoleError;
+            console.warn = originalConsoleWarn;
+        }
+
+        function updateLogDisplay() {
+            const logOutput = document.getElementById('logOutput');
+            logOutput.innerHTML = capturedLogs.map(log => {
+                const [type, ...messages] = log;
+                let style = 'color: black;';
+                if (type === 'ERROR') style = 'color: red; font-weight: bold;';
+                if (type === 'WARN') style = 'color: orange;';
+                return `<div style="${style}">[${type}] ${messages.join(' ')}</div>`;
+            }).join('');
+            logOutput.scrollTop = logOutput.scrollHeight;
+        }
+
+        function clearLogs() {
+            capturedLogs = [];
+            updateLogDisplay();
+        }
+
+        function checkElementsState() {
+            const mlSection = document.getElementById('ml-feedback-section');
+            const state = {
+                mlSectionExists: !!mlSection,
+                mlSectionVisible: mlSection ? (mlSection.style.display !== 'none') : false,
+                predictionDisplay: !!document.getElementById('ml-prediction-display'),
+                predictionVisible: false,
+                feedbackButton: !!document.querySelector('#ml-feedback-btn, .feedback-button, button[onclick*="feedback"]'),
+                classificationElement: !!document.getElementById('ml-prediction-class'),
+                confidenceElement: !!document.getElementById('ml-prediction-confidence'),
+                methodElement: !!document.getElementById('ml-prediction-method'),
+                visualAnalysis: !!document.querySelector('.ml-prediction, .visual-analysis, .curve-analysis')
+            };
+
+            const predictionDisplay = document.getElementById('ml-prediction-display');
+            if (predictionDisplay) {
+                state.predictionVisible = predictionDisplay.style.display !== 'none';
+            }
+
+            return state;
+        }
+
+        function displayState(state, elementId) {
+            const element = document.getElementById(elementId);
+            element.innerHTML = `
+                <ul style="margin: 0; padding-left: 20px; font-size: 14px;">
+                    <li>ML Section: ${state.mlSectionExists ? '✅' : '❌'} ${state.mlSectionVisible ? '(visible)' : '(hidden)'}</li>
+                    <li>Prediction Display: ${state.predictionDisplay ? '✅' : '❌'} ${state.predictionVisible ? '(visible)' : '(hidden)'}</li>
+                    <li>Feedback Button: ${state.feedbackButton ? '✅' : '❌'}</li>
+                    <li>Visual Analysis: ${state.visualAnalysis ? '✅' : '❌'}</li>
+                    <li>Classification Element: ${state.classificationElement ? '✅' : '❌'}</li>
+                    <li>Confidence Element: ${state.confidenceElement ? '✅' : '❌'}</li>
+                    <li>Method Element: ${state.methodElement ? '✅' : '❌'}</li>
+                </ul>
+            `;
+        }
+
+        async function runStaticTest() {
+            clearLogs();
+            mockConsole();
+
+            try {
+                console.log('🧪 STATIC TEST: Starting ML modal restoration test...');
+                
+                // Step 1: Setup global state
+                console.log('📋 STEP 1: Setting up global state...');
+                window.currentModalWellKey = 'A1_Ch1';
+                window.currentAnalysisResults = {
+                    individual_results: {
+                        'A1_Ch1': {
+                            classification: 'Positive',
+                            curve_classification: {
+                                classification: 'Positive',
+                                confidence: 0.92,
+                                method: 'ml_analysis'
+                            },
+                            ml_classification: {
+                                classification: 'Positive',
+                                confidence: 0.89,
+                                method: 'ML Analysis'
+                            },
+                            rfu_data: [100, 150, 250, 400, 650, 1000, 1500],
+                            cycles: [1, 2, 3, 4, 5, 6, 7]
+                        }
+                    }
+                };
+                console.log('✅ STEP 1: Global state configured');
+
+                // Step 2: Get ML interface
+                console.log('📋 STEP 2: Getting ML interface...');
+                let mlInterface;
+                
+                if (window.mlFeedbackInterface) {
+                    mlInterface = window.mlFeedbackInterface;
+                    console.log('✅ STEP 2: Using existing ML interface instance');
+                } else if (window.MLFeedbackInterface) {
+                    mlInterface = new window.MLFeedbackInterface();
+                    console.log('✅ STEP 2: Created new ML interface instance');
+                } else {
+                    throw new Error('MLFeedbackInterface not available');
+                }
+
+                // Step 3: Initialize with proper state to show BEFORE
+                console.log('📋 STEP 3: Creating initial ML section (BEFORE state)...');
+                mlInterface.currentWellKey = 'A1_Ch1';
+                mlInterface.currentWellData = window.currentAnalysisResults.individual_results['A1_Ch1'];
+                
+                // Create and populate the ML section first
+                await mlInterface.refreshMLDisplayInModal();
+                
+                const beforeState = checkElementsState();
+                console.log('📊 BEFORE STATE:', beforeState);
+                displayState(beforeState, 'beforeState');
+
+                // Step 4: Simulate the problem - this is the key part!
+                console.log('📋 STEP 4: 🚨 SIMULATING THE PROBLEM 🚨');
+                console.log('   - Removing ML section (simulates updateModalContent() behavior)');
+                console.log('   - Clearing internal state (simulates missing ML interface state)');
+                
+                const existingMLSection = document.getElementById('ml-feedback-section');
+                if (existingMLSection) {
+                    existingMLSection.remove();
+                    console.log('✅ STEP 4: ML section removed');
+                } else {
+                    console.log('⚠️ STEP 4: No ML section found to remove');
+                }
+                
+                // Clear internal state to simulate real problem conditions
+                mlInterface.currentWellKey = null;
+                mlInterface.currentWellData = null;
+                console.log('✅ STEP 4: Internal state cleared - this simulates the reported issue');
+
+                // Quick verification that the problem exists
+                const problemState = checkElementsState();
+                console.log('💥 PROBLEM STATE (elements should be missing):', problemState);
+
+                // Step 5: Test the enhanced restoration - THE FIX!
+                console.log('📋 STEP 5: 🔧 TESTING THE FIX 🔧');
+                console.log('   - Calling enhanced refreshMLDisplayInModal()');
+                console.log('   - Should use global state fallback to restore missing elements');
+                
+                await mlInterface.refreshMLDisplayInModal();
+                console.log('✅ STEP 5: Enhanced refreshMLDisplayInModal() completed');
+
+                // Step 6: Check AFTER state
+                console.log('📋 STEP 6: Checking restoration results...');
+                const afterState = checkElementsState();
+                console.log('📊 AFTER STATE:', afterState);
+                displayState(afterState, 'afterState');
+
+                // Step 7: Evaluate success - these are the elements you mentioned were missing!
+                const criticalElements = [
+                    'mlSectionExists',      // The ML section itself
+                    'feedbackButton',       // feedback button - you mentioned this was missing
+                    'visualAnalysis',       // visual curve analysis - you mentioned this was missing  
+                    'classificationElement' // result display - you mentioned this was missing
+                ];
+                
+                const criticalSuccess = criticalElements.every(key => afterState[key]);
+                const fullSuccess = criticalSuccess && afterState.predictionVisible && afterState.methodElement;
+                
+                console.log('🎯 CRITICAL ELEMENTS RESTORED:', criticalSuccess);
+                console.log('🎯 FULL FUNCTIONALITY:', fullSuccess);
+
+                // Detailed analysis
+                console.log('🔍 DETAILED ANALYSIS:');
+                console.log('   - Feedback Button:', afterState.feedbackButton ? '✅ RESTORED' : '❌ STILL MISSING');
+                console.log('   - Visual Analysis:', afterState.visualAnalysis ? '✅ RESTORED' : '❌ STILL MISSING');
+                console.log('   - Method Display:', afterState.methodElement ? '✅ RESTORED' : '❌ STILL MISSING');
+                console.log('   - Result Display:', afterState.classificationElement ? '✅ RESTORED' : '❌ STILL MISSING');
+
+                if (fullSuccess) {
+                    showTestResult('success', 
+                        '🎉 STATIC TEST PASSED! All missing modal elements have been successfully restored! ' +
+                        'The enhanced refreshMLDisplayInModal() method with global state fallback is working correctly. ' +
+                        'Feedback button, visual curve analysis, method, and result display are all back!'
+                    );
+                } else if (criticalSuccess) {
+                    showTestResult('partial', 
+                        '✅ STATIC TEST PARTIAL SUCCESS! Critical elements (feedback button, visual analysis, result display) were restored ' +
+                        'but some minor elements may need adjustment. The core fix is working!'
+                    );
+                } else {
+                    showTestResult('failure', 
+                        '❌ STATIC TEST FAILED! Some critical elements are still missing after the restoration attempt. ' +
+                        'The specific missing elements are shown in the logs above.'
+                    );
+                }
+
+            } catch (error) {
+                console.error('💥 STATIC TEST ERROR:', error);
+                showTestResult('failure', `Static test encountered an error: ${error.message}`);
+            } finally {
+                restoreConsole();
+            }
+        }
+
+        function showTestResult(type, message) {
+            const resultsDiv = document.getElementById('testResults');
+            resultsDiv.className = `test-results ${type}`;
+            resultsDiv.innerHTML = `
+                <h4>Static Test Results</h4>
+                <p>${message}</p>
+                <p><strong>Timestamp:</strong> ${new Date().toLocaleTimeString()}</p>
+            `;
+        }
+
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            mockConsole();
+            console.log('🏁 Static test page loaded and ready');
+            console.log('📁 ML Interface should be loaded from static/ml_feedback_interface.js');
+            console.log('🚫 All API calls will be mocked to avoid external dependencies');
+            restoreConsole();
+        });
+    </script>
+</body>
+</html>
