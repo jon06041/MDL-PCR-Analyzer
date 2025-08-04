@@ -1,0 +1,13 @@
+{
+  "test_session_id": "ml_learning_test_1754341088",
+  "test_duration_seconds": 3.64,
+  "test_curves_count": 30,
+  "baseline_accuracy": 0.0,
+  "improved_accuracy": 0.0,
+  "accuracy_improvement": 0.0,
+  "confidence_improvement": 0.0,
+  "expert_corrections": 30,
+  "feedback_persistence": false,
+  "learning_demonstrated": false,
+  "timestamp": "2025-08-04T20:58:11.859523"
+}

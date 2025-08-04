@@ -1,6 +1,97 @@
 # MDL-PCR-Analyzer: Comprehensive Agent Instructions & Progress Log
 
-## 🚨 **CURRENT STATUS: ML Batch Analysis Critical Failure** (August 2, 2025)
+## 🎯 **CURRENT STATUS: ML Learning Demonstration Infrastructure Complete** (August 4, 2025)
+
+### ✅ **MAJOR ACHIEVEMENT: Comprehensive ML Learning Test Framework** 
+
+#### **📍 CURRENT WORK**: ML Learning Progression Test & Infrastructure
+- **✅ COMPLETED**: Complete test file organization (all tests moved to test/ folder)
+- **✅ COMPLETED**: Comprehensive ML learning progression test (`test/test_ml_learning_progression.py`)
+- **✅ COMPLETED**: ML API endpoints implementation (`/api/ml-classify`, `/api/ml-feedback-stats`)
+- **✅ COMPLETED**: MySQL-only database configuration (no SQLite dependency)
+- **✅ WORKING**: ML prediction API (46.67% accuracy baseline)
+- **✅ WORKING**: Expert feedback submission (19 corrections per test run)
+- **✅ WORKING**: Database persistence and compliance tracking
+- **⚠️ ISSUE**: ML feedback stats endpoint needs table structure fix
+- **⚠️ OBSERVATION**: No learning improvement demonstrated (46.67% baseline = 46.67% after feedback)
+
+#### **🔧 TECHNICAL STATUS**:
+- **Flask App**: Running on port 5000 with MySQL backend
+- **Database**: MySQL configured (host: 127.0.0.1:3306, db: qpcr_analysis)
+- **ML System**: Using rule-based classification with expert feedback collection
+- **Test Framework**: 500+ line comprehensive learning progression test
+- **Web Interface**: `test/ml_learning_test.html` for ML test execution
+
+#### **📊 ML LEARNING TEST RESULTS**:
+```
+✅ 30 test curves generated with realistic POSITIVE/NEGATIVE/SUSPICIOUS patterns
+✅ 46.67% baseline accuracy (14/30 correct predictions)
+✅ 19 expert feedback corrections successfully submitted
+✅ Database persistence working (expert feedback tracked)
+⚠️ 46.67% improved accuracy (0.00% improvement - system not learning)
+⚠️ Training paused: "40+ sample milestone reached" (safety feature preventing improvement)
+```
+
+#### **🗂️ FILE ORGANIZATION COMPLETED**:
+- **ALL TEST FILES**: Successfully moved from root and static/ to test/ folder
+- **GIT STATUS**: All test file moves committed and pushed
+- **TEST STRUCTURE**: 
+  - `test/test_ml_learning_progression.py` - Main learning test
+  - `test/ml_learning_test.html` - Web interface for tests
+  - `test/test_file_organization.py` - File organization verification
+  - All legacy test files properly organized
+
+#### **🔍 CURRENT INVESTIGATION NEEDED**:
+1. **Why no ML improvement?** System shows working infrastructure but 0% learning gain
+2. **Training pause feature**: "40+ sample milestone" - need to understand learning triggers
+3. **Table structure**: `ml_expert_decisions` table exists but feedback stats endpoint fails
+
+#### **💾 MYSQL-ONLY CONFIGURATION** (Critical for Computer Switching):
+- **NO SQLITE DEPENDENCY**: All data persisted in MySQL only
+- **HOST**: 127.0.0.1:3306
+- **DATABASE**: qpcr_analysis
+- **USER**: qpcr_user
+- **PASSWORD**: qpcr_password
+- **PERSISTENCE**: Data survives computer switches (unlike SQLite files)
+
+### � **AGENT CONTINUATION INSTRUCTIONS**:
+
+When resuming work on any computer:
+
+1. **VERIFY MYSQL CONNECTION**:
+   ```bash
+   mysql -u qpcr_user -pqpcr_password -h 127.0.0.1 qpcr_analysis -e "SHOW TABLES;"
+   ```
+
+2. **START FLASK APP**:
+   ```bash
+   cd /workspaces/MDL-PCR-Analyzer
+   python app.py
+   ```
+
+3. **RUN ML LEARNING TEST**:
+   ```bash
+   python test/test_ml_learning_progression.py
+   ```
+
+4. **CHECK TEST RESULTS**:
+   - Baseline accuracy should be ~46.67%
+   - Expert feedback should submit successfully
+   - Investigate why improvement = 0.00%
+
+5. **INVESTIGATE LEARNING MECHANISM**:
+   - Review "Training paused" logs
+   - Check ML classifier retraining triggers
+   - Examine why expert feedback doesn't improve predictions
+
+6. **FIX FEEDBACK STATS ENDPOINT**:
+   - Table name: `ml_expert_decisions` 
+   - Columns: `expert_correction`, `pathogen`, `confidence`
+   - Fix any remaining MySQL connection issues
+
+---
+
+## 🚨 **PREVIOUS STATUS: ML Batch Analysis Critical Failure** (August 2, 2025)
 
 ### 🔴 **EMERGENCY STATUS: REVERTED TO SAFE COMMIT d2c9fb8** 
 

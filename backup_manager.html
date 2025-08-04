@@ -361,8 +361,23 @@ python db_manager.py reset --dev
                 const result = await response.json();
                 
                 if (result.success) {
-                    const sizeStr = (result.size / (1024 * 1024)).toFixed(2);
-                    showStatus(`✅ Backup created successfully: ${result.backup_path} (${sizeStr} MB)`, 'success');
+                    // Helper function to format file size appropriately
+                    function formatFileSize(bytes) {
+                        if (!bytes || bytes === 0) return 'Unknown';
+                        
+                        if (bytes < 1024) {
+                            return `${bytes} B`;
+                        } else if (bytes < 1024 * 1024) {
+                            return `${(bytes / 1024).toFixed(1)} KB`;
+                        } else if (bytes < 1024 * 1024 * 1024) {
+                            return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+                        } else {
+                            return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+                        }
+                    }
+                    
+                    const sizeStr = formatFileSize(result.size);
+                    showStatus(`✅ Backup created successfully: ${result.backup_path} (${sizeStr})`, 'success');
                     document.getElementById('backup-description').value = '';
                     loadBackups(); // Refresh the list
                 } else {
@@ -406,8 +421,23 @@ python db_manager.py reset --dev
                 return;
             }
             
+            // Helper function to format file size appropriately
+            function formatFileSize(bytes) {
+                if (!bytes || bytes === 0) return 'Unknown';
+                
+                if (bytes < 1024) {
+                    return `${bytes} B`;
+                } else if (bytes < 1024 * 1024) {
+                    return `${(bytes / 1024).toFixed(1)} KB`;
+                } else if (bytes < 1024 * 1024 * 1024) {
+                    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+                } else {
+                    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+                }
+            }
+            
             backupList.innerHTML = backups.map(backup => {
-                const size = backup.backup_size ? (backup.backup_size / (1024 * 1024)).toFixed(2) : 'Unknown';
+                const size = formatFileSize(backup.backup_size);
                 const timestamp = backup.timestamp || 'Unknown';
                 const description = backup.description || 'No description';
                 const type = backup.backup_type || 'manual';
@@ -418,7 +448,7 @@ python db_manager.py reset --dev
                             <div class="backup-name">🗄️ ${timestamp} (${type})</div>
                             <div class="backup-details">
                                 📝 ${description}<br>
-                                📊 Size: ${size} MB
+                                📊 Size: ${size}
                             </div>
                         </div>
                         <div class="backup-actions">

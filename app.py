@@ -5,6 +5,7 @@ import re
 import traceback
 import logging
 import time
+import sqlite3
 from logging.handlers import RotatingFileHandler
 import numpy as np
 from datetime import datetime
@@ -2012,6 +2013,49 @@ def ml_analyze_curve():
         
         total_samples = len(ml_classifier.training_data)
         
+        # CRITICAL: Persist ML predictions to database for session persistence
+        session_id = data.get('session_id')
+        well_id_full = data.get('well_id')  # Full well ID with fluorophore
+        if session_id and well_id_full and not recent_feedback:
+            try:
+                # Find and update the WellResult in the database
+                well_result = WellResult.query.filter_by(session_id=session_id, well_id=well_id_full).first()
+                if well_result:
+                    # Update the curve_classification field with ML prediction
+                    current_classification = {}
+                    if well_result.curve_classification:
+                        try:
+                            current_classification = json.loads(well_result.curve_classification)
+                        except (json.JSONDecodeError, TypeError):
+                            current_classification = {}
+                    
+                    # Preserve original classification and add ML prediction
+                    original_class = current_classification.get('class', 'Unknown')
+                    
+                    # Update with ML prediction and metadata
+                    current_classification.update({
+                        'class': prediction['classification'],
+                        'confidence': prediction['confidence'],
+                        'method': prediction['method'],
+                        'pathogen': pathogen,
+                        'ml_prediction': prediction['classification'],
+                        'ml_confidence': prediction['confidence'],
+                        'ml_timestamp': datetime.utcnow().isoformat(),
+                        'original_classification': original_class,
+                        'training_samples': total_samples
+                    })
+                    
+                    well_result.curve_classification = json.dumps(current_classification)
+                    db.session.commit()
+                    
+                    print(f"[ML PREDICTION] Updated well {well_id_full} with ML prediction: {prediction['classification']} ({prediction['confidence']:.1%} confidence)")
+                    app.logger.info(f"[ML PREDICTION] Persisted ML prediction for session persistence: {well_id_full}")
+                else:
+                    print(f"[ML PREDICTION] Warning: Could not find WellResult for well_id={well_id_full}, session_id={session_id}")
+            except Exception as db_error:
+                print(f"[ML PREDICTION] Database update error: {db_error}")
+                app.logger.warning(f"Failed to persist ML prediction for well {well_id_full}: {db_error}")
+        
         # Track ML compliance for prediction made
         if not recent_feedback:  # Only track actual ML predictions, not recent feedback returns
             ml_prediction_metadata = {
@@ -2183,6 +2227,132 @@ def ml_submit_feedback():
         
     except Exception as e:
         print(f"ML feedback error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-classify', methods=['POST'])
+def ml_classify():
+    """Get ML classification for a single curve"""
+    if not ML_AVAILABLE or ml_classifier is None:
+        return jsonify({'error': 'ML classifier not available'}), 503
+    
+    try:
+        data = request.json
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # Extract features for ML classification
+        features = {
+            'amplitude': data.get('amplitude', 0),
+            'r2_score': data.get('r2_score', 0),
+            'snr': data.get('snr', 0),
+            'steepness': data.get('steepness', 0),
+            'is_good_scurve': data.get('is_good_scurve', False)
+        }
+        
+        # Get ML prediction
+        ml_prediction = ml_classifier.predict_classification(
+            rfu_data=data.get('rfu_data', []),
+            cycles=data.get('cycles', []),
+            existing_metrics=features,
+            pathogen=data.get('pathogen_target', 'General_PCR'),
+            well_id=data.get('well_id', 'test_well')
+        )
+        
+        # Return prediction with confidence and method
+        return jsonify({
+            'classification': ml_prediction.get('classification', 'UNKNOWN'),
+            'confidence': ml_prediction.get('confidence', 0.0),
+            'method': 'ml_classifier',
+            'timestamp': datetime.now().isoformat(),
+            'features_used': features
+        })
+        
+    except Exception as e:
+        print(f"ML classification error: {e}")
+        return jsonify({
+            'classification': 'UNKNOWN',
+            'confidence': 0.0,
+            'method': 'error',
+            'error': str(e)
+        }), 500
+
+@app.route('/api/ml-feedback-stats', methods=['GET'])
+def ml_feedback_stats():
+    """Get statistics about expert feedback submissions - MySQL ONLY"""
+    try:
+        session_id = request.args.get('session_id')
+        
+        # FORCE MySQL - no SQLite fallback to prevent data loss
+        import mysql.connector
+        
+        # Build MySQL config from environment variables
+        mysql_config = {
+            'host': os.environ.get("MYSQL_HOST", "127.0.0.1"),
+            'port': int(os.environ.get("MYSQL_PORT", 3306)),
+            'user': os.environ.get("MYSQL_USER", "qpcr_user"), 
+            'password': os.environ.get("MYSQL_PASSWORD", "qpcr_password"),
+            'database': os.environ.get("MYSQL_DATABASE", "qpcr_analysis"),
+            'charset': 'utf8mb4',
+            'autocommit': True
+        }
+        
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Get feedback statistics from ml_expert_decisions table
+        if session_id:
+            cursor.execute("""
+                SELECT COUNT(*) as total_feedback,
+                       COUNT(DISTINCT pathogen) as unique_pathogens,
+                       COUNT(DISTINCT expert_correction) as unique_classifications,
+                       AVG(confidence) as avg_confidence
+                FROM ml_expert_decisions 
+                WHERE session_id = %s
+            """, (session_id,))
+        else:
+            cursor.execute("""
+                SELECT COUNT(*) as total_feedback,
+                       COUNT(DISTINCT pathogen) as unique_pathogens,
+                       COUNT(DISTINCT expert_correction) as unique_classifications,
+                       AVG(confidence) as avg_confidence
+                FROM ml_expert_decisions 
+                WHERE timestamp >= DATE_SUB(NOW(), INTERVAL 1 DAY)
+            """)
+        
+        stats = cursor.fetchone()
+        
+        # Get classification breakdown
+        if session_id:
+            cursor.execute("""
+                SELECT expert_correction, COUNT(*) as count
+                FROM ml_expert_decisions 
+                WHERE session_id = %s
+                GROUP BY expert_correction
+            """, (session_id,))
+        else:
+            cursor.execute("""
+                SELECT expert_correction, COUNT(*) as count
+                FROM ml_expert_decisions 
+                WHERE timestamp >= DATE_SUB(NOW(), INTERVAL 1 DAY)
+                GROUP BY expert_correction
+            """)
+        
+        classification_breakdown = {row['expert_correction']: row['count'] for row in cursor.fetchall()}
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'session_id': session_id,
+            'stats': stats,
+            'classification_breakdown': classification_breakdown,
+            'database_type': 'mysql',
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        print(f"ML feedback stats error: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/ml-check-trained-sample', methods=['POST'])
