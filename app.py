@@ -2084,6 +2084,46 @@ def ml_submit_feedback():
             expert_classification, well_id, pathogen
         )
         
+        # Update the well classification in the database for session persistence
+        session_id = data.get('session_id')
+        try:
+            if session_id and well_id:
+                # Find and update the WellResult in the database
+                well_result = WellResult.query.filter_by(session_id=session_id, well_id=well_id).first()
+                if well_result:
+                    # Update the curve_classification field with expert feedback
+                    current_classification = {}
+                    if well_result.curve_classification:
+                        try:
+                            current_classification = json.loads(well_result.curve_classification)
+                        except (json.JSONDecodeError, TypeError):
+                            current_classification = {}
+                    
+                    # Preserve original classification for comparison
+                    original_class = current_classification.get('class', 'Unknown')
+                    
+                    # Update with expert classification and metadata
+                    current_classification.update({
+                        'class': expert_classification,
+                        'confidence': 1.0,
+                        'method': 'Expert Review',
+                        'expert_classification': expert_classification,
+                        'expert_review_method': 'ml_feedback_interface',
+                        'expert_review_timestamp': datetime.utcnow().isoformat(),
+                        'original_classification': original_class
+                    })
+                    
+                    well_result.curve_classification = json.dumps(current_classification)
+                    db.session.commit()
+                    
+                    print(f"[ML FEEDBACK] Updated well {well_id} classification in database: {original_class} -> {expert_classification}")
+                    app.logger.info(f"[ML FEEDBACK] Updated well {well_id} classification in database for session persistence")
+                else:
+                    print(f"[ML FEEDBACK] Warning: Could not find WellResult for well_id={well_id}, session_id={session_id}")
+        except Exception as db_error:
+            print(f"[ML FEEDBACK] Database update error: {db_error}")
+            app.logger.warning(f"Failed to update database for well {well_id}: {db_error}")
+        
         # Get enhanced training stats breakdown with detailed pathogen information
         general_samples = len([s for s in ml_classifier.training_data if not s.get('pathogen') or s.get('pathogen') == 'General_PCR'])
         
@@ -2419,19 +2459,59 @@ def update_well_classification():
         new_classification = data.get('new_classification')
         reason = data.get('reason', 'expert_feedback')
         timestamp = data.get('timestamp')
+        session_id = data.get('session_id')
         
         if not well_id or not new_classification:
             return jsonify({'error': 'Well ID and classification required'}), 400
         
         # Update the stored analysis results if they exist
         try:
+            # Find and update the WellResult in the database
+            well_result = None
+            if session_id:
+                well_result = WellResult.query.filter_by(session_id=session_id, well_id=well_id).first()
+            else:
+                # Try to find the most recent WellResult for this well_id if no session_id provided
+                well_result = WellResult.query.filter_by(well_id=well_id).order_by(WellResult.id.desc()).first()
+            
+            if well_result:
+                # Update the curve_classification field with expert feedback
+                current_classification = {}
+                if well_result.curve_classification:
+                    try:
+                        current_classification = json.loads(well_result.curve_classification)
+                    except (json.JSONDecodeError, TypeError):
+                        current_classification = {}
+                
+                # Update with expert classification and metadata
+                current_classification.update({
+                    'class': new_classification,
+                    'confidence': 1.0,
+                    'method': 'Expert Review',
+                    'expert_classification': new_classification,
+                    'expert_review_method': reason,
+                    'expert_review_timestamp': timestamp or datetime.utcnow().isoformat(),
+                    'original_classification': current_classification.get('class', 'Unknown')
+                })
+                
+                well_result.curve_classification = json.dumps(current_classification)
+                db.session.commit()
+                
+                print(f"[EXPERT FEEDBACK] Updated well {well_id} classification: {current_classification.get('original_classification', 'Unknown')} -> {new_classification}")
+                app.logger.info(f"[EXPERT FEEDBACK] Updated well {well_id} classification in database")
+            else:
+                print(f"[EXPERT FEEDBACK] Warning: Could not find WellResult for well_id={well_id}, session_id={session_id}")
+                app.logger.warning(f"Could not find WellResult for well_id={well_id}, session_id={session_id}")
+            
             # Track this as a compliance event using the existing function
             metadata = {
                 'well_id': well_id,
+                'session_id': session_id,
                 'new_classification': new_classification,
                 'reason': reason,
                 'timestamp': timestamp or datetime.utcnow().isoformat(),
-                'event_type': 'expert_classification_update'
+                'event_type': 'expert_classification_update',
+                'database_updated': well_result is not None
             }
             
             track_ml_compliance('EXPERT_CLASSIFICATION_UPDATE', metadata)
@@ -2441,7 +2521,8 @@ def update_well_classification():
                 'message': f'Well {well_id} classification updated to {new_classification}',
                 'well_id': well_id,
                 'new_classification': new_classification,
-                'reason': reason
+                'reason': reason,
+                'database_updated': well_result is not None
             })
             
         except Exception as e:
