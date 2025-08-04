@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real ML Interface Integration Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 8px;
+        }
+        .btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+            font-size: 14px;
+        }
+        .btn:hover {
+            background: #0056b3;
+        }
+        .test-output {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            height: 500px;
+            overflow-y: auto;
+            margin: 10px 0;
+            white-space: pre-wrap;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+        .modal-body {
+            border: 2px dashed #ccc;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            background: #f9f9f9;
+            min-height: 200px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.loading {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔧 Real ML Interface Integration Test</h1>
+            <p>Testing with actual MLFeedbackInterface but mocked APIs</p>
+        </div>
+
+        <div>
+            <button class="btn" onclick="runIntegrationTest()">🚀 Run Integration Test</button>
+            <button class="btn" onclick="testModalRefresh()">🔄 Test Modal Refresh</button>
+            <button class="btn" onclick="testMultipleRefresh()">🔁 Test Multiple Refreshes</button>
+            <button class="btn" onclick="clearOutput()">🗑️ Clear</button>
+        </div>
+        
+        <div id="status" class="status" style="display: none;"></div>
+
+        <div class="test-output" id="output">
+🔧 Real ML Interface Integration Test
+=====================================
+
+This test uses the actual MLFeedbackInterface with mocked API responses to simulate real app conditions.
+
+Ready to test...
+        </div>
+        
+        <!-- Real modal structure like in the app -->
+        <div class="modal-body">
+            <h4>📱 Real Modal Structure</h4>
+            <div class="modal-chart-container">Chart Container</div>
+            <div id="modalDetails">Modal Details</div>
+            <!-- ML section will be added/removed here -->
+        </div>
+    </div>
+
+    <script>
+        const output = document.getElementById('output');
+        const statusDiv = document.getElementById('status');
+        
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            let prefix = '📝';
+            
+            switch(type) {
+                case 'success':
+                    prefix = '✅';
+                    break;
+                case 'error':
+                    prefix = '❌';
+                    break;
+                case 'warning':
+                    prefix = '⚠️';
+                    break;
+                case 'info':
+                default:
+                    prefix = '📝';
+            }
+            
+            output.textContent += `[${timestamp}] ${prefix} ${message}\n`;
+            output.scrollTop = output.scrollHeight;
+        }
+        
+        function showStatus(message, type) {
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+            statusDiv.style.display = 'block';
+        }
+        
+        function clearOutput() {
+            output.textContent = '';
+            statusDiv.style.display = 'none';
+        }
+
+        // Mock all the API endpoints that the real ML interface needs
+        function setupAPIMocks() {
+            log('🔧 Setting up API mocks...', 'info');
+            
+            // Mock fetch globally
+            const originalFetch = window.fetch;
+            window.fetch = async function(url, options) {
+                log(`🌐 API Call intercepted: ${url}`, 'info');
+                
+                // Mock responses for different endpoints
+                if (url.includes('/api/ml-stats')) {
+                    return new Response(JSON.stringify({
+                        total_samples: 100,
+                        training_samples: 50,
+                        recent_feedback: 10
+                    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+                } 
+                else if (url.includes('/api/ml-get-trained-samples')) {
+                    return new Response(JSON.stringify({
+                        trained_samples: [
+                            { well_id: 'A1', classification: 'POSITIVE' },
+                            { well_id: 'B2', classification: 'NEGATIVE' }
+                        ]
+                    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+                }
+                else if (url.includes('/api/ml-config/pathogen/')) {
+                    return new Response(JSON.stringify({
+                        pathogen: 'TEST_PATHOGEN',
+                        classification_enabled: true,
+                        confidence_threshold: 0.7
+                    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+                }
+                else if (url.includes('/api/ml-config/system')) {
+                    return new Response(JSON.stringify({
+                        ml_enabled: true,
+                        auto_classification: true,
+                        confidence_threshold: 0.8
+                    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+                }
+                else if (url.includes('/api/ml-analyze-curve')) {
+                    return new Response(JSON.stringify({
+                        classification: 'POSITIVE',
+                        confidence: 0.85,
+                        method: 'ML Classification'
+                    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+                }
+                else if (url.includes('/api/update-well-classification') || 
+                         url.includes('/api/log-expert-decision') ||
+                         url.includes('/api/ml-submit-feedback')) {
+                    return new Response(JSON.stringify({
+                        success: true,
+                        message: 'Feedback submitted successfully'
+                    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+                }
+                else {
+                    // Default mock response
+                    return new Response(JSON.stringify({
+                        status: 'mocked',
+                        message: 'API endpoint mocked'
+                    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+                }
+            };
+            
+            log('✅ API mocks setup complete', 'success');
+        }
+
+        function setupRealEnvironment() {
+            log('🔧 Setting up real app environment...', 'info');
+            
+            // Setup global functions like in the real app
+            window.getCurrentFullPattern = () => 'TEST_PATTERN_2024';
+            window.extractTestCode = (pattern) => pattern.split('_')[0];
+            window.getPathogenTarget = (testCode, channel) => `${testCode}_${channel}_PATHOGEN`;
+            window.currentSessionId = 'test_session_' + Date.now();
+            window.currentModalWellKey = 'A1_FAM';
+            
+            // Setup analysis results like in real app
+            window.currentAnalysisResults = {
+                individual_results: {
+                    'A1_FAM': {
+                        well_id: 'A1',
+                        channel: 'FAM',
+                        fluorophore: 'FAM',
+                        sample: 'Integration_Test_Sample',
+                        classification: 'SUSPICIOUS',
+                        amplitude: 450.2,
+                        r2_score: 0.85,
+                        snr: 5.2,
+                        steepness: 0.3,
+                        rfu_data: [100, 102, 105, 150, 200, 300, 450, 500, 520, 525],
+                        cycles: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+                        is_good_scurve: false
+                    }
+                }
+            };
+
+            // Mock the real updateModalContent function
+            window.updateModalContent = function(wellKey) {
+                log(`📋 Real updateModalContent called for ${wellKey}`, 'info');
+                
+                const wellResult = window.currentAnalysisResults.individual_results[wellKey];
+                if (!wellResult) {
+                    log(`❌ No well result found for key: ${wellKey}`, 'error');
+                    return;
+                }
+                
+                // Set the modal well key globally (like real app)
+                window.currentModalWellKey = wellKey;
+                
+                // Simulate modal title update
+                const modalTitle = document.getElementById('modalTitle');
+                if (modalTitle) {
+                    const wellId = wellKey.split('_')[0];
+                    const fluorophore = wellResult.fluorophore || 'Unknown';
+                    modalTitle.textContent = `TEST_PATTERN_2024 - ${wellId} (${fluorophore})`;
+                }
+                
+                // Simulate modal details update (this doesn't touch ML section)
+                const modalDetails = document.getElementById('modalDetails');
+                if (modalDetails) {
+                    modalDetails.innerHTML = `
+                        <div><strong>Well:</strong> ${wellResult.well_id}</div>
+                        <div><strong>Sample:</strong> ${wellResult.sample}</div>
+                        <div><strong>Classification:</strong> ${wellResult.classification}</div>
+                        <div><strong>Amplitude:</strong> ${wellResult.amplitude}</div>
+                    `;
+                }
+                
+                log(`✅ Modal content updated for ${wellKey}`, 'success');
+            };
+
+            // Mock buildModalNavigationList
+            window.buildModalNavigationList = () => {
+                window.modalNavigationList = Object.keys(window.currentAnalysisResults.individual_results);
+                log(`🧭 Modal navigation list built: ${window.modalNavigationList.join(', ')}`, 'info');
+            };
+
+            // Mock updateNavigationButtons
+            window.updateNavigationButtons = () => {
+                log(`🔄 Navigation buttons updated`, 'info');
+            };
+            
+            log('✅ Real app environment setup complete', 'success');
+        }
+
+        async function runIntegrationTest() {
+            showStatus('Running integration test...', 'loading');
+            clearOutput();
+            
+            try {
+                log('🚀 Starting Real ML Interface Integration Test', 'info');
+                log('='*60, 'info');
+                
+                // Step 1: Setup environment
+                setupAPIMocks();
+                setupRealEnvironment();
+                
+                // Step 2: Wait for ML interface to be available
+                if (typeof MLFeedbackInterface === 'undefined') {
+                    throw new Error('MLFeedbackInterface not loaded. Check if ml_feedback_interface.js is included.');
+                }
+                
+                log('✅ MLFeedbackInterface found', 'success');
+                
+                // Step 3: Initialize real ML interface
+                log('🔧 Initializing real ML interface...', 'info');
+                const mlInterface = new MLFeedbackInterface();
+                
+                // Wait for initialization to complete
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                log('✅ ML interface initialized', 'success');
+                
+                // Step 4: Set current well
+                const wellKey = 'A1_FAM';
+                const wellData = window.currentAnalysisResults.individual_results[wellKey];
+                mlInterface.setCurrentWell(wellKey, wellData);
+                
+                log(`📊 Set current well: ${wellKey}`, 'info');
+                
+                // Step 5: Test initial ML section creation
+                log('🔧 Testing createMLSectionInModal...', 'info');
+                const creationResult = mlInterface.createMLSectionInModal();
+                
+                if (!creationResult) {
+                    throw new Error('Failed to create ML section');
+                }
+                
+                // Verify ML section exists
+                const mlSection = document.getElementById('ml-feedback-section');
+                if (!mlSection) {
+                    throw new Error('ML section not found after creation');
+                }
+                
+                log('✅ ML section created successfully', 'success');
+                
+                // Step 6: Test modal content refresh (should remove ML section)
+                log('🔄 Testing modal content refresh...', 'info');
+                window.updateModalContent(wellKey);
+                
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // Step 7: Verify ML section was removed
+                const mlSectionAfterRefresh = document.getElementById('ml-feedback-section');
+                if (mlSectionAfterRefresh) {
+                    throw new Error('ML section should have been removed during modal refresh');
+                }
+                
+                log('✅ ML section correctly removed during modal refresh', 'success');
+                
+                // Step 8: Test restoration
+                log('🔧 Testing refreshMLDisplayInModal restoration...', 'info');
+                mlInterface.refreshMLDisplayInModal();
+                
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // Step 9: Verify ML section was restored
+                const mlSectionAfterRestore = document.getElementById('ml-feedback-section');
+                if (!mlSectionAfterRestore) {
+                    throw new Error('ML section was not restored');
+                }
+                
+                log('✅ ML section successfully restored', 'success');
+                
+                // Step 10: Verify all components
+                const requiredComponents = [
+                    'ml-prediction-display',
+                    'ml-feedback-btn',
+                    'visual-curve-display',
+                    'ml-prediction-method',
+                    'ml-prediction-class',
+                    'ml-prediction-confidence',
+                    'submit-feedback-btn',
+                    'ml-feedback-form'
+                ];
+
+                let allComponentsFound = true;
+                for (const componentId of requiredComponents) {
+                    const element = document.getElementById(componentId);
+                    if (element) {
+                        log(`  ✓ ${componentId} found`, 'info');
+                    } else {
+                        log(`  ❌ ${componentId} missing`, 'error');
+                        allComponentsFound = false;
+                    }
+                }
+
+                if (!allComponentsFound) {
+                    throw new Error('Some components missing after restoration');
+                }
+                
+                log('✅ All components verified after restoration', 'success');
+                log('🎉 Integration test PASSED!', 'success');
+                showStatus('Integration test PASSED!', 'success');
+                
+            } catch (error) {
+                log(`❌ Integration test FAILED: ${error.message}`, 'error');
+                showStatus('Integration test FAILED', 'error');
+            }
+        }
+
+        async function testModalRefresh() {
+            showStatus('Testing modal refresh...', 'loading');
+            
+            try {
+                log('🔄 Testing repeated modal refresh...', 'info');
+                
+                if (typeof MLFeedbackInterface === 'undefined') {
+                    throw new Error('MLFeedbackInterface not available');
+                }
+                
+                const mlInterface = new MLFeedbackInterface();
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                const wellKey = 'A1_FAM';
+                const wellData = window.currentAnalysisResults.individual_results[wellKey];
+                mlInterface.setCurrentWell(wellKey, wellData);
+                
+                // Create initial section
+                mlInterface.createMLSectionInModal();
+                log('✅ Initial ML section created', 'success');
+                
+                // Test multiple refresh cycles
+                for (let i = 1; i <= 3; i++) {
+                    log(`🔄 Refresh cycle ${i}/3...`, 'info');
+                    
+                    // Refresh modal content (removes ML section)
+                    window.updateModalContent(wellKey);
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                    
+                    // Restore ML section
+                    mlInterface.refreshMLDisplayInModal();
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                    
+                    // Verify restoration
+                    const mlSection = document.getElementById('ml-feedback-section');
+                    if (!mlSection) {
+                        throw new Error(`ML section not restored in cycle ${i}`);
+                    }
+                    
+                    log(`✅ Cycle ${i} successful`, 'success');
+                }
+                
+                log('🎉 Multiple refresh test PASSED!', 'success');
+                showStatus('Multiple refresh test PASSED!', 'success');
+                
+            } catch (error) {
+                log(`❌ Modal refresh test FAILED: ${error.message}`, 'error');
+                showStatus('Modal refresh test FAILED', 'error');
+            }
+        }
+
+        async function testMultipleRefresh() {
+            showStatus('Testing rapid refresh...', 'loading');
+            
+            try {
+                log('🔁 Testing rapid multiple refreshes...', 'info');
+                
+                if (typeof MLFeedbackInterface === 'undefined') {
+                    throw new Error('MLFeedbackInterface not available');
+                }
+                
+                const mlInterface = new MLFeedbackInterface();
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                const wellKey = 'A1_FAM';
+                const wellData = window.currentAnalysisResults.individual_results[wellKey];
+                mlInterface.setCurrentWell(wellKey, wellData);
+                
+                // Rapid refresh test
+                for (let i = 1; i <= 10; i++) {
+                    window.updateModalContent(wellKey);
+                    mlInterface.refreshMLDisplayInModal();
+                    
+                    if (i % 3 === 0) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                        log(`  Rapid refresh ${i}/10 completed`, 'info');
+                    }
+                }
+                
+                // Final verification
+                await new Promise(resolve => setTimeout(resolve, 500));
+                const mlSection = document.getElementById('ml-feedback-section');
+                if (!mlSection) {
+                    throw new Error('ML section not found after rapid refresh test');
+                }
+                
+                log('🎉 Rapid refresh test PASSED!', 'success');
+                showStatus('Rapid refresh test PASSED!', 'success');
+                
+            } catch (error) {
+                log(`❌ Rapid refresh test FAILED: ${error.message}`, 'error');
+                showStatus('Rapid refresh test FAILED', 'error');
+            }
+        }
+
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            log('🚀 Real ML Interface Integration Test initialized', 'success');
+            log('Click "Run Integration Test" to begin comprehensive testing with real ML interface', 'info');
+            
+            // Setup mocks immediately
+            setupAPIMocks();
+            setupRealEnvironment();
+        });
+    </script>
+
+    <!-- Include the real ML Feedback Interface -->
+    <script src="static/ml_feedback_interface.js"></script>
+</body>
+</html>

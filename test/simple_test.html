@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple ML Section Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 8px;
+        }
+        .btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+            font-size: 14px;
+        }
+        .btn:hover {
+            background: #0056b3;
+        }
+        .test-output {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            height: 500px;
+            overflow-y: auto;
+            margin: 10px 0;
+            white-space: pre-wrap;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+        .modal-body {
+            border: 2px dashed #ccc;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            background: #f9f9f9;
+            min-height: 200px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.loading {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+    </style>
+    
+    <!-- Setup API mocking BEFORE loading ML interface -->
+    <script>
+        // Mock fetch globally BEFORE any scripts load
+        window.originalFetch = window.fetch;
+        window.fetch = async function(url, options) {
+            console.log(`🌐 MOCK API: ${url}`);
+            
+            // Return mock responses for all ML API endpoints
+            if (url.includes('/api/')) {
+                const mockResponse = {
+                    status: 200,
+                    json: async () => ({
+                        success: true,
+                        training_samples: 50,
+                        model_trained: true,
+                        pathogen_models: ['TEST_PATHOGEN'],
+                        classification: 'POSITIVE',
+                        confidence: 0.85,
+                        method: 'ML Classification',
+                        trained_samples: []
+                    }),
+                    ok: true,
+                    headers: { get: () => 'application/json' }
+                };
+                return Promise.resolve(mockResponse);
+            }
+            
+            // Fall back to original fetch for non-API calls
+            return window.originalFetch.apply(this, arguments);
+        };
+        
+        // Setup global environment
+        window.getCurrentFullPattern = () => 'TEST_PATTERN_2024';
+        window.extractTestCode = (pattern) => pattern.split('_')[0];
+        window.getPathogenTarget = (testCode, channel) => `${testCode}_${channel}_PATHOGEN`;
+        window.currentSessionId = 'test_session_' + Date.now();
+        window.currentModalWellKey = 'A1_FAM';
+        
+        window.currentAnalysisResults = {
+            individual_results: {
+                'A1_FAM': {
+                    well_id: 'A1',
+                    channel: 'FAM',
+                    fluorophore: 'FAM',
+                    sample: 'Test_Sample',
+                    classification: 'SUSPICIOUS',
+                    amplitude: 450.2,
+                    r2_score: 0.85,
+                    snr: 5.2,
+                    steepness: 0.3,
+                    rfu_data: [100, 102, 105, 150, 200, 300, 450, 500, 520, 525],
+                    cycles: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+                    is_good_scurve: false
+                }
+            }
+        };
+
+        // Mock modal functions
+        window.updateModalContent = function(wellKey) {
+            console.log(`📋 updateModalContent called for ${wellKey}`);
+            const mlSection = document.getElementById('ml-feedback-section');
+            if (mlSection) {
+                mlSection.remove();
+                console.log(`🗑️ ML section removed (simulating modal content refresh)`);
+            }
+        };
+
+        window.buildModalNavigationList = () => {
+            window.modalNavigationList = Object.keys(window.currentAnalysisResults.individual_results);
+        };
+
+        window.updateNavigationButtons = () => {
+            console.log(`🔄 Navigation buttons updated`);
+        };
+        
+        console.log('✅ Pre-setup complete - API mocking and environment ready');
+    </script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔧 Simple ML Section Test</h1>
+            <p>Direct test of ML section restoration with minimal dependencies</p>
+        </div>
+
+        <div>
+            <button class="btn" onclick="testMLSectionRestoration()">🚀 Test ML Section Restoration</button>
+            <button class="btn" onclick="testDirectMethods()">🔧 Test Direct Methods</button>
+            <button class="btn" onclick="clearOutput()">🗑️ Clear</button>
+        </div>
+        
+        <div id="status" class="status" style="display: none;"></div>
+
+        <div class="test-output" id="output">
+🔧 Simple ML Section Test
+==========================
+
+This test directly calls the restoration methods to verify they work.
+
+Ready to test...
+        </div>
+        
+        <!-- Modal structure -->
+        <div class="modal-body">
+            <h4>📱 Modal Structure</h4>
+            <div class="modal-chart-container">Chart Container</div>
+            <div id="modalDetails">Modal Details</div>
+            <!-- ML section will be added/removed here -->
+        </div>
+    </div>
+
+    <!-- Load ML interface after mocking is in place -->
+    <script src="static/ml_feedback_interface.js"></script>
+    
+    <script>
+        const output = document.getElementById('output');
+        const statusDiv = document.getElementById('status');
+        
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            let prefix = '📝';
+            
+            switch(type) {
+                case 'success':
+                    prefix = '✅';
+                    break;
+                case 'error':
+                    prefix = '❌';
+                    break;
+                case 'warning':
+                    prefix = '⚠️';
+                    break;
+                case 'info':
+                default:
+                    prefix = '📝';
+            }
+            
+            output.textContent += `[${timestamp}] ${prefix} ${message}\n`;
+            output.scrollTop = output.scrollHeight;
+        }
+        
+        function showStatus(message, type) {
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+            statusDiv.style.display = 'block';
+        }
+        
+        function clearOutput() {
+            output.textContent = '';
+            statusDiv.style.display = 'none';
+        }
+
+        // Wait for ML interface to load then test
+        let mlInterface = null;
+        
+        async function initializeMLInterface() {
+            try {
+                if (typeof MLFeedbackInterface === 'undefined') {
+                    throw new Error('MLFeedbackInterface not available');
+                }
+                
+                log('🔧 Initializing ML interface...', 'info');
+                
+                // Create instance but don't wait for full initialization
+                mlInterface = new MLFeedbackInterface();
+                
+                // Set current well immediately
+                const wellKey = 'A1_FAM';
+                const wellData = window.currentAnalysisResults.individual_results[wellKey];
+                mlInterface.setCurrentWell(wellKey, wellData);
+                
+                log('✅ ML interface created and well set', 'success');
+                return true;
+                
+            } catch (error) {
+                log(`❌ Failed to initialize ML interface: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+        async function testMLSectionRestoration() {
+            showStatus('Testing ML section restoration...', 'loading');
+            clearOutput();
+            
+            try {
+                log('🚀 Starting ML Section Restoration Test', 'info');
+                log('='*50, 'info');
+                
+                // Initialize ML interface
+                const initialized = await initializeMLInterface();
+                if (!initialized) {
+                    throw new Error('Failed to initialize ML interface');
+                }
+                
+                // Wait a bit for any async initialization
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // Step 1: Test createMLSectionInModal directly
+                log('🔧 Step 1: Testing createMLSectionInModal...', 'info');
+                const creationResult = mlInterface.createMLSectionInModal();
+                
+                if (!creationResult) {
+                    log('⚠️ createMLSectionInModal returned false, checking if section exists...', 'warning');
+                }
+                
+                // Check if ML section exists
+                let mlSection = document.getElementById('ml-feedback-section');
+                if (!mlSection) {
+                    throw new Error('ML section not created by createMLSectionInModal');
+                }
+                
+                log('✅ ML section created successfully', 'success');
+                
+                // Step 2: Simulate modal content refresh
+                log('🔄 Step 2: Simulating modal content refresh...', 'info');
+                window.updateModalContent('A1_FAM');
+                
+                await new Promise(resolve => setTimeout(resolve, 200));
+                
+                // Verify ML section was removed
+                mlSection = document.getElementById('ml-feedback-section');
+                if (mlSection) {
+                    throw new Error('ML section should have been removed during modal refresh');
+                }
+                
+                log('✅ ML section correctly removed during modal refresh', 'success');
+                
+                // Step 3: Test refreshMLDisplayInModal
+                log('🔧 Step 3: Testing refreshMLDisplayInModal...', 'info');
+                mlInterface.refreshMLDisplayInModal();
+                
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // Verify ML section was restored
+                mlSection = document.getElementById('ml-feedback-section');
+                if (!mlSection) {
+                    throw new Error('ML section was not restored by refreshMLDisplayInModal');
+                }
+                
+                log('✅ ML section successfully restored', 'success');
+                
+                // Step 4: Verify components
+                log('🔍 Step 4: Verifying restored components...', 'info');
+                
+                const requiredComponents = [
+                    'ml-prediction-display',
+                    'ml-feedback-btn',
+                    'visual-curve-display',
+                    'submit-feedback-btn',
+                    'ml-feedback-form'
+                ];
+
+                let allComponentsFound = true;
+                for (const componentId of requiredComponents) {
+                    const element = document.getElementById(componentId);
+                    if (element) {
+                        log(`  ✓ ${componentId} found`, 'info');
+                    } else {
+                        log(`  ❌ ${componentId} missing`, 'error');
+                        allComponentsFound = false;
+                    }
+                }
+
+                if (!allComponentsFound) {
+                    throw new Error('Some components missing after restoration');
+                }
+                
+                log('✅ All components verified after restoration', 'success');
+                
+                // Step 5: Test multiple restoration cycles
+                log('🔁 Step 5: Testing multiple restoration cycles...', 'info');
+                
+                for (let i = 1; i <= 3; i++) {
+                    log(`  Cycle ${i}/3...`, 'info');
+                    
+                    // Remove ML section
+                    window.updateModalContent('A1_FAM');
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    
+                    // Restore ML section
+                    mlInterface.refreshMLDisplayInModal();
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                    
+                    // Verify restoration
+                    const restored = document.getElementById('ml-feedback-section');
+                    if (!restored) {
+                        throw new Error(`ML section not restored in cycle ${i}`);
+                    }
+                    
+                    log(`  ✅ Cycle ${i} successful`, 'success');
+                }
+                
+                log('🎉 ML Section Restoration Test PASSED!', 'success');
+                showStatus('ML Section Restoration Test PASSED!', 'success');
+                
+            } catch (error) {
+                log(`❌ ML Section Restoration Test FAILED: ${error.message}`, 'error');
+                showStatus('Test FAILED', 'error');
+            }
+        }
+
+        async function testDirectMethods() {
+            showStatus('Testing direct methods...', 'loading');
+            clearOutput();
+            
+            try {
+                log('🔧 Testing Direct Method Calls', 'info');
+                log('='*40, 'info');
+                
+                // Initialize ML interface
+                const initialized = await initializeMLInterface();
+                if (!initialized) {
+                    throw new Error('Failed to initialize ML interface');
+                }
+                
+                // Test 1: Direct createMLSectionInModal call
+                log('📝 Test 1: Direct createMLSectionInModal call', 'info');
+                const result1 = mlInterface.createMLSectionInModal();
+                log(`Result: ${result1}`, result1 ? 'success' : 'warning');
+                
+                // Test 2: Check if section exists
+                log('📝 Test 2: Check if ML section exists', 'info');
+                const section = document.getElementById('ml-feedback-section');
+                log(`ML section exists: ${!!section}`, section ? 'success' : 'error');
+                
+                if (section) {
+                    // Test 3: Remove section manually
+                    log('📝 Test 3: Remove ML section manually', 'info');
+                    section.remove();
+                    
+                    // Test 4: Check if removed
+                    log('📝 Test 4: Verify section removed', 'info');
+                    const removedCheck = document.getElementById('ml-feedback-section');
+                    log(`ML section removed: ${!removedCheck}`, !removedCheck ? 'success' : 'error');
+                    
+                    // Test 5: Direct refreshMLDisplayInModal call
+                    log('📝 Test 5: Direct refreshMLDisplayInModal call', 'info');
+                    mlInterface.refreshMLDisplayInModal();
+                    
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                    
+                    // Test 6: Check if restored
+                    log('📝 Test 6: Check if section restored', 'info');
+                    const restoredSection = document.getElementById('ml-feedback-section');
+                    log(`ML section restored: ${!!restoredSection}`, restoredSection ? 'success' : 'error');
+                }
+                
+                log('✅ Direct method tests completed', 'success');
+                showStatus('Direct method tests completed', 'success');
+                
+            } catch (error) {
+                log(`❌ Direct method test failed: ${error.message}`, 'error');
+                showStatus('Direct method test failed', 'error');
+            }
+        }
+
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            log('🚀 Simple ML Section Test initialized', 'success');
+            log('API mocking is active, ML interface should load without errors', 'info');
+            
+            // Check if ML interface loaded
+            setTimeout(() => {
+                if (typeof MLFeedbackInterface !== 'undefined') {
+                    log('✅ MLFeedbackInterface loaded successfully', 'success');
+                    log('Ready to test - click "Test ML Section Restoration"', 'info');
+                } else {
+                    log('❌ MLFeedbackInterface not loaded', 'error');
+                }
+            }, 1000);
+        });
+    </script>
+</body>
+</html>

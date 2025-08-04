@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final ML Modal Restoration Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .test-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .test-results {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .failure {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .modal {
+            display: block;
+            position: relative;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .modal-body {
+            min-height: 200px;
+        }
+        .modal-chart-container {
+            background: #f8f9fa;
+            padding: 20px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        #modalDetails {
+            background: #e9ecef;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .log-output {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-family: monospace;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .test-step {
+            margin: 10px 0;
+            padding: 10px;
+            border-left: 3px solid #007bff;
+            background: #f8f9fa;
+        }
+        .step-title {
+            font-weight: bold;
+            color: #007bff;
+        }
+        .step-detail {
+            margin-top: 5px;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <h1>Final ML Modal Restoration Test</h1>
+    <p>Testing the fully enhanced refreshMLDisplayInModal method with all fixes applied.</p>
+
+    <div class="test-container">
+        <h3>Test Strategy</h3>
+        <div class="test-step">
+            <div class="step-title">1. Setup Global State</div>
+            <div class="step-detail">Configure window.currentModalWellKey and window.currentAnalysisResults with complete well data</div>
+        </div>
+        <div class="test-step">
+            <div class="step-title">2. Clear ML Section</div>
+            <div class="step-detail">Remove any existing ML section to simulate the reported problem</div>
+        </div>
+        <div class="test-step">
+            <div class="step-title">3. Create ML Interface Without Internal State</div>
+            <div class="step-detail">Create MLFeedbackInterface instance without setting currentWellKey/currentWellData</div>
+        </div>
+        <div class="test-step">
+            <div class="step-title">4. Call refreshMLDisplayInModal</div>
+            <div class="step-detail">Method should use global state fallback to recreate and populate ML section</div>
+        </div>
+        <div class="test-step">
+            <div class="step-title">5. Verify Complete Functionality</div>
+            <div class="step-detail">Check that all modal elements are present and populated with correct data</div>
+        </div>
+        
+        <button onclick="runFinalTest()">Run Final Test</button>
+        <button onclick="clearLogs()">Clear Logs</button>
+        <button onclick="showInitialState()">Show Initial State</button>
+        <button onclick="simulateProblem()">Simulate Problem (Remove ML Section)</button>
+        
+        <div id="logOutput" class="log-output"></div>
+    </div>
+
+    <!-- Mock Modal Structure with Initial ML Section -->
+    <div id="testModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-body">
+                <div class="modal-chart-container">
+                    <h4>Chart Container</h4>
+                    <p>Mock chart visualization would be here</p>
+                </div>
+                
+                <!-- Initial ML Section (will be removed to simulate problem) -->
+                <div id="ml-feedback-section" class="ml-feedback-container">
+                    <div class="ml-section">
+                        <h4>🤖 ML Curve Classification</h4>
+                        
+                        <!-- ML Prediction Display -->
+                        <div class="ml-prediction" id="ml-prediction-display" style="display: block;">
+                            <div class="prediction-info">
+                                <div class="prediction-result">
+                                    <strong>ML Prediction:</strong> 
+                                    <span id="ml-prediction-class" class="classification-badge">Positive</span>
+                                    <span id="ml-prediction-confidence" class="confidence-score">89%</span>
+                                </div>
+                                <div class="prediction-method">
+                                    <small>Method: <span id="ml-prediction-method">ML Analysis</span></small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Visual Analysis -->
+                        <div class="visual-analysis">
+                            <h5>📊 Visual Curve Analysis</h5>
+                            <p>Curve pattern analysis and features</p>
+                        </div>
+                        
+                        <!-- Feedback Button -->
+                        <button id="ml-feedback-btn" class="feedback-button" onclick="provideFeedback()">
+                            🗣️ Provide Expert Feedback
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="modalDetails">
+                    <h4>Modal Details</h4>
+                    <p>Other modal content</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="testResults" class="test-results"></div>
+
+    <script src="static/ml_feedback_interface.js"></script>
+    <script>
+        // Mock console.log to capture logs
+        const originalConsoleLog = console.log;
+        const originalConsoleError = console.error;
+        const originalConsoleWarn = console.warn;
+        let capturedLogs = [];
+
+        function mockConsole() {
+            console.log = function(...args) {
+                capturedLogs.push(['LOG', ...args]);
+                originalConsoleLog.apply(console, args);
+                updateLogDisplay();
+            };
+            console.error = function(...args) {
+                capturedLogs.push(['ERROR', ...args]);
+                originalConsoleError.apply(console, args);
+                updateLogDisplay();
+            };
+            console.warn = function(...args) {
+                capturedLogs.push(['WARN', ...args]);
+                originalConsoleWarn.apply(console, args);
+                updateLogDisplay();
+            };
+        }
+
+        function restoreConsole() {
+            console.log = originalConsoleLog;
+            console.error = originalConsoleError;
+            console.warn = originalConsoleWarn;
+        }
+
+        function updateLogDisplay() {
+            const logOutput = document.getElementById('logOutput');
+            logOutput.innerHTML = capturedLogs.map(log => {
+                const [type, ...messages] = log;
+                let style = 'color: black;';
+                if (type === 'ERROR') style = 'color: red; font-weight: bold;';
+                if (type === 'WARN') style = 'color: orange;';
+                return `<div style="${style}">[${type}] ${messages.join(' ')}</div>`;
+            }).join('');
+            logOutput.scrollTop = logOutput.scrollHeight;
+        }
+
+        function clearLogs() {
+            capturedLogs = [];
+            updateLogDisplay();
+        }
+
+        async function runFinalTest() {
+            clearLogs();
+            mockConsole();
+
+            try {
+                console.log('🧪 FINAL TEST: Starting comprehensive ML modal restoration test...');
+                
+                // Step 1: Setup comprehensive global state
+                console.log('📋 STEP 1: Setting up comprehensive global state...');
+                window.currentModalWellKey = 'A1_Ch1';
+                window.currentAnalysisResults = {
+                    individual_results: {
+                        'A1_Ch1': {
+                            classification: 'Positive',
+                            curve_classification: {
+                                classification: 'Positive',
+                                confidence: 0.92,
+                                method: 'ml_analysis'
+                            },
+                            ml_classification: {
+                                classification: 'Positive',
+                                confidence: 0.89,
+                                method: 'ML Analysis'
+                            },
+                            rfu_data: [100, 150, 250, 400, 650, 1000, 1500],
+                            cycles: [1, 2, 3, 4, 5, 6, 7]
+                        }
+                    }
+                };
+                console.log('✅ STEP 1: Global state configured successfully');
+
+                // Step 1.5: Create initial ML section to show "before" state
+                console.log('📋 STEP 1.5: Creating initial ML section to show BEFORE state...');
+                let mlInterface;
+                if (window.mlFeedbackInterface) {
+                    mlInterface = window.mlFeedbackInterface;
+                    console.log('✅ STEP 1.5: Using existing ML interface instance');
+                } else if (window.MLFeedbackInterface) {
+                    mlInterface = new window.MLFeedbackInterface();
+                    console.log('✅ STEP 1.5: Created new ML interface instance');
+                } else {
+                    throw new Error('MLFeedbackInterface not available');
+                }
+
+                // Initialize the ML section properly first
+                mlInterface.currentWellKey = 'A1_Ch1';
+                mlInterface.currentWellData = window.currentAnalysisResults.individual_results['A1_Ch1'];
+                await mlInterface.refreshMLDisplayInModal();
+                
+                console.log('📊 BEFORE STATE: Checking initial ML section...');
+                let beforeState = {
+                    mlSectionExists: !!document.getElementById('ml-feedback-section'),
+                    predictionDisplay: !!document.getElementById('ml-prediction-display')
+                };
+                console.log('📊 BEFORE STATE:', beforeState);
+
+                // Step 2: Clear existing ML section to simulate the problem
+                console.log('📋 STEP 2: Simulating problem - removing ML section...');
+                const existingMLSection = document.getElementById('ml-feedback-section');
+                if (existingMLSection) {
+                    existingMLSection.remove();
+                    console.log('✅ STEP 2: ML section removed (simulating the problem)');
+                } else {
+                    console.log('⚠️ STEP 2: No ML section found to remove');
+                }
+
+                // Step 3: Clear internal state to simulate the real problem
+                console.log('� STEP 3: Clearing internal state to simulate real conditions...');
+                mlInterface.currentWellKey = null;
+                mlInterface.currentWellData = null;
+                console.log('✅ STEP 3: Internal state cleared');
+
+                // Step 4: Call refreshMLDisplayInModal with enhanced fallback logic
+                console.log('📋 STEP 4: Calling refreshMLDisplayInModal with enhanced fallback...');
+                await mlInterface.refreshMLDisplayInModal();
+                console.log('✅ STEP 4: refreshMLDisplayInModal completed');
+
+                // Step 5: Comprehensive verification
+                console.log('📋 STEP 5: Running comprehensive verification...');
+                
+                const mlSection = document.getElementById('ml-feedback-section');
+                const testResults = {
+                    mlSectionExists: !!mlSection,
+                    mlSectionVisible: mlSection && mlSection.style.display !== 'none',
+                    feedbackButton: !!document.querySelector('#ml-feedback-btn, .feedback-button, button[onclick*="feedback"]'),
+                    visualAnalysis: !!document.querySelector('.visual-analysis, .curve-analysis, .ml-prediction'),
+                    methodDisplay: !!document.querySelector('.method-display, .classification-method, #ml-prediction-method'),
+                    resultDisplay: !!document.querySelector('.result-display, .classification-result, #ml-prediction-class'),
+                    predictionDisplay: !!document.getElementById('ml-prediction-display'),
+                    predictionVisible: false
+                };
+
+                // Check if prediction display is visible
+                const predictionDisplay = document.getElementById('ml-prediction-display');
+                if (predictionDisplay) {
+                    testResults.predictionVisible = predictionDisplay.style.display !== 'none';
+                }
+
+                console.log('🔍 STEP 5: Element verification results:', testResults);
+
+                // Check data population
+                if (testResults.resultDisplay) {
+                    const classElement = document.getElementById('ml-prediction-class');
+                    const confidenceElement = document.getElementById('ml-prediction-confidence');
+                    const methodElement = document.getElementById('ml-prediction-method');
+                    
+                    console.log('📊 STEP 5: Data population check:');
+                    console.log('   - Classification text:', classElement?.textContent);
+                    console.log('   - Confidence text:', confidenceElement?.textContent);
+                    console.log('   - Method text:', methodElement?.textContent);
+                    
+                    testResults.dataPopulated = !!(classElement?.textContent && classElement.textContent !== '-');
+                }
+
+                // Calculate overall success
+                const criticalElements = ['mlSectionExists', 'feedbackButton', 'visualAnalysis', 'methodDisplay', 'resultDisplay'];
+                const criticalSuccess = criticalElements.every(key => testResults[key]);
+                const fullSuccess = criticalSuccess && testResults.predictionVisible && testResults.dataPopulated;
+
+                console.log('✅ STEP 5: Verification completed');
+                console.log('🎯 FINAL RESULT: Critical elements present:', criticalSuccess);
+                console.log('🎯 FINAL RESULT: Full functionality:', fullSuccess);
+
+                // Show results
+                if (fullSuccess) {
+                    showTestResult('success', 
+                        '🎉 FINAL TEST PASSED! All modal elements were successfully recreated and populated using global state fallback. ' +
+                        'The enhanced refreshMLDisplayInModal method is working correctly!'
+                    );
+                } else if (criticalSuccess) {
+                    showTestResult('partial', 
+                        '✅ FINAL TEST PARTIAL SUCCESS! Critical elements recreated but some data population issues. ' +
+                        'Core restoration logic is working but needs minor adjustments.'
+                    );
+                } else {
+                    showTestResult('failure', 
+                        '❌ FINAL TEST FAILED! Some critical elements missing. ' +
+                        'Check the logs for specific issues.'
+                    );
+                }
+
+            } catch (error) {
+                console.error('💥 FINAL TEST ERROR:', error);
+                showTestResult('failure', `Final test encountered an error: ${error.message}`);
+            } finally {
+                restoreConsole();
+            }
+        }
+
+        function showTestResult(type, message) {
+            const resultsDiv = document.getElementById('testResults');
+            resultsDiv.className = `test-results ${type === 'success' ? 'success' : 'failure'}`;
+            resultsDiv.innerHTML = `
+                <h4>Final Test Results</h4>
+                <p>${message}</p>
+                <p><strong>Timestamp:</strong> ${new Date().toLocaleTimeString()}</p>
+            `;
+        }
+
+        // Initialize
+        mockConsole();
+        console.log('🏁 Final test page loaded and ready');
+        restoreConsole();
+    </script>
+</body>
+</html>
