@@ -66,12 +66,37 @@
             transition: all 0.3s ease;
         }
         
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(52, 152, 219, 0.3);
-        }
-        
-        .btn-success {
+            .btn:hover {
+                background-color: #2563eb;
+                transform: translateY(-1px);
+            }
+            
+            .stats-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 15px;
+                margin: 15px 0;
+            }
+            
+            .stat-item {
+                background: #f8fafc;
+                border: 1px solid #e2e8f0;
+                border-radius: 8px;
+                padding: 15px;
+                text-align: center;
+            }
+            
+            .stat-label {
+                font-size: 0.85em;
+                color: #64748b;
+                margin-bottom: 5px;
+            }
+            
+            .stat-value {
+                font-size: 1.25em;
+                font-weight: bold;
+                color: #1e293b;
+            }        .btn-success {
             background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
         }
         
@@ -221,6 +246,36 @@
                     • <strong>Daily:</strong> Every day at 2:00 AM (keeps last 30)<br>
                     • <strong>Weekly:</strong> Every Sunday at 3:00 AM (keeps last 12)<br>
                     • <strong>Startup:</strong> When application starts
+                </div>
+            </div>
+            
+            <!-- Database Statistics Section -->
+            <div class="section">
+                <h2>📊 Database Statistics</h2>
+                <div id="db-stats-loading" style="display: none;">Loading database statistics...</div>
+                <div id="db-stats-content">
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-label">Database Type</div>
+                            <div class="stat-value">MySQL</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">Database Size</div>
+                            <div class="stat-value" id="db-size">-</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">Recent Sessions (24h)</div>
+                            <div class="stat-value" id="recent-sessions">-</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">Total Tables</div>
+                            <div class="stat-value" id="total-tables">-</div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 15px;">
+                        <button class="btn btn-secondary" onclick="loadDatabaseStats()">🔄 Refresh Stats</button>
+                        <button class="btn btn-warning" onclick="resetDevelopmentData()">🗑️ Reset Dev Data</button>
+                    </div>
                 </div>
             </div>
             
@@ -419,9 +474,58 @@ python db_manager.py reset --dev
             }
         }
         
+        // Load database statistics
+        async function loadDatabaseStats() {
+            const loadingDiv = document.getElementById('db-stats-loading');
+            const contentDiv = document.getElementById('db-stats-content');
+            
+            try {
+                loadingDiv.style.display = 'block';
+                contentDiv.style.display = 'none';
+                
+                const response = await fetch('/api/db-stats');
+                if (!response.ok) throw new Error('Failed to load database stats');
+                
+                const stats = await response.json();
+                
+                // Update stat values
+                document.getElementById('db-size').textContent = stats.database_size || '-';
+                document.getElementById('recent-sessions').textContent = stats.recent_sessions || 0;
+                document.getElementById('total-tables').textContent = stats.table_count || '-';
+                
+                loadingDiv.style.display = 'none';
+                contentDiv.style.display = 'block';
+            } catch (error) {
+                console.error('Error loading database stats:', error);
+                loadingDiv.style.display = 'none';
+                contentDiv.style.display = 'block';
+                alert('Failed to load database statistics: ' + error.message);
+            }
+        }
+
+        // Reset development data
+        async function resetDevelopmentData() {
+            if (!confirm('This will reset all development data. Are you sure?')) return;
+            
+            try {
+                showStatus('Resetting development data...', 'info');
+                const response = await fetch('/api/db-reset', { method: 'POST' });
+                
+                if (!response.ok) throw new Error('Failed to reset development data');
+                
+                const result = await response.json();
+                showStatus('✅ Development data reset successfully: ' + result.message, 'success');
+                loadDatabaseStats(); // Refresh stats
+            } catch (error) {
+                console.error('Error resetting development data:', error);
+                showStatus('❌ Failed to reset development data: ' + error.message, 'error');
+            }
+        }
+        
         // Load backups when page loads
         document.addEventListener('DOMContentLoaded', function() {
             loadBackups();
+            loadDatabaseStats();
         });
     </script>
 </body>

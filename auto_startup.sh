@@ -101,6 +101,37 @@ if ! sudo mysql -e "FLUSH PRIVILEGES;"; then
     exit 1
 fi
 
+# Test database connection
+echo "🔍 Testing MySQL connection..."
+if ! mysql -h 127.0.0.1 -u qpcr_user -pqpcr_password qpcr_analysis -e "SELECT 1;" >/dev/null 2>&1; then
+    echo "❌ MySQL connection test failed"
+    exit 1
+else
+    echo "✅ MySQL connection test successful"
+fi
+
+# Set up automatic backup system
+echo "💾 Setting up MySQL backup system..."
+
+# Create backup directory
+mkdir -p /workspaces/MDL-PCR-Analyzer/db_backups
+
+# Create initial backup
+echo "📦 Creating initial MySQL backup..."
+if python3 /workspaces/MDL-PCR-Analyzer/mysql_backup_manager.py backup --description "Auto-startup initial backup"; then
+    echo "✅ Initial backup created successfully"
+else
+    echo "⚠️ Initial backup failed, but continuing..."
+fi
+
+# Add backup scheduling to crontab (runs every 6 hours)
+echo "⏰ Setting up automatic backup scheduling..."
+(crontab -l 2>/dev/null; echo "0 */6 * * * cd /workspaces/MDL-PCR-Analyzer && python3 mysql_backup_manager.py backup --description 'Scheduled auto-backup'") | crontab -
+
+echo "✅ MySQL setup completed successfully"
+    exit 1
+fi
+
 # Test the connection to ensure it works
 echo "🧪 Testing MySQL connection..."
 if ! mysql -u qpcr_user -pqpcr_password -h 127.0.0.1 -e "USE qpcr_analysis; SELECT 1;" > /dev/null 2>&1; then

@@ -492,7 +492,7 @@ database_url = os.environ.get("DATABASE_URL")
 
 # If DATABASE_URL is not set, try to construct it from individual env vars
 if not database_url:
-    mysql_host = os.environ.get("MYSQL_HOST", "localhost")
+    mysql_host = os.environ.get("MYSQL_HOST", "127.0.0.1")
     mysql_port = os.environ.get("MYSQL_PORT", "3306")
     mysql_user = os.environ.get("MYSQL_USER", "qpcr_user")
     mysql_password = os.environ.get("MYSQL_PASSWORD", "qpcr_password")
@@ -2287,15 +2287,15 @@ def backup_manager():
 
 @app.route('/api/db-backup', methods=['POST'])
 def create_database_backup():
-    """Create a manual database backup"""
+    """Create a manual database backup using MySQL backup manager"""
     try:
-        from database_backup_manager import DatabaseBackupManager
+        from mysql_backup_manager import MySQLBackupManager
         
         data = request.json or {}
         description = data.get('description', 'Manual backup via web interface')
         backup_type = data.get('type', 'manual')
         
-        backup_manager = DatabaseBackupManager()
+        backup_manager = MySQLBackupManager()
         backup_path, metadata = backup_manager.create_backup(backup_type, description)
         
         if backup_path:
@@ -2304,22 +2304,24 @@ def create_database_backup():
                 'backup_path': backup_path,
                 'description': description,
                 'size': metadata.get('backup_size', 0),
-                'timestamp': metadata.get('timestamp', '')
+                'timestamp': metadata.get('timestamp', ''),
+                'compressed': metadata.get('compressed', True),
+                'mysql_version': metadata.get('mysql_version', 'unknown')
             })
         else:
-            return jsonify({'error': 'Backup creation failed'}), 500
+            return jsonify({'error': 'MySQL backup creation failed'}), 500
             
     except Exception as e:
-        print(f"Database backup error: {e}")
+        print(f"MySQL backup error: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/db-backups', methods=['GET'])
 def list_database_backups():
-    """List available database backups"""
+    """List available MySQL database backups"""
     try:
-        from database_backup_manager import DatabaseBackupManager
+        from mysql_backup_manager import MySQLBackupManager
         
-        backup_manager = DatabaseBackupManager()
+        backup_manager = MySQLBackupManager()
         backups = backup_manager.list_backups()
         
         return jsonify({
@@ -2328,21 +2330,21 @@ def list_database_backups():
         })
         
     except Exception as e:
-        print(f"List backups error: {e}")
+        print(f"List MySQL backups error: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/db-restore', methods=['POST'])
 def restore_database_backup():
-    """Restore database from backup"""
+    """Restore MySQL database from backup"""
     try:
-        from database_backup_manager import DatabaseBackupManager
+        from mysql_backup_manager import MySQLBackupManager
         
         data = request.json
         if not data or not data.get('backup_file'):
             return jsonify({'error': 'Backup file path required'}), 400
             
         backup_file = data['backup_file']
-        backup_manager = DatabaseBackupManager()
+        backup_manager = MySQLBackupManager()
         
         # Verify backup file exists
         if not os.path.exists(backup_file):
@@ -2353,14 +2355,56 @@ def restore_database_backup():
         if success:
             return jsonify({
                 'success': True,
-                'message': f'Database restored from {backup_file}',
+                'message': f'MySQL database restored from {backup_file}',
                 'backup_file': backup_file
             })
         else:
-            return jsonify({'error': 'Database restore failed'}), 500
+            return jsonify({'error': 'MySQL database restore failed'}), 500
             
     except Exception as e:
-        print(f"Database restore error: {e}")
+        print(f"MySQL restore error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/db-stats', methods=['GET'])
+def get_database_stats():
+    """Get MySQL database statistics"""
+    try:
+        from mysql_backup_manager import MySQLBackupManager
+        
+        backup_manager = MySQLBackupManager()
+        stats = backup_manager.get_database_stats()
+        
+        return jsonify({
+            'success': True,
+            'stats': stats
+        })
+        
+    except Exception as e:
+        print(f"Database stats error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/db-reset', methods=['POST'])
+def reset_development_data():
+    """Reset development data while preserving schema"""
+    try:
+        from mysql_backup_manager import MySQLBackupManager
+        
+        data = request.json or {}
+        preserve_structure = data.get('preserve_structure', True)
+        
+        backup_manager = MySQLBackupManager()
+        success = backup_manager.reset_development_data(preserve_structure)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Development data reset completed successfully'
+            })
+        else:
+            return jsonify({'error': 'Development data reset failed'}), 500
+            
+    except Exception as e:
+        print(f"Database reset error: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/update-well-classification', methods=['POST'])
