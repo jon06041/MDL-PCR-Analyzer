@@ -3186,7 +3186,7 @@ class MLFeedbackInterface {
                 const wellNum = i + 1;
                 
                 // Update browser title to show progress
-                document.title = `ML Analysis: ${wellNum}/${wellKeys.length} wells`;
+                document.title = `🤖 ML Analysis: ${wellNum}/${wellKeys.length} wells`;
                 
                 //console.log(`🔄 ML Analysis: Processing well ${wellNum}/${wellKeys.length} (${wellKey})`);
                 
@@ -3207,7 +3207,7 @@ class MLFeedbackInterface {
                 
                 // Update progress
                 const progress = Math.round(((wellNum) / wellKeys.length) * 100);
-                this.updateBatchProgress(progress, wellNum, wellKeys.length, `Processing well ${wellNum}/${wellKeys.length}`);
+                this.updateBatchProgress(progress, wellNum, wellKeys.length, `🤖 Analyzing well ${wellNum}/${wellKeys.length}`);
                 
                 // Small delay between wells to allow UI updates and prevent server overload
                 await new Promise(resolve => setTimeout(resolve, 200));
@@ -3270,6 +3270,9 @@ class MLFeedbackInterface {
                 console.log(`🛑 ML Analysis: Skipping ${wellKey} - user cancelled batch analysis`);
                 return null; // Return early, don't make HTTP request
             }
+            
+            // ROBOT EMOJI FIX: Show robot emoji in ML column while processing this well
+            this.updateTableCellWithMLPrediction(wellKey, '🤖');
             
             // Extract pathogen information for this well
             const fluorophore = wellData.fluorophore || wellData.channel || '';
@@ -3381,7 +3384,7 @@ class MLFeedbackInterface {
             // Just update the progress text to show it's starting
             const notificationProgressText = document.getElementById('ml-progress-text');
             if (notificationProgressText) {
-                notificationProgressText.textContent = 'Starting analysis...';
+                notificationProgressText.textContent = '🤖 Starting analysis...';
             }
             
             // Initialize progress bar
@@ -3489,7 +3492,8 @@ class MLFeedbackInterface {
         }
         
         if (notificationProgressText) {
-            const progressText = statusText || `Processing ${processed}/${total} channels (${percentage}%)`;
+            // ROBOT EMOJI FIX: Show robot emoji during active processing
+            const progressText = statusText || `🤖 Analyzing ${processed}/${total} samples (${percentage}%)`;
             notificationProgressText.textContent = progressText;
         }
         
@@ -3503,7 +3507,8 @@ class MLFeedbackInterface {
         }
         
         if (progressDetails) {
-            const detailsText = statusText || `Processed ${processed}/${total} channels`;
+            // Also add robot emoji to legacy progress details
+            const detailsText = statusText || `🤖 Analyzed ${processed}/${total} samples`;
             progressDetails.textContent = detailsText;
         }
     }
@@ -3566,7 +3571,7 @@ class MLFeedbackInterface {
                     <div class="ml-overall-progress-bar">
                         <div class="ml-overall-progress-fill" id="ml-overall-progress-fill"></div>
                     </div>
-                    <div class="ml-overall-progress-text" id="ml-overall-progress-text">Starting analysis...</div>
+                    <div class="ml-overall-progress-text" id="ml-overall-progress-text">🤖 Starting analysis...</div>
                 </div>
             </div>
             <style>
@@ -4703,7 +4708,7 @@ class MLFeedbackInterface {
                         <div class="ml-progress-bar">
                             <div class="ml-progress-fill" id="ml-progress-fill"></div>
                         </div>
-                        <div class="ml-progress-text" id="ml-progress-text">Initializing analysis...</div>
+                        <div class="ml-progress-text" id="ml-progress-text">🤖 Initializing analysis...</div>
                     </div>
                 </div>
                 <div class="ml-notification-actions">
@@ -5794,11 +5799,12 @@ class MLFeedbackInterface {
             if (!wellKey) return;
             
             // Handle both string predictions and prediction objects
-            let predictionClass, confidence, displayText;
+            let predictionClass, confidence, displayText, isRobotEmoji = false;
             if (typeof prediction === 'string') {
                 predictionClass = prediction;
                 confidence = null;
                 displayText = prediction.replace('_', ' ');
+                isRobotEmoji = prediction === '🤖';
             } else if (prediction && prediction.classification) {
                 predictionClass = prediction.classification;
                 confidence = prediction.confidence;
@@ -5840,19 +5846,52 @@ class MLFeedbackInterface {
                 }
                 
                 if (curveClassCell) {
-                    const classMap = {
-                        'STRONG_POSITIVE': 'curve-strong-pos',
-                        'POSITIVE': 'curve-pos',
-                        'WEAK_POSITIVE': 'curve-weak-pos',
-                        'NEGATIVE': 'curve-neg',
-                        'INDETERMINATE': 'curve-indet',
-                        'SUSPICIOUS': 'curve-suspicious'
-                    };
-                    
-                    const badgeClass = classMap[predictionClass] || 'curve-other';
-                    const confidenceText = confidence ? ` (${(confidence * 100).toFixed(1)}%)` : '';
-                    
-                    curveClassCell.innerHTML = `<span class="curve-badge ${badgeClass}" title="ML: Updated via batch re-evaluation${confidenceText}">${displayText}</span>`;
+                    if (isRobotEmoji) {
+                        // ROBOT EMOJI SPECIAL CASE: Add robot emoji to existing content or show processing state
+                        const existingBadge = curveClassCell.querySelector('.curve-badge');
+                        if (existingBadge) {
+                            // Add robot emoji to existing classification and store original content
+                            const originalText = existingBadge.textContent;
+                            const originalClass = existingBadge.className;
+                            
+                            // Store original state for restoration later
+                            curveClassCell.dataset.originalText = originalText;
+                            curveClassCell.dataset.originalClass = originalClass;
+                            
+                            existingBadge.innerHTML = `${originalText} 🤖`;
+                            existingBadge.title = 'ML analysis in progress...';
+                            existingBadge.classList.add('ml-processing');
+                            console.log(`🤖 Added robot emoji to existing classification for ${wellKey}: ${originalText} 🤖`);
+                        } else {
+                            // No existing badge, show processing state
+                            curveClassCell.innerHTML = `<span class="curve-badge curve-processing ml-processing" title="ML analysis in progress...">🤖 Processing...</span>`;
+                            console.log(`🤖 Set processing state for ${wellKey}: 🤖 Processing...`);
+                        }
+                    } else {
+                        // Normal ML prediction - check if this was previously showing robot emoji
+                        const wasProcessing = curveClassCell.querySelector('.ml-processing');
+                        
+                        const classMap = {
+                            'STRONG_POSITIVE': 'curve-strong-pos',
+                            'POSITIVE': 'curve-pos',
+                            'WEAK_POSITIVE': 'curve-weak-pos',
+                            'NEGATIVE': 'curve-neg',
+                            'INDETERMINATE': 'curve-indet',
+                            'SUSPICIOUS': 'curve-suspicious'
+                        };
+                        
+                        const badgeClass = classMap[predictionClass] || 'curve-other';
+                        const confidenceText = confidence ? ` (${(confidence * 100).toFixed(1)}%)` : '';
+                        
+                        // If this was previously processing, show ML result with a subtle indicator
+                        if (wasProcessing) {
+                            curveClassCell.innerHTML = `<span class="curve-badge ${badgeClass}" title="ML: Batch analysis result${confidenceText}">${displayText} <small>🤖</small></span>`;
+                            console.log(`🤖✅ Updated ${wellKey} from processing to ML result: ${predictionClass}${confidenceText}`);
+                        } else {
+                            curveClassCell.innerHTML = `<span class="curve-badge ${badgeClass}" title="ML: Updated via batch re-evaluation${confidenceText}">${displayText}</span>`;
+                            console.log(`✅ Updated table cell for ${wellKey} with ML prediction: ${predictionClass}${confidenceText}`);
+                        }
+                    }
                     
                     // Add a highlight animation to show it was updated
                     curveClassCell.style.background = '#e8f5e8';
@@ -5860,8 +5899,6 @@ class MLFeedbackInterface {
                     setTimeout(() => {
                         curveClassCell.style.background = '';
                     }, 2000);
-                    
-                    console.log(`✅ Updated table cell for ${wellKey} with ML prediction: ${predictionClass}${confidenceText}`);
                 } else {
                     console.log(`⚠️ Could not find curve classification column for ${wellKey}`);
                 }
