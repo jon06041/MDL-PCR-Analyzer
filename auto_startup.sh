@@ -126,11 +126,15 @@ fi
 
 # Add backup scheduling to crontab (runs every 6 hours)
 echo "⏰ Setting up automatic backup scheduling..."
-(crontab -l 2>/dev/null; echo "0 */6 * * * cd /workspaces/MDL-PCR-Analyzer && python3 mysql_backup_manager.py backup --description 'Scheduled auto-backup'") | crontab -
+if command -v crontab >/dev/null 2>&1; then
+    (crontab -l 2>/dev/null; echo "0 */6 * * * cd /workspaces/MDL-PCR-Analyzer && python3 mysql_backup_manager.py backup --description 'Scheduled auto-backup'") | crontab -
+    echo "✅ Crontab backup schedule configured"
+else
+    echo "⚠️ crontab not available in this environment (normal for codespaces)"
+    echo "💡 Backups can still be created manually or via the web interface"
+fi
 
 echo "✅ MySQL setup completed successfully"
-    exit 1
-fi
 
 # Test the connection to ensure it works
 echo "🧪 Testing MySQL connection..."

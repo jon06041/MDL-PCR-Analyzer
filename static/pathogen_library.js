@@ -20,6 +20,9 @@ const PATHOGEN_LIBRARY = {
     "Ctrach": {
         "FAM": "Chlamydia trachomatis"
     },
+    "CNGON": {
+        "HEX": "Neisseria gonorrhoeae"
+    },
     "Ngon": {
         "HEX": "Neisseria gonorrhoeae"
     },
@@ -277,6 +280,9 @@ const PATHOGEN_LIBRARY = {
     "Ngon": {
         "HEX": "Neisseria gonorrhoeae"
     },
+    "NGON": {
+        "HEX": "Neisseria gonorrhoeae"
+    },
     "Calb": {
         "HEX": "Candida albicans"
     },
@@ -306,7 +312,20 @@ const PATHOGEN_LIBRARY = {
 function getPathogenTarget(testCode, fluorophore) {
     if (!testCode || !fluorophore) return "Unknown";
     
-    const testData = PATHOGEN_LIBRARY[testCode];
+    // First try exact match
+    let testData = PATHOGEN_LIBRARY[testCode];
+    
+    // If no exact match, try case-insensitive lookup
+    if (!testData) {
+        const lowerTestCode = testCode.toLowerCase();
+        for (const key in PATHOGEN_LIBRARY) {
+            if (key.toLowerCase() === lowerTestCode) {
+                testData = PATHOGEN_LIBRARY[key];
+                break;
+            }
+        }
+    }
+    
     if (!testData) return "Unknown";
     
     return testData[fluorophore] || "Unknown";

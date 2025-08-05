@@ -545,8 +545,8 @@ class MLFeedbackInterface {
             
             // Find config for current fluorophore or general config
             let pathogenMLEnabled = true; // Default to enabled
-            if (pathogenConfigResponse.success && pathogenConfigResponse.data?.length > 0) {
-                const configs = pathogenConfigResponse.data;
+            if (pathogenConfigResponse.success && pathogenConfigResponse.configs?.length > 0) {
+                const configs = pathogenConfigResponse.configs;
                 
                 // Look for specific fluorophore config first
                 let config = configs.find(c => c.fluorophore === pathogenInfo.fluorophore);
@@ -1934,6 +1934,7 @@ class MLFeedbackInterface {
             test_code: testCode,
             testCode: testCode,  // Keep both for compatibility
             channel: channel || 'Unknown',
+            fluorophore: channel || 'Unknown',  // Add fluorophore field for ML config lookup
             pathogen: specificPathogen
         };
     }
@@ -2145,6 +2146,8 @@ class MLFeedbackInterface {
                 // Store ML classification in well data
                 if (result.success && result.prediction) {
                     this.currentWellData.ml_classification = result.prediction;
+                    // CRITICAL FIX: Display the ML results after successful analysis
+                    this.displayMLResults(result);
                 } else {
                     throw new Error(result.error || 'ML analysis failed');
                 }
@@ -5285,38 +5288,14 @@ class MLFeedbackInterface {
                 typeof window.updateModalContent === 'function') {
                 console.log('🔄 Refreshing modal content after feedback submission');
                 
-                // CRITICAL FIX: Force update the global data first
-                if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
-                    const wellResult = window.currentAnalysisResults.individual_results[this.currentWellKey];
-                    if (wellResult) {
-                        console.log('📊 Before modal refresh - well data:', {
-                            classification: wellResult.classification,
-                            curve_classification: wellResult.curve_classification,
-                            ml_classification: wellResult.ml_classification
-                        });
-                    }
+                // CRITICAL FIX: Don't call updateModalContent as it destroys the ML section
+                // Instead, just refresh the ML section without destroying it
+                if (this.isInitialized) {
+                    console.log('🔄 Force refreshing ML feedback interface after modal update');
+                    setTimeout(() => {
+                        this.refreshMLDisplayInModal();
+                    }, 100);
                 }
-                
-                setTimeout(() => {
-                    window.updateModalContent(this.currentWellKey);
-                    
-                    // CRITICAL FIX: Also force refresh the ML section in the modal after delay
-                    if (this.isInitialized) {
-                        console.log('🔄 Force refreshing ML feedback interface after modal update');
-                        setTimeout(() => {
-                            this.refreshMLDisplayInModal();
-                        }, 200); // Additional delay to ensure expert data is preserved
-                    }
-                    
-                    // CRITICAL FIX: Always rebuild modal navigation after content update (REVERTED)
-                    if (typeof window.buildModalNavigationList === 'function') {
-                        window.buildModalNavigationList();
-                        if (typeof window.updateNavigationButtons === 'function') {
-                            window.updateNavigationButtons();
-                        }
-                        console.log('🔄 Rebuilt modal navigation - list length:', window.modalNavigationList ? window.modalNavigationList.length : 'undefined');
-                    }
-                }, 500); // Increased delay to ensure data persistence
             }
             
             // Get a fresh ML prediction for this well to show updated model performance
@@ -5459,30 +5438,11 @@ class MLFeedbackInterface {
             if (window.currentModalWellKey === this.currentWellKey) {
                 console.log('🔄 MODAL-REFRESH: Modal is open for this well, refreshing immediately');
                 
-                // Update modal details directly with the updated data
-                if (typeof window.updateModalDetails === 'function' && 
-                    window.currentAnalysisResults && 
-                    window.currentAnalysisResults.individual_results) {
-                    
-                    const wellResult = window.currentAnalysisResults.individual_results[this.currentWellKey];
-                    if (wellResult) {
-                        console.log('🔄 MODAL-REFRESH: Calling updateModalDetails with expert data');
-                        window.updateModalDetails(wellResult);
-                    }
-                }
-                
-                // CRITICAL: Also directly update the result field in case of timing issues
+                // CRITICAL FIX: Don't call updateModalDetails as it destroys the ML section
+                // Instead, just update the specific result field and preserve ML section
                 this.updateModalResultField(expertClassification);
                 
-                // Also refresh the entire modal content as backup
-                if (typeof window.updateModalContent === 'function') {
-                    console.log('🔄 MODAL-REFRESH: Calling updateModalContent as backup');
-                    setTimeout(() => {
-                        window.updateModalContent(this.currentWellKey);
-                    }, 100);
-                }
-                
-                // Refresh the ML feedback interface display
+                // Refresh the ML feedback interface display without destroying the section
                 setTimeout(() => {
                     if (this.isInitialized) {
                         console.log('🔄 MODAL-REFRESH: Refreshing ML feedback interface display');
