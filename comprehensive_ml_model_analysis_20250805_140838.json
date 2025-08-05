@@ -1,0 +1,563 @@
+{
+  "analysis_timestamp": "2025-08-05T14:08:38.453093",
+  "test_suite": {
+    "total_samples": 25,
+    "classification_distribution": {
+      "STRONG_POSITIVE": 5,
+      "WEAK_POSITIVE": 8,
+      "NEGATIVE": 6,
+      "SUSPICIOUS": 6
+    },
+    "pathogen_distribution": {
+      "NGON": 14,
+      "CT": 11
+    }
+  },
+  "baseline_performance": {
+    "accuracy": 44.0,
+    "correct": 11,
+    "total": 25,
+    "results": [
+      {
+        "sample": "Perfect_Strong_NGON_1",
+        "pathogen": "NGON",
+        "expected": "STRONG_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Perfect_Strong_CT_1",
+        "pathogen": "CT",
+        "expected": "STRONG_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Perfect_Strong_NGON_2",
+        "pathogen": "NGON",
+        "expected": "STRONG_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Good_Weak_NGON_1",
+        "pathogen": "NGON",
+        "expected": "WEAK_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Good_Weak_CT_1",
+        "pathogen": "CT",
+        "expected": "WEAK_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Borderline_Weak_NGON_1",
+        "pathogen": "NGON",
+        "expected": "WEAK_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Late_Weak_CT_1",
+        "pathogen": "CT",
+        "expected": "WEAK_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Clear_Negative_NGON_1",
+        "pathogen": "NGON",
+        "expected": "NEGATIVE",
+        "predicted": "NEGATIVE",
+        "correct": true,
+        "confidence": 0.5,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Clear_Negative_CT_1",
+        "pathogen": "CT",
+        "expected": "NEGATIVE",
+        "predicted": "NEGATIVE",
+        "correct": true,
+        "confidence": 0.5,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Flat_Negative_NGON_1",
+        "pathogen": "NGON",
+        "expected": "NEGATIVE",
+        "predicted": "NEGATIVE",
+        "correct": true,
+        "confidence": 0.5,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Suspicious_High_Baseline_NGON",
+        "pathogen": "NGON",
+        "expected": "SUSPICIOUS",
+        "predicted": "SUSPICIOUS",
+        "correct": true,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Suspicious_Late_Rise_CT",
+        "pathogen": "CT",
+        "expected": "SUSPICIOUS",
+        "predicted": "SUSPICIOUS",
+        "correct": true,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Suspicious_Plateau_Early_NGON",
+        "pathogen": "NGON",
+        "expected": "SUSPICIOUS",
+        "predicted": "SUSPICIOUS",
+        "correct": true,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Tricky_False_Positive_High_Amp_NGON",
+        "pathogen": "NGON",
+        "expected": "NEGATIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Tricky_False_Positive_Erratic_CT",
+        "pathogen": "CT",
+        "expected": "NEGATIVE",
+        "predicted": "NEGATIVE",
+        "correct": true,
+        "confidence": 0.5,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Tricky_False_Positive_Drift_NGON",
+        "pathogen": "NGON",
+        "expected": "NEGATIVE",
+        "predicted": "NEGATIVE",
+        "correct": true,
+        "confidence": 0.5,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Edge_Case_Very_Late_Positive_CT",
+        "pathogen": "CT",
+        "expected": "SUSPICIOUS",
+        "predicted": "SUSPICIOUS",
+        "correct": true,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Edge_Case_Sharp_Rise_NGON",
+        "pathogen": "NGON",
+        "expected": "WEAK_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Edge_Case_Biphasic_CT",
+        "pathogen": "CT",
+        "expected": "WEAK_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Moderate_Positive_NGON_1",
+        "pathogen": "NGON",
+        "expected": "WEAK_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Moderate_Positive_CT_1",
+        "pathogen": "CT",
+        "expected": "WEAK_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Challenge_Inhibition_Recovery_NGON",
+        "pathogen": "NGON",
+        "expected": "SUSPICIOUS",
+        "predicted": "SUSPICIOUS",
+        "correct": true,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Challenge_PCR_Failure_CT",
+        "pathogen": "CT",
+        "expected": "SUSPICIOUS",
+        "predicted": "SUSPICIOUS",
+        "correct": true,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Strong_Positive_NGON_3",
+        "pathogen": "NGON",
+        "expected": "STRONG_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Strong_Positive_CT_3",
+        "pathogen": "CT",
+        "expected": "STRONG_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      }
+    ]
+  },
+  "training_progression": [],
+  "final_analysis": {
+    "model_stats": {
+      "training_samples": 2,
+      "model_trained": false,
+      "accuracy": 0.0,
+      "feature_count": 18,
+      "class_count": 7,
+      "class_distribution": {
+        "STRONG_POSITIVE": 2
+      },
+      "pathogen_models": [
+        {
+          "pathogen_code": "NGON",
+          "test_code": "NGON",
+          "training_samples": 1,
+          "model_trained": false
+        },
+        {
+          "pathogen_code": "CT",
+          "test_code": "CT",
+          "training_samples": 1,
+          "model_trained": false
+        }
+      ]
+    },
+    "performance_by_classification": {
+      "STRONG_POSITIVE": {
+        "correct": 0,
+        "total": 5
+      },
+      "WEAK_POSITIVE": {
+        "correct": 0,
+        "total": 8
+      },
+      "NEGATIVE": {
+        "correct": 5,
+        "total": 6
+      },
+      "SUSPICIOUS": {
+        "correct": 6,
+        "total": 6
+      }
+    },
+    "performance_by_pathogen": {
+      "NGON": {
+        "correct": 6,
+        "total": 14
+      },
+      "CT": {
+        "correct": 5,
+        "total": 11
+      }
+    },
+    "method_distribution": {
+      "Rule-based": 25
+    },
+    "final_results": [
+      {
+        "sample": "Perfect_Strong_NGON_1",
+        "pathogen": "NGON",
+        "expected": "STRONG_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Perfect_Strong_CT_1",
+        "pathogen": "CT",
+        "expected": "STRONG_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Perfect_Strong_NGON_2",
+        "pathogen": "NGON",
+        "expected": "STRONG_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Good_Weak_NGON_1",
+        "pathogen": "NGON",
+        "expected": "WEAK_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Good_Weak_CT_1",
+        "pathogen": "CT",
+        "expected": "WEAK_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Borderline_Weak_NGON_1",
+        "pathogen": "NGON",
+        "expected": "WEAK_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Late_Weak_CT_1",
+        "pathogen": "CT",
+        "expected": "WEAK_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Clear_Negative_NGON_1",
+        "pathogen": "NGON",
+        "expected": "NEGATIVE",
+        "predicted": "NEGATIVE",
+        "correct": true,
+        "confidence": 0.5,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Clear_Negative_CT_1",
+        "pathogen": "CT",
+        "expected": "NEGATIVE",
+        "predicted": "NEGATIVE",
+        "correct": true,
+        "confidence": 0.5,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Flat_Negative_NGON_1",
+        "pathogen": "NGON",
+        "expected": "NEGATIVE",
+        "predicted": "NEGATIVE",
+        "correct": true,
+        "confidence": 0.5,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Suspicious_High_Baseline_NGON",
+        "pathogen": "NGON",
+        "expected": "SUSPICIOUS",
+        "predicted": "SUSPICIOUS",
+        "correct": true,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Suspicious_Late_Rise_CT",
+        "pathogen": "CT",
+        "expected": "SUSPICIOUS",
+        "predicted": "SUSPICIOUS",
+        "correct": true,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Suspicious_Plateau_Early_NGON",
+        "pathogen": "NGON",
+        "expected": "SUSPICIOUS",
+        "predicted": "SUSPICIOUS",
+        "correct": true,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Tricky_False_Positive_High_Amp_NGON",
+        "pathogen": "NGON",
+        "expected": "NEGATIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Tricky_False_Positive_Erratic_CT",
+        "pathogen": "CT",
+        "expected": "NEGATIVE",
+        "predicted": "NEGATIVE",
+        "correct": true,
+        "confidence": 0.5,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Tricky_False_Positive_Drift_NGON",
+        "pathogen": "NGON",
+        "expected": "NEGATIVE",
+        "predicted": "NEGATIVE",
+        "correct": true,
+        "confidence": 0.5,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Edge_Case_Very_Late_Positive_CT",
+        "pathogen": "CT",
+        "expected": "SUSPICIOUS",
+        "predicted": "SUSPICIOUS",
+        "correct": true,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Edge_Case_Sharp_Rise_NGON",
+        "pathogen": "NGON",
+        "expected": "WEAK_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Edge_Case_Biphasic_CT",
+        "pathogen": "CT",
+        "expected": "WEAK_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Moderate_Positive_NGON_1",
+        "pathogen": "NGON",
+        "expected": "WEAK_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Moderate_Positive_CT_1",
+        "pathogen": "CT",
+        "expected": "WEAK_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Challenge_Inhibition_Recovery_NGON",
+        "pathogen": "NGON",
+        "expected": "SUSPICIOUS",
+        "predicted": "SUSPICIOUS",
+        "correct": true,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Challenge_PCR_Failure_CT",
+        "pathogen": "CT",
+        "expected": "SUSPICIOUS",
+        "predicted": "SUSPICIOUS",
+        "correct": true,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Strong_Positive_NGON_3",
+        "pathogen": "NGON",
+        "expected": "STRONG_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      },
+      {
+        "sample": "Strong_Positive_CT_3",
+        "pathogen": "CT",
+        "expected": "STRONG_POSITIVE",
+        "predicted": "SUSPICIOUS",
+        "correct": false,
+        "confidence": 0.19999999999999996,
+        "method": "Rule-based"
+      }
+    ]
+  },
+  "model_capabilities": {
+    "general_model": {
+      "features_used": [
+        "r2",
+        "steepness",
+        "snr",
+        "midpoint",
+        "baseline",
+        "amplitude",
+        "max_slope",
+        "max_slope_cycle",
+        "baseline_std",
+        "curve_auc",
+        "early_cycles_mean",
+        "late_cycles_mean",
+        "plateau_detection",
+        "curve_efficiency",
+        "derivative_peak",
+        "second_derivative_max",
+        "cqj",
+        "calcj"
+      ],
+      "training_samples": 2,
+      "model_trained": false,
+      "last_accuracy": 0.0
+    },
+    "pathogen_models": {},
+    "feature_importance": {},
+    "version_info": "unknown"
+  }
+}

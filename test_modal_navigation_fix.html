@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modal Navigation Fix Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .test-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .test-result {
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .test-pass {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .test-fail {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .test-info {
+            background-color: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        .test-warning {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+        }
+        .step {
+            margin: 10px 0;
+            padding: 10px;
+            background: #f8f9fa;
+            border-left: 4px solid #007bff;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .status {
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+        .log {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 0.9em;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .critical {
+            background-color: #dc3545;
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>🔧 Modal Navigation Fix Test</h1>
+        <p>This test verifies that the modal navigation rebuilds correctly after ML predictions and expert feedback.</p>
+        
+        <div class="critical">
+            ⚠️ CRITICAL ISSUE BEING TESTED: Modal navigation should rebuild after ML predictions to prevent the result table from showing only the single predicted result instead of all results.
+        </div>
+        
+        <div class="step">
+            <h3>📋 Test Scenario</h3>
+            <p>1. Load qPCR data with multiple samples</p>
+            <p>2. Open modal for one sample</p>
+            <p>3. Apply ML prediction</p>
+            <p>4. Verify modal navigation list includes all samples (not just the predicted one)</p>
+            <p>5. Test navigation between samples</p>
+        </div>
+        
+        <div class="step">
+            <h3>🎯 Expected Behavior</h3>
+            <ul>
+                <li>✅ Modal navigation should rebuild after each ML prediction</li>
+                <li>✅ All table rows should remain accessible via navigation</li>
+                <li>✅ No result flashing or content loss</li>
+                <li>✅ Navigation buttons should work correctly</li>
+            </ul>
+        </div>
+        
+        <div class="step">
+            <h3>🚀 Test Actions</h3>
+            <button onclick="openMainApplication()">1. Open Main Application</button>
+            <button onclick="loadTestData()">2. Load Test Data</button>
+            <button onclick="testModalNavigation()">3. Test Modal Navigation</button>
+            <button onclick="simulateMLPrediction()">4. Simulate ML Prediction</button>
+            <button onclick="verifyNavigation()">5. Verify Navigation Fixed</button>
+        </div>
+        
+        <div id="testResults"></div>
+        <div id="testLog" class="log"></div>
+    </div>
+
+    <script>
+        let testLog = [];
+        
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = `[${timestamp}] ${message}`;
+            testLog.push(logEntry);
+            
+            const logDiv = document.getElementById('testLog');
+            const colorMap = {
+                'info': '#333',
+                'success': '#28a745',
+                'error': '#dc3545',
+                'warning': '#ffc107'
+            };
+            
+            logDiv.innerHTML += `<div style="color: ${colorMap[type] || '#333'}">${logEntry}</div>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        function showResult(message, isPass) {
+            const resultsDiv = document.getElementById('testResults');
+            const resultClass = isPass ? 'test-pass' : 'test-fail';
+            const icon = isPass ? '✅' : '❌';
+            
+            resultsDiv.innerHTML += `<div class="${resultClass}">${icon} ${message}</div>`;
+        }
+        
+        function openMainApplication() {
+            log('Opening main qPCR application...', 'info');
+            window.open('http://localhost:5000', '_blank');
+            showResult('Main application opened in new tab', true);
+            log('✅ Please switch to the main application tab to continue testing', 'success');
+        }
+        
+        function loadTestData() {
+            log('Instructions for loading test data:', 'info');
+            log('1. In the main application, upload some qPCR data files', 'info');
+            log('2. Ensure you have multiple samples in the results table', 'info');
+            log('3. Make sure the table shows several rows with different well IDs', 'info');
+            showResult('Follow the instructions above to load test data', true);
+        }
+        
+        function testModalNavigation() {
+            log('Instructions for testing modal navigation:', 'info');
+            log('1. Click on one of the sample rows to open the modal', 'info');
+            log('2. Note the Previous/Next buttons and try navigating', 'info');
+            log('3. Observe how many samples are accessible via navigation', 'info');
+            log('4. Keep the modal open for the next test step', 'warning');
+            showResult('Modal should be open with working navigation', true);
+        }
+        
+        function simulateMLPrediction() {
+            log('Instructions for simulating ML prediction:', 'info');
+            log('1. In the open modal, look for the ML section', 'info');
+            log('2. Click "Get ML Prediction" button', 'info');
+            log('3. Wait for the prediction to complete', 'info');
+            log('4. CRITICAL: Watch if the modal navigation rebuilds', 'warning');
+            log('5. The browser console should show: "🔄 Rebuilding modal navigation after ML prediction update"', 'warning');
+            showResult('ML prediction applied - navigation should rebuild automatically', true);
+        }
+        
+        function verifyNavigation() {
+            log('Instructions for verifying the fix:', 'info');
+            log('1. After ML prediction, try using Previous/Next buttons', 'info');
+            log('2. Navigate to a different sample', 'info');
+            log('3. Close the modal and check the results table', 'info');
+            log('4. CRITICAL: All original samples should still be visible in the table', 'error');
+            log('5. The table should NOT show only the single predicted sample', 'error');
+            
+            const testPassed = confirm('Did the modal navigation work correctly after ML prediction?\\n\\n' +
+                'Check these criteria:\\n' +
+                '✅ Navigation buttons work after ML prediction\\n' +
+                '✅ All samples still accessible via navigation\\n' +
+                '✅ Results table shows all samples (not just predicted one)\\n' +
+                '✅ No result flashing or content loss\\n\\n' +
+                'Click OK if all criteria are met, Cancel if any failed.');
+                
+            if (testPassed) {
+                showResult('🎉 MODAL NAVIGATION FIX VERIFIED - All tests passed!', true);
+                log('✅ Modal navigation fix is working correctly', 'success');
+                log('✅ The buildModalNavigationList() function is called after ML predictions', 'success');
+                log('✅ Navigation rebuilds prevent result table corruption', 'success');
+            } else {
+                showResult('❌ MODAL NAVIGATION FIX FAILED - Issue still exists', false);
+                log('❌ Modal navigation fix needs further investigation', 'error');
+                log('❌ Check browser console for navigation rebuild messages', 'error');
+                log('❌ Verify the buildModalNavigationList function is accessible', 'error');
+            }
+        }
+        
+        // Initialize
+        log('🔧 Modal Navigation Fix Test initialized', 'success');
+        log('🎯 This test verifies the fix for modal navigation rebuilding after ML predictions', 'info');
+        log('⚠️ Critical: Without this fix, result tables show only the predicted sample', 'warning');
+    </script>
+</body>
+</html>

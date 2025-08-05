@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Expert Feedback Fixes</title>
+    <style>
+        body { font-family: monospace; margin: 20px; background: #f0f0f0; }
+        .test { margin: 10px 0; padding: 10px; background: white; border-radius: 5px; }
+        .pass { border-left: 5px solid #4CAF50; }
+        .fail { border-left: 5px solid #f44336; }
+        .info { border-left: 5px solid #2196F3; }
+    </style>
+</head>
+<body>
+    <h1>🔧 Expert Feedback Fixes Test</h1>
+    <p>This page tests if the JavaScript fixes for expert feedback are properly loaded.</p>
+    
+    <div id="results"></div>
+    
+    <script>
+        function addResult(className, message) {
+            const div = document.createElement('div');
+            div.className = 'test ' + className;
+            div.innerHTML = message;
+            document.getElementById('results').appendChild(div);
+        }
+        
+        // Test 1: Check if functions are exposed
+        const requiredFunctions = [
+            'buildModalNavigationList',
+            'updateNavigationButtons', 
+            'populateResultsTable',
+            'resetFilterState'
+        ];
+        
+        addResult('info', '📋 Testing JavaScript Function Exposure:');
+        
+        let allFunctionsExposed = true;
+        requiredFunctions.forEach(funcName => {
+            if (typeof window[funcName] === 'function') {
+                addResult('pass', `✅ window.${funcName} is exposed`);
+            } else {
+                addResult('fail', `❌ window.${funcName} is NOT exposed`);
+                allFunctionsExposed = false;
+            }
+        });
+        
+        // Test 2: Check buildModalNavigationList implementation
+        addResult('info', '📋 Testing buildModalNavigationList Implementation:');
+        
+        if (typeof window.buildModalNavigationList === 'function') {
+            const funcString = window.buildModalNavigationList.toString();
+            if (funcString.includes('currentAnalysisResults.individual_results')) {
+                addResult('pass', '✅ buildModalNavigationList uses currentAnalysisResults (FIXED)');
+            } else if (funcString.includes('querySelectorAll') && funcString.includes('tr')) {
+                addResult('fail', '❌ buildModalNavigationList still uses table rows (OLD VERSION)');
+            } else {
+                addResult('info', '? buildModalNavigationList implementation unclear');
+            }
+        }
+        
+        // Test 3: API endpoint test
+        addResult('info', '📋 Testing API Endpoint:');
+        
+        fetch('/api/get-expert-feedback/test_123')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success === true && Array.isArray(data.feedback)) {
+                    addResult('pass', '✅ API endpoint returns correct format');
+                } else {
+                    addResult('fail', '❌ API endpoint returns wrong format');
+                }
+            })
+            .catch(error => {
+                addResult('fail', '❌ API endpoint failed: ' + error.message);
+            });
+        
+        // Summary
+        setTimeout(() => {
+            addResult('info', '📋 Test Summary:');
+            if (allFunctionsExposed) {
+                addResult('pass', '🎉 All critical JavaScript functions are properly exposed!');
+                addResult('info', '💡 Try testing expert feedback in the main application now.');
+            } else {
+                addResult('fail', '⚠️ Some functions are missing - browser cache issue or fixes not applied.');
+                addResult('info', '💡 Try force refreshing (Ctrl+F5) or use a different browser.');
+            }
+        }, 1000);
+    </script>
+</body>
+</html>

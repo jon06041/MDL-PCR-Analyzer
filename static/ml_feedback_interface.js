@@ -10,6 +10,10 @@ class MLFeedbackInterface {
         this.submissionInProgress = false; // Flag to prevent duplicate submissions
         this.trainedSamples = new Set(); // Track samples that have already been trained
         
+        // CRITICAL MULTICHANNEL FIX: Preserve original results
+        this.originalResultsBackup = null;
+        this.originalResultsCount = 0;
+        
         // Progress tracking for batch ML analysis
         this.batchProgress = {
             totalWells: 0,
@@ -25,6 +29,34 @@ class MLFeedbackInterface {
         } else {
             this.initializeInterface();
         }
+    }
+    
+    /**
+     * CRITICAL MULTICHANNEL FIX: Create backup of original results
+     */
+    preserveOriginalResults() {
+        if (window.currentAnalysisResults?.individual_results) {
+            const results = window.currentAnalysisResults.individual_results;
+            this.originalResultsBackup = JSON.parse(JSON.stringify(results));
+            this.originalResultsCount = Object.keys(results).length;
+            console.log(`💾 MULTICHANNEL-FIX: Preserved backup with ${this.originalResultsCount} wells`);
+        }
+    }
+    
+    /**
+     * CRITICAL MULTICHANNEL FIX: Restore results if they've been corrupted
+     */
+    checkAndRestoreResults() {
+        const currentResults = window.currentAnalysisResults?.individual_results;
+        const currentCount = currentResults ? Object.keys(currentResults).length : 0;
+        
+        if (this.originalResultsBackup && currentCount < this.originalResultsCount) {
+            console.warn(`⚠️ MULTICHANNEL-FIX: Results corrupted! Was ${this.originalResultsCount}, now ${currentCount}. Restoring...`);
+            window.currentAnalysisResults.individual_results = JSON.parse(JSON.stringify(this.originalResultsBackup));
+            console.log(`✅ MULTICHANNEL-FIX: Restored ${this.originalResultsCount} wells from backup`);
+            return true;
+        }
+        return false;
     }
 
     async initializeInterface() {
@@ -2690,6 +2722,78 @@ class MLFeedbackInterface {
         radioButtons.forEach(radio => radio.checked = false);
     }
 
+    /**
+     * Rebuild modal navigation after feedback updates to prevent result table issues
+     */
+    rebuildModalNavigationAfterUpdate() {
+        try {
+            console.log('🔄 NAVIGATION: Rebuilding modal navigation after feedback update');
+            
+            const modal = document.getElementById('chartModal');
+            if (modal && modal.style.display !== 'none') {
+                // Method 1: Call the main rebuild function if available
+                if (window.buildModalNavigationList && typeof window.buildModalNavigationList === 'function') {
+                    window.buildModalNavigationList();
+                    console.log('✅ NAVIGATION: Modal navigation list rebuilt');
+                    
+                    // Also update navigation buttons
+                    if (window.updateNavigationButtons && typeof window.updateNavigationButtons === 'function') {
+                        window.updateNavigationButtons();
+                        console.log('✅ NAVIGATION: Navigation buttons updated');
+                    }
+                } else {
+                    console.warn('⚠️ NAVIGATION: buildModalNavigationList function not available');
+                }
+                
+                // Method 2: Trigger a custom event for navigation rebuild
+                window.dispatchEvent(new CustomEvent('modalNavigationNeedsRebuild', {
+                    detail: { 
+                        reason: 'expert_feedback_submitted', 
+                        wellKey: this.currentWellKey,
+                        timestamp: new Date().toISOString()
+                    }
+                }));
+                
+            } else {
+                console.log('🔍 NAVIGATION: Modal not open, skipping navigation rebuild');
+            }
+        } catch (error) {
+            console.error('❌ NAVIGATION: Error rebuilding modal navigation:', error);
+        }
+    }
+
+    /**
+     * Ensure session ID is always available for database persistence
+     */
+    ensureSessionIdAvailable(wellData = null) {
+        // Try multiple sources for session ID
+        let sessionId = window.currentSessionId;
+        
+        if (!sessionId) {
+            // Try from analysis results
+            if (window.currentAnalysisResults && window.currentAnalysisResults.session_id) {
+                sessionId = window.currentAnalysisResults.session_id;
+                window.currentSessionId = sessionId; // Cache it
+            }
+        }
+        
+        if (!sessionId && wellData) {
+            // Try from well data
+            sessionId = wellData.session_id;
+        }
+        
+        if (!sessionId) {
+            // Generate a session ID based on current timestamp and context
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '');
+            const context = this.currentWellKey ? this.currentWellKey.split('_')[0] : 'unknown';
+            sessionId = `expert_feedback_${context}_${timestamp}`;
+            window.currentSessionId = sessionId; // Cache the generated ID
+        }
+        
+        console.log('🔧 PERSISTENCE: Ensured session ID available:', sessionId);
+        return sessionId;
+    }
+
     async submitFeedback() {
         // Check if batch ML analysis is currently running
         const batchRunning = document.getElementById('ml-available-notification') !== null;
@@ -2845,7 +2949,7 @@ class MLFeedbackInterface {
                     well_data: submissionWellData,
                     expert_classification: expertClassification,
                     well_id: wellKey,
-                    session_id: window.currentSessionId || wellData.session_id || null, // Add session_id for persistence
+                    session_id: this.ensureSessionIdAvailable(wellData), // Add session_id for persistence
                     existing_metrics: {
                         r2: wellData.r2_score || 0,
                         steepness: wellData.steepness || 0,
@@ -2872,16 +2976,27 @@ class MLFeedbackInterface {
                     // CRITICAL: FIRST persist the expert classification to both local and backend data
                     await this.updateWellClassification(expertClassification, 'expert_feedback');
                     
+                    // CRITICAL FIX: Persist to session state for page refresh persistence
+                    await this.updateWellState(this.currentWellKey, {
+                        classification: expertClassification,
+                        method: 'expert_feedback',
+                        expert_classification: expertClassification
+                    });
+                    
                     // IMMEDIATE: Update the UI elements to show the expert classification
                     this.updateUIWithExpertClassification(expertClassification);
                     
                     // THEN update the results table with the expert classification
                     await this.updateResultsTableAfterFeedback(expertClassification);
                     
-                    // CRITICAL FIX: Add a small delay to ensure data propagation before modal refresh
+                    // CRITICAL FIX: Add a delay to ensure data propagation AND table refresh complete
                     setTimeout(() => {
                         console.log('🔄 MODAL-REFRESH: About to refresh modal after expert feedback');
                         console.log('🔍 MODAL-REFRESH: Current well curve_classification:', this.currentWellData?.curve_classification);
+                        
+                        // CRITICAL: Rebuild navigation AFTER table refresh is complete
+                        console.log('🔄 NAVIGATION: Rebuilding navigation after table refresh complete');
+                        this.rebuildModalNavigationAfterUpdate();
                         
                         // Refresh the modal to show expert feedback (data is now updated)
                         this.refreshModalAfterFeedback(expertClassification);
@@ -2890,7 +3005,7 @@ class MLFeedbackInterface {
                         this.refreshMLDisplayInModal();
                         
                         console.log('✅ MODAL-REFRESH: Modal refresh completed');
-                    }, 100);
+                    }, 800); // Increased delay to ensure table refresh completes first
                     
                     // Use non-blocking notification instead of alert
                     this.showTrainingNotification(
@@ -4283,7 +4398,27 @@ class MLFeedbackInterface {
                     Object.values(window.currentAnalysisResults.fluorophore_data).reduce((acc, fluorophoreData) => {
                         return {...acc, ...fluorophoreData.well_data};
                     }, {}) : window.currentAnalysisResults.well_data || {};
-                populateResultsTable(individualResults);
+                
+                // DEBUG: Log batch analysis table rebuild details
+                const resultsCount = individualResults ? Object.keys(individualResults).length : 0;
+                console.log(`📊 Batch analysis table rebuild: ${resultsCount} wells in individualResults`);
+                
+                // CRITICAL MULTICHANNEL FIX: Use individual_results if available, better structured
+                const bestResults = window.currentAnalysisResults.individual_results || individualResults;
+                const finalResultsCount = bestResults ? Object.keys(bestResults).length : 0;
+                console.log(`📊 MULTICHANNEL-FIX: Using best results structure with ${finalResultsCount} wells`);
+                console.log('🔍 MULTICHANNEL-FIX: Well keys for batch rebuild:', Object.keys(bestResults || {}));
+                
+                populateResultsTable(bestResults);
+                
+                // CRITICAL: Rebuild modal navigation AFTER table is rebuilt
+                if (window.rebuildModalNavigationIfNeeded) {
+                    console.log('🔄 Triggering modal navigation rebuild after batch analysis table rebuild');
+                    window.rebuildModalNavigationIfNeeded();
+                } else if (window.buildModalNavigationList) {
+                    console.log('🔄 Rebuilding modal navigation after batch analysis table rebuild (fallback)');
+                    window.buildModalNavigationList();
+                }
             }
             
             // Show completion notification
@@ -5195,6 +5330,25 @@ class MLFeedbackInterface {
         try {
             console.log('🔄 Updating results table after feedback submission with:', expertClassification);
             
+            // CRITICAL FIX: Backup the complete original results to prevent data loss
+            if (!window.originalCompleteResults && window.currentAnalysisResults?.individual_results) {
+                window.originalCompleteResults = JSON.parse(JSON.stringify(window.currentAnalysisResults.individual_results));
+                console.log('💾 BACKUP: Stored original complete results with', Object.keys(window.originalCompleteResults).length, 'wells');
+            }
+            
+            // CRITICAL FIX: Check if currentAnalysisResults has been corrupted (reduced to 1 well)
+            const currentWellCount = Object.keys(window.currentAnalysisResults?.individual_results || {}).length;
+            const originalWellCount = Object.keys(window.originalCompleteResults || {}).length;
+            
+            if (window.originalCompleteResults && currentWellCount < originalWellCount) {
+                console.warn('🚨 CORRUPTION DETECTED: currentAnalysisResults reduced from', originalWellCount, 'to', currentWellCount, 'wells');
+                console.log('🔄 RESTORATION: Restoring complete results from backup');
+                
+                // Restore the complete results
+                window.currentAnalysisResults.individual_results = JSON.parse(JSON.stringify(window.originalCompleteResults));
+                console.log('✅ RESTORATION: Restored', Object.keys(window.currentAnalysisResults.individual_results).length, 'wells');
+            }
+            
             // Update the global results object with the expert classification
             if (window.currentAnalysisResults && 
                 window.currentAnalysisResults.individual_results && 
@@ -5279,12 +5433,72 @@ class MLFeedbackInterface {
             if (typeof window.refreshResultsTable === 'function') {
                 console.log('🔄 Force refreshing entire results table');
                 setTimeout(() => {
+                    // CRITICAL: Reset filters before refreshing to show all wells
+                    if (typeof window.resetFilterState === 'function') {
+                        console.log('🔄 Resetting filters to show all wells after expert feedback');
+                        window.resetFilterState();
+                    }
+                    
+                    // CRITICAL: Refresh table FIRST with updated global data
                     window.refreshResultsTable();
+                    
+                    // CRITICAL: Build navigation AFTER table refresh to use updated data
+                    setTimeout(() => {
+                        if (window.buildModalNavigationList) {
+                            console.log('🔄 Rebuilding modal navigation AFTER table refresh (ensuring expert feedback is preserved)');
+                            window.buildModalNavigationList();
+                        }
+                        if (window.updateNavigationButtons) {
+                            window.updateNavigationButtons();
+                        }
+                    }, 100);
                 }, 200);
             } else if (typeof window.populateResultsTable === 'function') {
                 console.log('🔄 Re-populating results table with updated data');
+                // DEBUG: Log table rebuild details
+                const resultsCount = window.currentAnalysisResults?.individual_results ? 
+                    Object.keys(window.currentAnalysisResults.individual_results).length : 0;
+                console.log(`📊 Table rebuild: ${resultsCount} wells in currentAnalysisResults.individual_results`);
+                
+                // CRITICAL MULTICHANNEL FIX: Preserve original results before rebuilding
+                const originalResults = window.currentAnalysisResults?.individual_results;
+                if (originalResults) {
+                    console.log('🔍 MULTICHANNEL-FIX: Preserving original results with', Object.keys(originalResults).length, 'wells');
+                    console.log('🔍 MULTICHANNEL-FIX: Well keys:', Object.keys(originalResults));
+                }
+                
                 setTimeout(() => {
-                    window.populateResultsTable(window.currentAnalysisResults.individual_results);
+                    // CRITICAL: Reset filters before rebuilding to show all wells
+                    if (typeof window.resetFilterState === 'function') {
+                        console.log('🔄 Resetting filters to show all wells after expert feedback');
+                        window.resetFilterState();
+                    }
+                    
+                    // Use preserved results to ensure we don't lose wells
+                    const resultsToUse = originalResults || window.currentAnalysisResults.individual_results;
+                    console.log('📊 MULTICHANNEL-FIX: Rebuilding table with', Object.keys(resultsToUse || {}).length, 'wells');
+                    
+                    // CRITICAL: Populate table FIRST
+                    window.populateResultsTable(resultsToUse);
+                    
+                    // CRITICAL: Build navigation AFTER table population to ensure expert feedback is preserved
+                    setTimeout(() => {
+                        if (window.rebuildModalNavigationIfNeeded) {
+                            console.log('🔄 Triggering modal navigation rebuild AFTER table rebuild (preserving expert feedback)');
+                            window.rebuildModalNavigationIfNeeded();
+                        } else if (window.buildModalNavigationList) {
+                            console.log('🔄 Rebuilding modal navigation AFTER table rebuild (preserving expert feedback)');
+                            window.buildModalNavigationList();
+                        }
+                        
+                        // Update navigation buttons last
+                        if (window.updateNavigationButtons) {
+                            window.updateNavigationButtons();
+                        }
+                        
+                        // DO NOT apply filters again - this might hide wells
+                        console.log('✅ Table and navigation rebuild complete - expert feedback preserved');
+                    }, 100);
                 }, 200);
             }
             
@@ -5749,6 +5963,13 @@ class MLFeedbackInterface {
                     
                     console.log('✅ Updated table cell for', wellKey, 'with classification:', classification);
                     
+                    // CRITICAL: Rebuild modal navigation if modal is open to prevent result table issues
+                    const modal = document.getElementById('chartModal');
+                    if (modal && modal.style.display !== 'none' && window.buildModalNavigationList) {
+                        console.log('🔄 Rebuilding modal navigation after expert classification update');
+                        window.buildModalNavigationList();
+                    }
+                    
                     // CRITICAL: Also trigger a table refresh to ensure changes persist
                     if (typeof window.refreshResultsTable === 'function') {
                         console.log('🔄 Triggering table refresh after cell update');
@@ -5891,6 +6112,16 @@ class MLFeedbackInterface {
                             curveClassCell.innerHTML = `<span class="curve-badge ${badgeClass}" title="ML: Updated via batch re-evaluation${confidenceText}">${displayText}</span>`;
                             console.log(`✅ Updated table cell for ${wellKey} with ML prediction: ${predictionClass}${confidenceText}`);
                         }
+                    }
+                    
+                    // CRITICAL: Rebuild modal navigation if modal is open to prevent result table issues
+                    const modal = document.getElementById('chartModal');
+                    if (modal && modal.style.display !== 'none' && window.rebuildModalNavigationIfNeeded) {
+                        console.log('🔄 Triggering modal navigation rebuild after ML prediction update');
+                        setTimeout(() => window.rebuildModalNavigationIfNeeded(), 50);
+                    } else if (modal && modal.style.display !== 'none' && window.buildModalNavigationList) {
+                        console.log('🔄 Rebuilding modal navigation after ML prediction update (fallback)');
+                        setTimeout(() => window.buildModalNavigationList(), 50);
                     }
                     
                     // Add a highlight animation to show it was updated
@@ -6426,6 +6657,118 @@ class MLFeedbackInterface {
         
         console.log('🔀 KEY-VARIATIONS: Generated variations for', wellKey, ':', variations);
         return variations;
+    }
+    
+    /**
+     * CRITICAL FIX: Update session state when changes are made
+     * This ensures persistence across page refreshes and session reloads
+     */
+    async updateSessionState(wellUpdates = {}, sessionUpdates = {}) {
+        try {
+            const sessionId = this.extractSessionId();
+            if (!sessionId) {
+                console.warn('⚠️ SESSION-UPDATE: No session ID available for state update');
+                return false;
+            }
+            
+            const updateData = {
+                session_id: sessionId,
+                well_updates: wellUpdates,
+                session_updates: sessionUpdates
+            };
+            
+            console.log('💾 SESSION-UPDATE: Updating session state:', updateData);
+            
+            const response = await fetch('/api/update-session-state', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(updateData)
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                console.log('✅ SESSION-UPDATE: Session state updated successfully:', result);
+                return true;
+            } else {
+                const error = await response.text();
+                console.error('❌ SESSION-UPDATE: Failed to update session state:', error);
+                return false;
+            }
+            
+        } catch (error) {
+            console.error('❌ SESSION-UPDATE: Error updating session state:', error);
+            return false;
+        }
+    }
+    
+    /**
+     * CRITICAL FIX: Update specific well state and persist to session
+     */
+    async updateWellState(wellKey, updates) {
+        try {
+            // Update the in-memory results
+            if (window.currentAnalysisResults?.individual_results?.[wellKey]) {
+                Object.assign(window.currentAnalysisResults.individual_results[wellKey], updates);
+                console.log(`🔄 WELL-UPDATE: Updated in-memory state for ${wellKey}:`, updates);
+            }
+            
+            // Persist to database via session update
+            const wellUpdates = { [wellKey]: updates };
+            const success = await this.updateSessionState(wellUpdates);
+            
+            if (success) {
+                console.log(`✅ WELL-UPDATE: Persisted ${wellKey} changes to database`);
+                
+                // Update the results table display
+                this.updateResultsTableDisplay(wellKey, updates);
+                
+                return true;
+            } else {
+                console.error(`❌ WELL-UPDATE: Failed to persist ${wellKey} changes`);
+                return false;
+            }
+            
+        } catch (error) {
+            console.error(`❌ WELL-UPDATE: Error updating well ${wellKey}:`, error);
+            return false;
+        }
+    }
+    
+    /**
+     * Update the results table display with new well data
+     */
+    updateResultsTableDisplay(wellKey, updates) {
+        try {
+            const tableRow = document.querySelector(`tr[data-well-key="${wellKey}"]`);
+            if (!tableRow) {
+                console.warn(`⚠️ TABLE-UPDATE: No table row found for ${wellKey}`);
+                return;
+            }
+            
+            // Update classification if provided
+            if (updates.classification) {
+                const classCell = tableRow.querySelector('.classification');
+                if (classCell) {
+                    classCell.textContent = updates.classification;
+                    classCell.className = `classification ${updates.classification.toLowerCase()}`;
+                }
+            }
+            
+            // Update other fields as needed
+            if (updates.cq_value !== undefined) {
+                const cqCell = tableRow.querySelector('.cq-value');
+                if (cqCell) {
+                    cqCell.textContent = updates.cq_value || 'N/A';
+                }
+            }
+            
+            console.log(`🎨 TABLE-UPDATE: Updated display for ${wellKey}`);
+            
+        } catch (error) {
+            console.error(`❌ TABLE-UPDATE: Error updating table display for ${wellKey}:`, error);
+        }
     }
 }
 

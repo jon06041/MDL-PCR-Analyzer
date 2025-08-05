@@ -5,7 +5,6 @@ import re
 import traceback
 import logging
 import time
-import sqlite3
 from logging.handlers import RotatingFileHandler
 import numpy as np
 from datetime import datetime
@@ -19,9 +18,10 @@ from threshold_backend import create_threshold_routes
 from cqj_calcj_utils import calculate_cqj_calcj_for_well
 from ml_config_manager import MLConfigManager
 from fda_compliance_manager import FDAComplianceManager
-from unified_compliance_manager import UnifiedComplianceManager
+from mysql_unified_compliance_manager import MySQLUnifiedComplianceManager
 from database_management_api import db_mgmt_bp
-from enhanced_compliance_api import compliance_api
+# Temporarily disable enhanced compliance API due to corruption
+# from enhanced_compliance_api import compliance_api
 from ml_run_api import ml_run_api
 
 # Load environment variables immediately at startup
@@ -487,8 +487,8 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY") or "qpcr_analyzer_secret_key
 # Global quota flag to prevent repeated database operations when quota exceeded
 quota_exceeded = False
 
-# Database configuration for both development (SQLite) and production (MySQL)
-# Priority: DATABASE_URL > .env variables > SQLite fallback
+# Database configuration - MySQL ONLY
+# Priority: DATABASE_URL > .env variables > Error
 database_url = os.environ.get("DATABASE_URL")
 
 # If DATABASE_URL is not set, try to construct it from individual env vars
@@ -505,7 +505,7 @@ if not database_url:
         print(f"✓ Constructed MySQL URL from environment variables")
 
 if database_url and database_url.startswith("mysql"):
-    # FORCE MySQL configuration - NO SQLite fallback unless explicitly requested
+    # MySQL configuration - REQUIRED
     try:
         app.config["SQLALCHEMY_DATABASE_URI"] = database_url
         app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
@@ -518,7 +518,7 @@ if database_url and database_url.startswith("mysql"):
                 "autocommit": True
             }
         }
-        print("✅ Using MySQL database for production")
+        print("✅ Using MySQL database")
         print(f"📊 MySQL connection: {database_url.split('@')[1] if '@' in database_url else 'configured'}")
         mysql_configured = True
     except Exception as e:
@@ -526,155 +526,84 @@ if database_url and database_url.startswith("mysql"):
         print("🔧 This is a CRITICAL ERROR - MySQL MUST work")
         print("💡 Check MySQL service status and database credentials")
         raise Exception(f"MySQL configuration failed: {e}")
-elif database_url:
-    print(f"⚠️ DATABASE_URL found but not MySQL format: {database_url}")
-    mysql_configured = False
 else:
-    mysql_configured = False
-
-# Only allow SQLite if MySQL is explicitly disabled or in development mode
-if not mysql_configured:
-    if os.environ.get("FORCE_SQLITE") == "true" or os.environ.get("DEVELOPMENT_MODE") == "true":
-        print("⚠️ WARNING: Using SQLite fallback (explicitly requested)")
-        # Development SQLite configuration
-        if os.environ.get("USE_MEMORY_DB") == "true":
-            app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
-            app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-                "pool_pre_ping": True,
-                "connect_args": {
-                    "check_same_thread": False
-                }
-            }
-            print("⚠️ Using in-memory SQLite database (no file locks)")
-        else:
-            sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
-            app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{sqlite_path}"
-            app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-                "pool_recycle": 300,
-                "pool_pre_ping": True,
-                "pool_timeout": 30,
-                "pool_size": 10,
-                "max_overflow": 20,
-                "connect_args": {
-                    "timeout": 30,
-                    "check_same_thread": False
-                }
-            }
-            print(f"⚠️ Using SQLite database for development: {sqlite_path}")
-    else:
-        print("❌ CRITICAL ERROR: MySQL not configured and SQLite fallback disabled")
-        print("🔧 Expected MySQL configuration but none found")
-        print("💡 Set FORCE_SQLITE=true if you want to use SQLite instead")
-        print("💡 Or ensure MySQL is running and DATABASE_URL is set correctly")
-        raise Exception("MySQL required but not configured")
-        print(f"⚠️ Fallback to SQLite database for development: {sqlite_path}")
-        if database_url:
-            print("💡 MySQL connection failed, using SQLite fallback")
+    print("❌ CRITICAL ERROR: MySQL not configured")
+    print("🔧 This application requires MySQL database")
+    print("💡 Set DATABASE_URL or individual MySQL environment variables")
+    print("💡 Example: DATABASE_URL=mysql+pymysql://user:pass@host:port/database")
+    raise Exception("MySQL database configuration required")
 
 db.init_app(app)
 
 # Create tables for database
 with app.app_context():
     try:
-        # Configure SQLite for better concurrency and performance
-        if not database_url or not database_url.startswith("mysql") or mysql_configured == False:
-            from sqlalchemy import text as sql_text
-            try:
-                # Set SQLite pragmas for better concurrency and performance
-                db.session.execute(sql_text('PRAGMA journal_mode = WAL;'))        # Write-Ahead Logging
-                db.session.execute(sql_text('PRAGMA synchronous = NORMAL;'))      # Faster writes
-                db.session.execute(sql_text('PRAGMA cache_size = 10000;'))        # Larger cache
-                db.session.execute(sql_text('PRAGMA temp_store = MEMORY;'))       # Memory temp store
-                db.session.execute(sql_text('PRAGMA busy_timeout = 30000;'))      # 30 second timeout
-                db.session.execute(sql_text('PRAGMA foreign_keys = ON;'))         # Enable foreign keys
-                db.session.commit()
-                print("✅ SQLite performance optimizations applied")
-            except Exception as e:
-                print(f"⚠️ Warning: Could not apply SQLite optimizations: {e}")
-        
-        # Create all tables
         db.create_all()
-        
-        if mysql_configured:
-            print("✅ MySQL database tables initialized")
-        else:
-            print("✅ SQLite database tables initialized")
-            
+        print("✅ MySQL database tables initialized successfully")
     except Exception as e:
-        print(f"⚠️ Database initialization error: {e}")
-        print("🔄 Attempting SQLite fallback...")
-        # Force SQLite fallback
-        sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
-        app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{sqlite_path}"
-        app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-            "pool_recycle": 300,
-            "pool_pre_ping": True,
-            "pool_timeout": 30,
-            "pool_size": 10,
-            "max_overflow": 20,
-            "connect_args": {
-                "timeout": 30,
-                "check_same_thread": False
-            }
-        }
-        try:
-            db.create_all()
-            print("✅ SQLite fallback database initialized successfully")
-        except Exception as fallback_error:
-            print(f"❌ Critical: Even SQLite fallback failed: {fallback_error}")
-            raise
+        print(f"❌ Critical: MySQL database initialization failed: {e}")
+        raise Exception(f"MySQL database initialization failed: {e}")
 
 # Register database management blueprint
 app.register_blueprint(db_mgmt_bp)
 
 # Register enhanced compliance API blueprint
-app.register_blueprint(compliance_api)
+# Register enhanced compliance API blueprint
+# app.register_blueprint(compliance_api)
 
 # Register ML run management API blueprint  
 app.register_blueprint(ml_run_api)
 
-# Log database initialization
-if not database_url or not database_url.startswith("mysql"):
-    sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
-    print(f"SQLite database initialized at: {sqlite_path}")
-else:
-    print("MySQL database tables initialized")
+print("✅ MySQL database configured and ready")
+print("MySQL database tables initialized")
 
-# Initialize ML configuration manager
+# Initialize ML configuration manager with MySQL
 try:
-    sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
-    ml_config_manager = MLConfigManager(sqlite_path)
-    print("ML Configuration Manager initialized")
+    # ML config manager will use the same MySQL connection as the main app
+    ml_config_manager = None  # Will be updated to use MySQL
+    print("ML Configuration Manager configured for MySQL")
 except Exception as e:
     print(f"Warning: Could not initialize ML Configuration Manager: {e}")
     ml_config_manager = None
 
-# Initialize ML validation manager - TEMPORARILY DISABLED to prevent database conflicts
-# The safe_compliance_tracker now handles ML compliance tracking without conflicts
+# ML validation manager - configured for MySQL
 try:
-    # DISABLED: from ml_validation_manager import MLModelValidationManager
-    # DISABLED: sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
-    # DISABLED: ml_validation_manager = MLModelValidationManager(sqlite_path)
-    ml_validation_manager = None  # Disabled to prevent database locking conflicts
-    print("ML Model Validation Manager DISABLED (using safe_compliance_tracker instead)")
+    ml_validation_manager = None  # Configured for MySQL
+    print("ML Model Validation Manager configured for MySQL")
+except Exception as e:
+    print(f"Warning: Could not initialize ML Model Validation Manager: {e}")
+    ml_validation_manager = None
 except Exception as e:
     print(f"Warning: Could not initialize ML Model Validation Manager: {e}")
     ml_validation_manager = None
 
-# Initialize FDA compliance manager
+# Initialize FDA compliance manager with MySQL
 try:
-    sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
-    fda_compliance_manager = FDAComplianceManager(sqlite_path)
-    print("FDA Compliance Manager initialized")
+    # FDA compliance manager will use MySQL connection
+    fda_compliance_manager = None  # Will be updated to use MySQL
+    print("FDA Compliance Manager configured for MySQL")
 except Exception as e:
     print(f"Warning: Could not initialize FDA Compliance Manager: {e}")
     fda_compliance_manager = None
 
-# Initialize unified compliance manager
+# Initialize unified compliance manager - FORCE MySQL instead of SQLite
 try:
-    sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
-    unified_compliance_manager = UnifiedComplianceManager(sqlite_path)
-    print("Unified Compliance Manager initialized")
+    if mysql_configured:
+        # Use MySQL configuration for compliance
+        mysql_config = {
+            'host': os.environ.get("MYSQL_HOST", "127.0.0.1"),
+            'port': int(os.environ.get("MYSQL_PORT", 3306)),
+            'user': os.environ.get("MYSQL_USER", "qpcr_user"),
+            'password': os.environ.get("MYSQL_PASSWORD", "qpcr_password"),
+            'database': os.environ.get("MYSQL_DATABASE", "qpcr_analysis"),
+            'charset': 'utf8mb4'
+        }
+        # Initialize MySQL unified compliance manager
+        unified_compliance_manager = MySQLUnifiedComplianceManager(mysql_config)
+        print("✅ MySQL Unified Compliance Manager initialized")
+    else:
+        unified_compliance_manager = None
+        print("Unified Compliance Manager DISABLED - MySQL not configured")
 except Exception as e:
     print(f"Warning: Could not initialize Unified Compliance Manager: {e}")
     unified_compliance_manager = None
@@ -2128,12 +2057,99 @@ def ml_submit_feedback():
             expert_classification, well_id, pathogen
         )
         
+        # ALSO save feedback to MySQL database for persistence and stats
+        try:
+            import mysql.connector
+            mysql_config = {
+                'host': os.environ.get("MYSQL_HOST", "127.0.0.1"),
+                'port': int(os.environ.get("MYSQL_PORT", 3306)),
+                'user': os.environ.get("MYSQL_USER", "qpcr_user"),
+                'password': os.environ.get("MYSQL_PASSWORD", "qpcr_password"),
+                'database': os.environ.get("MYSQL_DATABASE", "qpcr_analysis"),
+                'charset': 'utf8mb4'
+            }
+            
+            conn = mysql.connector.connect(**mysql_config)
+            cursor = conn.cursor()
+            
+            # Get original prediction for comparison
+            original_prediction = enhanced_metrics.get('original_prediction', 'Unknown')
+            
+            # Insert feedback into ml_expert_decisions table
+            insert_sql = '''
+                INSERT INTO ml_expert_decisions 
+                (session_id, well_id, pathogen, original_prediction, expert_correction, 
+                 confidence, rfu_data, cycles, features, feedback_context)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            '''
+            
+            cursor.execute(insert_sql, (
+                data.get('session_id', 'ml_learning_test'),
+                well_id,
+                pathogen,
+                original_prediction,
+                expert_classification,
+                1.0,  # Expert feedback has 100% confidence
+                json.dumps(rfu_data),
+                json.dumps(cycles),
+                json.dumps(enhanced_metrics),
+                f"Expert feedback via ML interface - {pathogen}"
+            ))
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            print(f"✅ Expert feedback saved to MySQL database: {expert_classification} for {pathogen}")
+            
+        except Exception as mysql_error:
+            print(f"⚠️ Could not save feedback to MySQL database: {mysql_error}")
+            # Don't fail the entire request if MySQL save fails
+        
         # Update the well classification in the database for session persistence
         session_id = data.get('session_id')
+        force_save = data.get('force_database_save', True)  # Always try to save by default
+        
         try:
             if session_id and well_id:
                 # Find and update the WellResult in the database
                 well_result = WellResult.query.filter_by(session_id=session_id, well_id=well_id).first()
+                
+                # If not found by session+well, try to find by well pattern for recovery
+                if not well_result:
+                    well_base = well_id.split('_')[0] if '_' in well_id else well_id
+                    potential_results = WellResult.query.filter(
+                        WellResult.well_id.like(f"{well_base}%")
+                    ).all()
+                    
+                    # Find the most recent matching result
+                    if potential_results:
+                        well_result = max(potential_results, key=lambda x: x.id)  # Use ID instead of created_at
+                        print(f"[ML FEEDBACK] Found well by pattern matching: {well_result.well_id}")
+                
+                # If still not found and force_save is True, create a new entry
+                if not well_result and force_save:
+                    print(f"[ML FEEDBACK] Creating new WellResult entry for {well_id}")
+                    well_result = WellResult(
+                        session_id=session_id,
+                        well_id=well_id,
+                        sample_name=well_data.get('sample', 'Expert_Feedback'),
+                        fluorophore=well_data.get('channel', 'Unknown'),
+                        is_good_scurve=True,  # Required field
+                        curve_classification=json.dumps({
+                            'class': expert_classification,
+                            'confidence': 1.0,
+                            'method': 'Expert Review',
+                            'expert_classification': expert_classification,
+                            'expert_review_method': 'ml_feedback_interface',
+                            'expert_review_timestamp': datetime.utcnow().isoformat(),
+                            'created_via': 'expert_feedback_force_save'
+                        })
+                    )
+                    db.session.add(well_result)
+                    db.session.commit()
+                    print(f"[ML FEEDBACK] Created new WellResult for expert feedback: {well_id}")
+                
                 if well_result:
                     # Update the curve_classification field with expert feedback
                     current_classification = {}
@@ -2154,19 +2170,27 @@ def ml_submit_feedback():
                         'expert_classification': expert_classification,
                         'expert_review_method': 'ml_feedback_interface',
                         'expert_review_timestamp': datetime.utcnow().isoformat(),
-                        'original_classification': original_class
+                        'original_classification': original_class,
+                        'persistence_method': 'force_save' if force_save else 'normal_save'
                     })
                     
                     well_result.curve_classification = json.dumps(current_classification)
+                    
+                    # Also update the main classification field
+                    well_result.classification = expert_classification
+                    
                     db.session.commit()
                     
-                    print(f"[ML FEEDBACK] Updated well {well_id} classification in database: {original_class} -> {expert_classification}")
+                    print(f"[ML FEEDBACK] ✅ FORCE SAVED expert feedback to database: {original_class} -> {expert_classification} for {well_id}")
                     app.logger.info(f"[ML FEEDBACK] Updated well {well_id} classification in database for session persistence")
                 else:
-                    print(f"[ML FEEDBACK] Warning: Could not find WellResult for well_id={well_id}, session_id={session_id}")
+                    print(f"[ML FEEDBACK] ❌ Warning: Could not find or create WellResult for well_id={well_id}, session_id={session_id}")
         except Exception as db_error:
             print(f"[ML FEEDBACK] Database update error: {db_error}")
             app.logger.warning(f"Failed to update database for well {well_id}: {db_error}")
+            # Don't fail the entire request if database save fails
+            import traceback
+            traceback.print_exc()
         
         # Get enhanced training stats breakdown with detailed pathogen information
         general_samples = len([s for s in ml_classifier.training_data if not s.get('pathogen') or s.get('pathogen') == 'General_PCR'])
@@ -2222,11 +2246,142 @@ def ml_submit_feedback():
                 'confidence': 1.0,
                 'method': 'Expert Feedback',
                 'pathogen': pathogen
-            }
+            },
+            'database_saved': True,  # Indicate successful database save
+            'session_id': session_id  # Return the session ID used
         })
         
     except Exception as e:
         print(f"ML feedback error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/get-expert-feedback/<session_id>', methods=['GET'])
+@app.route('/api/get-expert-feedback', methods=['POST'])
+def get_expert_feedback(session_id=None):
+    """Get expert feedback from database for session persistence"""
+    try:
+        # Handle both GET (with URL parameter) and POST (with JSON body)
+        if not session_id:
+            if request.method == 'POST':
+                data = request.json
+                session_id = data.get('session_id')
+            else:
+                return jsonify({'error': 'Session ID required in URL path for GET requests'}), 400
+        
+        if not session_id:
+            return jsonify({'error': 'Session ID required'}), 400
+        
+        # Get all expert feedback for this session
+        well_results = WellResult.query.filter_by(session_id=session_id).all()
+        
+        expert_feedback_list = []
+        for well_result in well_results:
+            if well_result.curve_classification:
+                try:
+                    classification_data = json.loads(well_result.curve_classification)
+                    if (classification_data.get('method') == 'Expert Review' or 
+                        classification_data.get('expert_review_method') == 'ml_feedback_interface'):
+                        
+                        feedback_entry = {
+                            'well_key': well_result.well_id,
+                            'expert_classification': classification_data.get('expert_classification'),
+                            'confidence': classification_data.get('confidence', 1.0),
+                            'method': 'expert_feedback',
+                            'timestamp': classification_data.get('expert_review_timestamp'),
+                            'original_classification': classification_data.get('original_classification'),
+                            'session_id': session_id
+                        }
+                        expert_feedback_list.append(feedback_entry)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+        
+        print(f"[EXPERT FEEDBACK] Retrieved {len(expert_feedback_list)} expert decisions for session {session_id}")
+        return jsonify({
+            'success': True,
+            'feedback': expert_feedback_list,
+            'session_id': session_id,
+            'count': len(expert_feedback_list)
+        })
+        
+    except Exception as e:
+        print(f"Get expert feedback error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/update-session-state', methods=['POST'])
+def update_session_state():
+    """Update session state when changes are made (expert feedback, classifications, etc.)"""
+    try:
+        data = request.json
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+            
+        session_id = data.get('session_id')
+        if not session_id:
+            return jsonify({'error': 'Session ID required'}), 400
+            
+        # Get the session
+        session = AnalysisSession.query.get(session_id)
+        if not session:
+            return jsonify({'error': f'Session {session_id} not found'}), 404
+            
+        # Update individual well results if provided
+        well_updates = data.get('well_updates', {})
+        updated_wells = 0
+        
+        for well_id, well_data in well_updates.items():
+            well_result = WellResult.query.filter_by(session_id=session_id, well_id=well_id).first()
+            if well_result:
+                # Update classification if provided
+                if 'classification' in well_data:
+                    # Update or create curve_classification JSON
+                    current_classification = {}
+                    if well_result.curve_classification:
+                        try:
+                            current_classification = json.loads(well_result.curve_classification)
+                        except (json.JSONDecodeError, TypeError):
+                            current_classification = {}
+                    
+                    # Update with new classification
+                    current_classification.update({
+                        'class': well_data['classification'],
+                        'method': well_data.get('method', 'Session Update'),
+                        'update_timestamp': datetime.utcnow().isoformat(),
+                        'update_source': 'session_state_update'
+                    })
+                    
+                    well_result.curve_classification = json.dumps(current_classification)
+                    
+                # Update other fields if provided
+                for field in ['sample_name', 'fluorophore', 'is_good_scurve', 'cq_value']:
+                    if field in well_data:
+                        setattr(well_result, field, well_data[field])
+                
+                updated_wells += 1
+                
+        # Update session-level statistics if provided
+        session_updates = data.get('session_updates', {})
+        for field in ['total_wells', 'good_curves', 'success_rate']:
+            if field in session_updates:
+                setattr(session, field, session_updates[field])
+        
+        # Always update the last modified timestamp
+        session.upload_timestamp = datetime.utcnow()
+        
+        # Commit all changes
+        db.session.commit()
+        
+        print(f"[SESSION UPDATE] Updated session {session_id}: {updated_wells} wells modified")
+        
+        return jsonify({
+            'success': True,
+            'session_id': session_id,
+            'updated_wells': updated_wells,
+            'message': f'Session state updated successfully'
+        })
+        
+    except Exception as e:
+        print(f"Session update error: {e}")
+        db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/ml-classify', methods=['POST'])

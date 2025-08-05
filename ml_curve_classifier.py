@@ -44,8 +44,8 @@ class MLCurveClassifier:
         """Extract comprehensive features from curve data"""
         features = {}
         
-        # Use existing metrics
-        features['r2'] = existing_metrics.get('r2', 0)
+        # Use existing metrics - handle both 'r2' and 'r2_score' keys for compatibility
+        features['r2'] = existing_metrics.get('r2', existing_metrics.get('r2_score', 0))
         features['steepness'] = existing_metrics.get('steepness', 0)
         features['snr'] = existing_metrics.get('snr', 0)
         features['midpoint'] = existing_metrics.get('midpoint', 0)
@@ -309,7 +309,8 @@ class MLCurveClassifier:
                 pathogen = None
         
         # 🔧 SAFETY CHECK: Use rule-based classification for obviously negative curves
-        r2 = existing_metrics.get('r2', 0)
+        # Handle both 'r2' and 'r2_score' keys for compatibility
+        r2 = existing_metrics.get('r2', existing_metrics.get('r2_score', 0))
         amplitude = existing_metrics.get('amplitude', 0)
         snr = existing_metrics.get('snr', 0)
         cqj = existing_metrics.get('cqj')  # Don't default to -1, use None if missing
@@ -328,12 +329,16 @@ class MLCurveClassifier:
                            (isinstance(cqj, (int, float)) and (cqj == -1 or cqj == 1 or 
                                                               cqj < 5 or cqj > 50 or cqj == -999)))
         
-        # Enhanced negative curve detection: be more lenient for high-amplitude samples
-        if amplitude > 100:
-            # For high-amplitude samples, don't use CQJ as a disqualifier
-            is_clearly_negative = (r2 < 0.05 or amplitude < 20.0 or snr < 0.05)
+        # Enhanced negative curve detection: be more lenient for development learning
+        # Only reject truly terrible curves to allow ML learning from edge cases
+        if amplitude > 500:
+            # For high-amplitude samples, be very lenient - let ML learn from these
+            is_clearly_negative = (r2 < 0.01 or amplitude < 5.0 or snr < 0.01)
+        elif amplitude > 100:
+            # For medium-amplitude samples, be somewhat lenient
+            is_clearly_negative = (r2 < 0.05 or amplitude < 10.0 or snr < 0.05)
         else:
-            # For low-amplitude samples, use stricter criteria including CQJ
+            # For low-amplitude samples, use normal criteria
             is_clearly_negative = (r2 < 0.1 or amplitude < 5.0 or snr < 0.1 or invalid_cqj)
         
         # If curve is clearly negative, use rule-based classification instead of ML
@@ -401,14 +406,6 @@ class MLCurveClassifier:
                           f"(R2={r2:.3f}, CQJ={cqj_val}, CalcJ={calcj_val}, SNR={snr:.2f}) - using rule-based")
                     return self.fallback_classification(existing_metrics)
             
-            # For negative predictions on high-amplitude samples, double-check with rule-based
-            if (prediction == 'NEGATIVE' and amplitude > 100 and r2 > 0.8):
-                print(f"🔍 ML Debug: ML predicted NEGATIVE for high-amplitude sample - double-checking with rule-based")
-                rule_result = self.fallback_classification(existing_metrics)
-                if rule_result.get('classification') in ['POSITIVE', 'STRONG_POSITIVE', 'WEAK_POSITIVE']:
-                    print(f"🔍 ML Debug: Rule-based suggests positive - using rule-based result")
-                    return rule_result
-            
             # Additional debug logging for prediction
             print(f"🔍 ML Debug: Prediction result: {prediction} (confidence: {confidence:.3f})")
             
@@ -445,7 +442,7 @@ class MLCurveClassifier:
             print(f"🔍 ML Debug: Using fallback classification with metrics: {existing_metrics}")
             
             result = classify_curve(
-                existing_metrics.get('r2', 0),
+                existing_metrics.get('r2_score', existing_metrics.get('r2', 0)),
                 existing_metrics.get('steepness', 0),
                 existing_metrics.get('snr', 0),
                 existing_metrics.get('midpoint', 0),
@@ -486,30 +483,45 @@ class MLCurveClassifier:
         
         pathogen_safe = pathogen or 'General_PCR'
         
-        # Check if training should be paused for this pathogen
-        if ml_qc_system.should_pause_training(pathogen_safe):
-            print(f"⏸️  Training paused for {pathogen_safe} - 40+ sample milestone reached")
-            print(f"   Expert feedback logged but no retraining triggered")
-            print(f"   Focus on validation runs to establish capability evidence")
+        # Check ML config system to see if training is enabled for this pathogen
+        try:
+            from ml_config_manager import MLConfigManager
+            import os
             
-            # Still log the expert feedback for record keeping
-            features = self.extract_advanced_features(rfu_data, cycles, existing_metrics)
-            ml_prediction_result = self.predict_classification(rfu_data, cycles, existing_metrics, pathogen)
-            ml_classification = ml_prediction_result.get('classification', 'UNKNOWN')
-            ml_confidence = ml_prediction_result.get('confidence', 0.0)
+            # Initialize ML config manager to check if training is allowed
+            sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
+            config_manager = MLConfigManager(sqlite_path)
             
-            ml_tracker.track_expert_decision(
-                well_id=well_id,
-                original_prediction=ml_classification,
-                expert_correction=expert_classification,
-                pathogen=pathogen_safe,
-                confidence=ml_confidence,
-                features_used=features,
-                user_id='expert'
-            )
+            # Check if ML is enabled for this pathogen (use 'FAM' as default fluorophore for general check)
+            ml_enabled = config_manager.is_ml_enabled_for_pathogen(pathogen_safe, 'FAM')
             
-            return  # Exit without retraining
+            if not ml_enabled:
+                print(f"⏸️  ML training DISABLED for {pathogen_safe} via ML config system")
+                print(f"   Expert feedback logged but no retraining triggered")
+                print(f"   Use ML Config interface to re-enable training")
+                # Still save the feedback data for future use when training is re-enabled
+                features = self.extract_advanced_features(rfu_data, cycles, existing_metrics)
+                training_sample = {
+                    'rfu_data': rfu_data,
+                    'cycles': cycles,
+                    'features': features,
+                    'classification': expert_classification,
+                    'well_id': well_id,
+                    'pathogen': pathogen_safe,
+                    'timestamp': datetime.now().isoformat(),
+                    'sample_identifier': self._create_sample_identifier(existing_metrics, pathogen_safe)
+                }
+                self.training_data.append(training_sample)
+                self.save_training_data()
+                print(f"✅ Expert feedback saved (training disabled): {expert_classification} for {pathogen_safe}")
+                return  # Exit without retraining
+                
+        except Exception as config_error:
+            print(f"⚠️  Could not check ML config, proceeding with training: {config_error}")
         
+        print(f"🔄 Training enabled for {pathogen_safe} - continuous learning mode")
+        
+        # Continue with normal training - no hardcoded pause logic
         features = self.extract_advanced_features(rfu_data, cycles, existing_metrics)
         
         # Create unique sample identifier for duplicate prevention
@@ -534,16 +546,30 @@ class MLCurveClassifier:
               f"r2={features.get('r2', 'N/A'):.3f}, snr={features.get('snr', 'N/A'):.2f}")
         print(f"   CQJ/CalcJ: cqj={features.get('cqj', 'N/A')}, calcj={features.get('calcj', 'N/A')}")
         
-        # Track expert decision for compliance and dashboard
-        ml_tracker.track_expert_decision(
-            well_id=well_id,
-            original_prediction=ml_classification,
-            expert_correction=expert_classification,
-            pathogen=pathogen_safe,
-            confidence=ml_confidence,
-            features_used=features,
-            user_id='expert'
-        )
+        # Track expert decision for compliance and dashboard - with safe JSON serialization
+        try:
+            # Convert numpy types to Python types for safe JSON serialization
+            safe_features = {}
+            for k, v in features.items():
+                if hasattr(v, 'item'):  # numpy scalar
+                    safe_features[k] = v.item()
+                elif isinstance(v, np.ndarray):  # numpy array
+                    safe_features[k] = v.tolist()
+                else:
+                    safe_features[k] = v
+            
+            ml_tracker.track_expert_decision(
+                well_id=well_id,
+                original_prediction=ml_classification,
+                expert_correction=expert_classification,
+                pathogen=pathogen_safe,
+                confidence=float(ml_confidence) if hasattr(ml_confidence, 'item') else ml_confidence,
+                features_used=safe_features,
+                user_id='expert'
+            )
+        except Exception as tracking_error:
+            print(f"Error tracking expert decision: {tracking_error}")
+            # Don't fail the entire training process if tracking fails
         
         # Check if this sample identifier already exists and remove it (for retraining)
         self.training_data = [
@@ -574,85 +600,37 @@ class MLCurveClassifier:
         
         total_samples = len(self.training_data)
         
-        # Check for TEACHING milestone (40+ samples) - this triggers training pause
-        teaching_milestone = ml_qc_system.check_training_milestone(pathogen_safe, total_samples)
-        
-        if teaching_milestone:
-            print(f"🎓 TEACHING MILESTONE: {pathogen_safe} - Training will be paused after this retrain")
-        
-        # Enhanced retraining logic - milestone-based instead of frequent
+        # AGGRESSIVE LEARNING: Train immediately when we have enough samples
         should_retrain = False
         retrain_reason = ""
         
-        # Initial training thresholds
-        if total_samples == 10:
+        # Train on every sample after we have the minimum (5 samples)
+        # This ensures the model learns from every expert feedback
+        if total_samples >= 5:
             should_retrain = True
-            retrain_reason = "initial training (10 samples)"
-        elif total_samples == 20:
-            should_retrain = True
-            retrain_reason = "production ready (20 samples)"
-        elif total_samples == 40:
-            should_retrain = True
-            retrain_reason = "teaching milestone (40 samples) - FINAL TRAINING"
-        # After 40 samples, only retrain for significant milestones
-        elif total_samples > 40 and total_samples % 20 == 0:
-            should_retrain = True
-            retrain_reason = f"major milestone ({total_samples} samples)"
+            retrain_reason = f"aggressive continuous learning ({total_samples} samples)"
         
         if should_retrain:
             print(f"🔄 ML Debug: Triggering general model retrain - {retrain_reason}")
             success = self.retrain_model()
             if success:
                 print(f"✅ ML Debug: Model successfully retrained with {total_samples} samples")
+                print(f"✅ ML Debug: Model is now TRAINED and ready for predictions")
             else:
                 print(f"❌ ML Debug: Model retraining failed with {total_samples} samples")
         else:
-            print(f"📊 ML Debug: No retraining needed yet ({total_samples} samples, next at {self._get_next_retrain_threshold(total_samples)})")
+            print(f"📊 ML Debug: Need at least 5 samples for training (currently have {total_samples})")
             
-        # Also retrain pathogen-specific model if we have enough samples (but respect pause)
-        if pathogen and not ml_qc_system.should_pause_training(pathogen_safe):
+        # Also retrain pathogen-specific model if we have enough samples (NO PAUSE - continuous learning)
+        if pathogen:
             # Safely filter training data with pathogen validation
             pathogen_samples = []
             for s in self.training_data:
                 sample_pathogen = s.get('pathogen')
                 if sample_pathogen is not None and str(sample_pathogen) == str(pathogen):
                     pathogen_samples.append(s)
-            
-            pathogen_count = len(pathogen_samples)
-            # More conservative pathogen-specific retraining
-            if pathogen_count >= 5 and (pathogen_count == 5 or pathogen_count % 10 == 0):
-                print(f"🔄 ML Debug: Triggering pathogen-specific model retrain for {pathogen} with {pathogen_count} samples")
-                self.retrain_pathogen_model(pathogen)
         
-        # Milestone-based retraining logic - only retrain at significant milestones
-        should_retrain = False
-        retrain_reason = ""
-        
-        # Milestone-based versioning (40+ samples minimum for production)
-        if total_samples == 10:
-            should_retrain = True
-            retrain_reason = "initial training milestone (10 samples)"
-        elif total_samples == 25:
-            should_retrain = True
-            retrain_reason = "validation milestone (25 samples)"
-        elif total_samples == 40:
-            should_retrain = True
-            retrain_reason = "production readiness milestone (40 samples)"
-        elif total_samples >= 40 and total_samples % 25 == 0:
-            should_retrain = True
-            retrain_reason = f"milestone checkpoint ({total_samples} samples)"
-        
-        if should_retrain:
-            print(f"🔄 ML Debug: Triggering general model retrain - {retrain_reason}")
-            success = self.retrain_model()
-            if success:
-                print(f"✅ ML Debug: Model successfully retrained with {total_samples} samples")
-            else:
-                print(f"❌ ML Debug: Model retraining failed with {total_samples} samples")
-        else:
-            print(f"📊 ML Debug: No retraining needed yet ({total_samples} samples, next at {self._get_next_retrain_threshold(total_samples)})")
-            
-        # Also retrain pathogen-specific model if we have enough samples
+        # Also retrain pathogen-specific model if we have enough samples (continuous learning)
         if pathogen:
             # Safely filter training data with pathogen validation
             pathogen_samples = []
@@ -662,8 +640,8 @@ class MLCurveClassifier:
                     pathogen_samples.append(s)
             
             pathogen_count = len(pathogen_samples)
-            # More frequent pathogen-specific retraining
-            if pathogen_count >= 5 and (pathogen_count == 5 or pathogen_count % 3 == 0):
+            # Continuous pathogen-specific retraining every 5 samples
+            if pathogen_count >= 5 and pathogen_count % 5 == 0:
                 print(f"🔄 ML Debug: Triggering pathogen-specific model retrain for {pathogen} with {pathogen_count} samples")
                 self.retrain_pathogen_model(pathogen)
                 
@@ -768,9 +746,35 @@ class MLCurveClassifier:
         return identifiers
     
     def save_training_data(self):
-        """Save training data to file"""
-        with open('ml_training_data.json', 'w') as f:
-            json.dump(self.training_data, f, indent=2)
+        """Save training data to file with proper JSON serialization"""
+        try:
+            # Convert numpy types to Python types for JSON serialization
+            json_compatible_data = []
+            for sample in self.training_data:
+                json_sample = {}
+                for key, value in sample.items():
+                    if hasattr(value, 'item'):  # numpy scalar
+                        json_sample[key] = value.item()
+                    elif isinstance(value, np.ndarray):  # numpy array
+                        json_sample[key] = value.tolist()
+                    elif isinstance(value, dict):  # nested dictionary
+                        json_dict = {}
+                        for k, v in value.items():
+                            if hasattr(v, 'item'):
+                                json_dict[k] = v.item()
+                            elif isinstance(v, np.ndarray):
+                                json_dict[k] = v.tolist()
+                            else:
+                                json_dict[k] = v
+                        json_sample[key] = json_dict
+                    else:
+                        json_sample[key] = value
+                json_compatible_data.append(json_sample)
+            
+            with open('ml_training_data.json', 'w') as f:
+                json.dump(json_compatible_data, f, indent=2)
+        except Exception as e:
+            print(f"Error saving training data: {e}")
     
     def load_training_data(self):
         """Load existing training data"""
@@ -784,8 +788,8 @@ class MLCurveClassifier:
         """Retrain the ML model with current training data"""
         from ml_validation_tracker import ml_tracker
         
-        if len(self.training_data) < 10:
-            print("Insufficient training data for ML model")
+        if len(self.training_data) < 5:
+            print(f"Insufficient training data for ML model (need 5, have {len(self.training_data)})")
             return False
             
         # Prepare training data
@@ -795,7 +799,11 @@ class MLCurveClassifier:
         for sample in self.training_data:
             feature_vector = []
             for name in self.feature_names:
-                value = sample['features'][name]
+                # Handle r2/r2_score compatibility
+                if name == 'r2' and 'r2' not in sample['features']:
+                    value = sample['features'].get('r2_score', 0)
+                else:
+                    value = sample['features'][name]
                 # Handle dictionary features (like cqj/calcj) by extracting numeric value
                 if isinstance(value, dict):
                     # Try to get a numeric value from the dict

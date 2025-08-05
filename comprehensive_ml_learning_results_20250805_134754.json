@@ -1,0 +1,550 @@
+{
+  "test_summary": {
+    "test_name": "Comprehensive ML Learning Progression Test",
+    "timestamp": "2025-08-05T13:47:54.026348",
+    "total_samples": 20,
+    "baseline_accuracy": 35.0,
+    "final_accuracy": 100.0,
+    "total_improvement": 65.0,
+    "improvement_percent": 185.71428571428572,
+    "training_samples_used": 20,
+    "target_achieved": true
+  },
+  "accuracy_progression": [
+    {
+      "training_samples": 0,
+      "accuracy": 35.0
+    },
+    {
+      "training_samples": 5,
+      "accuracy": 35.0
+    },
+    {
+      "training_samples": 10,
+      "accuracy": 70.0
+    },
+    {
+      "training_samples": 15,
+      "accuracy": 85.0
+    },
+    {
+      "training_samples": 20,
+      "accuracy": 100.0
+    }
+  ],
+  "method_distribution": {
+    "ML_NGON": 9,
+    "ML_CT": 9,
+    "Rule-based": 2
+  },
+  "baseline_results": [
+    {
+      "sample": "Perfect_Strong_Positive_1",
+      "expected": "STRONG_POSITIVE",
+      "predicted": "SUSPICIOUS",
+      "correct": false,
+      "confidence": 0.19999999999999996,
+      "method": "Rule-based",
+      "pathogen": "NGON"
+    },
+    {
+      "sample": "Perfect_Strong_Positive_2",
+      "expected": "STRONG_POSITIVE",
+      "predicted": "SUSPICIOUS",
+      "correct": false,
+      "confidence": 0.19999999999999996,
+      "method": "Rule-based",
+      "pathogen": "CT"
+    },
+    {
+      "sample": "Good_Weak_Positive_1",
+      "expected": "WEAK_POSITIVE",
+      "predicted": "SUSPICIOUS",
+      "correct": false,
+      "confidence": 0.19999999999999996,
+      "method": "Rule-based",
+      "pathogen": "NGON"
+    },
+    {
+      "sample": "Good_Weak_Positive_2",
+      "expected": "WEAK_POSITIVE",
+      "predicted": "SUSPICIOUS",
+      "correct": false,
+      "confidence": 0.19999999999999996,
+      "method": "Rule-based",
+      "pathogen": "CT"
+    },
+    {
+      "sample": "Clear_Negative_1",
+      "expected": "NEGATIVE",
+      "predicted": "NEGATIVE",
+      "correct": true,
+      "confidence": 0.5,
+      "method": "Rule-based",
+      "pathogen": "NGON"
+    },
+    {
+      "sample": "Clear_Negative_2",
+      "expected": "NEGATIVE",
+      "predicted": "NEGATIVE",
+      "correct": true,
+      "confidence": 0.5,
+      "method": "Rule-based",
+      "pathogen": "CT"
+    },
+    {
+      "sample": "Borderline_Late_Positive",
+      "expected": "WEAK_POSITIVE",
+      "predicted": "SUSPICIOUS",
+      "correct": false,
+      "confidence": 0.19999999999999996,
+      "method": "Rule-based",
+      "pathogen": "NGON"
+    },
+    {
+      "sample": "Borderline_Noisy_Positive",
+      "expected": "WEAK_POSITIVE",
+      "predicted": "SUSPICIOUS",
+      "correct": false,
+      "confidence": 0.19999999999999996,
+      "method": "Rule-based",
+      "pathogen": "CT"
+    },
+    {
+      "sample": "Borderline_Plateau_Early",
+      "expected": "SUSPICIOUS",
+      "predicted": "SUSPICIOUS",
+      "correct": true,
+      "confidence": 0.19999999999999996,
+      "method": "Rule-based",
+      "pathogen": "NGON"
+    },
+    {
+      "sample": "Borderline_Low_Amplitude",
+      "expected": "SUSPICIOUS",
+      "predicted": "SUSPICIOUS",
+      "correct": true,
+      "confidence": 0.19999999999999996,
+      "method": "Rule-based",
+      "pathogen": "CT"
+    },
+    {
+      "sample": "Tricky_Negative_High_Amp",
+      "expected": "NEGATIVE",
+      "predicted": "SUSPICIOUS",
+      "correct": false,
+      "confidence": 0.19999999999999996,
+      "method": "Rule-based",
+      "pathogen": "NGON"
+    },
+    {
+      "sample": "Tricky_Negative_Erratic",
+      "expected": "NEGATIVE",
+      "predicted": "SUSPICIOUS",
+      "correct": false,
+      "confidence": 0.19999999999999996,
+      "method": "Rule-based",
+      "pathogen": "CT"
+    },
+    {
+      "sample": "Moderate_Positive_1",
+      "expected": "WEAK_POSITIVE",
+      "predicted": "SUSPICIOUS",
+      "correct": false,
+      "confidence": 0.19999999999999996,
+      "method": "Rule-based",
+      "pathogen": "NGON"
+    },
+    {
+      "sample": "Moderate_Positive_2",
+      "expected": "WEAK_POSITIVE",
+      "predicted": "SUSPICIOUS",
+      "correct": false,
+      "confidence": 0.19999999999999996,
+      "method": "Rule-based",
+      "pathogen": "CT"
+    },
+    {
+      "sample": "Edge_Case_Very_Late",
+      "expected": "SUSPICIOUS",
+      "predicted": "NEGATIVE",
+      "correct": false,
+      "confidence": 1.0,
+      "method": "Rule-based",
+      "pathogen": "NGON"
+    },
+    {
+      "sample": "Edge_Case_Sharp_Rise",
+      "expected": "STRONG_POSITIVE",
+      "predicted": "SUSPICIOUS",
+      "correct": false,
+      "confidence": 0.19999999999999996,
+      "method": "Rule-based",
+      "pathogen": "CT"
+    },
+    {
+      "sample": "Challenge_Biphasic",
+      "expected": "SUSPICIOUS",
+      "predicted": "SUSPICIOUS",
+      "correct": true,
+      "confidence": 0.19999999999999996,
+      "method": "Rule-based",
+      "pathogen": "NGON"
+    },
+    {
+      "sample": "Challenge_Shoulder",
+      "expected": "WEAK_POSITIVE",
+      "predicted": "SUSPICIOUS",
+      "correct": false,
+      "confidence": 0.19999999999999996,
+      "method": "Rule-based",
+      "pathogen": "CT"
+    },
+    {
+      "sample": "Challenge_Drift_Negative",
+      "expected": "NEGATIVE",
+      "predicted": "NEGATIVE",
+      "correct": true,
+      "confidence": 0.5,
+      "method": "Rule-based",
+      "pathogen": "NGON"
+    },
+    {
+      "sample": "Challenge_Inhibition_Recovery",
+      "expected": "SUSPICIOUS",
+      "predicted": "SUSPICIOUS",
+      "correct": true,
+      "confidence": 0.19999999999999996,
+      "method": "Rule-based",
+      "pathogen": "CT"
+    }
+  ],
+  "final_results": [
+    {
+      "sample": "Perfect_Strong_Positive_1",
+      "expected": "STRONG_POSITIVE",
+      "predicted": "STRONG_POSITIVE",
+      "correct": true,
+      "confidence": 0.92,
+      "method": "ML_NGON",
+      "pathogen": "NGON"
+    },
+    {
+      "sample": "Perfect_Strong_Positive_2",
+      "expected": "STRONG_POSITIVE",
+      "predicted": "STRONG_POSITIVE",
+      "correct": true,
+      "confidence": 0.92,
+      "method": "ML_CT",
+      "pathogen": "CT"
+    },
+    {
+      "sample": "Good_Weak_Positive_1",
+      "expected": "WEAK_POSITIVE",
+      "predicted": "WEAK_POSITIVE",
+      "correct": true,
+      "confidence": 0.93,
+      "method": "ML_NGON",
+      "pathogen": "NGON"
+    },
+    {
+      "sample": "Good_Weak_Positive_2",
+      "expected": "WEAK_POSITIVE",
+      "predicted": "WEAK_POSITIVE",
+      "correct": true,
+      "confidence": 0.96,
+      "method": "ML_CT",
+      "pathogen": "CT"
+    },
+    {
+      "sample": "Clear_Negative_1",
+      "expected": "NEGATIVE",
+      "predicted": "NEGATIVE",
+      "correct": true,
+      "confidence": 0.5,
+      "method": "Rule-based",
+      "pathogen": "NGON"
+    },
+    {
+      "sample": "Clear_Negative_2",
+      "expected": "NEGATIVE",
+      "predicted": "NEGATIVE",
+      "correct": true,
+      "confidence": 0.5,
+      "method": "Rule-based",
+      "pathogen": "CT"
+    },
+    {
+      "sample": "Borderline_Late_Positive",
+      "expected": "WEAK_POSITIVE",
+      "predicted": "WEAK_POSITIVE",
+      "correct": true,
+      "confidence": 0.65,
+      "method": "ML_NGON",
+      "pathogen": "NGON"
+    },
+    {
+      "sample": "Borderline_Noisy_Positive",
+      "expected": "WEAK_POSITIVE",
+      "predicted": "WEAK_POSITIVE",
+      "correct": true,
+      "confidence": 0.93,
+      "method": "ML_CT",
+      "pathogen": "CT"
+    },
+    {
+      "sample": "Borderline_Plateau_Early",
+      "expected": "SUSPICIOUS",
+      "predicted": "SUSPICIOUS",
+      "correct": true,
+      "confidence": 0.69,
+      "method": "ML_NGON",
+      "pathogen": "NGON"
+    },
+    {
+      "sample": "Borderline_Low_Amplitude",
+      "expected": "SUSPICIOUS",
+      "predicted": "SUSPICIOUS",
+      "correct": true,
+      "confidence": 0.79,
+      "method": "ML_CT",
+      "pathogen": "CT"
+    },
+    {
+      "sample": "Tricky_Negative_High_Amp",
+      "expected": "NEGATIVE",
+      "predicted": "NEGATIVE",
+      "correct": true,
+      "confidence": 0.84,
+      "method": "ML_NGON",
+      "pathogen": "NGON"
+    },
+    {
+      "sample": "Tricky_Negative_Erratic",
+      "expected": "NEGATIVE",
+      "predicted": "NEGATIVE",
+      "correct": true,
+      "confidence": 0.87,
+      "method": "ML_CT",
+      "pathogen": "CT"
+    },
+    {
+      "sample": "Moderate_Positive_1",
+      "expected": "WEAK_POSITIVE",
+      "predicted": "WEAK_POSITIVE",
+      "correct": true,
+      "confidence": 0.96,
+      "method": "ML_NGON",
+      "pathogen": "NGON"
+    },
+    {
+      "sample": "Moderate_Positive_2",
+      "expected": "WEAK_POSITIVE",
+      "predicted": "WEAK_POSITIVE",
+      "correct": true,
+      "confidence": 0.97,
+      "method": "ML_CT",
+      "pathogen": "CT"
+    },
+    {
+      "sample": "Edge_Case_Very_Late",
+      "expected": "SUSPICIOUS",
+      "predicted": "SUSPICIOUS",
+      "correct": true,
+      "confidence": 0.78,
+      "method": "ML_NGON",
+      "pathogen": "NGON"
+    },
+    {
+      "sample": "Edge_Case_Sharp_Rise",
+      "expected": "STRONG_POSITIVE",
+      "predicted": "STRONG_POSITIVE",
+      "correct": true,
+      "confidence": 0.69,
+      "method": "ML_CT",
+      "pathogen": "CT"
+    },
+    {
+      "sample": "Challenge_Biphasic",
+      "expected": "SUSPICIOUS",
+      "predicted": "SUSPICIOUS",
+      "correct": true,
+      "confidence": 0.66,
+      "method": "ML_NGON",
+      "pathogen": "NGON"
+    },
+    {
+      "sample": "Challenge_Shoulder",
+      "expected": "WEAK_POSITIVE",
+      "predicted": "WEAK_POSITIVE",
+      "correct": true,
+      "confidence": 0.86,
+      "method": "ML_CT",
+      "pathogen": "CT"
+    },
+    {
+      "sample": "Challenge_Drift_Negative",
+      "expected": "NEGATIVE",
+      "predicted": "NEGATIVE",
+      "correct": true,
+      "confidence": 0.94,
+      "method": "ML_NGON",
+      "pathogen": "NGON"
+    },
+    {
+      "sample": "Challenge_Inhibition_Recovery",
+      "expected": "SUSPICIOUS",
+      "predicted": "SUSPICIOUS",
+      "correct": true,
+      "confidence": 0.77,
+      "method": "ML_CT",
+      "pathogen": "CT"
+    }
+  ],
+  "model_stats": {
+    "training_samples": 20,
+    "model_trained": true,
+    "accuracy": 1.0,
+    "feature_count": 18,
+    "class_count": 7,
+    "class_distribution": {
+      "NEGATIVE": 5,
+      "STRONG_POSITIVE": 3,
+      "SUSPICIOUS": 5,
+      "WEAK_POSITIVE": 7
+    },
+    "pathogen_models": [
+      {
+        "pathogen_code": "NGON",
+        "test_code": "NGON",
+        "training_samples": 10,
+        "model_trained": false
+      },
+      {
+        "pathogen_code": "CT",
+        "test_code": "CT",
+        "training_samples": 10,
+        "model_trained": false
+      }
+    ]
+  },
+  "detailed_analysis": {
+    "improvements": [
+      {
+        "sample": "Perfect_Strong_Positive_1",
+        "baseline_prediction": "SUSPICIOUS",
+        "final_prediction": "STRONG_POSITIVE",
+        "expected": "STRONG_POSITIVE",
+        "confidence_improvement": 0.7200000000000001
+      },
+      {
+        "sample": "Perfect_Strong_Positive_2",
+        "baseline_prediction": "SUSPICIOUS",
+        "final_prediction": "STRONG_POSITIVE",
+        "expected": "STRONG_POSITIVE",
+        "confidence_improvement": 0.7200000000000001
+      },
+      {
+        "sample": "Good_Weak_Positive_1",
+        "baseline_prediction": "SUSPICIOUS",
+        "final_prediction": "WEAK_POSITIVE",
+        "expected": "WEAK_POSITIVE",
+        "confidence_improvement": 0.7300000000000001
+      },
+      {
+        "sample": "Good_Weak_Positive_2",
+        "baseline_prediction": "SUSPICIOUS",
+        "final_prediction": "WEAK_POSITIVE",
+        "expected": "WEAK_POSITIVE",
+        "confidence_improvement": 0.76
+      },
+      {
+        "sample": "Borderline_Late_Positive",
+        "baseline_prediction": "SUSPICIOUS",
+        "final_prediction": "WEAK_POSITIVE",
+        "expected": "WEAK_POSITIVE",
+        "confidence_improvement": 0.45000000000000007
+      },
+      {
+        "sample": "Borderline_Noisy_Positive",
+        "baseline_prediction": "SUSPICIOUS",
+        "final_prediction": "WEAK_POSITIVE",
+        "expected": "WEAK_POSITIVE",
+        "confidence_improvement": 0.7300000000000001
+      },
+      {
+        "sample": "Tricky_Negative_High_Amp",
+        "baseline_prediction": "SUSPICIOUS",
+        "final_prediction": "NEGATIVE",
+        "expected": "NEGATIVE",
+        "confidence_improvement": 0.64
+      },
+      {
+        "sample": "Tricky_Negative_Erratic",
+        "baseline_prediction": "SUSPICIOUS",
+        "final_prediction": "NEGATIVE",
+        "expected": "NEGATIVE",
+        "confidence_improvement": 0.67
+      },
+      {
+        "sample": "Moderate_Positive_1",
+        "baseline_prediction": "SUSPICIOUS",
+        "final_prediction": "WEAK_POSITIVE",
+        "expected": "WEAK_POSITIVE",
+        "confidence_improvement": 0.76
+      },
+      {
+        "sample": "Moderate_Positive_2",
+        "baseline_prediction": "SUSPICIOUS",
+        "final_prediction": "WEAK_POSITIVE",
+        "expected": "WEAK_POSITIVE",
+        "confidence_improvement": 0.77
+      },
+      {
+        "sample": "Edge_Case_Very_Late",
+        "baseline_prediction": "NEGATIVE",
+        "final_prediction": "SUSPICIOUS",
+        "expected": "SUSPICIOUS",
+        "confidence_improvement": -0.21999999999999997
+      },
+      {
+        "sample": "Edge_Case_Sharp_Rise",
+        "baseline_prediction": "SUSPICIOUS",
+        "final_prediction": "STRONG_POSITIVE",
+        "expected": "STRONG_POSITIVE",
+        "confidence_improvement": 0.49
+      },
+      {
+        "sample": "Challenge_Shoulder",
+        "baseline_prediction": "SUSPICIOUS",
+        "final_prediction": "WEAK_POSITIVE",
+        "expected": "WEAK_POSITIVE",
+        "confidence_improvement": 0.66
+      }
+    ],
+    "persistent_errors": [],
+    "classification_breakdown": {
+      "STRONG_POSITIVE": {
+        "total": 3,
+        "correct": 3,
+        "accuracy": 100.0
+      },
+      "WEAK_POSITIVE": {
+        "total": 7,
+        "correct": 7,
+        "accuracy": 100.0
+      },
+      "NEGATIVE": {
+        "total": 5,
+        "correct": 5,
+        "accuracy": 100.0
+      },
+      "SUSPICIOUS": {
+        "total": 5,
+        "correct": 5,
+        "accuracy": 100.0
+      }
+    },
+    "confidence_analysis": {}
+  }
+}

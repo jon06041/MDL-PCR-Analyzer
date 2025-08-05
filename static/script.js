@@ -4591,6 +4591,11 @@ async function performAnalysis() {
 
 // Display functions
 async function displayAnalysisResults(results) {
+    // CRITICAL: Load expert feedback from database BEFORE setting global results
+    if (results && results.session_id) {
+        results = await loadExpertFeedbackFromDatabase(results);
+    }
+    
     // Ensure global is set before any UI/chart calls
     window.currentAnalysisResults = results;
     
@@ -5078,9 +5083,9 @@ async function displayMultiFluorophoreResults(results) {
         
         // Use individual_results which is where the actual well data is stored in loaded sessions
         if (currentAnalysisResults && currentAnalysisResults.individual_results) {
-            // Set global variable for pathogen grid access
-            window.currentAnalysisResults = currentAnalysisResults.individual_results;
-            // console.log('🔍 PATHOGEN GRIDS - Set global currentAnalysisResults from individual_results:', Object.keys(currentAnalysisResults.individual_results).length, 'wells');
+            // CRITICAL FIX: Preserve the complete structure, don't replace with just individual_results
+            window.currentAnalysisResults = currentAnalysisResults;
+            // console.log('🔍 PATHOGEN GRIDS - Set global currentAnalysisResults with complete structure:', Object.keys(currentAnalysisResults.individual_results).length, 'wells');
             
             // Control validation already handled above - no need to call again here
             // console.log('🔍 CONTROL VALIDATION - Already applied above, skipping duplicate call');
@@ -9183,6 +9188,9 @@ async function loadSessionDetails(sessionId) {
         // Store session filename for pattern extraction
         window.currentSessionFilename = session.filename;
         
+        // Store session ID for expert feedback functionality
+        window.currentSessionId = sessionId;
+        
         // Transform the session data into the expected format
         // Use stored database values instead of recalculating from individual wells
         const transformedResults = {
@@ -12945,46 +12953,166 @@ function showWellModal(wellKey) {
 function buildModalNavigationList() {
     modalNavigationList = [];
     
-    // Get all visible table rows (respecting current filters)
-    const tableRows = document.querySelectorAll('#resultsTableBody tr');
-    console.log('🔄 Building modal navigation list from', tableRows.length, 'table rows');
-    
-    tableRows.forEach((row, index) => {
-        if (row.style.display !== 'none') {
-            let wellKey = row.getAttribute('data-well-key'); // Use actual wellKey with fluorophore
+    // CRITICAL FIX: Build navigation from ALL analysis results, not just visible table rows
+    // This prevents filters from breaking modal navigation after expert feedback
+    if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+        console.log('🔄 Building modal navigation list from complete analysis results');
+        const allResults = window.currentAnalysisResults.individual_results;
+        const allWellKeys = Object.keys(allResults);
+        
+        console.log('� Total wells in analysis results:', allWellKeys.length);
+        
+        allWellKeys.forEach((wellKey, index) => {
+            const wellData = allResults[wellKey];
+            const sampleName = wellData.sample_name || wellData.sample || 'Unknown Sample';
             
-            // Fallback: if data-well-key is missing, try to construct it from cell content
-            if (!wellKey) {
-                const firstCell = row.querySelector('td:first-child');
-                if (firstCell) {
-                    const wellId = firstCell.textContent.trim();
-                    // For single channel runs, we need to add the fluorophore
-                    if (window.currentAnalysisResults && window.currentAnalysisResults.experiment_info) {
-                        const fluorophore = window.currentAnalysisResults.experiment_info.fluorophore || 'HEX';
-                        wellKey = `${wellId}_${fluorophore}`;
-                    } else {
-                        wellKey = wellId;
-                    }
-                    console.log('🔧 Constructed wellKey from cell content:', wellKey);
-                }
-            }
+            modalNavigationList.push({
+                wellKey: wellKey,
+                sampleName: sampleName
+            });
+            console.log(`📋 Added to navigation: ${wellKey} (${sampleName})`);
+        });
+    } else {
+        console.warn('⚠️ No analysis results available for building modal navigation, trying table rows...');
+        
+        // Fallback: Build from table rows if analysis results not available
+        const tableRows = document.querySelectorAll('#resultsTable tbody tr[data-well-key]');
+        console.log('📊 Fallback: Using table rows, found:', tableRows.length);
+        
+        tableRows.forEach((row) => {
+            const wellKey = row.getAttribute('data-well-key');
+            const sampleCell = row.querySelector('.sample-name');
+            const sampleName = sampleCell ? sampleCell.textContent.trim() : 'Unknown Sample';
             
-            const sampleName = row.cells[1] ? row.cells[1].textContent : 'Unknown Sample';
-            
-            if (wellKey) {
-                modalNavigationList.push({
-                    wellKey: wellKey,
-                    sampleName: sampleName
-                });
-                console.log(`📋 Added to navigation: ${wellKey} (${sampleName})`);
-            } else {
-                console.warn('⚠️ Could not determine wellKey for row', index);
-            }
-        }
-    });
+            modalNavigationList.push({
+                wellKey: wellKey,
+                sampleName: sampleName
+            });
+            console.log(`📋 Added to navigation from table: ${wellKey} (${sampleName})`);
+        });
+    }
     
     console.log('✅ Modal navigation list built with', modalNavigationList.length, 'items');
     console.log('Navigation items:', modalNavigationList.map(item => item.wellKey));
+}
+
+// Expose functions globally for ML feedback interface
+window.buildModalNavigationList = buildModalNavigationList;
+window.updateNavigationButtons = updateNavigationButtons;
+window.populateResultsTable = populateResultsTable;
+window.resetFilterState = resetFilterState;
+
+/**
+ * Load expert feedback from database and merge with analysis results
+ */
+async function loadExpertFeedbackFromDatabase(analysisResults) {
+    try {
+        if (!analysisResults || !analysisResults.session_id) {
+            console.log('📋 PERSISTENCE: No session ID available for expert feedback recovery');
+            return analysisResults;
+        }
+        
+        console.log('📋 PERSISTENCE: Loading expert feedback from database for session:', analysisResults.session_id);
+        
+        // FIXED: Use the correct GET endpoint with session ID in URL
+        const response = await fetch(`/api/get-expert-feedback/${analysisResults.session_id}`);
+        
+        if (response.ok) {
+            const result = await response.json();
+            
+            // FIXED: Use the correct response format with success and feedback array
+            if (result.success && result.feedback && result.feedback.length > 0) {
+                console.log('📋 PERSISTENCE: Merging expert feedback for', result.feedback.length, 'wells');
+                
+                // Merge expert feedback into analysis results
+                for (const feedback of result.feedback) {
+                    const wellKey = feedback.well_key;
+                    if (analysisResults.individual_results && analysisResults.individual_results[wellKey]) {
+                        // Update the curve classification with expert feedback
+                        analysisResults.individual_results[wellKey].curve_classification = {
+                            classification: feedback.expert_classification,
+                            method: 'expert_feedback',
+                            confidence: feedback.confidence || 1.0,
+                            expert_review_method: 'ml_feedback_interface',
+                            timestamp: feedback.timestamp,
+                            original_classification: feedback.original_classification
+                        };
+                        
+                        // Also update the main classification field
+                        analysisResults.individual_results[wellKey].classification = feedback.expert_classification;
+                        
+                        console.log('✅ PERSISTENCE: Restored expert feedback for', wellKey, ':', feedback.expert_classification);
+                    }
+                }
+                
+                console.log('✅ PERSISTENCE: Expert feedback merged successfully');
+            } else {
+                console.log('📋 PERSISTENCE: No expert feedback found for session');
+            }
+        } else {
+            console.warn('⚠️ PERSISTENCE: Failed to load expert feedback:', response.statusText);
+        }
+    } catch (error) {
+        console.error('❌ PERSISTENCE: Error loading expert feedback:', error);
+    }
+    
+    return analysisResults;
+}
+
+// Expose the function globally
+window.loadExpertFeedbackFromDatabase = loadExpertFeedbackFromDatabase;
+
+// Create a robust navigation rebuild system
+window.rebuildModalNavigationIfNeeded = function() {
+    const modal = document.getElementById('chartModal');
+    if (modal && modal.style.display !== 'none' && modal.style.display !== '') {
+        console.log('🔄 Modal is open - rebuilding navigation list');
+        buildModalNavigationList();
+        
+        // Update navigation buttons
+        updateNavigationButtons();
+        
+        // Ensure current modal index is still valid
+        if (window.currentModalIndex >= modalNavigationList.length) {
+            window.currentModalIndex = modalNavigationList.length - 1;
+        }
+        if (window.currentModalIndex < 0 && modalNavigationList.length > 0) {
+            window.currentModalIndex = 0;
+        }
+        
+        console.log(`✅ Navigation rebuilt: ${modalNavigationList.length} items, current index: ${window.currentModalIndex}`);
+    }
+};
+
+// Monitor table changes with MutationObserver
+if (typeof window.tableObserver === 'undefined') {
+    window.tableObserver = new MutationObserver(function(mutations) {
+        let tableChanged = false;
+        mutations.forEach(function(mutation) {
+            if (mutation.type === 'childList' && 
+                (mutation.target.id === 'resultsTableBody' || 
+                 mutation.target.closest('#resultsTableBody'))) {
+                tableChanged = true;
+            }
+        });
+        
+        if (tableChanged) {
+            console.log('📊 Table content changed - checking if modal navigation needs rebuild');
+            setTimeout(() => {
+                window.rebuildModalNavigationIfNeeded();
+            }, 100);
+        }
+    });
+    
+    // Start observing
+    const tableBody = document.getElementById('resultsTableBody');
+    if (tableBody) {
+        window.tableObserver.observe(tableBody, {
+            childList: true,
+            subtree: true
+        });
+        console.log('👁️ Table mutation observer started');
+    }
 }
 
 function updateModalContent(wellKey) {
