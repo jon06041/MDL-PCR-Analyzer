@@ -192,6 +192,16 @@ class MLValidationTracker:
                     )
                 """))
                 
+                # Ensure current_version column exists (for existing tables)
+                try:
+                    conn.execute(text("""
+                        ALTER TABLE ml_model_versions 
+                        ADD COLUMN current_version VARCHAR(50) AFTER pathogen_code
+                    """))
+                except Exception as e:
+                    # Column might already exist, ignore the error
+                    pass
+                
                 # Check if record exists for this pathogen
                 result = conn.execute(text("""
                     SELECT id FROM ml_model_versions WHERE pathogen_code = :pathogen_code

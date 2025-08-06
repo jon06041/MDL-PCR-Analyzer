@@ -308,9 +308,18 @@ class MLCurveClassifier:
             return self.fallback_classification(existing_metrics)
         
         # 🔧 SAFETY CHECK: If training data is too small, use rule-based
-        if len(self.training_data) < 10:
+        if len(self.training_data) < 20:
             print(f"🔍 ML Debug: Insufficient training data ({len(self.training_data)} samples) - using rule-based classification")
             return self.fallback_classification(existing_metrics)
+        
+        # 🔧 CONSERVATIVE LEARNING: For small datasets, require higher confidence
+        min_confidence_threshold = 0.75  # Default threshold
+        if len(self.training_data) < 50:
+            min_confidence_threshold = 0.90  # Higher threshold for small datasets
+            print(f"🔍 ML Debug: Small dataset ({len(self.training_data)} samples) - requiring {min_confidence_threshold:.0%} confidence")
+        elif len(self.training_data) < 100:
+            min_confidence_threshold = 0.85  # Moderate threshold for medium datasets
+            print(f"🔍 ML Debug: Medium dataset ({len(self.training_data)} samples) - requiring {min_confidence_threshold:.0%} confidence")
         
         # Ensure pathogen is a valid string or None
         if pathogen is not None:
@@ -431,10 +440,10 @@ class MLCurveClassifier:
                 return self.fallback_classification(existing_metrics)
             
             # 🔧 CONFIDENCE CHECK: Only use ML prediction if confidence is high enough
-            MIN_CONFIDENCE_THRESHOLD = 0.75  # ML must be 75%+ confident to override rule-based
+            # Use dynamic threshold based on dataset size
             
-            if confidence < MIN_CONFIDENCE_THRESHOLD:
-                print(f"🔍 ML Debug: ML confidence too low ({confidence:.3f} < {MIN_CONFIDENCE_THRESHOLD}) - using rule-based fallback")
+            if confidence < min_confidence_threshold:
+                print(f"🔍 ML Debug: ML confidence too low ({confidence:.3f} < {min_confidence_threshold:.3f}) - using rule-based fallback")
                 return self.fallback_classification(existing_metrics)
             
             # 🔧 CROSS-VALIDATION: For positive predictions, double-check with rule-based logic
@@ -700,9 +709,21 @@ class MLCurveClassifier:
                     pathogen_samples.append(s)
             
             pathogen_count = len(pathogen_samples)
-            # Continuous pathogen-specific retraining every 5 samples
-            if pathogen_count >= 5 and pathogen_count % 5 == 0:
-                print(f"🔄 ML Debug: Triggering pathogen-specific model retrain for {pathogen} with {pathogen_count} samples")
+            # 🔧 CONSERVATIVE RETRAINING: More spaced out retraining to prevent overconfidence
+            # Start at 10 samples, then every 10 samples until 50, then every 20
+            should_retrain = False
+            if pathogen_count == 10:
+                should_retrain = True
+                reason = "initial_pathogen_model"
+            elif pathogen_count <= 50 and pathogen_count % 10 == 0:
+                should_retrain = True  
+                reason = f"regular_retrain_{pathogen_count}_samples"
+            elif pathogen_count > 50 and pathogen_count % 20 == 0:
+                should_retrain = True
+                reason = f"mature_retrain_{pathogen_count}_samples"
+                
+            if should_retrain:
+                print(f"🔄 ML Debug: Triggering pathogen-specific model retrain for {pathogen} with {pathogen_count} samples ({reason})")
                 self.retrain_pathogen_model(pathogen)
                 
     def _get_next_retrain_threshold(self, current_samples):
@@ -922,11 +943,36 @@ class MLCurveClassifier:
         
         accuracy = 0.0
         
-        # Evaluate
+        # Evaluate with conservative accuracy calculation
         if len(X_test) > 0:
             predictions = self.model.predict(X_test_scaled)
-            accuracy = np.mean(predictions == y_test)
-            print(f"Model retrained. Accuracy: {accuracy:.2f}")
+            
+            # 🔧 CONSERVATIVE ACCURACY: Penalize small datasets to prevent overconfidence
+            raw_accuracy = np.mean(predictions == y_test)
+            
+            # Apply confidence penalty for small datasets
+            dataset_size = len(self.training_data)
+            if dataset_size < 20:
+                # Heavy penalty for very small datasets
+                accuracy = raw_accuracy * 0.6  # Max 60% reported accuracy
+                print(f"Model retrained. Raw accuracy: {raw_accuracy:.2f}, Conservative accuracy: {accuracy:.2f} (small dataset penalty)")
+            elif dataset_size < 50:
+                # Moderate penalty for small-medium datasets
+                accuracy = raw_accuracy * 0.8  # Max 80% reported accuracy
+                print(f"Model retrained. Raw accuracy: {raw_accuracy:.2f}, Conservative accuracy: {accuracy:.2f} (dataset size penalty)")
+            else:
+                # Use cross-validation for larger datasets to get realistic accuracy
+                from sklearn.model_selection import cross_val_score
+                try:
+                    cv_scores = cross_val_score(self.model, X_train_scaled, y_train, cv=min(5, len(y_train)//2))
+                    accuracy = np.mean(cv_scores)
+                    print(f"Model retrained. Cross-validated accuracy: {accuracy:.2f} (CV on {len(cv_scores)} folds)")
+                except:
+                    accuracy = raw_accuracy * 0.9  # Conservative fallback
+                    print(f"Model retrained. Conservative accuracy: {accuracy:.2f} (CV failed, using penalty)")
+            
+            # Cap maximum reported accuracy to prevent overconfidence
+            accuracy = min(accuracy, 0.95)  # Never report > 95% accuracy
             
             # Save model
             self.save_model()
@@ -948,10 +994,12 @@ class MLCurveClassifier:
         # Update model version in database
         ml_tracker.update_pathogen_model_version(
             pathogen='General_PCR',
-            version=model_version,
-            accuracy=accuracy,
-            training_samples=len(self.training_data),
-            deployment_status='active'
+            new_version=model_version,
+            metrics={
+                'accuracy': accuracy,
+                'training_samples': len(self.training_data),
+                'deployment_status': 'active'
+            }
         )
         
         return True
@@ -967,8 +1015,8 @@ class MLCurveClassifier:
             if sample_pathogen is not None and str(sample_pathogen) == str(pathogen):
                 pathogen_samples.append(s)
         
-        if len(pathogen_samples) < 5:
-            print(f"Insufficient training data for {pathogen} model")
+        if len(pathogen_samples) < 10:
+            print(f"Insufficient training data for {pathogen} model (need 10+ samples, have {len(pathogen_samples)})")
             return False
             
         # Prepare training data
@@ -1030,15 +1078,34 @@ class MLCurveClassifier:
         # Train model
         pathogen_model.fit(X_scaled, y)
         
-        # Calculate accuracy (simple evaluation on training data for pathogen-specific models)
+        # Calculate accuracy with conservative approach for pathogen-specific models
         predictions = pathogen_model.predict(X_scaled)
-        accuracy = np.mean(predictions == y)
+        raw_accuracy = np.mean(predictions == y)
+        
+        # 🔧 CONSERVATIVE ACCURACY: Apply penalties for small pathogen-specific datasets
+        dataset_size = len(pathogen_samples)
+        if dataset_size < 10:
+            # Very heavy penalty for tiny pathogen datasets
+            accuracy = raw_accuracy * 0.5  # Max 50% reported accuracy
+            print(f"Pathogen-specific model trained for {pathogen} with {len(X)} samples")
+            print(f"   Raw accuracy: {raw_accuracy:.2f}, Conservative accuracy: {accuracy:.2f} (tiny dataset penalty)")
+        elif dataset_size < 20:
+            # Heavy penalty for small pathogen datasets  
+            accuracy = raw_accuracy * 0.7  # Max 70% reported accuracy
+            print(f"Pathogen-specific model trained for {pathogen} with {len(X)} samples")
+            print(f"   Raw accuracy: {raw_accuracy:.2f}, Conservative accuracy: {accuracy:.2f} (small dataset penalty)")
+        else:
+            # Moderate penalty for larger pathogen datasets
+            accuracy = raw_accuracy * 0.9  # Max 90% reported accuracy
+            print(f"Pathogen-specific model trained for {pathogen} with {len(X)} samples")
+            print(f"   Raw accuracy: {raw_accuracy:.2f}, Conservative accuracy: {accuracy:.2f} (dataset size penalty)")
+        
+        # Cap maximum reported accuracy
+        accuracy = min(accuracy, 0.92)  # Never report > 92% accuracy for pathogen models
         
         # Store pathogen-specific model
         self.pathogen_models[pathogen] = pathogen_model
         self.pathogen_scalers[pathogen] = pathogen_scaler
-        
-        print(f"Pathogen-specific model trained for {pathogen} with {len(X)} samples (accuracy: {accuracy:.2f})")
         
         # Track pathogen-specific training event
         model_version = f"1.{len(pathogen_samples)}"
@@ -1054,10 +1121,12 @@ class MLCurveClassifier:
         # Update pathogen-specific model version
         ml_tracker.update_pathogen_model_version(
             pathogen=pathogen,
-            version=model_version,
-            accuracy=accuracy,
-            training_samples=len(pathogen_samples),
-            deployment_status='active'
+            new_version=model_version,
+            metrics={
+                'accuracy': accuracy,
+                'training_samples': len(pathogen_samples),
+                'deployment_status': 'active'
+            }
         )
         
         # Save pathogen models

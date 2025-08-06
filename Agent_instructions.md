@@ -1,6 +1,89 @@
 # MDL-PCR-Analyzer: Comprehensive Agent Instructions & Progress Log
 
-## 🎯 **CURRENT STATUS: Compliance Dashboard Fixed - Evidence Tracking Enhancement Needed** (August 6, 2025)
+## 🎯 **CURRENT STATUS: ML Classification & SNR Fixes** (August 6, 2025)
+
+### ✅ **MAJOR ACHIEVEMENTS: ML Classification System Enhanced**
+
+#### **📍 LATEST WORK**: Weighted Classification & Baseline-Subtracted Data Fixes
+
+**✅ COMPLETED TODAY**:
+1. **Fixed 5th Sample ML Feedback Bug**: Resolved database schema error preventing ML feedback after 5 samples
+2. **Fixed Overconfident ML Model**: Implemented conservative learning with accuracy penalties (60% max for <20 samples)
+3. **Fixed FDA Compliance 503 Errors**: Properly initialized FDAComplianceManager with SQLite
+4. **Implemented Weighted Classification System**: Replaced hard cutoffs with ~30 criteria weighted scoring
+5. **Fixed Baseline-Subtracted Data SNR**: Enhanced SNR calculation for negative baseline values
+
+#### **🚨 WEIGHTED CLASSIFICATION SYSTEM BREAKTHROUGH**
+
+**Problem Solved**: User's excellent curve (R²=0.99, steepness=0.67, Cq=31.86) was incorrectly classified as NEGATIVE due to single poor metric (low SNR from baseline-subtracted data).
+
+**Solution Implemented**: Complete rewrite of `curve_classification.py` with weighted scoring system:
+
+```python
+# OLD SYSTEM (Hard Cutoffs - FAILED)
+if snr < 3.0:
+    return "NEGATIVE"  # ❌ Rejects excellent curves
+
+# NEW SYSTEM (Weighted Scoring - WORKS)
+scores = {
+    'positive_evidence': 0.0,  # Evidence FOR being positive
+    'negative_evidence': 0.0,  # Evidence AGAINST being positive  
+    'confidence_score': 0.0    # How confident we are
+}
+# Considers ~30 criteria with weighted contributions
+```
+
+**Key Improvements**:
+- **Signal Strength vs Curve Quality**: Separates concentration (STRONG/WEAK) from reliability (curve fit)
+- **Override Protection**: Excellent curves (R²≥0.95, steepness≥0.4) cannot be classified as negative
+- **Synergy Bonuses**: Rewards combinations of good metrics
+- **Conservative Penalties**: Applies penalties for poor metrics without absolute rejection
+
+**Results**: User's sample now correctly classified as **WEAK_POSITIVE** (excellent curve quality but low concentration).
+
+#### **🔧 TECHNICAL FIXES IMPLEMENTED**
+
+**1. ML Database Schema Fix** (`ml_validation_tracker.py`):
+```sql
+-- Fixed missing column causing 5th sample ML feedback crash
+ALTER TABLE ml_model_versions ADD COLUMN current_version TEXT DEFAULT '1.0.0';
+```
+
+**2. Conservative ML Learning** (`ml_curve_classifier.py`):
+```python
+# Prevents overconfident accuracy reporting
+if total_samples < 20:
+    conservative_accuracy = min(accuracy, 0.60)  # Max 60% for small datasets
+```
+
+**3. Baseline-Subtracted SNR Fix** (`qpcr_analyzer.py`):
+```python
+# Handles negative baseline values properly
+baseline_abs = abs(baseline_mean) if baseline_mean != 0 else 1.0
+snr = amplitude / baseline_abs  # ✅ Works with negative baselines
+```
+
+**4. Weighted Classification** (`curve_classification.py`):
+```python
+# ~30 criteria with weighted scoring instead of hard cutoffs
+def classify_curve(r2, steepness, snr, midpoint, baseline, amplitude):
+    # Comprehensive weighted scoring system...
+```
+
+#### **📊 VALIDATION RESULTS**
+
+**User's Sample Analysis**:
+- **Input**: R²=0.99, steepness=0.67, Cq=31.86, CalcJ=223, SNR=4.5 (corrected)
+- **OLD SYSTEM**: ❌ NEGATIVE (failed on low SNR)
+- **NEW SYSTEM**: ✅ **WEAK_POSITIVE** (excellent curve quality, low concentration)
+- **Classification Score**: 81.0 (strong evidence)
+- **Confidence**: 68.0% (high confidence in result)
+
+**System Working**: All ML bugs fixed, conservative learning implemented, weighted classification deployed.
+
+---
+
+## 🎯 **PREVIOUS STATUS: Compliance Dashboard Fixed - Evidence Tracking Enhancement Needed** (August 6, 2025)
 
 ### ✅ **MAJOR ACHIEVEMENT: Unified Compliance Dashboard Fully Functional**
 
@@ -554,6 +637,15 @@ When resuming work on any computer:
 - **SOLUTION**: Enhanced `check_signal_to_noise()` in `qpcr_analyzer.py` with proper fallback logic
 - **RESULT**: Excellent curves now get proper SNR values (>1000) and classify as POSITIVE/STRONG_POSITIVE
 - **FILES MODIFIED**: `qpcr_analyzer.py` (enhanced SNR calculation + added 'snr' field to results)
+
+#### **1.1. Baseline-Subtracted Data SNR Fix** ✅ (August 6, 2025)
+- **PROBLEM**: SNR calculation broken for baseline-subtracted qPCR data (negative baseline values)
+- **ROOT CAUSE**: `snr = amplitude / baseline_mean` fails when `baseline_mean` is negative (e.g., -50)
+- **SYMPTOMS**: Excellent curves (R²=0.99, steepness=0.67) incorrectly getting negative/zero SNR values
+- **SOLUTION**: Modified SNR calculation to use `abs(baseline_mean)` for baseline-subtracted data
+- **RESULT**: Proper SNR calculation for baseline-subtracted data (e.g., SNR=4.5 instead of negative)
+- **TECHNICAL**: Added handling for negative baselines in `check_signal_to_noise()` function
+- **FILES MODIFIED**: `qpcr_analyzer.py` (fixed SNR calculation for baseline-subtracted data)
 
 #### **2. Batch ML Request Overflow Fixed** ✅
 - **PROBLEM**: 1536+ excessive ML requests after clicking "Skip Analysis" button

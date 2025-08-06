@@ -579,9 +579,17 @@ except Exception as e:
 
 # Initialize FDA compliance manager with MySQL
 try:
-    # FDA compliance manager will use MySQL connection
-    fda_compliance_manager = None  # Will be updated to use MySQL
-    print("FDA Compliance Manager configured for MySQL")
+    # Import FDA compliance manager and initialize with proper database
+    from fda_compliance_manager import FDAComplianceManager
+    
+    if mysql_configured:
+        # For now, use SQLite for FDA compliance as it's already working
+        # TODO: Update FDAComplianceManager to support MySQL
+        fda_compliance_manager = FDAComplianceManager(db_path=database_path)
+        print("FDA Compliance Manager initialized with SQLite")
+    else:
+        fda_compliance_manager = FDAComplianceManager(db_path=database_path)
+        print("FDA Compliance Manager initialized with SQLite fallback")
 except Exception as e:
     print(f"Warning: Could not initialize FDA Compliance Manager: {e}")
     fda_compliance_manager = None
@@ -4033,17 +4041,62 @@ def log_compliance_event():
             return jsonify({'error': 'Event type is required'}), 400
         
         # Log event and update related requirements
-        result = unified_compliance_manager.log_event(
+        event_id = unified_compliance_manager.log_compliance_event(
             event_type=data['event_type'],
-            metadata=data.get('metadata', {}),
+            event_data=data.get('metadata', {}),
             session_id=data.get('session_id'),
-            user_id=data.get('user_id')
+            user_id=data.get('user_id', 'system')
         )
+        
+        result = {'event_id': event_id, 'status': 'logged'}
         
         return jsonify(result)
         
     except Exception as e:
         app.logger.error(f"Error logging compliance event: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/unified-compliance/summary', methods=['GET'])
+def get_compliance_summary():
+    """Get compliance dashboard summary statistics"""
+    try:
+        if not unified_compliance_manager:
+            return jsonify({'error': 'Unified Compliance Manager not available'}), 503
+        
+        summary = unified_compliance_manager.get_compliance_summary()
+        return jsonify(summary)
+        
+    except Exception as e:
+        app.logger.error(f"Error getting compliance summary: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/unified-compliance/requirements', methods=['GET'])
+def get_unified_compliance_requirements():
+    """Get all compliance requirements with their tracking status"""
+    try:
+        if not unified_compliance_manager:
+            return jsonify({'error': 'Unified Compliance Manager not available'}), 503
+        
+        requirements = unified_compliance_manager.get_requirements_status()
+        return jsonify(requirements)
+        
+    except Exception as e:
+        app.logger.error(f"Error getting compliance requirements: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/unified-compliance/recent-events', methods=['GET'])
+def get_recent_compliance_events():
+    """Get recent compliance events"""
+    try:
+        if not unified_compliance_manager:
+            return jsonify({'error': 'Unified Compliance Manager not available'}), 503
+        
+        limit = int(request.args.get('limit', 10))
+        events = unified_compliance_manager.get_recent_events(limit)
+        return jsonify(events)
+        
+    except Exception as e:
+        app.logger.error(f"Error getting recent events: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/unified-compliance/export', methods=['GET'])

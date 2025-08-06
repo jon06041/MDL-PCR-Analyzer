@@ -114,30 +114,35 @@ def check_signal_to_noise(rfu, min_snr=3.0):
     plateau_start = int(len(rfu) * 0.75)
     signal_level = np.mean(rfu[plateau_start:])
 
-    # Calculate SNR with improved logic to prevent false negatives
+    # Calculate SNR with improved logic for baseline-subtracted data
     amplitude = signal_level - baseline_mean
     
     if baseline_std > 0.01:  # Use standard SNR calculation when there's measurable noise
         snr = amplitude / baseline_std
     else:
         # For very stable baselines (low noise), use amplitude-based calculation
-        if baseline_mean > 0:
-            # Use ratio of amplitude to baseline
-            snr = amplitude / baseline_mean if amplitude > 0 else 0
-        else:
-            # If baseline is near zero, use amplitude directly scaled
-            snr = amplitude / 10.0 if amplitude > 0 else 0
+        # Handle baseline-subtracted data where baseline_mean can be negative
+        baseline_abs = abs(baseline_mean) if baseline_mean != 0 else 1.0
         
-        # For clear amplification cases with stable baselines, ensure reasonable SNR
+        if amplitude > 0:
+            # Use amplitude relative to baseline magnitude for SNR
+            snr = amplitude / baseline_abs
+        else:
+            snr = 0
+        
+        # For baseline-subtracted data, ensure reasonable SNR scaling
         if amplitude > 100:  # Significant amplification (>100 RFU)
             snr = max(snr, 5.0)  # Minimum SNR for clear amplification
         elif amplitude > 50:  # Moderate amplification
             snr = max(snr, 3.0)  # Minimum SNR for moderate amplification
+        elif amplitude > 20:  # Weak amplification  
+            snr = max(snr, 1.5)  # Minimum SNR for weak amplification
     
-    # Debug output for SNR calculation issues
+    # Debug output for SNR calculation issues (including baseline-subtracted data)
     if snr <= 0:
         print(f"🔍 SNR Debug: baseline_mean={baseline_mean:.2f}, baseline_std={baseline_std:.4f}, "
               f"signal_level={signal_level:.2f}, amplitude={amplitude:.2f}, calculated_snr={snr:.2f}")
+        print(f"   Note: For baseline-subtracted data, negative baseline_mean is normal")
 
     return {
         'baseline_mean': baseline_mean,
