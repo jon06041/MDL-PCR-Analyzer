@@ -64,20 +64,29 @@ def confirm_run():
         if not all(field in data for field in required_fields):
             return jsonify({'error': 'Missing required fields: run_log_id, confirmed_by, is_confirmed'}), 400
         
-        # Get the run_id from the log_id
-        import sqlite3
-        conn = sqlite3.connect('qpcr_analysis.db')
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        # Get the run_id from the log_id using MySQL
+        from sqlalchemy import create_engine, text
+        import os
         
-        cursor.execute('SELECT run_id FROM ml_run_logs WHERE id = ?', (data['run_log_id'],))
-        result = cursor.fetchone()
-        conn.close()
+        database_url = os.environ.get("DATABASE_URL")
+        if not database_url:
+            mysql_host = os.environ.get("MYSQL_HOST", "127.0.0.1")
+            mysql_port = os.environ.get("MYSQL_PORT", "3306")
+            mysql_user = os.environ.get("MYSQL_USER", "qpcr_user")
+            mysql_password = os.environ.get("MYSQL_PASSWORD", "qpcr_password")
+            mysql_database = os.environ.get("MYSQL_DATABASE", "qpcr_analysis")
+            database_url = f"mysql+pymysql://{mysql_user}:{mysql_password}@{mysql_host}:{mysql_port}/{mysql_database}?charset=utf8mb4"
         
-        if not result:
+        engine = create_engine(database_url)
+        
+        with engine.connect() as conn:
+            result = conn.execute(text('SELECT run_id FROM ml_run_logs WHERE id = :log_id'), {'log_id': data['run_log_id']})
+            row = result.fetchone()
+        
+        if not row:
             return jsonify({'error': f'Run with log ID {data["run_log_id"]} not found'}), 404
         
-        run_id = result['run_id']
+        run_id = row.run_id
         
         # Use the MLRunManager's confirm_run method
         success = run_manager.confirm_run(

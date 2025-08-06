@@ -743,8 +743,15 @@
                     fetch('/api/compliance/evidence-summary')
                 ]);
 
-                complianceData = await requirementsResponse.json();
-                evidenceData = await evidenceResponse.json();
+                const requirementsData = await requirementsResponse.json();
+                const evidenceResponseData = await evidenceResponse.json();
+
+                // Extract the actual data from API response
+                complianceData = requirementsData.requirements_by_status || {};
+                evidenceData = evidenceResponseData.evidence_summary || {};
+                
+                // Store the total count from the API response
+                window.totalRequirementsCount = requirementsData.total_count || 0;
 
                 updateMetrics();
                 updateOverviewTab();
@@ -764,17 +771,28 @@
         }
 
         function updateMetrics() {
-            const total = Object.values(complianceData).reduce((sum, reqs) => sum + reqs.length, 0);
-            const active = complianceData.active?.length || 0;
-            const ready = complianceData.ready_to_implement?.length || 0;
-            const compliance = total > 0 ? Math.round(((active + (complianceData.partial?.length || 0)) / total) * 100) : 0;
+            // Use the total count from the API response
+            const total = window.totalRequirementsCount || 0;
+            
+            // Handle different status names from the actual API
+            const compliant = (complianceData.compliant?.length || 0) + 
+                            (complianceData.active?.length || 0) + 
+                            (complianceData.implemented?.length || 0);
+            const inProgress = (complianceData.in_progress?.length || 0) + 
+                             (complianceData.partial?.length || 0) + 
+                             (complianceData.ready_to_implement?.length || 0);
+            const needsAttention = (complianceData.needs_attention?.length || 0) + 
+                                 (complianceData.not_implemented?.length || 0);
+            
+            // Calculate compliance percentage (compliant requirements / total)
+            const compliance = total > 0 ? Math.round((compliant / total) * 100) : 0;
             
             // Count total evidence records
-            const totalEvidence = Object.values(evidenceData).reduce((sum, evidence) => sum + (evidence.count || 0), 0);
+            const totalEvidence = evidenceData.total_evidence || 0;
 
             document.getElementById('totalRequirements').textContent = total;
-            document.getElementById('activeTracking').textContent = active;
-            document.getElementById('readyToImplement').textContent = ready;
+            document.getElementById('activeTracking').textContent = compliant;
+            document.getElementById('readyToImplement').textContent = inProgress;
             document.getElementById('evidenceCollected').textContent = totalEvidence;
             document.getElementById('overallScore').textContent = compliance + '%';
         }
@@ -796,37 +814,29 @@
             }
 
             element.innerHTML = requirements.map(req => `
-                <div class="requirement-item" onclick="toggleRequirement('${req.code}')">
+                <div class="requirement-item" onclick="toggleRequirement('${req.id}')">
                     <div class="d-flex justify-content-between align-items-start">
                         <div>
                             <strong>${req.title}</strong>
-                            <br><small class="text-muted">${req.organization} - ${req.section}</small>
+                            <br><small class="text-muted">${req.category || 'General'}</small>
                         </div>
                         <div class="evidence-badges">
-                            ${getEvidenceBadges(req.code)}
+                            ${getEvidenceBadges(req.id)}
                         </div>
                     </div>
-                    <div id="detail-${req.code}" class="requirement-details" style="display: none;">
+                    <div id="detail-${req.id}" class="requirement-details" style="display: none;">
                         <hr>
                         <p><strong>Description:</strong> ${req.description}</p>
                         <div class="evidence-detail">
-                            <h6>Evidence Type:</h6>
-                            <p>${req.evidence_type}</p>
-                            <h6>Tracked Events:</h6>
+                            <h6>Evidence Types:</h6>
                             <div class="d-flex flex-wrap">
-                                ${req.tracked_by.map(event => `
-                                    <span class="badge bg-secondary me-1 mb-1">${event}</span>
+                                ${(req.evidence_types || []).map(type => `
+                                    <span class="badge bg-info me-1 mb-1">${type}</span>
                                 `).join('')}
                             </div>
+                            <h6>Auto Trackable:</h6>
+                            <span class="badge ${req.auto_trackable ? 'bg-success' : 'bg-secondary'}">${req.auto_trackable ? 'Yes' : 'No'}</span>
                         </div>
-                        ${req.implementation_features ? `
-                            <div class="mt-3">
-                                <h6>Implementation Features:</h6>
-                                ${req.implementation_features.map(feature => `
-                                    <div class="implementation-feature">${feature}</div>
-                                `).join('')}
-                            </div>
-                        ` : ''}
                     </div>
                 </div>
             `).join('');
@@ -836,17 +846,18 @@
             const orgContainer = document.getElementById('organizationRequirements');
             const orgData = {};
 
-            // Group requirements by organization
+            // Group requirements by category (since we don't have organization field)
             Object.values(complianceData).flat().forEach(req => {
-                if (!orgData[req.organization]) {
-                    orgData[req.organization] = [];
+                const category = req.category || 'General';
+                if (!orgData[category]) {
+                    orgData[category] = [];
                 }
-                orgData[req.organization].push(req);
+                orgData[category].push(req);
             });
 
-            orgContainer.innerHTML = Object.entries(orgData).map(([org, reqs]) => `
+            orgContainer.innerHTML = Object.entries(orgData).map(([category, reqs]) => `
                 <div class="regulation-section">
-                    <h3><i class="fas fa-building"></i> ${org}</h3>
+                    <h3><i class="fas fa-building"></i> ${category}</h3>
                     <div class="row">
                         <div class="col-md-3">
                             <div class="metric-card">
@@ -879,12 +890,12 @@
                                 <div class="d-flex justify-content-between align-items-start">
                                     <div>
                                         <strong>${req.title}</strong>
-                                        <br><small class="text-muted">${req.section} - ${req.regulation_title}</small>
+                                        <br><small class="text-muted">${req.category}</small>
                                         <br><small>${req.description}</small>
                                     </div>
                                     <div>
                                         <span class="badge bg-${getStatusColor(getImplementationStatus(req))}">${getImplementationStatus(req)}</span>
-                                        ${getEvidenceBadges(req.code)}
+                                        ${getEvidenceBadges(req.id)}
                                     </div>
                                 </div>
                             </div>
@@ -898,22 +909,22 @@
             const evidenceContainer = document.getElementById('evidenceTracking');
             
             evidenceContainer.innerHTML = Object.values(complianceData).flat().map(req => {
-                const evidence = evidenceData[req.code] || {};
-                const hasEvidence = evidence.count > 0;
+                const evidence = evidenceData.by_requirement && evidenceData.by_requirement[req.id] || {};
+                const hasEvidence = (evidence.count || 0) > 0;
                 
                 return `
                     <div class="requirement-item">
                         <div class="d-flex justify-content-between align-items-start">
                             <div class="flex-grow-1">
                                 <h6>${req.title}</h6>
-                                <p class="text-muted mb-2">${req.organization} - ${req.section}</p>
+                                <p class="text-muted mb-2">${req.category || 'General'}</p>
                                 <p class="mb-2">${req.description}</p>
                                 
                                 <div class="evidence-detail">
                                     <div class="row">
                                         <div class="col-md-6">
-                                            <strong>Evidence Type:</strong><br>
-                                            <small>${req.evidence_type}</small>
+                                            <strong>Evidence Types:</strong><br>
+                                            <small>${(req.evidence_types || []).join(', ')}</small>
                                         </div>
                                         <div class="col-md-6">
                                             <strong>Evidence Count:</strong><br>
@@ -924,10 +935,9 @@
                                     </div>
                                     
                                     <div class="mt-2">
-                                        <strong>Tracked Events:</strong><br>
-                                        ${req.tracked_by.map(event => {
-                                            const eventCount = evidence.events && evidence.events[event] || 0;
-                                            return `<span class="badge ${eventCount > 0 ? 'bg-success' : 'bg-secondary'} me-1 mb-1">${event} (${eventCount})</span>`;
+                                        <strong>Evidence Types:</strong><br>
+                                        ${(req.evidence_types || []).map(type => {
+                                            return `<span class="badge bg-info me-1 mb-1">${type}</span>`;
                                         }).join('')}
                                     </div>
                                     
@@ -939,9 +949,9 @@
                                 </div>
                             </div>
                             <div class="text-end">
-                                ${getEvidenceBadges(req.code)}
+                                ${getEvidenceBadges(req.id)}
                                 <br>
-                                <button class="btn btn-sm btn-outline-primary mt-2" onclick="viewEvidence('${req.code}')">
+                                <button class="btn btn-sm btn-outline-primary mt-2" onclick="viewEvidence('${req.id}')">
                                     <i class="fas fa-eye"></i> View Evidence
                                 </button>
                             </div>
@@ -955,7 +965,6 @@
             const roadmapContainer = document.getElementById('implementationRoadmap');
             
             const roadmapItems = Object.values(complianceData).flat()
-                .filter(req => req.implementation_features)
                 .sort((a, b) => {
                     const order = { 'ready_to_implement': 1, 'planned': 2, 'partial': 3, 'active': 4 };
                     return order[getImplementationStatus(a)] - order[getImplementationStatus(b)];
@@ -967,18 +976,16 @@
                         <h6>${req.title}</h6>
                         <span class="badge bg-${getStatusColor(getImplementationStatus(req))}">${getImplementationStatus(req)}</span>
                     </div>
-                    <p class="text-muted mb-2">${req.organization} - ${req.description}</p>
+                    <p class="text-muted mb-2">${req.category} - ${req.description}</p>
                     <div>
-                        <strong>Implementation Features:</strong>
-                        ${req.implementation_features.map(feature => `
-                            <div class="implementation-feature">${feature}</div>
+                        <strong>Evidence Types:</strong>
+                        ${(req.evidence_types || []).map(type => `
+                            <span class="badge bg-info me-1 mb-1">${type}</span>
                         `).join('')}
                     </div>
                     <div class="mt-2">
-                        <strong>Will Track:</strong>
-                        ${req.tracked_by.map(event => `
-                            <span class="badge bg-info me-1">${event}</span>
-                        `).join('')}
+                        <strong>Auto Trackable:</strong>
+                        <span class="badge ${req.auto_trackable ? 'bg-success' : 'bg-secondary'} me-1">${req.auto_trackable ? 'Yes' : 'No'}</span>
                     </div>
                 </div>
             `).join('');
@@ -988,7 +995,7 @@
         function getImplementationStatus(req) {
             // Find which category this requirement is in
             for (const [status, reqs] of Object.entries(complianceData)) {
-                if (reqs.some(r => r.code === req.code)) {
+                if (Array.isArray(reqs) && reqs.some(r => r.id === req.id)) {
                     return status;
                 }
             }
@@ -1017,8 +1024,8 @@
             `;
         }
 
-        function toggleRequirement(reqCode) {
-            const detail = document.getElementById(`detail-${reqCode}`);
+        function toggleRequirement(reqId) {
+            const detail = document.getElementById(`detail-${reqId}`);
             const item = detail.closest('.requirement-item');
             
             if (detail.style.display === 'none') {
@@ -1328,7 +1335,7 @@
                 }
 
                 // Load pathogen models (version control data)
-                const modelsResponse = await fetch('/api/ml-pathogen-models');
+                const modelsResponse = await fetch('/api/ml-validation-dashboard');
                 if (modelsResponse.ok) {
                     const models = await modelsResponse.json();
                     updatePathogenModels(models);
@@ -1404,10 +1411,13 @@
             `).join('');
         }
 
-        function updateConfirmedRuns(runs) {
+        function updateConfirmedRuns(response) {
             const container = document.getElementById('mlConfirmedRunsList');
             
-            if (!runs || runs.length === 0) {
+            // Extract the actual runs array from the API response
+            const runs = response.confirmed_runs || [];
+            
+            if (!Array.isArray(runs) || runs.length === 0) {
                 container.innerHTML = `
                     <div class="text-center text-muted py-4">
                         <i class="fas fa-history fa-3x mb-3"></i>
@@ -1452,39 +1462,44 @@
             `;
         }
 
-        function updatePathogenModels(models) {
+        function updatePathogenModels(response) {
             const container = document.getElementById('mlPathogenModels');
             
-            if (!models || models.length === 0) {
+            // Extract pathogen models from the response
+            const models = response.pathogen_models || {};
+            const modelArray = Object.entries(models);
+            
+            if (modelArray.length === 0) {
                 container.innerHTML = `
                     <div class="text-center text-muted py-4">
                         <i class="fas fa-virus fa-3x mb-3"></i>
                         <h5>No Pathogen Models</h5>
                         <p>ML pathogen models and version data will appear here.</p>
+                        <small>Models will be created automatically when processing samples.</small>
                     </div>
                 `;
                 return;
             }
 
-            container.innerHTML = models.map(model => `
+            container.innerHTML = modelArray.map(([pathogen, model]) => `
                 <div class="card mb-3">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h6 class="mb-0">
-                            <i class="fas fa-virus text-info"></i> ${model.pathogen_code}
+                            <i class="fas fa-virus text-info"></i> ${pathogen}
                         </h6>
-                        <span class="badge bg-primary">v${model.model_version || '1.0'}</span>
+                        <span class="badge bg-primary">v${model.version || '1.0'}</span>
                     </div>
                     <div class="card-body">
                         <div class="row">
                             <div class="col-md-3">
                                 <div class="metric">
-                                    <div class="metric-value">${model.total_runs || 0}</div>
+                                    <div class="metric-value">${model.predictions_count || 0}</div>
                                     <div class="metric-label">Total Runs</div>
                                 </div>
                             </div>
                             <div class="col-md-3">
                                 <div class="metric">
-                                    <div class="metric-value">${model.confirmed_runs || 0}</div>
+                                    <div class="metric-value">${model.predictions_confirmed || 0}</div>
                                     <div class="metric-label">Confirmed</div>
                                 </div>
                             </div>

@@ -4097,6 +4097,53 @@ def export_compliance_data():
         app.logger.error(f"Error exporting compliance data: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/compliance/requirements-by-status', methods=['GET'])
+def get_compliance_requirements_by_status():
+    """Get compliance requirements grouped by status"""
+    try:
+        if not unified_compliance_manager:
+            return jsonify({'error': 'Unified Compliance Manager not available'}), 503
+        
+        # Get all requirements from the unified compliance manager
+        all_requirements = unified_compliance_manager.get_requirements()
+        
+        # Group by status
+        grouped = {}
+        for req in all_requirements.get('requirements', []):
+            status = req.get('implementation_status', 'unknown')
+            if status not in grouped:
+                grouped[status] = []
+            grouped[status].append(req)
+        
+        return jsonify({
+            'success': True,
+            'requirements_by_status': grouped,
+            'total_count': len(all_requirements.get('requirements', []))
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error getting requirements by status: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/compliance/evidence-summary', methods=['GET'])
+def get_compliance_evidence_summary():
+    """Get summary of compliance evidence"""
+    try:
+        if not unified_compliance_manager:
+            return jsonify({'error': 'Unified Compliance Manager not available'}), 503
+        
+        # Get evidence summary from the unified compliance manager
+        evidence_summary = unified_compliance_manager.get_evidence_summary()
+        
+        return jsonify({
+            'success': True,
+            'evidence_summary': evidence_summary
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error getting evidence summary: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/unified-compliance/validate-system', methods=['POST'])
 def validate_system_compliance():
     """Run comprehensive system validation against all compliance requirements"""

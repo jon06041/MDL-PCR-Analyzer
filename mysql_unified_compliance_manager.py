@@ -10,6 +10,7 @@ import hashlib
 import datetime
 from typing import Dict, List, Optional, Any, Tuple
 import logging
+from software_compliance_requirements import SOFTWARE_TRACKABLE_REQUIREMENTS
 
 class MySQLUnifiedComplianceManager:
     def __init__(self, mysql_config: dict):
@@ -25,132 +26,45 @@ class MySQLUnifiedComplianceManager:
         # Only includes requirements that can be satisfied by using this qPCR software
         self.event_to_requirements_map = {
             # ML Model Validation & Versioning
-            'ML_MODEL_TRAINED': ['ML_MODEL_VALIDATION', 'ML_VERSION_CONTROL', 'ML_PERFORMANCE_TRACKING'],
-            'ML_PREDICTION_MADE': ['ML_MODEL_VALIDATION', 'ML_AUDIT_TRAIL'],
-            'ML_FEEDBACK_SUBMITTED': ['ML_EXPERT_VALIDATION', 'ML_CONTINUOUS_LEARNING'],
-            'ML_MODEL_RETRAINED': ['ML_VERSION_CONTROL', 'ML_PERFORMANCE_TRACKING'],
-            'ML_ACCURACY_VALIDATED': ['ML_PERFORMANCE_VALIDATION', 'ML_EXPERT_VALIDATION'],
+            'ML_MODEL_TRAINED': ['AI_ML_VALIDATION', 'AI_ML_VERSION_CONTROL', 'AI_ML_TRAINING_VALIDATION'],
+            'ML_PREDICTION_MADE': ['AI_ML_VALIDATION', 'AI_ML_PERFORMANCE_MONITORING'],
+            'ML_FEEDBACK_SUBMITTED': ['AI_ML_VALIDATION', 'AI_ML_AUDIT_COMPLIANCE'],
+            'ML_MODEL_RETRAINED': ['AI_ML_VERSION_CONTROL', 'AI_ML_TRAINING_VALIDATION'],
+            'ML_ACCURACY_VALIDATED': ['AI_ML_PERFORMANCE_MONITORING', 'AI_ML_VALIDATION'],
             
             # Core qPCR Analysis Activities
-            'ANALYSIS_COMPLETED': ['ANALYSIS_EXECUTION_TRACKING', 'ELECTRONIC_RECORDS_CREATION'],
-            'REPORT_GENERATED': ['ELECTRONIC_REPORT_GENERATION', 'DATA_INTEGRITY_TRACKING'],
-            'THRESHOLD_ADJUSTED': ['SOFTWARE_CONFIGURATION_CONTROL', 'ANALYSIS_PARAMETER_TRACKING'],
-            'DATA_EXPORTED': ['DATA_EXPORT_TRACKING', 'AUDIT_TRAIL_GENERATION'],
+            'ANALYSIS_COMPLETED': ['CFR_11_10_A', 'CFR_11_10_C', 'CLIA_493_1251'],
+            'REPORT_GENERATED': ['CFR_11_10_C', 'CFR_11_10_D', 'ISO_15189_5_8_2'],
+            'THRESHOLD_ADJUSTED': ['CFR_11_10_A', 'CLIA_493_1252'],
+            'DATA_EXPORTED': ['CFR_11_10_C', 'CFR_11_10_D', 'ISO_15189_4_14_7'],
             
             # Quality Control Through Software
-            'QC_ANALYZED': ['QC_SOFTWARE_EXECUTION', 'CONTROL_SAMPLE_TRACKING'],
-            'CONTROL_ANALYZED': ['CONTROL_SAMPLE_VALIDATION', 'QC_SOFTWARE_EXECUTION'],
-            'NEGATIVE_CONTROL_VERIFIED': ['NEGATIVE_CONTROL_TRACKING', 'QC_SOFTWARE_EXECUTION'],
-            'POSITIVE_CONTROL_VERIFIED': ['POSITIVE_CONTROL_TRACKING', 'QC_SOFTWARE_EXECUTION'],
+            'QC_ANALYZED': ['CLIA_493_1251', 'CAP_GEN_43400', 'ISO_15189_5_5_1'],
+            'CONTROL_ANALYZED': ['CLIA_493_1252', 'CAP_GEN_43420'],
+            'NEGATIVE_CONTROL_VERIFIED': ['CLIA_493_1253', 'CAP_GEN_43400'],
+            'POSITIVE_CONTROL_VERIFIED': ['CLIA_493_1253', 'CAP_GEN_43400'],
             
             # System Validation & Software Operation
-            'SYSTEM_VALIDATION': ['SOFTWARE_VALIDATION_EXECUTION', 'SYSTEM_PERFORMANCE_VERIFICATION'],
-            'SOFTWARE_FEATURE_USED': ['SOFTWARE_FUNCTIONALITY_VALIDATION', 'USER_INTERACTION_TRACKING'],
-            'CONFIGURATION_CHANGED': ['SOFTWARE_CONFIGURATION_CONTROL', 'CHANGE_CONTROL_TRACKING'],
+            'SYSTEM_VALIDATION': ['CFR_11_10_A', 'CAP_GEN_40425'],
+            'SOFTWARE_FEATURE_USED': ['CFR_11_10_A', 'CFR_11_10_G'],
+            'CONFIGURATION_CHANGED': ['CFR_11_10_A', 'CFR_11_10_E'],
             
-            # User Training & Competency (Software-Specific)
-            'USER_TRAINING': ['SOFTWARE_TRAINING_COMPLETION', 'USER_COMPETENCY_SOFTWARE'],
-            'TRAINING_COMPLETED': ['SOFTWARE_TRAINING_TRACKING', 'COMPETENCY_VERIFICATION'],
+            # Data Security & Access Control
+            'DATA_ENCRYPTED': ['DATA_ENCRYPTION_TRANSIT', 'DATA_ENCRYPTION_REST'],
+            'USER_LOGIN': ['ACCESS_LOGGING', 'ENTRA_SSO_INTEGRATION'],
+            'ACCESS_DENIED': ['ACCESS_LOGGING', 'ENTRA_CONDITIONAL_ACCESS'],
+            'FILE_UPLOADED': ['CFR_11_10_B', 'DATA_ENCRYPTION_TRANSIT'],
+            'DATA_MODIFIED': ['CFR_11_10_B', 'ACCESS_LOGGING'],
+            
+            # Training & Competency
+            'TRAINING_COMPLETED': ['CLIA_493_1281', 'CAP_GEN_43420'],
+            'COMPETENCY_ASSESSED': ['CLIA_493_1281'],
         }
         
         # SOFTWARE-SPECIFIC compliance requirements with auto-tracking mechanisms
-        self.compliance_requirements = {
-            # ML Model Validation Requirements
-            'ML_MODEL_VALIDATION': {
-                'title': 'ML Model Validation',
-                'description': 'Validation of machine learning models for qPCR analysis',
-                'category': 'ML_VALIDATION',
-                'evidence_types': ['model_training_records', 'accuracy_metrics', 'validation_datasets'],
-                'auto_trackable': True,
-                'tracking_events': ['ML_MODEL_TRAINED', 'ML_PREDICTION_MADE'],
-                'validation_criteria': {
-                    'min_training_samples': 100,
-                    'min_accuracy': 0.85,
-                    'cross_validation_required': True
-                }
-            },
-            
-            'ML_VERSION_CONTROL': {
-                'title': 'ML Model Version Control',
-                'description': 'Version control and change management for ML models',
-                'category': 'ML_VALIDATION',
-                'evidence_types': ['model_versions', 'change_logs', 'deployment_records'],
-                'auto_trackable': True,
-                'tracking_events': ['ML_MODEL_TRAINED', 'ML_MODEL_RETRAINED'],
-                'validation_criteria': {
-                    'version_tracking_required': True,
-                    'change_documentation_required': True
-                }
-            },
-            
-            'ML_EXPERT_VALIDATION': {
-                'title': 'Expert Validation of ML Predictions',
-                'description': 'Expert review and validation of ML prediction accuracy',
-                'category': 'ML_VALIDATION',
-                'evidence_types': ['expert_feedback', 'validation_reports', 'accuracy_assessments'],
-                'auto_trackable': True,
-                'tracking_events': ['ML_FEEDBACK_SUBMITTED', 'ML_ACCURACY_VALIDATED'],
-                'validation_criteria': {
-                    'expert_review_required': True,
-                    'feedback_documentation_required': True
-                }
-            },
-            
-            # Core Analysis Requirements
-            'ANALYSIS_EXECUTION_TRACKING': {
-                'title': 'Analysis Execution Tracking',
-                'description': 'Tracking of qPCR analysis execution and parameters',
-                'category': 'ANALYSIS_CONTROL',
-                'evidence_types': ['analysis_logs', 'parameter_records', 'execution_timestamps'],
-                'auto_trackable': True,
-                'tracking_events': ['ANALYSIS_COMPLETED'],
-                'validation_criteria': {
-                    'parameter_documentation_required': True,
-                    'timestamp_tracking_required': True
-                }
-            },
-            
-            'ELECTRONIC_RECORDS_CREATION': {
-                'title': 'Electronic Records Creation',
-                'description': 'Creation and management of electronic analysis records',
-                'category': 'DATA_INTEGRITY',
-                'evidence_types': ['electronic_records', 'metadata', 'digital_signatures'],
-                'auto_trackable': True,
-                'tracking_events': ['ANALYSIS_COMPLETED', 'REPORT_GENERATED'],
-                'validation_criteria': {
-                    'metadata_required': True,
-                    'integrity_verification_required': True
-                }
-            },
-            
-            # Quality Control Requirements
-            'QC_SOFTWARE_EXECUTION': {
-                'title': 'QC Software Execution',
-                'description': 'Quality control processes executed through software',
-                'category': 'QUALITY_CONTROL',
-                'evidence_types': ['qc_reports', 'control_analysis', 'qc_parameters'],
-                'auto_trackable': True,
-                'tracking_events': ['QC_ANALYZED', 'CONTROL_ANALYZED'],
-                'validation_criteria': {
-                    'qc_documentation_required': True,
-                    'control_analysis_required': True
-                }
-            },
-            
-            # System Validation Requirements
-            'SOFTWARE_VALIDATION_EXECUTION': {
-                'title': 'Software Validation Execution',
-                'description': 'Execution of software validation procedures',
-                'category': 'SYSTEM_VALIDATION',
-                'evidence_types': ['validation_protocols', 'test_results', 'compliance_reports'],
-                'auto_trackable': True,
-                'tracking_events': ['SYSTEM_VALIDATION', 'SOFTWARE_FEATURE_USED'],
-                'validation_criteria': {
-                    'validation_protocol_required': True,
-                    'test_documentation_required': True
-                }
-            }
-        }
+        # Import software-trackable requirements
+        self.compliance_requirements = {}
+        self._load_software_trackable_requirements()
 
     def get_connection(self):
         """Get MySQL database connection"""
@@ -246,6 +160,26 @@ class MySQLUnifiedComplianceManager:
         finally:
             cursor.close()
             conn.close()
+
+    def _load_software_trackable_requirements(self):
+        """Load software-trackable requirements from the imported module"""
+        for org_key, org_data in SOFTWARE_TRACKABLE_REQUIREMENTS.items():
+            trackable_reqs = org_data.get('trackable_requirements', {})
+            
+            for req_id, req_spec in trackable_reqs.items():
+                # Convert to our internal format
+                self.compliance_requirements[req_id] = {
+                    'title': req_spec.get('title', req_id),
+                    'description': req_spec.get('description', ''),
+                    'category': org_key,
+                    'evidence_types': [req_spec.get('evidence_type', 'general_evidence')],
+                    'auto_trackable': req_spec.get('auto_trackable', False),
+                    'tracking_events': req_spec.get('tracked_by', []),
+                    'section': req_spec.get('section', ''),
+                    'organization': org_data.get('organization', org_key)
+                }
+        
+        self.logger.info(f"Loaded {len(self.compliance_requirements)} software-trackable requirements")
 
     def log_compliance_event(self, event_type: str, event_data: dict, user_id: str = 'system', session_id: str = None):
         """Log a compliance-relevant event"""
@@ -498,6 +432,116 @@ class MySQLUnifiedComplianceManager:
         except Exception as e:
             self.logger.error(f"Error getting requirement details: {e}")
             return None
+        finally:
+            cursor.close()
+            conn.close()
+
+    def get_requirements(self, category=None, status=None, regulation_number=None):
+        """Get all compliance requirements with optional filtering"""
+        conn = self.get_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        try:
+            # Get tracking info for all requirements
+            cursor.execute('''
+                SELECT requirement_id, compliance_status, evidence_count, 
+                       compliance_percentage, updated_at
+                FROM compliance_requirements_tracking
+            ''')
+            tracking_data = {row['requirement_id']: row for row in cursor.fetchall()}
+            
+            # Build requirements list
+            requirements = []
+            for req_id, req_spec in self.compliance_requirements.items():
+                tracking_info = tracking_data.get(req_id, {})
+                
+                requirement = {
+                    'id': req_id,
+                    'title': req_spec['title'],
+                    'description': req_spec['description'],
+                    'category': req_spec['category'],
+                    'evidence_types': req_spec['evidence_types'],
+                    'auto_trackable': req_spec.get('auto_trackable', False),
+                    'implementation_status': tracking_info.get('compliance_status', 'not_started'),
+                    'evidence_count': tracking_info.get('evidence_count', 0),
+                    'compliance_percentage': float(tracking_info.get('compliance_percentage', 0)),
+                    'last_updated': tracking_info.get('updated_at')
+                }
+                
+                # Apply filters if provided
+                if category and req_spec['category'] != category:
+                    continue
+                if status and requirement['implementation_status'] != status:
+                    continue
+                
+                requirements.append(requirement)
+            
+            return {'requirements': requirements, 'total_count': len(requirements)}
+            
+        except Exception as e:
+            self.logger.error(f"Error getting requirements: {e}")
+            return {'requirements': [], 'total_count': 0}
+        finally:
+            cursor.close()
+            conn.close()
+
+    def get_evidence_summary(self):
+        """Get summary of compliance evidence"""
+        conn = self.get_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        try:
+            # Get total evidence count
+            cursor.execute('SELECT COUNT(*) as total_evidence FROM compliance_evidence')
+            total_evidence = cursor.fetchone()['total_evidence']
+            
+            # Get evidence by type
+            cursor.execute('''
+                SELECT evidence_type, COUNT(*) as count 
+                FROM compliance_evidence 
+                GROUP BY evidence_type
+            ''')
+            by_type = {row['evidence_type']: row['count'] for row in cursor.fetchall()}
+            
+            # Get evidence by category (based on requirement categories)
+            cursor.execute('''
+                SELECT rt.requirement_id, COUNT(ce.id) as count
+                FROM compliance_requirements_tracking rt
+                LEFT JOIN compliance_evidence ce ON rt.requirement_id = ce.requirement_id
+                GROUP BY rt.requirement_id
+            ''')
+            by_category = {}
+            for row in cursor.fetchall():
+                req_id = row['requirement_id']
+                if req_id in self.compliance_requirements:
+                    category = self.compliance_requirements[req_id]['category']
+                    by_category[category] = by_category.get(category, 0) + row['count']
+            
+            # Get recent additions
+            cursor.execute('''
+                SELECT ce.*, uce.event_type, uce.timestamp
+                FROM compliance_evidence ce
+                JOIN unified_compliance_events uce ON ce.event_id = uce.id
+                ORDER BY ce.created_at DESC
+                LIMIT 5
+            ''')
+            recent_additions = cursor.fetchall()
+            
+            return {
+                'total_evidence': total_evidence,
+                'by_type': by_type,
+                'by_category': by_category,
+                'recent_additions': recent_additions
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error getting evidence summary: {e}")
+            return {
+                'total_evidence': 0,
+                'by_type': {},
+                'by_category': {},
+                'recent_additions': []
+            }
         finally:
             cursor.close()
             conn.close()
