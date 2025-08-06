@@ -302,6 +302,16 @@ class MLCurveClassifier:
         """Predict curve classification using ML model"""
         from ml_validation_tracker import ml_tracker
         
+        # 🔧 CHECK: If no training data or model available, always use rule-based
+        if not self.model_trained or len(self.training_data) == 0:
+            print(f"🔍 ML Debug: No trained model available (trained={self.model_trained}, data_count={len(self.training_data)}) - using rule-based classification")
+            return self.fallback_classification(existing_metrics)
+        
+        # 🔧 SAFETY CHECK: If training data is too small, use rule-based
+        if len(self.training_data) < 10:
+            print(f"🔍 ML Debug: Insufficient training data ({len(self.training_data)} samples) - using rule-based classification")
+            return self.fallback_classification(existing_metrics)
+        
         # Ensure pathogen is a valid string or None
         if pathogen is not None:
             pathogen = str(pathogen).strip()
@@ -406,8 +416,47 @@ class MLCurveClassifier:
                           f"(R2={r2:.3f}, CQJ={cqj_val}, CalcJ={calcj_val}, SNR={snr:.2f}) - using rule-based")
                     return self.fallback_classification(existing_metrics)
             
+            # 🔧 TEMPORARY FIX: ML model may have learned backwards patterns from corrupted training data
+            # For now, only trust ML for clearly negative curves, use rule-based for potential positives
+            r2 = existing_metrics.get('r2_score', existing_metrics.get('r2', 0))
+            amplitude = existing_metrics.get('amplitude', 0)
+            snr = existing_metrics.get('snr', 0)
+            steepness = existing_metrics.get('steepness', 0)
+            
+            # If this looks like it could be a positive curve, use rule-based instead of ML
+            potential_positive = (r2 > 0.85 and amplitude > 100 and snr > 2 and steepness > 0.1)
+            
+            if potential_positive:
+                print(f"🔍 ML Debug: Potential positive curve detected (r2={r2:.3f}, amp={amplitude:.0f}, snr={snr:.1f}) - using rule-based to avoid ML corruption")
+                return self.fallback_classification(existing_metrics)
+            
+            # 🔧 CONFIDENCE CHECK: Only use ML prediction if confidence is high enough
+            MIN_CONFIDENCE_THRESHOLD = 0.75  # ML must be 75%+ confident to override rule-based
+            
+            if confidence < MIN_CONFIDENCE_THRESHOLD:
+                print(f"🔍 ML Debug: ML confidence too low ({confidence:.3f} < {MIN_CONFIDENCE_THRESHOLD}) - using rule-based fallback")
+                return self.fallback_classification(existing_metrics)
+            
+            # 🔧 CROSS-VALIDATION: For positive predictions, double-check with rule-based logic
+            if prediction in ['POSITIVE', 'STRONG_POSITIVE', 'WEAK_POSITIVE']:
+                # Get what rule-based classification would say
+                from curve_classification import classify_curve
+                rule_based_result = classify_curve(
+                    existing_metrics.get('r2_score', existing_metrics.get('r2', 0)),
+                    existing_metrics.get('steepness', 0),
+                    existing_metrics.get('snr', 0),
+                    existing_metrics.get('midpoint', 0),
+                    existing_metrics.get('baseline', 0),
+                    existing_metrics.get('amplitude', 0)
+                )
+                
+                # If rule-based says negative but ML says positive, be conservative and use rule-based
+                if rule_based_result.get('classification') == 'NEGATIVE':
+                    print(f"🔍 ML Debug: ML predicted {prediction} but rule-based says NEGATIVE - using rule-based for safety")
+                    return self.fallback_classification(existing_metrics)
+            
             # Additional debug logging for prediction
-            print(f"🔍 ML Debug: Prediction result: {prediction} (confidence: {confidence:.3f})")
+            print(f"🔍 ML Debug: Prediction result: {prediction} (confidence: {confidence:.3f}) - HIGH CONFIDENCE, using ML")
             
             # Track prediction for dashboard (only if well_id provided to avoid duplicate tracking)
             if well_id:
@@ -454,7 +503,18 @@ class MLCurveClassifier:
             
             # Ensure all values are JSON serializable
             result['method'] = 'Rule-based'
-            result['confidence'] = float(1.0 - result.get('confidence_penalty', 0))
+            
+            # Use the sophisticated confidence scoring from rule-based classification
+            # No need to override - curve_classification.py already provides realistic confidence scores
+            if 'confidence' in result:
+                result['confidence'] = float(result['confidence'])
+            else:
+                # Only fallback if confidence is somehow missing
+                result['confidence'] = 0.5  # Neutral confidence for missing data
+            
+            # Clean up old confidence_penalty field if it exists
+            if 'confidence_penalty' in result:
+                del result['confidence_penalty']
             
             # Convert any numpy types to Python types
             for key, value in result.items():

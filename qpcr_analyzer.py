@@ -18,7 +18,31 @@ def sigmoid(x, L, k, x0, B):
 
 def detect_amplification_start(cycles, rfu, threshold_factor=0.1):
     """
-    Detect when amplification actually starts
+    Detect when amplifi                             # FALLBACK TO RULE-BASED CLASSIFICATION
+                analysis['curve_classification'] = classify_curve(
+                    analysis.get('r2_score'),
+                    analysis.get('steepness'),
+                    analysis.get('quality_filters', {}).get('snr_check', {}).get('snr'),
+                    analysis.get('midpoint'),
+                    analysis.get('baseline'),
+                    analysis.get('amplitude')
+                )
+                # Mark as rule-based method - confidence already calculated by classify_curve
+                analysis['curve_classification']['method'] = 'Rule-based (ML failed)'
+                print(f"🔄 Fallback Result: {analysis['curve_classification'].get('classification')} via Rule-based (confidence: {analysis['curve_classification'].get('confidence', 0.5):.3f})")K TO RULE-BASED CLASSIFICATION
+                analysis['curve_classification'] = classify_curve(
+                    analysis.get('r2_score'),
+                    analysis.get('steepness'),
+                    analysis.get('quality_filters', {}).get('snr_check', {}).get('snr'),
+                    analysis.get('midpoint'),
+                    analysis.get('baseline'),
+                    analysis.get('amplitude')
+                )
+                # Mark as rule-based method and ensure confidence is present
+                analysis['curve_classification']['method'] = 'Rule-based (ML failed)'
+                if 'confidence' not in analysis['curve_classification']:
+                    analysis['curve_classification']['confidence'] = 0.5  # Default fallback confidence
+                print(f"🔄 Fallback Result: {analysis['curve_classification'].get('classification')} via Rule-based (confidence: {analysis['curve_classification'].get('confidence', 0.5):.3f})")lly starts
     Returns the cycle number where significant amplification begins
     """
     cycles = np.array(cycles)
@@ -90,25 +114,30 @@ def check_signal_to_noise(rfu, min_snr=3.0):
     plateau_start = int(len(rfu) * 0.75)
     signal_level = np.mean(rfu[plateau_start:])
 
-    # Calculate SNR with proper fallback for low-noise baselines
+    # Calculate SNR with improved logic to prevent false negatives
+    amplitude = signal_level - baseline_mean
+    
     if baseline_std > 0.01:  # Use standard SNR calculation when there's measurable noise
-        snr = (signal_level - baseline_mean) / baseline_std
+        snr = amplitude / baseline_std
     else:
-        # For very stable baselines (low noise), calculate SNR differently
-        # Use amplitude-based SNR: signal/baseline ratio
+        # For very stable baselines (low noise), use amplitude-based calculation
         if baseline_mean > 0:
-            snr = signal_level / baseline_mean  # Ratio-based SNR
+            # Use ratio of amplitude to baseline
+            snr = amplitude / baseline_mean if amplitude > 0 else 0
         else:
-            snr = signal_level  # Pure signal level if baseline near zero
+            # If baseline is near zero, use amplitude directly scaled
+            snr = amplitude / 10.0 if amplitude > 0 else 0
         
-        # Ensure reasonable SNR values for high-quality curves
-        if signal_level > baseline_mean + 100:  # Significant amplification
-            snr = max(snr, 10.0)  # Minimum SNR for clear amplification
+        # For clear amplification cases with stable baselines, ensure reasonable SNR
+        if amplitude > 100:  # Significant amplification (>100 RFU)
+            snr = max(snr, 5.0)  # Minimum SNR for clear amplification
+        elif amplitude > 50:  # Moderate amplification
+            snr = max(snr, 3.0)  # Minimum SNR for moderate amplification
     
     # Debug output for SNR calculation issues
     if snr <= 0:
         print(f"🔍 SNR Debug: baseline_mean={baseline_mean:.2f}, baseline_std={baseline_std:.4f}, "
-              f"signal_level={signal_level:.2f}, calculated_snr={snr:.2f}")
+              f"signal_level={signal_level:.2f}, amplitude={amplitude:.2f}, calculated_snr={snr:.2f}")
 
     return {
         'baseline_mean': baseline_mean,
@@ -522,23 +551,62 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
         # Add anomaly detection
         anomalies = detect_curve_anomalies(cycles, rfu)
         analysis['anomalies'] = anomalies
-        # Add curve classification
+        # Add curve classification - ML ENABLED WITH CONFIDENCE SAFEGUARDS + RULE-BASED FALLBACK
         if 'error' in analysis:
             analysis['curve_classification'] = {
                 'classification': 'No Data',
                 'reason': analysis.get('error', 'Invalid or missing data'),
-                'confidence_penalty': 1.0,
-                'review_flag': True
+                'confidence': 0.1,  # Very low confidence for error cases
+                'review_flag': True,
+                'method': 'Error'
             }
         else:
-            analysis['curve_classification'] = classify_curve(
-                analysis.get('r2_score'),
-                analysis.get('steepness'),
-                analysis.get('quality_filters', {}).get('snr_check', {}).get('snr'),
-                analysis.get('midpoint'),
-                analysis.get('baseline'),
-                analysis.get('amplitude')
-            )
+            # TRY ML CLASSIFICATION WITH CONFIDENCE SAFEGUARDS FIRST
+            try:
+                from ml_curve_classifier import ml_classifier
+                
+                # Get pathogen from test_code if available
+                pathogen = None
+                test_code = data.get('test_code', None)
+                if test_code:
+                    pathogen = test_code
+                
+                # Prepare comprehensive metrics for ML classifier (30+ metrics)
+                ml_metrics = analysis.copy()
+                # Add CQJ value if we have a threshold
+                threshold = analysis.get('threshold_value')
+                if threshold is not None:
+                    well_for_cqj = {
+                        'raw_cycles': analysis.get('raw_cycles'),
+                        'raw_rfu': analysis.get('raw_rfu'),
+                        'cycles': cycles,
+                        'rfu': rfu
+                    }
+                    cqj_val = py_cqj(well_for_cqj, threshold)
+                    ml_metrics['cqj'] = cqj_val
+                
+                print(f"🤖 ML Analysis: Attempting ML classification for {well_id} with {len(ml_metrics)} metrics")
+                ml_result = ml_classifier.predict_classification(
+                    rfu, cycles, ml_metrics, pathogen, well_id
+                )
+                analysis['curve_classification'] = ml_result
+                print(f"🤖 ML Result: {ml_result.get('classification')} via {ml_result.get('method')} (confidence: {ml_result.get('confidence', 'N/A')})")
+                
+            except Exception as e:
+                print(f"⚠️ ML Failed for {well_id}: {e}")
+                print(f"🔄 Falling back to rule-based classification")
+                # FALLBACK TO RULE-BASED CLASSIFICATION
+                analysis['curve_classification'] = classify_curve(
+                    analysis.get('r2_score'),
+                    analysis.get('steepness'),
+                    analysis.get('quality_filters', {}).get('snr_check', {}).get('snr'),
+                    analysis.get('midpoint'),
+                    analysis.get('baseline'),
+                    analysis.get('amplitude')
+                )
+                # Mark as rule-based method
+                analysis['curve_classification']['method'] = 'Rule-based (ML failed)'
+                print(f"� Fallback Result: {analysis['curve_classification'].get('classification')} via Rule-based")
 
         # --- Per-channel CQJ/CalcJ integration (dict, robust) ---
         # Prepare well dict for CQJ/CalcJ utils
