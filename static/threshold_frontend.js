@@ -4,6 +4,17 @@
 // STANDARDIZED CHANNEL ORDER - ALWAYS FAM, HEX, Texas Red, Cy5
 const STANDARD_CHANNEL_ORDER = ['FAM', 'HEX', 'Texas Red', 'Cy5'];
 
+// Initialize app state for loading guards
+if (!window.appState) {
+    window.appState = {};
+}
+if (!window.appState.uiState) {
+    window.appState.uiState = {
+        isThresholdLoading: false,
+        isChartLoading: false
+    };
+}
+
 // Add this combined initialization function
 
 // Debounce utility to prevent rapid-fire function calls
@@ -52,7 +63,8 @@ window.initializeThresholdSystem = function() {
     
     // 4. Update chart thresholds if chart exists
     if (window.amplificationChart && window.updateChartThresholds) {
-        window.updateChartThresholds();
+        // Use a direct call instead of the wrapper to avoid recursion
+        updateChartThresholds();
     }
     
     // Clear loading flag
@@ -63,7 +75,10 @@ window.initializeThresholdSystem = function() {
 };
 
 // Create debounced version for use in rapid-fire scenarios
-window.initializeThresholdSystemDebounced = debounce(window.initializeThresholdSystem, 300);
+window.initializeThresholdSystemDebounced = debounce(function() {
+    // Use the direct function to avoid wrapper recursion
+    window.initializeThresholdSystem();
+}, 300);
 
 
 // --- Global threshold storage ---
@@ -231,11 +246,26 @@ function initializeThresholdStrategyDropdown() {
 function handleThresholdStrategyDropdownChange(event) {
     const newStrategy = event.target.value;
     
+    // Prevent rapid-fire strategy changes
+    if (handleThresholdStrategyDropdownChange._isChanging) {
+        return;
+    }
+    
+    handleThresholdStrategyDropdownChange._isChanging = true;
+    
     // Update global variable
     window.selectedThresholdStrategy = newStrategy;
     
     // Clear cached thresholds to force recalculation with new strategy
     window.stableChannelThresholds = {};
+    
+    // Debounced recalculation to prevent excessive updates
+    setTimeout(() => {
+        if (window.initializeChannelThresholds) {
+            window.initializeChannelThresholds();
+        }
+        handleThresholdStrategyDropdownChange._isChanging = false;
+    }, 300);
 }
 
 // --- Threshold Storage Functions ---
@@ -741,26 +771,56 @@ window.addThresholdDragging = addThresholdDragging;
 // Modify the existing updateAllChannelThresholds to call addThresholdDragging after updating
 const originalUpdateAllChannelThresholds = window.updateAllChannelThresholds;
 window.updateAllChannelThresholds = function() {
-    originalUpdateAllChannelThresholds.apply(this, arguments);
+    // Prevent infinite recursion
+    if (window.updateAllChannelThresholds._isUpdating) {
+        return;
+    }
     
-    // Add dragging after a small delay to ensure chart is updated
-    setTimeout(addThresholdDragging, 100);
+    window.updateAllChannelThresholds._isUpdating = true;
     
-    // Show threshold status after updating
-    setTimeout(() => {
-        if (window.showThresholdStatus) {
-            const currentStrategy = window.getSelectedThresholdStrategy ? 
-                window.getSelectedThresholdStrategy() : 'unknown';
-            window.showThresholdStatus(currentStrategy);
-        }
-    }, 200);
+    try {
+        originalUpdateAllChannelThresholds.apply(this, arguments);
+        
+        // Add dragging after a small delay to ensure chart is updated
+        setTimeout(() => {
+            addThresholdDragging();
+            window.updateAllChannelThresholds._isUpdating = false;
+        }, 100);
+        
+        // Show threshold status after updating
+        setTimeout(() => {
+            if (window.showThresholdStatus) {
+                const currentStrategy = window.getSelectedThresholdStrategy ? 
+                    window.getSelectedThresholdStrategy() : 'unknown';
+                window.showThresholdStatus(currentStrategy);
+            }
+        }, 200);
+    } catch (error) {
+        window.updateAllChannelThresholds._isUpdating = false;
+        throw error;
+    }
 };
 
 // Also call it after updateSingleChannelThreshold
 const originalUpdateSingleChannelThreshold = window.updateSingleChannelThreshold;
 window.updateSingleChannelThreshold = function() {
-    originalUpdateSingleChannelThreshold.apply(this, arguments);
-    setTimeout(addThresholdDragging, 100);
+    // Prevent infinite recursion
+    if (window.updateSingleChannelThreshold._isUpdating) {
+        return;
+    }
+    
+    window.updateSingleChannelThreshold._isUpdating = true;
+    
+    try {
+        originalUpdateSingleChannelThreshold.apply(this, arguments);
+        setTimeout(() => {
+            addThresholdDragging();
+            window.updateSingleChannelThreshold._isUpdating = false;
+        }, 100);
+    } catch (error) {
+        window.updateSingleChannelThreshold._isUpdating = false;
+        throw error;
+    }
 };
 
 function updateSingleChannelThreshold(fluorophore) {
@@ -1214,7 +1274,16 @@ function updateChartThresholds() {
         return;
     }
     
+    // Set loading flag to prevent recursive calls
+    if (window.appState && window.appState.uiState) {
+        window.appState.uiState.isChartLoading = true;
+    }
+    
     if (!window.amplificationChart) {
+        // Clear loading flag before returning
+        if (window.appState && window.appState.uiState) {
+            window.appState.uiState.isChartLoading = false;
+        }
         return;
     }
     
@@ -1226,12 +1295,20 @@ function updateChartThresholds() {
                 initializeChannelThresholds();
             }
         }
+        // Clear loading flag before returning
+        if (window.appState && window.appState.uiState) {
+            window.appState.uiState.isChartLoading = false;
+        }
         return;
     }
     
     // Check if this is a single-well chart or multi-well chart
     const datasets = window.amplificationChart.data?.datasets || [];
     if (datasets.length === 0) {
+        // Clear loading flag before returning
+        if (window.appState && window.appState.uiState) {
+            window.appState.uiState.isChartLoading = false;
+        }
         return;
     }
     
@@ -1246,6 +1323,11 @@ function updateChartThresholds() {
     } else {
         // Multi-channel chart - apply thresholds for all channels
         if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
+    }
+    
+    // Clear loading flag after chart update
+    if (window.appState && window.appState.uiState) {
+        window.appState.uiState.isChartLoading = false;
     }
 }
 
@@ -2056,12 +2138,20 @@ function applyThresholdStrategy(strategy) {
  * This function is required by threshold_frontend.js for threshold calculations
  */
 window.extractChannelControlWells = function() {
+    // Add loading guard to prevent excessive calls
+    if (window.extractChannelControlWells._isExtracting) {
+        return;
+    }
+    
     if (!window.currentAnalysisResults || !window.currentAnalysisResults.individual_results) {
         return;
     }
     
-    window.channelControlWells = {};
-    const results = window.currentAnalysisResults.individual_results;
+    window.extractChannelControlWells._isExtracting = true;
+    
+    try {
+        window.channelControlWells = {};
+        const results = window.currentAnalysisResults.individual_results;
     
     // Group wells by channel (fluorophore)
     Object.entries(results).forEach(([wellKey, well]) => {
@@ -2108,6 +2198,10 @@ window.extractChannelControlWells = function() {
     // Log summary for debugging
     Object.entries(window.channelControlWells).forEach(([channel, controls]) => {
     });
+    
+    } finally {
+        window.extractChannelControlWells._isExtracting = false;
+    }
 };
 // --- End Additional Functions ---
 
