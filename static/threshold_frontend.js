@@ -375,29 +375,70 @@ function updateAllChannelThresholds() {
     // Add new threshold annotations for visible channels
     const currentScale = window.currentScaleMode;
     
+    // First, collect all channel thresholds for intelligent positioning
+    const channelThresholds = [];
     Array.from(visibleChannels).forEach(channel => {
         const threshold = getCurrentChannelThreshold(channel, currentScale);
-        
         if (threshold !== null && threshold !== undefined && !isNaN(threshold)) {
-            const annotationKey = `threshold_${channel}`;
-            annotations[annotationKey] = {
-                type: 'line',
-                yMin: threshold,
-                yMax: threshold,
-                borderColor: getChannelColor(channel),
-                borderWidth: 2,
-                borderDash: [5, 5],
-                label: {
-                    display: true,
-                    content: `${channel}: ${threshold.toFixed(2)}`,
-                    position: 'start',
-                    backgroundColor: 'rgba(255,255,255,0.8)',
-                    color: getChannelColor(channel),
-                    font: { size: 10, weight: 'bold' }
-                }
-            };
-        } else {
+            channelThresholds.push({ channel, threshold });
         }
+    });
+    
+    // Sort by threshold value to handle overlapping labels
+    channelThresholds.sort((a, b) => a.threshold - b.threshold);
+    
+    // Create annotations with staggered positioning for overlapping thresholds
+    channelThresholds.forEach((item, index) => {
+        const { channel, threshold } = item;
+        
+        // Check for overlapping thresholds (within 5% of each other)
+        const overlappingIndices = [];
+        for (let i = 0; i < channelThresholds.length; i++) {
+            const otherThreshold = channelThresholds[i].threshold;
+            if (Math.abs(threshold - otherThreshold) / Math.max(threshold, otherThreshold) < 0.05) {
+                overlappingIndices.push(i);
+            }
+        }
+        
+        // Calculate label offset for overlapping thresholds
+        const overlapPosition = overlappingIndices.indexOf(index);
+        const totalOverlapping = overlappingIndices.length;
+        
+        // Distribute labels horizontally across the chart when they overlap
+        let labelPosition = 'start';
+        let xAdjust = 0;
+        
+        if (totalOverlapping > 1) {
+            // Stagger labels horizontally: left, center-left, center-right, right
+            const positions = ['start', 'center', 'end'];
+            const positionIndex = overlapPosition % positions.length;
+            labelPosition = positions[positionIndex];
+            
+            // Add small x offset to further separate labels
+            xAdjust = (overlapPosition - Math.floor(totalOverlapping / 2)) * 30;
+        }
+        
+        const annotationKey = `threshold_${channel}`;
+        annotations[annotationKey] = {
+            type: 'line',
+            yMin: threshold,
+            yMax: threshold,
+            borderColor: getChannelColor(channel),
+            borderWidth: 2,
+            borderDash: [5, 5],
+            label: {
+                display: true,
+                content: `${channel}: ${threshold.toFixed(2)}`,
+                position: labelPosition,
+                xAdjust: xAdjust,
+                backgroundColor: 'rgba(255,255,255,0.9)',
+                color: getChannelColor(channel),
+                font: { size: 10, weight: 'bold' },
+                borderColor: getChannelColor(channel),
+                borderWidth: 1,
+                padding: 4
+            }
+        };
     });
     
     // Update chart
@@ -751,6 +792,45 @@ function updateSingleChannelThreshold(fluorophore) {
     const threshold = getCurrentChannelThreshold(fluorophore, currentScale);
     
     if (threshold !== null && threshold !== undefined && !isNaN(threshold)) {
+        // Get all existing threshold values to determine positioning
+        const existingThresholds = [];
+        Object.keys(annotations).forEach(key => {
+            if (key.startsWith('threshold_') && key !== `threshold_${fluorophore}`) {
+                const annotation = annotations[key];
+                if (annotation && annotation.yMin !== undefined) {
+                    existingThresholds.push({
+                        channel: key.replace('threshold_', ''),
+                        value: annotation.yMin
+                    });
+                }
+            }
+        });
+        
+        // Add current threshold
+        existingThresholds.push({ channel: fluorophore, value: threshold });
+        
+        // Sort to determine overlap
+        existingThresholds.sort((a, b) => a.value - b.value);
+        
+        // Find overlapping thresholds (within 5% of each other)
+        const overlappingThresholds = existingThresholds.filter(t => 
+            Math.abs(t.value - threshold) / Math.max(t.value, threshold) < 0.05
+        );
+        
+        // Determine position for this channel
+        const currentIndex = overlappingThresholds.findIndex(t => t.channel === fluorophore);
+        const totalOverlapping = overlappingThresholds.length;
+        
+        let labelPosition = 'start';
+        let xAdjust = 0;
+        
+        if (totalOverlapping > 1) {
+            const positions = ['start', 'center', 'end'];
+            const positionIndex = currentIndex % positions.length;
+            labelPosition = positions[positionIndex];
+            xAdjust = (currentIndex - Math.floor(totalOverlapping / 2)) * 30;
+        }
+        
         const annotationKey = `threshold_${fluorophore}`;
         annotations[annotationKey] = {
             type: 'line',
@@ -762,10 +842,14 @@ function updateSingleChannelThreshold(fluorophore) {
             label: {
                 display: true,
                 content: `${fluorophore}: ${threshold.toFixed(2)}`,
-                position: 'start',
-                backgroundColor: 'rgba(255,255,255,0.8)',
+                position: labelPosition,
+                xAdjust: xAdjust,
+                backgroundColor: 'rgba(255,255,255,0.9)',
                 color: getChannelColor(fluorophore),
-                font: { size: 10, weight: 'bold' }
+                font: { size: 10, weight: 'bold' },
+                borderColor: getChannelColor(fluorophore),
+                borderWidth: 1,
+                padding: 4
             }
         };
 } else {
@@ -1422,6 +1506,14 @@ function createThresholdAnnotation(threshold, fluorophore, color = 'red', index 
     const adjustedThreshold = currentScaleMode === 'log' ? 
         Math.max(threshold, currentLogMin) : threshold;
     
+    // Intelligent label positioning based on index to avoid overlaps
+    const positions = ['start', 'center', 'end'];
+    const positionIndex = index % positions.length;
+    const labelPosition = positions[positionIndex];
+    
+    // Add x offset to further separate overlapping labels
+    const xAdjust = (index - 1) * 25; // Spread labels horizontally
+    
     return {
         type: 'line',
         yMin: adjustedThreshold,
@@ -1432,10 +1524,13 @@ function createThresholdAnnotation(threshold, fluorophore, color = 'red', index 
         label: {
             content: `${fluorophore}: ${adjustedThreshold.toFixed(2)}`,
             enabled: true,
-            position: index % 2 === 0 ? 'start' : 'end',
-            backgroundColor: color || getFluorophoreColor(fluorophore),
-            color: 'white',
+            position: labelPosition,
+            xAdjust: xAdjust,
+            backgroundColor: 'rgba(255,255,255,0.9)',
+            color: color || getFluorophoreColor(fluorophore),
             font: { weight: 'bold', size: 10 },
+            borderColor: color || getFluorophoreColor(fluorophore),
+            borderWidth: 1,
             padding: 4
         }
     };
