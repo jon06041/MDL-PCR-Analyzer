@@ -616,6 +616,7 @@
                 if (reqResponse.ok) {
                     const requirementsData = await reqResponse.json();
                     dashboardData.detailed_requirements = requirementsData.requirements || [];
+                    dashboardData.actual_total_requirements = requirementsData.total_count || 0;
                 }
                 
                 renderEnhancedDashboard(dashboardData);
@@ -638,7 +639,7 @@
             const scoreElement = document.getElementById('overallScore');
             
             // Update overall compliance score
-            const complianceScore = data.compliance_percentage || 0;
+            const complianceScore = data.overall_metrics?.overall_percentage || 0;
             scoreElement.textContent = `${complianceScore.toFixed(1)}%`;
             scoreElement.className = 'score-number';
             if (complianceScore >= 90) {
@@ -657,35 +658,41 @@
         }
 
         function renderComplianceStats(data) {
+            // Calculate actual metrics from detailed requirements
+            const requirements = data.detailed_requirements || [];
+            const totalEvidence = requirements.reduce((sum, req) => sum + (req.evidence_count || 0), 0);
+            const currentlyTracking = requirements.filter(req => req.evidence_count > 0 && req.last_updated).length;
+            const fullyCompliant = requirements.filter(req => req.compliance_percentage >= 90).length;
+            
             const stats = [
                 {
-                    number: data.compliance_percentage?.toFixed(1) || '0',
+                    number: data.overall_metrics?.overall_percentage?.toFixed(1) || '0',
                     label: 'Overall Compliance',
                     suffix: '%',
-                    color: data.compliance_percentage >= 90 ? '#27ae60' : 
-                           data.compliance_percentage >= 70 ? '#f39c12' : '#e74c3c'
+                    color: data.overall_metrics?.overall_percentage >= 90 ? '#27ae60' : 
+                           data.overall_metrics?.overall_percentage >= 70 ? '#f39c12' : '#e74c3c'
                 },
                 {
-                    number: data.total_requirements || '0',
+                    number: data.actual_total_requirements || data.overall_metrics?.total_requirements || '0',
                     label: 'Total Requirements',
                     suffix: '',
                     color: '#3498db'
                 },
                 {
-                    number: data.compliant_count || '0', 
+                    number: fullyCompliant,
                     label: 'Fully Compliant',
                     suffix: '',
                     color: '#27ae60'
                 },
                 {
-                    number: data.attention_needed?.length || '0',
-                    label: 'Need Attention',
+                    number: currentlyTracking,
+                    label: 'Currently Tracking',
                     suffix: '',
-                    color: '#e74c3c'
+                    color: '#f39c12'
                 },
                 {
-                    number: data.recent_activities?.length || '0',
-                    label: 'Recent Activities',
+                    number: totalEvidence,
+                    label: 'Evidence Records',
                     suffix: '',
                     color: '#9b59b6'
                 }
@@ -709,7 +716,7 @@
             const regulationGroups = {};
             
             requirements.forEach(req => {
-                const regulation = req.regulation_source || 'Other';
+                const regulation = req.category || 'Other';  // Use category field from API
                 if (!regulationGroups[regulation]) {
                     regulationGroups[regulation] = [];
                 }
@@ -717,16 +724,17 @@
             });
 
             return Object.entries(regulationGroups).map(([regulation, reqs]) => {
-                const compliantCount = reqs.filter(r => r.compliance_status === 'compliant').length;
+                const compliantCount = reqs.filter(r => r.compliance_percentage >= 90).length;
                 const compliancePercentage = reqs.length > 0 ? (compliantCount / reqs.length) * 100 : 0;
+                const avgCompliance = reqs.reduce((sum, r) => sum + (r.compliance_percentage || 0), 0) / reqs.length;
                 const regulationName = getRegulationDisplayName(regulation);
                 
                 return `
                     <div class="regulation-section">
                         <div class="section-header">
                             <div class="section-title">${regulationName}</div>
-                            <div class="section-score" style="background: ${compliancePercentage >= 90 ? '#28a745' : compliancePercentage >= 70 ? '#ffc107' : '#dc3545'}">
-                                ${compliancePercentage.toFixed(1)}% (${compliantCount}/${reqs.length})
+                            <div class="section-score" style="background: ${avgCompliance >= 90 ? '#28a745' : avgCompliance >= 70 ? '#ffc107' : '#dc3545'}">
+                                ${avgCompliance.toFixed(1)}% avg (${compliantCount}/${reqs.length} compliant)
                             </div>
                         </div>
                         <div class="requirements-list">
@@ -738,30 +746,37 @@
         }
 
         function renderRequirementItem(req) {
-            const statusClass = `status-${req.compliance_status?.replace('_', '-') || 'unknown'}`;
-            const statusText = req.compliance_status?.replace('_', ' ').toUpperCase() || 'UNKNOWN';
+            const statusClass = `status-${req.implementation_status?.replace('_', '-') || 'unknown'}`;
+            const statusText = req.implementation_status?.replace('_', ' ').toUpperCase() || 'UNKNOWN';
+            const compliancePercent = req.compliance_percentage || 0;
             
             return `
                 <div class="requirement-item">
                     <div class="requirement-header">
-                        <div class="requirement-title">${req.requirement_title || req.requirement_name}</div>
+                        <div class="requirement-title">${req.title}</div>
                         <div class="requirement-status ${statusClass}">${statusText}</div>
                     </div>
                     <div class="requirement-details">
                         <div class="requirement-description">${req.description || 'No description available'}</div>
                         <div class="requirement-info">
-                            <strong>Section:</strong> ${req.section_number || 'N/A'} | 
-                            <strong>Priority:</strong> ${req.criticality_level || 'medium'} |
-                            <strong>Score:</strong> ${req.current_score || 0}/${req.target_score || 100}
+                            <strong>ID:</strong> ${req.id} | 
+                            <strong>Compliance:</strong> ${compliancePercent.toFixed(1)}% |
+                            <strong>Evidence:</strong> ${req.evidence_count || 0} records |
+                            <strong>Auto-Trackable:</strong> ${req.auto_trackable ? 'Yes' : 'No'}
                         </div>
                         ${renderRequirementEvidence(req)}
                         <div class="requirement-actions">
-                            <button class="action-btn" onclick="viewRequirementDetails('${req.requirement_code}')">
+                            <button class="action-btn" onclick="viewRequirementDetails('${req.id}')">
                                 📋 View Details
                             </button>
-                            <button class="action-btn" onclick="addEvidenceForRequirement('${req.requirement_code}')">
+                            <button class="action-btn" onclick="addEvidenceForRequirement('${req.id}')">
                                 📝 Add Evidence
                             </button>
+                            ${req.evidence_count === 0 ? `
+                                <button class="action-btn" onclick="runDemoForRequirement('${req.id}')" style="background: #28a745; color: white;">
+                                    🚀 Run Demo
+                                </button>
+                            ` : ''}
                         </div>
                     </div>
                 </div>
@@ -769,9 +784,22 @@
         }
 
         function renderRequirementEvidence(req) {
-            // This would need to be populated with actual evidence data
-            // For now, showing placeholder structure
-            const evidenceCount = Math.floor(Math.random() * 5) + 1; // Simulated for demo
+            const evidenceCount = req.evidence_count || 0;
+            const evidenceTypes = req.evidence_types || [];
+            
+            if (evidenceCount === 0) {
+                return `
+                    <div class="requirement-evidence">
+                        <div class="evidence-header">
+                            <span>📋 Evidence</span>
+                            <span class="evidence-count">0</span>
+                        </div>
+                        <div style="padding: 10px; color: #6c757d; font-style: italic;">
+                            No evidence recorded yet. Run qPCR analysis to generate compliance evidence.
+                        </div>
+                    </div>
+                `;
+            }
             
             return `
                 <div class="requirement-evidence">
@@ -780,16 +808,20 @@
                         <span class="evidence-count">${evidenceCount}</span>
                     </div>
                     <div class="evidence-list">
-                        <div class="evidence-item">
-                            <span class="evidence-type">automated_log</span>
-                            <span>System validation executed successfully</span>
-                            <span class="evidence-timestamp">2 hours ago</span>
-                        </div>
-                        <div class="evidence-item">
-                            <span class="evidence-type">user_action</span>
-                            <span>Manual compliance check completed</span>
-                            <span class="evidence-timestamp">1 day ago</span>
-                        </div>
+                        ${evidenceTypes.map(evidenceType => `
+                            <div class="evidence-item">
+                                <span class="evidence-type">automated_log</span>
+                                <span>${evidenceType}</span>
+                                <span class="evidence-timestamp">${req.last_updated ? new Date(req.last_updated).toLocaleDateString() : 'No date'}</span>
+                            </div>
+                        `).join('')}
+                        ${evidenceCount > evidenceTypes.length ? `
+                            <div class="evidence-item">
+                                <span class="evidence-type">system_log</span>
+                                <span>Additional evidence records (${evidenceCount - evidenceTypes.length} more)</span>
+                                <span class="evidence-timestamp">Various dates</span>
+                            </div>
+                        ` : ''}
                     </div>
                 </div>
             `;
@@ -947,6 +979,74 @@
 
         function closeRequirementModal() {
             document.getElementById('requirementModal').style.display = 'none';
+        }
+
+        async function runDemoForRequirement(requirementId) {
+            if (confirm(`Run demo events to generate evidence for ${requirementId}?\n\nThis will trigger sample compliance events to demonstrate the tracking system.`)) {
+                try {
+                    // Send a demo event specific to this requirement
+                    const demoEvent = {
+                        event_type: getDemoEventForRequirement(requirementId),
+                        metadata: {
+                            requirement_demo: true,
+                            requirement_id: requirementId,
+                            demo_description: `Demo evidence generation for ${requirementId}`,
+                            timestamp: new Date().toISOString()
+                        },
+                        user_id: 'demo_user',
+                        session_id: `demo_${Date.now()}`
+                    };
+
+                    const response = await fetch('/api/unified-compliance/event', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(demoEvent)
+                    });
+
+                    if (response.ok) {
+                        alert(`✅ Demo event logged for ${requirementId}!\n\nRefreshing dashboard to show new evidence...`);
+                        refreshDashboard();
+                    } else {
+                        throw new Error('Failed to log demo event');
+                    }
+                } catch (error) {
+                    alert('❌ Error running demo: ' + error.message);
+                }
+            }
+        }
+
+        function getDemoEventForRequirement(requirementId) {
+            // Map requirements to appropriate demo events
+            const eventMap = {
+                'CFR_11_10_A': 'ANALYSIS_COMPLETED',
+                'CFR_11_10_B': 'FILE_UPLOADED', 
+                'CFR_11_10_C': 'REPORT_GENERATED',
+                'CFR_11_10_D': 'DATA_EXPORTED',
+                'CFR_11_10_E': 'USER_LOGIN',
+                'DATA_ENCRYPTION_TRANSIT': 'FILE_UPLOADED',
+                'DATA_ENCRYPTION_REST': 'DATA_EXPORTED',
+                'ACCESS_LOGGING': 'USER_LOGIN',
+                'CLIA_493_1251': 'QC_ANALYZED',
+                'CLIA_493_1252': 'QC_ANALYZED',
+                'CLIA_493_1253': 'QC_ANALYZED',
+                'CLIA_493_1281': 'ANALYSIS_COMPLETED',
+                'CAP_GEN_43400': 'SYSTEM_VALIDATION',
+                'CAP_GEN_43420': 'SYSTEM_VALIDATION',
+                'CAP_GEN_40425': 'QC_ANALYZED',
+                'ISO_15189_5_5_1': 'SYSTEM_VALIDATION',
+                'ISO_15189_5_8_2': 'QC_ANALYZED',
+                'ISO_15189_4_14_7': 'SYSTEM_VALIDATION',
+                'AI_ML_VALIDATION': 'ML_MODEL_TRAINED',
+                'AI_ML_VERSION_CONTROL': 'ML_MODEL_TRAINED',
+                'AI_ML_PERFORMANCE_MONITORING': 'ML_PREDICTION_MADE',
+                'AI_ML_TRAINING_VALIDATION': 'ML_MODEL_TRAINED',
+                'AI_ML_AUDIT_COMPLIANCE': 'ML_FEEDBACK_SUBMITTED',
+                'ENTRA_SSO_INTEGRATION': 'USER_LOGIN',
+                'ENTRA_MFA_ENFORCEMENT': 'USER_LOGIN',
+                'ENTRA_CONDITIONAL_ACCESS': 'USER_LOGIN',
+                'ENTRA_ROLE_MANAGEMENT': 'USER_LOGIN'
+            };
+            return eventMap[requirementId] || 'SYSTEM_VALIDATION';
         }
 
         async function exportComplianceReport() {

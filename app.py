@@ -583,18 +583,17 @@ try:
     from fda_compliance_manager import FDAComplianceManager
     
     if mysql_configured:
-        # For now, use SQLite for FDA compliance as it's already working
-        # TODO: Update FDAComplianceManager to support MySQL
-        fda_compliance_manager = FDAComplianceManager(db_path=database_path)
-        print("FDA Compliance Manager initialized with SQLite")
+        # Use MySQL for FDA compliance - no SQLite fallback
+        fda_compliance_manager = FDAComplianceManager(use_mysql=True, mysql_config=mysql_config)
+        print("FDA Compliance Manager initialized with MySQL")
     else:
-        fda_compliance_manager = FDAComplianceManager(db_path=database_path)
-        print("FDA Compliance Manager initialized with SQLite fallback")
+        print("Warning: MySQL not configured - FDA Compliance Manager disabled")
+        fda_compliance_manager = None
 except Exception as e:
     print(f"Warning: Could not initialize FDA Compliance Manager: {e}")
     fda_compliance_manager = None
 
-# Initialize unified compliance manager - FORCE MySQL instead of SQLite
+# Initialize unified compliance manager - FORCE MySQL only
 try:
     if mysql_configured:
         # Use MySQL configuration for compliance
@@ -1501,24 +1500,12 @@ def delete_all_sessions():
         
         from sqlalchemy import text as sql_text
         try:
-            # Set SQLite-specific pragmas for better concurrency
-            if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
-                db.session.execute(sql_text('PRAGMA busy_timeout = 30000;'))
-                db.session.execute(sql_text('PRAGMA journal_mode = WAL;'))
-                db.session.execute(sql_text('PRAGMA synchronous = NORMAL;'))
+            # MySQL database operations - no SQLite pragmas needed
             print("[DEBUG] Deleting all well results first...")
-            if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
-                result = db.session.execute(sql_text('DELETE FROM well_results'))
-                num_wells_deleted = result.rowcount if hasattr(result, 'rowcount') else 0 # type: ignore
-            else:
-                num_wells_deleted = WellResult.query.delete()
+            num_wells_deleted = WellResult.query.delete()
             print(f"[DEBUG] Deleted {num_wells_deleted} well results")
             print("[DEBUG] Deleting all sessions...")
-            if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
-                result = db.session.execute(sql_text('DELETE FROM analysis_sessions'))
-                num_sessions_deleted = result.rowcount if hasattr(result, 'rowcount') else 0  # type: ignore
-            else:
-                num_sessions_deleted = AnalysisSession.query.delete()
+            num_sessions_deleted = AnalysisSession.query.delete()
             print(f"[DEBUG] Deleted {num_sessions_deleted} sessions")
             db.session.commit()
             print(f"[API] Successfully deleted all {num_sessions} sessions and their well results.")
@@ -1551,25 +1538,14 @@ def delete_session(session_id):
         
         from sqlalchemy import text as sql_text
         try:
-            # Set SQLite-specific pragmas for better concurrency
-            if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
-                db.session.execute(sql_text('PRAGMA busy_timeout = 30000;'))
-                db.session.execute(sql_text('PRAGMA journal_mode = WAL;'))
-                db.session.execute(sql_text('PRAGMA synchronous = NORMAL;'))
+            # MySQL database operations - no SQLite pragmas needed
             print(f"[DEBUG] Deleting {well_count} well results for session {session_id}...")
-            if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
-                result = db.session.execute(sql_text('DELETE FROM well_results WHERE session_id = :session_id'), {'session_id': session_id})
-                num_wells_deleted = result.rowcount if hasattr(result, 'rowcount') else 0  # type: ignore
-            else:
-                num_wells_deleted = WellResult.query.filter_by(session_id=session_id).delete()
+            num_wells_deleted = WellResult.query.filter_by(session_id=session_id).delete()
             print(f"[DEBUG] Actually deleted {num_wells_deleted} well results")
             print(f"[DEBUG] Deleting session {session_id}...")
-            if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:'):
-                result = db.session.execute(sql_text('DELETE FROM analysis_sessions WHERE id = :session_id'), {'session_id': session_id})
-                sessions_deleted = result.rowcount if hasattr(result, 'rowcount') else 0  # type: ignore
-            else:
-                db.session.delete(session)
-                sessions_deleted = 1
+            # MySQL database operations - no SQLite-specific code needed
+            db.session.delete(session)
+            sessions_deleted = 1
             print(f"[DEBUG] Deleted {sessions_deleted} session(s)")
             db.session.commit()
             print(f"[API] Successfully deleted session {session_id} and its {well_count} well results.")
@@ -3175,9 +3151,8 @@ def get_enabled_pathogens():
         from ml_config_manager import MLConfigManager
         import os
         
-        # Create a fresh instance to ensure we have the latest methods
-        sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
-        local_ml_config_manager = MLConfigManager(sqlite_path)
+        # Create a fresh instance using MySQL
+        local_ml_config_manager = MLConfigManager(use_mysql=True, mysql_config=mysql_config)
         
         # Get all pathogen configs where ML is enabled
         enabled_configs = local_ml_config_manager.get_enabled_pathogen_configs()

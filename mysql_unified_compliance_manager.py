@@ -545,3 +545,123 @@ class MySQLUnifiedComplianceManager:
         finally:
             cursor.close()
             conn.close()
+
+    def get_compliance_summary(self):
+        """Get compliance dashboard summary statistics"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Get total requirements
+            total_requirements = len(self.compliance_requirements)
+            
+            # Get currently tracking (requirements with recent events)
+            cursor.execute('''
+                SELECT DISTINCT requirement_id 
+                FROM compliance_evidence 
+                WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+            ''')
+            currently_tracking = len(cursor.fetchall())
+            
+            # Get unique event types
+            cursor.execute('''
+                SELECT DISTINCT event_type 
+                FROM unified_compliance_events 
+                WHERE timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+            ''')
+            unique_event_types = len(cursor.fetchall())
+            
+            # Get total events
+            cursor.execute('SELECT COUNT(*) FROM unified_compliance_events')
+            total_events = cursor.fetchone()[0]
+            
+            return {
+                'total_requirements': total_requirements,
+                'currently_tracking': currently_tracking,
+                'unique_event_types': unique_event_types,
+                'total_events': total_events
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error getting compliance summary: {e}")
+            return {
+                'total_requirements': 0,
+                'currently_tracking': 0,
+                'unique_event_types': 0,
+                'total_events': 0
+            }
+        finally:
+            cursor.close()
+            conn.close()
+
+    def get_requirements_status(self):
+        """Get all compliance requirements with their tracking status"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            requirements_list = []
+            for req_id, req_data in self.compliance_requirements.items():
+                # Get evidence count for this requirement
+                cursor.execute('''
+                    SELECT COUNT(*) FROM compliance_evidence 
+                    WHERE requirement_id = %s
+                ''', (req_id,))
+                event_count = cursor.fetchone()[0]
+                
+                # Check if currently tracking
+                cursor.execute('''
+                    SELECT COUNT(*) FROM compliance_evidence 
+                    WHERE requirement_id = %s 
+                    AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                ''', (req_id,))
+                currently_tracking = cursor.fetchone()[0] > 0
+                
+                requirements_list.append({
+                    'id': req_id,
+                    'title': req_data['title'],
+                    'category': req_data['category'],
+                    'event_count': event_count,
+                    'currently_tracking': currently_tracking,
+                    'auto_trackable': req_data.get('auto_trackable', False)
+                })
+            
+            return requirements_list
+            
+        except Exception as e:
+            self.logger.error(f"Error getting requirements status: {e}")
+            return []
+        finally:
+            cursor.close()
+            conn.close()
+
+    def get_recent_events(self, limit=10):
+        """Get recent compliance events"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute('''
+                SELECT event_type, user_id, timestamp, event_data 
+                FROM unified_compliance_events 
+                ORDER BY timestamp DESC 
+                LIMIT %s
+            ''', (limit,))
+            
+            events = []
+            for event_type, user_id, timestamp, event_data in cursor.fetchall():
+                events.append({
+                    'event_type': event_type,
+                    'user_id': user_id,
+                    'timestamp': timestamp.isoformat() if timestamp else None,
+                    'event_data': json.loads(event_data) if event_data else {}
+                })
+            
+            return events
+            
+        except Exception as e:
+            self.logger.error(f"Error getting recent events: {e}")
+            return []
+        finally:
+            cursor.close()
+            conn.close()

@@ -1,6 +1,8 @@
 // threshold_frontend.js
 // All frontend threshold calculation, storage, and chart annotation logic
 
+// STANDARDIZED CHANNEL ORDER - ALWAYS FAM, HEX, Texas Red, Cy5
+const STANDARD_CHANNEL_ORDER = ['FAM', 'HEX', 'Texas Red', 'Cy5'];
 
 // Add this combined initialization function
 
@@ -351,8 +353,8 @@ function updateAllChannelThresholds() {
         // Method 4: If viewing "all curves", ensure all known fluorophores are included
         const currentChannel = window.currentFluorophore;
         if (currentChannel === 'all' || !currentChannel) {
-            const knownChannels = ['Cy5', 'FAM', 'HEX', 'Texas Red'];
-            knownChannels.forEach(channel => {
+            // USE STANDARDIZED CHANNEL ORDER
+            STANDARD_CHANNEL_ORDER.forEach(channel => {
                 // Only add if we have threshold data for this channel
                 if (window.stableChannelThresholds && window.stableChannelThresholds[channel]) {
                     visibleChannels.add(channel);
@@ -376,8 +378,11 @@ function updateAllChannelThresholds() {
     const currentScale = window.currentScaleMode;
     
     // First, collect all channel thresholds for intelligent positioning
+    // SORT CHANNELS IN STANDARDIZED ORDER
+    const orderedChannels = STANDARD_CHANNEL_ORDER.filter(channel => visibleChannels.has(channel));
+    
     const channelThresholds = [];
-    Array.from(visibleChannels).forEach(channel => {
+    orderedChannels.forEach(channel => {
         const threshold = getCurrentChannelThreshold(channel, currentScale);
         if (threshold !== null && threshold !== undefined && !isNaN(threshold)) {
             channelThresholds.push({ channel, threshold });
@@ -387,35 +392,28 @@ function updateAllChannelThresholds() {
     // Sort by threshold value to handle overlapping labels
     channelThresholds.sort((a, b) => a.threshold - b.threshold);
     
-    // Create annotations with staggered positioning for overlapping thresholds
+    // Create annotations with left-side horizontal positioning for each channel
     channelThresholds.forEach((item, index) => {
         const { channel, threshold } = item;
         
-        // Check for overlapping thresholds (within 5% of each other)
-        const overlappingIndices = [];
-        for (let i = 0; i < channelThresholds.length; i++) {
+        // Use fixed positioning for each channel: FAM=0, HEX=90, Texas Red=180, Cy5=270
+        const channelPositions = {
+            'FAM': 0,
+            'HEX': 90,
+            'Texas Red': 180,
+            'Cy5': 270
+        };
+        
+        const xAdjust = channelPositions[channel] || 0;
+        
+        // Check for overlapping thresholds and adjust y-position if needed
+        let yAdjust = 0;
+        for (let i = 0; i < index; i++) {
             const otherThreshold = channelThresholds[i].threshold;
-            if (Math.abs(threshold - otherThreshold) / Math.max(threshold, otherThreshold) < 0.05) {
-                overlappingIndices.push(i);
+            if (Math.abs(threshold - otherThreshold) / Math.max(threshold, otherThreshold) < 0.03) {
+                // If thresholds are very close, offset this label vertically
+                yAdjust += (index - i) * 20;
             }
-        }
-        
-        // Calculate label offset for overlapping thresholds
-        const overlapPosition = overlappingIndices.indexOf(index);
-        const totalOverlapping = overlappingIndices.length;
-        
-        // Distribute labels horizontally across the chart when they overlap
-        let labelPosition = 'start';
-        let xAdjust = 0;
-        
-        if (totalOverlapping > 1) {
-            // Stagger labels horizontally: left, center-left, center-right, right
-            const positions = ['start', 'center', 'end'];
-            const positionIndex = overlapPosition % positions.length;
-            labelPosition = positions[positionIndex];
-            
-            // Add small x offset to further separate labels
-            xAdjust = (overlapPosition - Math.floor(totalOverlapping / 2)) * 30;
         }
         
         const annotationKey = `threshold_${channel}`;
@@ -429,14 +427,16 @@ function updateAllChannelThresholds() {
             label: {
                 display: true,
                 content: `${channel}: ${threshold.toFixed(2)}`,
-                position: labelPosition,
+                position: 'start',
                 xAdjust: xAdjust,
-                backgroundColor: 'rgba(255,255,255,0.9)',
+                yAdjust: yAdjust,
+                backgroundColor: 'rgba(255,255,255,0.95)',
                 color: getChannelColor(channel),
-                font: { size: 10, weight: 'bold' },
+                font: { size: 11, weight: 'bold' },
                 borderColor: getChannelColor(channel),
                 borderWidth: 1,
-                padding: 4
+                borderRadius: 3,
+                padding: 6
             }
         };
     });

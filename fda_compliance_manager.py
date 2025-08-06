@@ -4,18 +4,25 @@ Comprehensive compliance tracking for pathogen testing software
 Covers all FDA requirements including 21 CFR Part 820, Part 11, CLIA, ISO standards
 """
 
-import sqlite3
 import json
 import hashlib
 import datetime
 from typing import Dict, List, Optional, Any
 import logging
+import mysql.connector
+from mysql.connector import Error
 
 class FDAComplianceManager:
-    def __init__(self, db_path: str = 'qpcr_analysis.db'):
-        self.db_path = db_path
+    def __init__(self, use_mysql: bool = True, mysql_config: dict = None, db_path: str = None):
+        self.use_mysql = use_mysql
+        self.mysql_config = mysql_config or {}
+        self.db_path = db_path  # Legacy SQLite support (deprecated)
         self.logger = logging.getLogger(__name__)
-        self._init_database_schema()
+        
+        if self.use_mysql and self.mysql_config:
+            self._init_mysql_schema()
+        else:
+            raise ValueError("MySQL configuration required - SQLite is no longer supported")
     
     def get_db_connection(self):
         """Get database connection with proper settings"""
