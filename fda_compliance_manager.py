@@ -25,99 +25,74 @@ class FDAComplianceManager:
             raise ValueError("MySQL configuration required - SQLite is no longer supported")
     
     def get_db_connection(self):
-        """Get database connection with proper settings"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+        """Get MySQL database connection with proper settings"""
+        return mysql.connector.connect(**self.mysql_config)
     
-    def _init_database_schema(self):
-        """Initialize database schema for FDA compliance"""
+    def _init_mysql_schema(self):
+        """Initialize MySQL database schema for FDA compliance"""
         try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor()
-                
-                # Check if user_access_log table exists and get its structure
-                cursor.execute("PRAGMA table_info(user_access_log)")
-                existing_columns = [col[1] for col in cursor.fetchall()]
-                
-                if not existing_columns:
-                    # Table doesn't exist, create new schema
-                    cursor.execute("""
-                        CREATE TABLE user_access_log (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            user_id TEXT NOT NULL,
-                            user_role TEXT,
-                            action_type TEXT NOT NULL,
-                            resource_accessed TEXT,
-                            action_details TEXT,
-                            success BOOLEAN DEFAULT TRUE,
-                            ip_address TEXT,
-                            session_id TEXT,
-                            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                        )
-                    """)
-                    cursor.execute("""
-                        CREATE INDEX IF NOT EXISTS idx_user_access_timestamp 
-                        ON user_access_log(timestamp, user_id)
-                    """)
-                elif 'action_type' not in existing_columns:
-                    # Legacy table exists, add missing columns for future role system
-                    self.logger.info("Found legacy user_access_log table, keeping for compatibility")
-                    # Note: We'll handle schema migration when the role system is implemented
-                    # For now, the log_user_action method handles both schemas
-                else:
-                    # Modern schema already exists
-                    self.logger.info("Modern user_access_log schema found")
-                
-                # Create other essential tables for FDA compliance
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS software_versions (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        version_number TEXT NOT NULL UNIQUE,
-                        change_description TEXT,
-                        risk_assessment TEXT,
-                        validation_status TEXT DEFAULT 'pending',
-                        is_active BOOLEAN DEFAULT FALSE,
-                        approved_by TEXT,
-                        approval_date DATETIME,
-                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-                
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS quality_control_runs (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        qc_date DATETIME NOT NULL,
-                        qc_type TEXT NOT NULL,
-                        test_type TEXT NOT NULL,
-                        operator_id TEXT NOT NULL,
-                        supervisor_id TEXT,
-                        expected_results TEXT,
-                        actual_results TEXT,
-                        qc_status TEXT,
-                        deviation_notes TEXT,
-                        corrective_actions TEXT,
-                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-                
-                # Create indexes for performance
-                cursor.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_user_access_timestamp 
-                    ON user_access_log(timestamp, user_id)
-                """)
-                
-                cursor.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_qc_runs_date 
-                    ON quality_control_runs(qc_date, qc_type)
-                """)
-                
-                conn.commit()
-                self.logger.info("FDA compliance database schema initialized successfully")
-                
-        except Exception as e:
-            self.logger.error(f"Failed to initialize FDA compliance database schema: {e}")
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            
+            # Create user_access_log table for FDA compliance
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_access_log (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id VARCHAR(100) NOT NULL,
+                    user_role VARCHAR(50),
+                    action_type VARCHAR(100) NOT NULL,
+                    resource_accessed VARCHAR(500),
+                    action_details TEXT,
+                    success BOOLEAN DEFAULT TRUE,
+                    ip_address VARCHAR(45),
+                    session_id VARCHAR(200),
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_user_access_timestamp (timestamp, user_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
+            
+            # Create software_versions table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS software_versions (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    version_number VARCHAR(50) NOT NULL UNIQUE,
+                    change_description TEXT,
+                    risk_assessment TEXT,
+                    validation_status VARCHAR(50) DEFAULT 'pending',
+                    is_active BOOLEAN DEFAULT FALSE,
+                    approved_by VARCHAR(100),
+                    approval_date TIMESTAMP NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
+            
+            # Create quality_control_runs table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS quality_control_runs (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    qc_date TIMESTAMP NOT NULL,
+                    qc_type VARCHAR(100) NOT NULL,
+                    test_type VARCHAR(100) NOT NULL,
+                    operator_id VARCHAR(100) NOT NULL,
+                    supervisor_id VARCHAR(100),
+                    expected_results TEXT,
+                    actual_results TEXT,
+                    qc_status VARCHAR(50),
+                    deviation_notes TEXT,
+                    corrective_actions TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_qc_runs_date (qc_date, qc_type)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            self.logger.info("FDA compliance MySQL schema initialized successfully")
+            
+        except Error as e:
+            self.logger.error(f"Failed to initialize FDA compliance MySQL schema: {e}")
             # Don't raise exception to avoid breaking the application startup
     
     # Software Version Control Methods
@@ -152,42 +127,45 @@ class FDAComplianceManager:
                        success: bool = True, ip_address: str = None, session_id: str = None) -> int:
         """Log user access and actions for 21 CFR Part 11 compliance"""
         try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor()
-                
-                # Check if the table has the new schema or old schema
-                cursor.execute("PRAGMA table_info(user_access_log)")
-                columns = [col[1] for col in cursor.fetchall()]
-                
-                # Prepare data for both old and new schema compatibility
-                action_value = action_type or 'unknown_action'
-                details_data = {
-                    'user_role': user_role or 'unknown',
-                    'resource_accessed': resource_accessed,
-                    'action_details': action_details or {},
-                    'timestamp': datetime.datetime.now().isoformat()
-                }
-                
-                if 'action_type' in columns and 'user_role' in columns:
-                    # New schema - use full compliance tracking
-                    cursor.execute("""
-                        INSERT INTO user_access_log 
-                        (user_id, user_role, action_type, resource_accessed, action_details, 
-                         success, ip_address, session_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (user_id, user_role or 'operator', action_value, resource_accessed, 
-                          json.dumps(details_data), success, ip_address, 
-                          session_id or f"session_{datetime.datetime.now().timestamp()}"))
-                else:
-                    # Legacy schema - map to existing columns
-                    cursor.execute("""
-                        INSERT INTO user_access_log 
-                        (user_id, action, details, success, ip_address, session_id)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    """, (user_id, action_value, json.dumps(details_data), 
-                          success, ip_address, session_id or f"session_{datetime.datetime.now().timestamp()}"))
-                
-                return cursor.lastrowid
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            
+            # Check if the table has the new schema or old schema using MySQL DESCRIBE
+            cursor.execute("DESCRIBE user_access_log")
+            columns = [col[0] for col in cursor.fetchall()]
+            
+            # Prepare data for both old and new schema compatibility
+            action_value = action_type or 'unknown_action'
+            details_data = {
+                'user_role': user_role or 'unknown',
+                'resource_accessed': resource_accessed,
+                'action_details': action_details or {},
+                'timestamp': datetime.datetime.now().isoformat()
+            }
+            
+            if 'action_type' in columns and 'user_role' in columns:
+                # New schema - use full compliance tracking
+                cursor.execute("""
+                    INSERT INTO user_access_log 
+                    (user_id, user_role, action_type, resource_accessed, action_details, 
+                     success, ip_address, session_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (user_id, user_role or 'operator', action_value, resource_accessed, 
+                      json.dumps(details_data), success, ip_address, 
+                      session_id or f"session_{datetime.datetime.now().timestamp()}"))
+            else:
+                # Legacy schema - map to existing columns
+                cursor.execute("""
+                    INSERT INTO user_access_log 
+                    (user_id, action, details, success, ip_address, session_id)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (user_id, action_value, json.dumps(details_data), 
+                      success, ip_address, session_id or f"session_{datetime.datetime.now().timestamp()}"))
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return cursor.lastrowid
         except Exception as e:
             self.logger.error(f"Failed to log user action: {e}")
             # Return 0 to indicate logging failed but don't break the main workflow
@@ -198,20 +176,25 @@ class FDAComplianceManager:
                      operator_id: str, expected_results: Dict, actual_results: Dict,
                      supervisor_id: str = None) -> int:
         """Create quality control run record"""
-        with self.get_db_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Determine QC status based on results comparison
-            qc_status = self._evaluate_qc_results(expected_results, actual_results)
-            
-            cursor.execute("""
-                INSERT INTO quality_control_runs 
-                (qc_date, qc_type, test_type, operator_id, supervisor_id,
-                 expected_results, actual_results, qc_status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (qc_date, qc_type, test_type, operator_id, supervisor_id,
-                  json.dumps(expected_results), json.dumps(actual_results), qc_status))
-            return cursor.lastrowid
+        conn = self.get_db_connection()
+        cursor = conn.cursor()
+        
+        # Determine QC status based on results comparison
+        qc_status = self._evaluate_qc_results(expected_results, actual_results)
+        
+        cursor.execute("""
+            INSERT INTO quality_control_runs 
+            (qc_date, qc_type, test_type, operator_id, supervisor_id,
+             expected_results, actual_results, qc_status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """, (qc_date, qc_type, test_type, operator_id, supervisor_id,
+              json.dumps(expected_results), json.dumps(actual_results), qc_status))
+        
+        conn.commit()
+        result = cursor.lastrowid
+        cursor.close()
+        conn.close()
+        return result
     
     def _evaluate_qc_results(self, expected: Dict, actual: Dict) -> str:
         """Evaluate QC results and return status"""

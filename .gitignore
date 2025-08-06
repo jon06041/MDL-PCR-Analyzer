@@ -112,3 +112,15 @@ static/script_working_old_backup_*.js
 
 # Test files folder
 test files/
+
+# Test and debug files (prevent empty file sync issues between computers)
+test_*.py
+test_*.html
+debug_*.py
+comprehensive_*.py
+*_test.py
+*_debug.py
+ml_learning_test.*
+classification_debug.*
+temp_*.py
+temp_*.html
