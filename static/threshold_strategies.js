@@ -5,6 +5,12 @@
 
 // --- Linear strategies ---
 const LINEAR_THRESHOLD_STRATEGIES = {
+  "linear_fixed": {
+    name: "Linear: Fixed Value (per-pathogen)",
+    calculate: ({fixed_value}) => fixed_value,
+    description: "User- or pathogen-specific fixed threshold value (loaded from JS or CSV).",
+    reference: "Manual or pathogen-specific. See documentation."
+  },
   "linear": {
     name: "Baseline + N × baseline_std",
     calculate: ({baseline, baseline_std, N = 10}) => baseline + N * baseline_std,
@@ -38,17 +44,17 @@ const LINEAR_THRESHOLD_STRATEGIES = {
     },
     description: "Threshold at the point of maximum slope (first derivative) on the linear curve.",
     reference: "See qPCR_Curve_Classification_Reference.md"
-  },
-  "linear_fixed": {
-    name: "Linear: Fixed Value (per-pathogen)",
-    calculate: ({fixed_value}) => fixed_value,
-    description: "User- or pathogen-specific fixed threshold value (loaded from JS or CSV).",
-    reference: "Manual or pathogen-specific. See documentation."
   }
 };
 
 // --- Log strategies ---
 const LOG_THRESHOLD_STRATEGIES = {
+  "log_fixed": {
+    name: "Log: Fixed Value (per-pathogen)",
+    calculate: ({fixed_value}) => fixed_value,
+    description: "User- or pathogen-specific fixed threshold value (loaded from JS or CSV).",
+    reference: "Manual or pathogen-specific. See documentation."
+  },
   "default": {
     name: "Log: Exponential Phase (L/2 + B, clamped, RFU units)",
     calculate: ({L, B}) => {
@@ -105,25 +111,21 @@ const LOG_THRESHOLD_STRATEGIES = {
     },
     description: "Threshold at the point of maximum second derivative (inflection) on the log-transformed curve.",
     reference: "See qPCR_Curve_Classification_Reference.md"
-  },
-  "log_fixed": {
-    name: "Log: Fixed Value (per-pathogen)",
-    calculate: ({fixed_value}) => fixed_value,
-    description: "User- or pathogen-specific fixed threshold value (loaded from JS or CSV).",
-    reference: "Manual or pathogen-specific. See documentation."
   }
 };
 
 // Pathogen-specific fixed threshold values (per channel/fluorophore)
 window.PATHOGEN_FIXED_THRESHOLDS = {
   "BVAB": { 
-    "FAM": { linear: 250, log: 250 }
+    "FAM": { linear: 250, log: 250 },
+    "HEX": { linear: 250, log: 250 },
+    "Cy5": { linear: 200, log: 200 }
   },
   "BVPanelPCR1": {
     "FAM": { linear: 200, log: 200 },
     "HEX": { linear: 250, log: 250 },
     "Texas Red": { linear: 150, log: 150 },
-    "CY5": { linear: 200, log: 200 }
+    "Cy5": { linear: 200, log: 200 }
   },
   "BVPanelPCR2": {
     "FAM": { linear: 350, log: 350 },
@@ -163,7 +165,7 @@ window.PATHOGEN_FIXED_THRESHOLDS = {
     "FAM": { linear: 200, log: 200 }
   },
   "FLUA": { "FAM": { linear: 265, log: 265 } },
-  "FLUB": { "CY5": { linear: 225, log: 225 } },
+  "FLUB": { "Cy5": { linear: 225, log: 225 } },
   "GBS": { 
     "FAM": { linear: 300, log: 300 }
   },
