@@ -601,6 +601,11 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                 print(f"⚠️ ML Failed for {well_id}: {e}")
                 print(f"🔄 Falling back to rule-based classification")
                 # FALLBACK TO RULE-BASED CLASSIFICATION
+                # Get CQJ value for this channel
+                cqj_for_channel = None
+                if 'cqj' in analysis and isinstance(analysis['cqj'], dict):
+                    cqj_for_channel = analysis['cqj'].get(channel_name)
+                
                 analysis['curve_classification'] = classify_curve(
                     analysis.get('r2_score', 0),
                     analysis.get('steepness', 0),
@@ -608,7 +613,7 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                     analysis.get('midpoint', 50),
                     analysis.get('baseline', 100),
                     amplitude=analysis.get('amplitude', 0),
-                    cq_value=analysis.get('cq_value')
+                    cq_value=cqj_for_channel
                 )
                 # Mark as rule-based method
                 analysis['curve_classification']['method'] = 'Rule-based (ML failed)'
