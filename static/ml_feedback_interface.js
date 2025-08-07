@@ -673,14 +673,20 @@ class MLFeedbackInterface {
         const r2Score = wellData.r2_score || 0;
         const steepness = wellData.steepness || 0;
 
-        if (!isGoodSCurve) {
+        // CORRECTED LOGIC: Use updated thresholds instead of potentially outdated is_good_scurve
+        // Apply same corrected criteria as in qpcr_analyzer.py (k > 0.02, high confidence k > 0.05)
+        const dataPoints = wellData.cycles?.length || 40; // Default to 40 if no cycle data
+        const r2Threshold = dataPoints > 20 ? 0.9 : 0.85; // Adaptive threshold based on data points
+        const correctedSCurveGood = (r2Score > r2Threshold && steepness > 0.02 && amplitude > 150);
+        
+        if (!correctedSCurveGood) {
             if (amplitude < 100) return 'Flat/No Rise';
             if (r2Score < 0.5) return 'Irregular/Noisy';
             return 'Poor S-Curve';
         }
 
-        if (steepness > 0.5) return 'Sharp S-Curve';
-        if (steepness > 0.3) return 'Good S-Curve';
+        if (steepness > 0.4) return 'Sharp S-Curve';   // LOWERED from 0.5
+        if (steepness > 0.25) return 'Good S-Curve';   // LOWERED from 0.3  
         if (steepness > 0.1) return 'Gradual S-Curve';
         return 'Weak S-Curve';
     }
@@ -690,9 +696,16 @@ class MLFeedbackInterface {
         const snr = wellData.snr || 0;
         const hasAnomalies = wellData.anomalies && wellData.anomalies.length > 0;
         const isGoodSCurve = wellData.is_good_scurve;
+        const r2Score = wellData.r2_score || 0;
+        const steepness = wellData.steepness || 0;
 
-        // CRITICAL FIX: Check is_good_scurve FIRST before any positive classification
-        if (!isGoodSCurve) {
+        // CORRECTED LOGIC: Use updated thresholds instead of potentially outdated is_good_scurve
+        const dataPoints = wellData.cycles?.length || 40; // Default to 40 if no cycle data
+        const r2Threshold = dataPoints > 20 ? 0.9 : 0.85; // Adaptive threshold based on data points
+        const correctedSCurveGood = (r2Score > r2Threshold && steepness > 0.02 && amplitude > 150);
+
+        // CRITICAL FIX: Check corrected S-curve criteria FIRST before any positive classification
+        if (!correctedSCurveGood) {
             if (amplitude < 200) return 'Negative/Background';
             if (amplitude < 500) return 'Poor Quality Signal';
             return 'High Amplitude/Poor Shape';  // High amplitude but poor S-curve shape
@@ -719,9 +732,15 @@ class MLFeedbackInterface {
         const snr = wellData.snr || 0;
         const amplitude = wellData.amplitude || 0;
         const isGoodSCurve = wellData.is_good_scurve;
+        const steepness = wellData.steepness || 0;
+        
+        // CORRECTED LOGIC: Use updated thresholds instead of potentially outdated is_good_scurve
+        const dataPoints = wellData.cycles?.length || 40; // Default to 40 if no cycle data
+        const r2Threshold = dataPoints > 20 ? 0.9 : 0.85; // Adaptive threshold based on data points
+        const correctedSCurveGood = (r2Score > r2Threshold && steepness > 0.02 && amplitude > 150);
         
         // CRITICAL FIX: Poor S-curve quality should override metric-based quality
-        if (!isGoodSCurve) {
+        if (!correctedSCurveGood) {
             // Even with good metrics, poor S-curve = poor overall quality
             if (r2Score > 0.9 && amplitude > 1000) {
                 return 'Good Metrics/Poor Shape';  // Acknowledge good metrics but poor shape

@@ -185,18 +185,18 @@ class MLValidationTracker:
                     CREATE TABLE IF NOT EXISTS ml_model_versions (
                         id INT AUTO_INCREMENT PRIMARY KEY,
                         pathogen_code VARCHAR(255) UNIQUE,
-                        current_version VARCHAR(50),
+                        version_number VARCHAR(50),
                         model_metrics TEXT,
                         last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
                         INDEX idx_pathogen (pathogen_code)
                     )
                 """))
                 
-                # Ensure current_version column exists (for existing tables)
+                # Ensure version_number column exists (for existing tables)
                 try:
                     conn.execute(text("""
                         ALTER TABLE ml_model_versions 
-                        ADD COLUMN current_version VARCHAR(50) AFTER pathogen_code
+                        ADD COLUMN version_number VARCHAR(50) AFTER pathogen_code
                     """))
                 except Exception as e:
                     # Column might already exist, ignore the error
@@ -211,12 +211,12 @@ class MLValidationTracker:
                     # Update existing record
                     conn.execute(text("""
                         UPDATE ml_model_versions 
-                        SET current_version = :current_version, 
+                        SET version_number = :version_number, 
                             model_metrics = :model_metrics, 
                             last_updated = CURRENT_TIMESTAMP 
                         WHERE pathogen_code = :pathogen_code
                     """), {
-                        'current_version': new_version,
+                        'version_number': new_version,
                         'model_metrics': json.dumps(metrics),
                         'pathogen_code': pathogen
                     })
@@ -224,11 +224,11 @@ class MLValidationTracker:
                     # Insert new record
                     conn.execute(text("""
                         INSERT INTO ml_model_versions 
-                        (pathogen_code, current_version, model_metrics)
-                        VALUES (:pathogen_code, :current_version, :model_metrics)
+                        (pathogen_code, version_number, model_metrics)
+                        VALUES (:pathogen_code, :version_number, :model_metrics)
                     """), {
                         'pathogen_code': pathogen,
-                        'current_version': new_version,
+                        'version_number': new_version,
                         'model_metrics': json.dumps(metrics)
                     })
                 
@@ -373,6 +373,247 @@ class MLValidationTracker:
             except Exception as e:
                 self.logger.error(f"Error getting teaching summary: {e}")
                 return {}
+    
+    def track_analysis_run(self, session_id, file_name, pathogen_codes, total_samples, 
+                          ml_samples_analyzed, user_id='system'):
+        """Track analysis runs for validation dashboard"""
+        with self.engine.connect() as conn:
+            try:
+                # Create table if it doesn't exist
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS ml_analysis_runs (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        session_id VARCHAR(255),
+                        file_name VARCHAR(255),
+                        pathogen_codes TEXT,
+                        total_samples INT,
+                        ml_samples_analyzed INT,
+                        accuracy_percentage DECIMAL(5,2) DEFAULT 85.0,
+                        status ENUM('pending', 'confirmed', 'rejected') DEFAULT 'pending',
+                        logged_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        confirmed_at DATETIME NULL,
+                        confirmed_by VARCHAR(255) NULL,
+                        overturned_count INT DEFAULT 0,
+                        confirmed_count INT DEFAULT 0,
+                        INDEX idx_session (session_id),
+                        INDEX idx_status (status),
+                        INDEX idx_logged_at (logged_at)
+                    )
+                """))
+                
+                conn.execute(text("""
+                    INSERT INTO ml_analysis_runs 
+                    (session_id, file_name, pathogen_codes, total_samples, ml_samples_analyzed)
+                    VALUES (:session_id, :file_name, :pathogen_codes, :total_samples, :ml_samples_analyzed)
+                """), {
+                    'session_id': session_id,
+                    'file_name': file_name,
+                    'pathogen_codes': json.dumps(pathogen_codes) if isinstance(pathogen_codes, list) else pathogen_codes,
+                    'total_samples': total_samples,
+                    'ml_samples_analyzed': ml_samples_analyzed
+                })
+                
+                conn.commit()
+                
+            except Exception as e:
+                self.logger.error(f"Error tracking analysis run: {e}")
+                raise
+    
+    def update_training_status(self, pathogen, training_status, accuracy=None, reason=None):
+        """Update training status for a pathogen model (active, paused, monitoring)"""
+        with self.engine.connect() as conn:
+            try:
+                # Create/update training status table
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS ml_training_status (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        pathogen_code VARCHAR(255) UNIQUE,
+                        training_status ENUM('active', 'paused', 'monitoring') DEFAULT 'active',
+                        current_accuracy DECIMAL(5,2),
+                        stable_since DATETIME NULL,
+                        pause_reason TEXT,
+                        status_changed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        performance_history JSON,
+                        pause_threshold DECIMAL(5,2) DEFAULT 95.0,
+                        min_stable_runs INT DEFAULT 10,
+                        INDEX idx_pathogen_status (pathogen_code, training_status)
+                    )
+                """))
+                
+                # Check if record exists
+                result = conn.execute(text("""
+                    SELECT id, current_accuracy, stable_since FROM ml_training_status 
+                    WHERE pathogen_code = :pathogen_code
+                """), {'pathogen_code': pathogen}).fetchone()
+                
+                if result:
+                    # Update existing record
+                    conn.execute(text("""
+                        UPDATE ml_training_status 
+                        SET training_status = :training_status,
+                            current_accuracy = :current_accuracy,
+                            pause_reason = :pause_reason,
+                            status_changed_at = CURRENT_TIMESTAMP,
+                            stable_since = CASE 
+                                WHEN :training_status = 'paused' AND stable_since IS NULL 
+                                THEN CURRENT_TIMESTAMP 
+                                ELSE stable_since 
+                            END
+                        WHERE pathogen_code = :pathogen_code
+                    """), {
+                        'pathogen_code': pathogen,
+                        'training_status': training_status,
+                        'current_accuracy': accuracy,
+                        'pause_reason': reason
+                    })
+                else:
+                    # Insert new record
+                    conn.execute(text("""
+                        INSERT INTO ml_training_status 
+                        (pathogen_code, training_status, current_accuracy, pause_reason)
+                        VALUES (:pathogen_code, :training_status, :current_accuracy, :pause_reason)
+                    """), {
+                        'pathogen_code': pathogen,
+                        'training_status': training_status,
+                        'current_accuracy': accuracy,
+                        'pause_reason': reason
+                    })
+                
+                conn.commit()
+                self.logger.info(f"Updated training status for {pathogen}: {training_status}")
+                
+            except Exception as e:
+                self.logger.error(f"Error updating training status: {e}")
+                raise
+    
+    def check_training_pause_recommendation(self, pathogen, recent_accuracy_scores):
+        """Check if training should be paused based on performance plateau"""
+        with self.engine.connect() as conn:
+            try:
+                # Get current training status
+                result = conn.execute(text("""
+                    SELECT training_status, current_accuracy, pause_threshold, min_stable_runs 
+                    FROM ml_training_status 
+                    WHERE pathogen_code = :pathogen_code
+                """), {'pathogen_code': pathogen}).fetchone()
+                
+                if not result or result[0] != 'active':
+                    return {'should_pause': False, 'reason': 'Training not active'}
+                
+                current_accuracy = result[1] or 0.0
+                pause_threshold = result[2] or 95.0
+                min_stable_runs = result[3] or 10
+                
+                # Check if we have enough data points
+                if len(recent_accuracy_scores) < min_stable_runs:
+                    return {
+                        'should_pause': False, 
+                        'reason': f'Need {min_stable_runs} stable runs, have {len(recent_accuracy_scores)}'
+                    }
+                
+                # Check if accuracy is consistently high
+                avg_accuracy = sum(recent_accuracy_scores) / len(recent_accuracy_scores)
+                min_accuracy = min(recent_accuracy_scores)
+                accuracy_variance = max(recent_accuracy_scores) - min(recent_accuracy_scores)
+                
+                # Recommend pause if:
+                # 1. Average accuracy >= threshold
+                # 2. Minimum accuracy >= threshold - 2%
+                # 3. Variance < 3% (stable performance)
+                should_pause = (
+                    avg_accuracy >= pause_threshold and
+                    min_accuracy >= (pause_threshold - 2.0) and
+                    accuracy_variance < 3.0
+                )
+                
+                recommendation = {
+                    'should_pause': should_pause,
+                    'reason': f'Avg: {avg_accuracy:.1f}%, Min: {min_accuracy:.1f}%, Variance: {accuracy_variance:.1f}%',
+                    'avg_accuracy': avg_accuracy,
+                    'min_accuracy': min_accuracy,
+                    'variance': accuracy_variance,
+                    'threshold': pause_threshold,
+                    'stable_runs': len(recent_accuracy_scores)
+                }
+                
+                if should_pause:
+                    recommendation['pause_message'] = (
+                        f"Model for {pathogen} has achieved sustained performance: "
+                        f"{avg_accuracy:.1f}% average accuracy over {len(recent_accuracy_scores)} runs. "
+                        f"Recommend pausing training to maintain regulatory consistency."
+                    )
+                
+                return recommendation
+                
+            except Exception as e:
+                self.logger.error(f"Error checking pause recommendation: {e}")
+                return {'should_pause': False, 'reason': 'Error checking status'}
+    
+    def get_training_status(self, pathogen=None):
+        """Get training status for pathogen(s)"""
+        with self.engine.connect() as conn:
+            try:
+                if pathogen:
+                    # Get specific pathogen status
+                    result = conn.execute(text("""
+                        SELECT pathogen_code, training_status, current_accuracy, 
+                               stable_since, pause_reason, status_changed_at,
+                               pause_threshold, min_stable_runs
+                        FROM ml_training_status 
+                        WHERE pathogen_code = :pathogen_code
+                    """), {'pathogen_code': pathogen}).fetchone()
+                    
+                    if result:
+                        return {
+                            'pathogen': result[0],
+                            'status': result[1],
+                            'accuracy': float(result[2]) if result[2] else 0.0,
+                            'stable_since': result[3].isoformat() if result[3] else None,
+                            'pause_reason': result[4],
+                            'status_changed_at': result[5].isoformat() if result[5] else None,
+                            'pause_threshold': float(result[6]) if result[6] else 95.0,
+                            'min_stable_runs': result[7] or 10
+                        }
+                    else:
+                        return {
+                            'pathogen': pathogen,
+                            'status': 'active',
+                            'accuracy': 85.0,
+                            'stable_since': None,
+                            'pause_reason': None,
+                            'status_changed_at': None,
+                            'pause_threshold': 95.0,
+                            'min_stable_runs': 10
+                        }
+                else:
+                    # Get all pathogen statuses
+                    results = conn.execute(text("""
+                        SELECT pathogen_code, training_status, current_accuracy, 
+                               stable_since, pause_reason, status_changed_at
+                        FROM ml_training_status 
+                        ORDER BY pathogen_code
+                    """)).fetchall()
+                    
+                    statuses = {}
+                    for row in results:
+                        statuses[row[0]] = {
+                            'status': row[1],
+                            'accuracy': float(row[2]) if row[2] else 85.0,
+                            'stable_since': row[3].isoformat() if row[3] else None,
+                            'pause_reason': row[4],
+                            'status_changed_at': row[5].isoformat() if row[5] else None
+                        }
+                    
+                    return statuses
+                    
+            except Exception as e:
+                self.logger.error(f"Error getting training status: {e}")
+                return {}
+    
+    def should_accept_training(self, pathogen):
+        """Check if training should be accepted for this pathogen"""
+        status = self.get_training_status(pathogen)
+        return status.get('status', 'active') == 'active'
 
 # Global tracker instance
 ml_tracker = MLValidationTracker()

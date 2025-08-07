@@ -307,15 +307,15 @@ def analyze_curve_quality(cycles, rfu, plot=False,
         min_amplitude_original = max(50, rfu_range * 0.3)  # Adaptive amplitude threshold
         r2_threshold = 0.9 if len(cycles) > 20 else 0.85  # Relaxed for shorter runs
 
-        # Original S-curve quality criteria
-        original_s_curve_criteria = bool(r2 > r2_threshold and k > 0.05 and L > min_amplitude_original)
+        # Original S-curve quality criteria (LOWERED THRESHOLDS per instructions)
+        original_s_curve_criteria = bool(r2 > r2_threshold and k > 0.02 and L > min_amplitude_original)
 
         # ENHANCED FINAL CLASSIFICATION: Use original criteria for high-quality curves
         # If original criteria pass with very high confidence, don't apply strict filters
-        high_confidence_curve = (r2 > 0.99 and L > 1000 and k > 0.1)
+        high_confidence_curve = (r2 > 0.99 and L > 1000 and k > 0.05)
         
         # RELAXED criteria for excellent fits with high amplitude
-        excellent_curve = (r2 > 0.95 and L > 1000 and k > 0.2)
+        excellent_curve = (r2 > 0.95 and L > 1000 and k > 0.05)
         
         if high_confidence_curve or excellent_curve:
             # For obviously excellent curves, use original criteria only

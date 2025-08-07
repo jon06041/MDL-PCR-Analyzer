@@ -106,7 +106,7 @@ def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, c
     confident_positive = (
         amplitude >= 600 and         # Strong signal
         r2 >= 0.90 and             # Excellent curve fit
-        steepness >= 0.3 and       # Good exponential growth
+        steepness >= 0.15 and      # Good exponential growth (LOWERED from 0.3)
         has_valid_cqj and          # Valid CQJ crossing
         midpoint >= 5 and          # Not impossibly early
         not suspicious_patterns    # No anomalies
@@ -126,7 +126,7 @@ def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, c
     # CLASSIFICATION LOGIC - CHECK POSITIVES FIRST
     if confident_positive:
         # Determine strength based on signal quality
-        if amplitude >= 1000 and r2 >= 0.95 and steepness >= 0.5:
+        if amplitude >= 1000 and r2 >= 0.95 and steepness >= 0.25:  # LOWERED from 0.5
             classification = "STRONG_POSITIVE"
             confidence = 0.95
         else:
