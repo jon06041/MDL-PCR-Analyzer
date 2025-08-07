@@ -536,13 +536,24 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
         # --- Calculate CQJ FIRST (BEFORE classification) ---
         from cqj_calcj_utils import calculate_cqj as py_cqj
         
-        # Prepare well dict for CQJ calculation
+        # Prepare well dict for CQJ calculation with enhanced debugging
         well_for_cqj = {
             'raw_cycles': analysis.get('raw_cycles'),
             'raw_rfu': analysis.get('raw_rfu'),
-            'amplitude': analysis.get('amplitude')
+            'amplitude': analysis.get('amplitude'),
+            'well_id': well_id  # Add well_id for debugging
         }
         threshold = analysis.get('threshold_value')
+        
+        # DEBUG: Check data availability before CQJ calculation
+        print(f"🔍 CQJ Calculation Input Debug for {well_id}:")
+        print(f"   raw_cycles available: {well_for_cqj['raw_cycles'] is not None}")
+        print(f"   raw_rfu available: {well_for_cqj['raw_rfu'] is not None}")
+        print(f"   threshold: {threshold}")
+        if well_for_cqj['raw_cycles'] and well_for_cqj['raw_rfu']:
+            print(f"   data length: cycles={len(well_for_cqj['raw_cycles'])}, rfu={len(well_for_cqj['raw_rfu'])}")
+            print(f"   max RFU: {max(well_for_cqj['raw_rfu'])}")
+        
         cqj_val = py_cqj(well_for_cqj, threshold) if threshold is not None else None
         
         # Store CQJ value BEFORE classification

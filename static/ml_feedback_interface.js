@@ -3266,13 +3266,61 @@ class MLFeedbackInterface {
                 throw new Error('No wells found in current analysis results');
             }
             
-            //console.log(`📊 Processing ${wellKeys.length} wells for batch ML analysis`);
+            // EDGE CASE FILTERING: Only process wells that are edge cases
+            console.log(`🎯 Filtering for edge cases from ${wellKeys.length} total wells...`);
             
-            // Process wells sequentially to show real-time progress in result modals
-            for (let i = 0; i < wellKeys.length; i++) {
+            const edgeCaseWells = [];
+            const confidentWells = [];
+            
+            for (const wellKey of wellKeys) {
+                const wellData = individualResults[wellKey];
+                const classification = wellData?.curve_classification;
+                
+                if (!classification) {
+                    // No classification - treat as edge case
+                    edgeCaseWells.push(wellKey);
+                    continue;
+                }
+                
+                // Check if this well should get ML analysis (edge case logic)
+                const shouldApplyML = this.shouldApplyMLToWell(classification);
+                
+                if (shouldApplyML) {
+                    edgeCaseWells.push(wellKey);
+                    console.log(`🎯 Edge case: ${wellKey} - ${classification.classification} (${this.getEdgeCaseReason(classification)})`);
+                } else {
+                    confidentWells.push(wellKey);
+                    console.log(`✅ Confident: ${wellKey} - ${classification.classification} (confidence: ${classification.confidence?.toFixed(2)}) - Skipping ML`);
+                }
+            }
+            
+            console.log(`📊 Edge case filtering complete:`);
+            console.log(`  Total wells: ${wellKeys.length}`);
+            console.log(`  Edge cases (will process): ${edgeCaseWells.length}`);
+            console.log(`  Confident cases (skipping): ${confidentWells.length}`);
+            console.log(`  Processing efficiency: ${confidentWells.length}/${wellKeys.length} wells skip ML computation`);
+            
+            if (edgeCaseWells.length === 0) {
+                console.log('🎉 No edge cases found - all wells have confident classifications!');
+                this.showTrainingNotification(
+                    'All Wells Confident',
+                    `✅ All ${wellKeys.length} wells have confident classifications. No ML analysis needed!`,
+                    'success'
+                );
+                
+                // Reset browser title
+                document.title = 'MDL PCR Analyzer';
+                return;
+            }
+            
+            // Show updated notification with edge case count
+            this.showEdgeCaseAnalysisNotification(edgeCaseWells.length, wellKeys.length, analysisType);
+            
+            // Process only edge case wells sequentially to show real-time progress
+            for (let i = 0; i < edgeCaseWells.length; i++) {
                 // CRITICAL: Check if user clicked "Skip" during processing
                 if (this.isMLAnalysisCancelled()) {
-                    console.log('🛑 ML Batch Analysis: User cancelled - aborting batch analysis at well', i + 1, 'of', wellKeys.length);
+                    console.log('🛑 ML Batch Analysis: User cancelled - aborting edge case analysis at well', i + 1, 'of', edgeCaseWells.length);
                     
                     // Send immediate cancellation to server
                     await this.sendBatchCancellationRequest();
@@ -3289,25 +3337,25 @@ class MLFeedbackInterface {
                     // Show cancellation message
                     this.showTrainingNotification(
                         'Analysis Cancelled',
-                        `✋ Batch ML analysis cancelled by user after processing ${i} of ${wellKeys.length} wells.`,
+                        `✋ Edge case ML analysis cancelled by user after processing ${i} of ${edgeCaseWells.length} edge cases.`,
                         'info'
                     );
                     
                     return; // Exit the function early
                 }
                 
-                const wellKey = wellKeys[i];
+                const wellKey = edgeCaseWells[i];
                 const wellData = individualResults[wellKey];
                 const wellNum = i + 1;
                 
-                // Update browser title to show progress
-                document.title = `🤖 ML Analysis: ${wellNum}/${wellKeys.length} wells`;
+                // Update browser title to show edge case progress
+                document.title = `🎯 ML Edge Cases: ${wellNum}/${edgeCaseWells.length} wells`;
                 
-                //console.log(`🔄 ML Analysis: Processing well ${wellNum}/${wellKeys.length} (${wellKey})`);
+                console.log(`🔄 ML Analysis: Processing edge case ${wellNum}/${edgeCaseWells.length} (${wellKey})`);
                 
                 // CRITICAL: Final check before individual well processing to prevent HTTP requests
                 if (this.isMLAnalysisCancelled() || window.mlAutoAnalysisUserChoice === 'skipped') {
-                    //console.log(`🛑 ML Batch Analysis: Cancellation detected before processing ${wellKey}, stopping batch`);
+                    console.log(`🛑 ML Batch Analysis: Cancellation detected before processing ${wellKey}, stopping edge case analysis`);
                     break;
                 }
                 
@@ -3337,32 +3385,34 @@ class MLFeedbackInterface {
             // Show appropriate completion message based on analysis type
             let completionTitle = '';
             let completionMessage = '';
+            const skippedCount = wellKeys.length - edgeCaseWells.length;
             
             switch (analysisType) {
                 case 'automatic':
-                    completionTitle = 'Automatic Analysis Complete!';
-                    completionMessage = `🎉 Successfully analyzed ${wellKeys.length} wells with pathogen-specific ${trainingCount}-sample model.`;
+                    completionTitle = 'Edge Case Analysis Complete!';
+                    completionMessage = `� Successfully analyzed ${edgeCaseWells.length} edge cases with pathogen-specific ${trainingCount}-sample model. ${skippedCount} confident wells skipped for efficiency.`;
                     break;
                 case 'cross-pathogen':
-                    completionTitle = 'Cross-Pathogen Analysis Complete!';
-                    completionMessage = `⚠️ Analyzed ${wellKeys.length} wells with general ${trainingCount}-sample model. Results may need manual review for accuracy.`;
+                    completionTitle = 'Cross-Pathogen Edge Case Analysis Complete!';
+                    completionMessage = `🎯 Analyzed ${edgeCaseWells.length} edge cases with general ${trainingCount}-sample model. ${skippedCount} confident wells skipped. Results may need manual review for accuracy.`;
                     break;
                 case 'initial':
-                    completionTitle = 'Initial Batch Analysis Complete!';
-                    completionMessage = `🎉 Successfully re-analyzed ${wellKeys.length} wells with ${trainingCount}-sample trained model.`;
+                    completionTitle = 'Initial Edge Case Analysis Complete!';
+                    completionMessage = `� Successfully re-analyzed ${edgeCaseWells.length} edge cases with ${trainingCount}-sample trained model. ${skippedCount} confident wells skipped.`;
                     break;
                 case 'milestone':
-                    completionTitle = 'Milestone Analysis Complete!';
-                    completionMessage = `📈 Successfully re-analyzed ${wellKeys.length} wells with updated ${trainingCount}-sample model.`;
+                    completionTitle = 'Milestone Edge Case Analysis Complete!';
+                    completionMessage = `🎯 Successfully re-analyzed ${edgeCaseWells.length} edge cases with updated ${trainingCount}-sample model. ${skippedCount} confident wells skipped.`;
                     break;
                 default:
-                    completionTitle = 'Batch Analysis Complete!';
-                    completionMessage = `🎉 Successfully analyzed ${wellKeys.length} wells with ${trainingCount}-sample trained model.`;
+                    completionTitle = 'Edge Case Analysis Complete!';
+                    completionMessage = `� Successfully analyzed ${edgeCaseWells.length} edge cases with ${trainingCount}-sample trained model. ${skippedCount} confident wells skipped.`;
             }
             
             this.showTrainingNotification(completionTitle, completionMessage, 'success');
             
-            console.log(`✅ Batch ML analysis complete: ${wellKeys.length} wells processed`);
+            console.log(`✅ Edge case ML analysis complete: ${edgeCaseWells.length} edge cases processed, ${skippedCount} confident wells skipped`);
+            console.log(`📊 Processing efficiency: ${skippedCount}/${wellKeys.length} wells saved ML computation`);
             
             // Auto-reset cancellation flag after successful batch completion
             await this.resetBatchCancellationFlag();
@@ -6394,7 +6444,106 @@ class MLFeedbackInterface {
             // Non-blocking - cancellation request failure shouldn't break the UI
         }
     }
-    
+
+    /**
+     * Determine if a well should get ML analysis based on edge case logic
+     */
+    shouldApplyMLToWell(classificationResult) {
+        if (!classificationResult) return true;
+        
+        // Always apply ML to edge cases
+        if (classificationResult.edge_case) return true;
+        
+        // Apply ML to samples flagged for ML review
+        if (classificationResult.ml_recommended) return true;
+        
+        // Apply ML to low confidence classifications
+        const confidence = classificationResult.confidence || 1.0;
+        if (confidence < 0.75) return true;
+        
+        // Apply ML to uncertain classifications
+        const classification = classificationResult.classification || '';
+        if (['INDETERMINATE', 'SUSPICIOUS', 'WEAK_POSITIVE'].includes(classification)) {
+            return true;
+        }
+        
+        // Skip ML for confident classifications
+        if (['STRONG_POSITIVE', 'POSITIVE', 'NEGATIVE'].includes(classification) && confidence >= 0.85) {
+            return false;
+        }
+        
+        // Default to ML for anything else uncertain
+        return true;
+    }
+
+    /**
+     * Get human-readable reason why a sample is an edge case
+     */
+    getEdgeCaseReason(classificationResult) {
+        if (!classificationResult) return 'No classification';
+        
+        const edgeReasons = classificationResult.edge_case_reasons || [];
+        if (edgeReasons.length > 0) {
+            const reasonMap = {
+                'intermediate_amplitude': 'Signal 200-600 RFU',
+                'moderate_curve_quality': 'R² 0.70-0.90',
+                'moderate_steepness': 'Growth 0.1-0.2',
+                'moderate_snr': 'SNR 1.5-3.0',
+                'valid_cqj_weak_signal': 'Valid CQJ + weak signal',
+                'no_cqj_moderate_signal': 'No CQJ + moderate signal',
+                'good_curve_no_cqj': 'Good curve without CQJ',
+                'borderline_curve_no_cqj': 'Borderline curve without CQJ'
+            };
+            return edgeReasons.map(r => reasonMap[r] || r).join(', ');
+        }
+        
+        const confidence = classificationResult.confidence || 1.0;
+        const classification = classificationResult.classification || '';
+        
+        if (confidence < 0.75) {
+            return `Low confidence (${(confidence * 100).toFixed(0)}%)`;
+        } else if (['INDETERMINATE', 'SUSPICIOUS', 'WEAK_POSITIVE'].includes(classification)) {
+            return `Uncertain classification (${classification})`;
+        } else {
+            return 'Borderline metrics';
+        }
+    }
+
+    /**
+     * Show notification for edge case analysis with updated counts
+     */
+    showEdgeCaseAnalysisNotification(edgeCaseCount, totalCount, analysisType) {
+        // Remove any existing notification
+        const existing = document.getElementById('ml-available-notification');
+        if (existing) existing.remove();
+        
+        const notification = document.createElement('div');
+        notification.id = 'ml-available-notification';
+        notification.className = 'ml-notification';
+        notification.innerHTML = `
+            <div class="ml-notification-content">
+                <div class="ml-notification-icon">🎯</div>
+                <div class="ml-notification-text">
+                    <strong>Edge Case ML Analysis Running</strong><br>
+                    Processing ${edgeCaseCount} edge cases (${totalCount - edgeCaseCount} confident cases skipped)<br>
+                    <small>Analysis Type: ${analysisType}</small>
+                </div>
+                <div class="ml-notification-actions">
+                    <button class="ml-notification-btn secondary" onclick="window.mlFeedbackInterface.skipBatchAnalysis()">✋ Skip Analysis</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(notification);
+        
+        // Auto-remove after analysis completes (handled elsewhere)
+        setTimeout(() => {
+            if (document.getElementById('ml-available-notification')) {
+                notification.remove();
+            }
+        }, 300000); // 5 minutes max
+    }
+
     async resetBatchCancellationFlag() {
         /**
          * Reset the batch cancellation flag on the server when starting new analysis

@@ -1,0 +1,8 @@
+{
+  "backup_type": "startup",
+  "timestamp": "20250807_135614",
+  "description": "Automatic startup backup",
+  "original_size": 28672,
+  "backup_size": 28672,
+  "md5_hash": "f64ac2c873df87cce09a62b2f7c80306"
+}

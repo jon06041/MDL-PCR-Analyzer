@@ -6136,15 +6136,17 @@ function populateResultsTable(individualResults) {
             };
             const badgeClass = classMap[result.curve_classification.classification] || 'curve-other';
             
-            // Add edge case symbol if applicable
+            // Add edge case styling and symbol if applicable
             let edgeSymbol = '';
+            let edgeClass = '';
             if (result.curve_classification.edge_case === true) {
                 const reasons = result.curve_classification.edge_case_reasons || [];
                 const reasonText = reasons.length > 0 ? reasons.join(', ') : 'borderline';
                 edgeSymbol = ` <span class="edge-symbol" title="Edge Case: ${reasonText}">🎯</span>`;
+                edgeClass = ' edge-case-highlight'; // Add light background for edge cases
             }
             
-            curveClassBadgeHTML = `<span class="curve-badge ${badgeClass}" title="${result.curve_classification.reason || 'Rule-based Classification'}">${result.curve_classification.classification.replace('_', ' ')}${edgeSymbol}</span>`;
+            curveClassBadgeHTML = `<span class="curve-badge ${badgeClass}${edgeClass}" title="${result.curve_classification.reason || 'Rule-based Classification'}">${result.curve_classification.classification.replace('_', ' ')}${edgeSymbol}</span>`;
         } else if (typeof result.curve_classification === 'string') {
             curveClassBadgeHTML = `<span class="curve-badge curve-other" title="Legacy Classification">${result.curve_classification}</span>`;
         }

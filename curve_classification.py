@@ -23,6 +23,91 @@ SNR_CUTOFFS = {
     'Negative': 1.0            # Below detection (reduced from 2.0)
 }
 
+def should_apply_ml_analysis(classification_result):
+    """
+    Determine if a sample should be included in ML batch analysis.
+    Only edge cases and uncertain classifications should use ML.
+    
+    Args:
+        classification_result: Dict with classification, confidence, edge_case, etc.
+    
+    Returns:
+        bool: True if sample should be analyzed with ML
+    """
+    if not isinstance(classification_result, dict):
+        return False
+    
+    # Always apply ML to edge cases
+    if classification_result.get('edge_case', False):
+        return True
+    
+    # Apply ML to samples flagged for ML review
+    if classification_result.get('ml_recommended', False):
+        return True
+    
+    # Apply ML to low confidence classifications
+    confidence = classification_result.get('confidence', 1.0)
+    if confidence < 0.75:
+        return True
+    
+    # Apply ML to INDETERMINATE and SUSPICIOUS classifications
+    classification = classification_result.get('classification', '')
+    if classification in ['INDETERMINATE', 'SUSPICIOUS']:
+        return True
+    
+    # Apply ML to WEAK_POSITIVE (often borderline cases)
+    if classification == 'WEAK_POSITIVE':
+        return True
+    
+    # Skip ML for confident STRONG_POSITIVE, POSITIVE, and NEGATIVE
+    if classification in ['STRONG_POSITIVE', 'POSITIVE', 'NEGATIVE'] and confidence >= 0.85:
+        return False
+    
+    # Default to ML for anything else uncertain
+    return True
+
+
+def get_edge_case_summary(classification_result):
+    """
+    Get a human-readable summary of why a sample is an edge case.
+    
+    Args:
+        classification_result: Dict with classification results
+    
+    Returns:
+        str: Description of edge case reasons
+    """
+    if not isinstance(classification_result, dict):
+        return "Unknown"
+    
+    edge_reasons = classification_result.get('edge_case_reasons', [])
+    if not edge_reasons:
+        confidence = classification_result.get('confidence', 1.0)
+        classification = classification_result.get('classification', '')
+        
+        if confidence < 0.75:
+            return f"Low confidence ({confidence:.2f})"
+        elif classification in ['INDETERMINATE', 'SUSPICIOUS', 'WEAK_POSITIVE']:
+            return f"Uncertain classification ({classification})"
+        else:
+            return "Borderline metrics"
+    
+    # Convert edge reasons to readable descriptions
+    reason_descriptions = {
+        'intermediate_amplitude': 'Signal strength between thresholds (200-600 RFU)',
+        'moderate_curve_quality': 'Curve fit quality marginal (R² 0.70-0.90)',
+        'moderate_steepness': 'Growth rate borderline (0.1-0.2)',
+        'moderate_snr': 'Signal-to-noise ratio marginal (1.5-3.0)',
+        'valid_cqj_weak_signal': 'Has threshold crossing but weak signal',
+        'no_cqj_moderate_signal': 'Moderate signal but no threshold crossing',
+        'good_curve_no_cqj': 'Good curve quality but no threshold crossing',
+        'borderline_curve_no_cqj': 'Borderline curve without threshold crossing'
+    }
+    
+    descriptions = [reason_descriptions.get(reason, reason) for reason in edge_reasons]
+    return "; ".join(descriptions)
+
+
 def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, cq_value=None, **kwargs):
     """
     STRICT qPCR curve classification with clear positive/negative criteria.
@@ -30,16 +115,18 @@ def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, c
     POSITIVE CRITERIA (must have ALL):
     - Amplitude ≥ 600 (clear signal above noise)
     - R² ≥ 0.90 (excellent curve fit) 
-    - Steepness ≥ 0.3 (good exponential growth)
-    - Valid CQJ (5-42 cycles, not N/A)
-    - SNR ≥ 4 (signal clearly above noise)
+    - Steepness ≥ 0.2 (good exponential growth - lowered from 0.3)
+    - Valid CQJ (5+ cycles, not N/A)
+    - Midpoint ≥ 5 (not impossibly early)
     
     NEGATIVE CRITERIA (any ONE triggers negative):
     - Amplitude < 200 (too weak)
     - R² < 0.70 (poor curve fit)
     - Steepness < 0.1 (flat line)
     - Midpoint > 42 (too late crossing)
-    - SNR < 1.5 (too noisy)
+    
+    NOTE: SNR criteria removed due to baseline-subtracted data reliability issues.
+    SNR is still used conservatively for edge case detection only.
     
     CQJ LOGIC:
     - CQJ < 5 with high amplitude = suspicious (possible machine error)
@@ -89,8 +176,7 @@ def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, c
         suspicious_patterns.append("high_amplitude_poor_fit")
     if steepness > 1.0:  # Impossibly steep (machine spike)
         suspicious_patterns.append("impossible_steepness") 
-    if snr > 20 and r2 < 0.7:  # Great SNR but poor curve (noise artifact)
-        suspicious_patterns.append("snr_curve_contradiction")
+    # NOTE: SNR contradictions removed due to baseline-subtracted data unreliability
     if midpoint < 3 and amplitude > 100:  # Impossibly early crossing
         suspicious_patterns.append("impossible_early_crossing")
     if cqj_suspicious and amplitude > 300:  # Early CQJ with significant amplitude
@@ -113,21 +199,21 @@ def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, c
     confident_positive = (
         amplitude >= 600 and         # Strong signal
         r2 >= 0.90 and             # Excellent curve fit
-        steepness >= 0.3 and       # Good exponential growth
+        steepness >= 0.2 and       # Good exponential growth (lowered from 0.3)
         has_valid_cqj and          # Valid CQJ crossing
-        midpoint >= 5 and          # Not impossibly early
-        not suspicious_patterns    # No anomalies
-        # Note: SNR removed - causing incorrect classifications
+        midpoint >= 5              # Not impossibly early
+        # NOTE: SNR removed from strict criteria due to baseline-subtracted data issues
+        # SNR is used separately for edge case detection only
     )
     
     # STRICT CONFIDENT NEGATIVE CRITERIA (ANY one triggers negative)
-    # Focus on curve quality and signal strength, not CQJ timing
+    # Focus on curve quality and signal strength, not SNR timing
     confident_negative = (
         amplitude < 200 or          # Too weak signal
         r2 < 0.70 or               # Poor curve fit  
         steepness < 0.1 or         # Flat line
-        snr < 1.5                  # Signal too noisy
-        # Note: No CQJ timing limits - pathogen specific
+        midpoint > 42              # Too late (pathogen specific limit)
+        # NOTE: SNR removed due to baseline-subtracted data unreliability
     )
     
     # CLASSIFICATION LOGIC - CHECK POSITIVES FIRST
@@ -203,14 +289,15 @@ def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, c
         # EDGE CASE - needs ML review
         edge_reasons = []
         
-        # Identify specific borderline issues
+        # Identify specific borderline issues (be careful with SNR due to baseline-subtracted data)
         if 200 <= amplitude < 600:
             edge_reasons.append("intermediate_amplitude")
         if 0.70 <= r2 < 0.90:
             edge_reasons.append("moderate_curve_quality")
-        if 0.1 <= steepness < 0.3:
+        if 0.1 <= steepness < 0.2:  # Updated to match confident_positive threshold
             edge_reasons.append("moderate_steepness")
-        if 1.5 <= snr < 4:
+        # NOTE: SNR edge case detection more conservative due to baseline-subtracted data issues
+        if snr < 2.0 and amplitude > 200:  # Only flag very low SNR with decent amplitude
             edge_reasons.append("moderate_snr")
         if has_valid_cqj and amplitude < 600:
             edge_reasons.append("valid_cqj_weak_signal")

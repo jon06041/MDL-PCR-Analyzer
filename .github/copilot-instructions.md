@@ -48,6 +48,12 @@ scores = {'positive_evidence': 0.0, 'negative_evidence': 0.0}
 - `CQJ` = calculated Cq at specific threshold (currently same number, but may differ)
 - Classification function expects CQJ, not imported cq_value
 
+**CRITICAL CSV Cq Import Rules**:
+- **NEVER import CSV Cq values for negative samples** - they often contain invalid placeholder values
+- Only import CSV Cq for confirmed positive classifications (POSITIVE, STRONG_POSITIVE, WEAK_POSITIVE)
+- CSV often contains invalid Cq values like 13.06 for negative samples that must be rejected
+- Strict validation: only accept Cq values in range 10.0-40.0 for positive samples
+
 ```python
 # CORRECT sequencing in qpcr_analyzer.py
 # 1. Calculate CQJ BEFORE classification
@@ -57,6 +63,12 @@ analysis['cqj'] = {channel_name: cqj_val}
 # 2. Pass CQJ to classification, not imported cq_value
 cqj_for_channel = analysis['cqj'].get(channel_name)
 classify_curve(..., cq_value=cqj_for_channel)  # cq_value param gets CQJ!
+
+# 3. In sql_integration.py: NEVER import CSV Cq for negative samples
+if classification in ['POSITIVE', 'STRONG_POSITIVE', 'WEAK_POSITIVE'] and 10.0 <= csv_cq <= 40.0:
+    well_result['cq_value'] = csv_cq  # Only for confirmed positives
+else:
+    well_result['cq_value'] = None    # Force None for negatives
 ```
 
 ### Frontend Loading Guards
@@ -142,6 +154,12 @@ Data flows: `MySQL tables` → `Flask API` → `Chart.js visualization` → `Use
 - **Root Cause**: CQJ dict `{'channel': cqj_val}` empty or CQJ retrieval failing
 - **Debug**: Check `analysis['cqj']` storage and `cqj_for_channel` retrieval
 - **Solution**: Ensure CQJ calculated before classification and channel names match
+
+### Invalid CSV Cq Import for Negative Samples
+- **Problem**: Negative samples showing invalid Cq values (e.g., 13.06) instead of N/A
+- **Root Cause**: CSV contains placeholder Cq values for negative samples that get imported
+- **Debug**: Check classification result vs CSV Cq value - negatives should have cq_value=None
+- **Solution**: Only import CSV Cq for confirmed positive classifications, reject all others
 
 ### Frontend Freezing
 - **Problem**: Infinite loops in threshold updates

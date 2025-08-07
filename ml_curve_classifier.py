@@ -505,7 +505,8 @@ class MLCurveClassifier:
                 existing_metrics.get('snr', 0),
                 existing_metrics.get('midpoint', 0),
                 existing_metrics.get('baseline', 0),
-                existing_metrics.get('amplitude', 0)
+                existing_metrics.get('amplitude', 0),
+                cq_value=existing_metrics.get('cqj') or existing_metrics.get('cq_value')  # CRITICAL FIX: Pass CQJ value to classification
             )
             
             print(f"🔍 ML Debug: Rule-based classification result: {result}")
