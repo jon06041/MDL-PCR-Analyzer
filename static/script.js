@@ -5924,6 +5924,176 @@ function onThresholdChange(channel, scale, value) {
 window.onThresholdChange = onThresholdChange;
 
 // Hook into scale changes to trigger ML updates (only for threshold-affecting changes)
+// Hook into scale changes to trigger ML updates (only for threshold-affecting changes)
+function onScaleChange(newScale) {
+    // Note: This should only be called when scale changes affect actual threshold values,
+    // not when scale toggle affects display mode only
+    setTimeout(() => {
+        triggerMLReClassification(`scale change: ${newScale}`);
+    }, 300);
+}
+
+// ========================================
+// EDGE CASE DETECTION & ML BATCH ANALYSIS
+// ========================================
+
+/**
+ * Get all visible edge cases from the current results table
+ * @returns {Array} Array of edge case well objects with details
+ */
+function getVisibleEdgeCases() {
+    const edgeCases = [];
+    
+    if (!currentAnalysisResults || !currentAnalysisResults.individual_results) {
+        return edgeCases;
+    }
+    
+    // Get all visible wells (respecting current filters)
+    const resultsTableBody = document.getElementById('resultsTableBody');
+    if (!resultsTableBody) return edgeCases;
+    
+    const visibleRows = Array.from(resultsTableBody.querySelectorAll('tr')).filter(row => {
+        return row.style.display !== 'none';
+    });
+    
+    visibleRows.forEach(row => {
+        const wellKey = row.getAttribute('data-well-key');
+        if (!wellKey) return;
+        
+        const result = currentAnalysisResults.individual_results[wellKey];
+        if (!result) return;
+        
+        // Check if this is an edge case
+        const isEdgeCase = result.curve_classification && 
+                          result.curve_classification.edge_case === true;
+        
+        if (isEdgeCase) {
+            edgeCases.push({
+                wellKey: wellKey,
+                wellId: result.well_id || wellKey,
+                sampleName: result.sample || result.sample_name || 'Unknown',
+                fluorophore: result.fluorophore || 'Unknown',
+                classification: result.curve_classification.classification,
+                reasons: result.curve_classification.edge_case_reasons || [],
+                confidence: result.curve_classification.confidence || 0.5,
+                result: result
+            });
+        }
+    });
+    
+    return edgeCases;
+}
+
+/**
+ * Count edge cases and update UI indicator
+ * @returns {number} Number of visible edge cases
+ */
+function countEdgeCases() {
+    const edgeCases = getVisibleEdgeCases();
+    const count = edgeCases.length;
+    
+    // Update edge case counter in UI (if element exists)
+    const edgeCaseCounter = document.getElementById('edgeCaseCounter');
+    if (edgeCaseCounter) {
+        edgeCaseCounter.textContent = count;
+        edgeCaseCounter.style.display = count > 0 ? 'inline' : 'none';
+    }
+    
+    // Update ML batch analysis button
+    const mlBatchButton = document.getElementById('mlBatchAnalysisBtn');
+    if (mlBatchButton) {
+        mlBatchButton.disabled = count === 0;
+        mlBatchButton.textContent = count > 0 ? 
+            `Analyze ${count} Edge Case${count !== 1 ? 's' : ''} with ML` : 
+            'No Edge Cases to Analyze';
+    }
+    
+    return count;
+}
+
+/**
+ * Trigger ML batch analysis for edge cases only
+ */
+async function triggerMLBatchAnalysisForEdgeCases() {
+    const edgeCases = getVisibleEdgeCases();
+    
+    if (edgeCases.length === 0) {
+        console.log('🎯 No edge cases found for ML analysis');
+        return;
+    }
+    
+    console.log(`🎯 Starting ML batch analysis for ${edgeCases.length} edge cases`);
+    
+    // Show loading state
+    const mlBatchButton = document.getElementById('mlBatchAnalysisBtn');
+    if (mlBatchButton) {
+        mlBatchButton.disabled = true;
+        mlBatchButton.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Analyzing...';
+    }
+    
+    try {
+        // Create a subset of results containing only edge cases
+        const edgeCaseResults = {};
+        edgeCases.forEach(edgeCase => {
+            edgeCaseResults[edgeCase.wellKey] = edgeCase.result;
+        });
+        
+        // Trigger ML enhancement for edge cases only
+        await enhanceResultsWithMLClassification(edgeCaseResults, true);
+        
+        console.log(`🎯 ML batch analysis completed for ${edgeCases.length} edge cases`);
+        
+        // Show success message
+        if (mlBatchButton) {
+            mlBatchButton.innerHTML = '✅ Analysis Complete';
+            setTimeout(() => {
+                countEdgeCases(); // Reset button text
+            }, 2000);
+        }
+        
+    } catch (error) {
+        console.error('🎯 ML batch analysis failed:', error);
+        
+        // Show error state
+        if (mlBatchButton) {
+            mlBatchButton.innerHTML = '❌ Analysis Failed';
+            mlBatchButton.disabled = false;
+            setTimeout(() => {
+                countEdgeCases(); // Reset button text
+            }, 3000);
+        }
+    }
+}
+
+/**
+ * Update the edge case counter in the UI
+ */
+function updateEdgeCaseCounter() {
+    try {
+        const count = countEdgeCases();
+        const counterElement = document.getElementById('edgeCaseCounterText');
+        const buttonElement = document.getElementById('mlBatchAnalysisBtn');
+        
+        if (counterElement) {
+            counterElement.textContent = `${count} detected`;
+        }
+        
+        if (buttonElement) {
+            if (count > 0) {
+                buttonElement.disabled = false;
+                buttonElement.textContent = `Analyze ${count} Edge Cases`;
+                buttonElement.style.background = '#6f42c1';
+            } else {
+                buttonElement.disabled = true;
+                buttonElement.textContent = 'No Edge Cases to Analyze';
+                buttonElement.style.background = '#6c757d';
+            }
+        }
+    } catch (error) {
+        console.error('Error updating edge case counter:', error);
+    }
+}
+
 function onScaleChange(newScale) {
     // Note: This should only be called when scale changes affect actual threshold values,
     // not when scale toggle affects display mode only
@@ -6270,6 +6440,9 @@ function populateResultsTable(individualResults) {
         
         // ML enhancement is now handled through the banner system in displayAnalysisResults
         // No longer automatically run ML enhancement here to preserve existing classifications
+        
+        // Update edge case counter after table population
+        updateEdgeCaseCounter();
     
 
     } catch (mainError) {

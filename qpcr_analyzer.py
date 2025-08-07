@@ -314,7 +314,10 @@ def analyze_curve_quality(cycles, rfu, plot=False,
         # If original criteria pass with very high confidence, don't apply strict filters
         high_confidence_curve = (r2 > 0.99 and L > 1000 and k > 0.1)
         
-        if high_confidence_curve:
+        # RELAXED criteria for excellent fits with high amplitude
+        excellent_curve = (r2 > 0.95 and L > 1000 and k > 0.2)
+        
+        if high_confidence_curve or excellent_curve:
             # For obviously excellent curves, use original criteria only
             enhanced_is_good_scurve = original_s_curve_criteria
         else:
@@ -633,10 +636,6 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
         from app import get_pathogen_target
         test_code = data.get('test_code', None)
         analysis['pathogen_target'] = get_pathogen_target(test_code, channel_name) if test_code else channel_name
-        
-        # Preserve original cq_value from input data (imported CSV Cq value)
-        if 'cq_value' in data and data['cq_value'] is not None:
-            analysis['cq_value'] = data['cq_value']
 
         results[well_id] = analysis
 
