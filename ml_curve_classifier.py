@@ -433,7 +433,7 @@ class MLCurveClassifier:
             steepness = existing_metrics.get('steepness', 0)
             
             # If this looks like it could be a positive curve, use rule-based instead of ML
-            potential_positive = (r2 > 0.85 and amplitude > 100 and snr > 2 and steepness > 0.1)
+            potential_positive = (r2 > 0.85 and amplitude > 100 and snr > 2 and steepness > 0.05)  # Lowered from 0.1 to 0.05
             
             if potential_positive:
                 print(f"🔍 ML Debug: Potential positive curve detected (r2={r2:.3f}, amp={amplitude:.0f}, snr={snr:.1f}) - using rule-based to avoid ML corruption")

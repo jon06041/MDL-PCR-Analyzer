@@ -283,27 +283,30 @@ def analyze_curve_quality(cycles, rfu, plot=False,
         min_amplitude_original = max(50, rfu_range * 0.3)  # Adaptive amplitude threshold
         r2_threshold = 0.9 if len(cycles) > 20 else 0.85  # Relaxed for shorter runs
 
-        # Original S-curve quality criteria
-        original_s_curve_criteria = bool(r2 > r2_threshold and k > 0.05 and L > min_amplitude_original)
+        # Original S-curve quality criteria - LOWERED steepness threshold for better sensitivity
+        original_s_curve_criteria = bool(r2 > r2_threshold and k > 0.02 and L > min_amplitude_original)
+        print(f"[S-CURVE DEBUG] Original criteria: R²={r2:.4f}>{r2_threshold}, k={k:.3f}>0.02, L={L:.1f}>{min_amplitude_original:.1f} -> {original_s_curve_criteria}")
 
         # ENHANCED FINAL CLASSIFICATION: Use original criteria for high-quality curves
-        # If original criteria pass with very high confidence, don't apply strict filters
-        high_confidence_curve = (r2 > 0.99 and L > 1000 and k > 0.1)
+        # If original criteria pass with very high confidence, don't apply strict filters  
+        high_confidence_curve = (r2 > 0.99 and L > 1000 and k > 0.05)  # Lowered from 0.1 to 0.05
         
         if high_confidence_curve:
             # For obviously excellent curves, use original criteria only
             enhanced_is_good_scurve = original_s_curve_criteria
+            print(f"[S-CURVE DEBUG] High confidence curve: R²={r2:.4f}, L={L:.1f}, k={k:.3f} -> enhanced={enhanced_is_good_scurve}")
         else:
             # For borderline curves, apply additional quality filters
             enhanced_is_good_scurve = original_s_curve_criteria and all_quality_checks_pass
+            print(f"[S-CURVE DEBUG] Regular curve: R²={r2:.4f}, L={L:.1f}, k={k:.3f}, original={original_s_curve_criteria}, quality_pass={all_quality_checks_pass} -> enhanced={enhanced_is_good_scurve}")
 
         # Determine rejection reason
         rejection_reason = None
         if not original_s_curve_criteria:
             if r2 <= r2_threshold:
                 rejection_reason = f"Poor R² fit ({r2:.3f} <= {r2_threshold})"
-            elif k <= 0.05:
-                rejection_reason = f"Insufficient steepness ({k:.4f} <= 0.05)"
+            elif k <= 0.02:  # Updated to match new threshold
+                rejection_reason = f"Insufficient steepness ({k:.4f} <= 0.02)"
             elif L <= min_amplitude_original:
                 rejection_reason = f"Insufficient amplitude ({L:.1f} <= {min_amplitude_original:.1f})"
         elif not start_cycle_valid:

@@ -161,6 +161,12 @@ Data flows: `MySQL tables` → `Flask API` → `Chart.js visualization` → `Use
 - **Debug**: Check classification result vs CSV Cq value - negatives should have cq_value=None
 - **Solution**: Only import CSV Cq for confirmed positive classifications, reject all others
 
+### S-Curve Detection Too Strict
+- **Problem**: Excellent curves (R² 0.99+, steepness 0.18+) showing "Poor S-Curve" in visual analysis
+- **Root Cause**: Steepness thresholds too strict (k > 0.05 original, k > 0.1 high confidence)
+- **Debug**: Check backend is_good_scurve flag vs actual steepness values
+- **Solution**: Lowered steepness criteria: original k > 0.02, high confidence k > 0.05, ML potential k > 0.05
+
 ### Frontend Freezing
 - **Problem**: Infinite loops in threshold updates
 - **Solution**: Implement loading guards and recursion prevention

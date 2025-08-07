@@ -181,7 +181,7 @@ def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, c
         suspicious_patterns.append("impossible_early_crossing")
     if cqj_suspicious and amplitude > 300:  # Early CQJ with significant amplitude
         suspicious_patterns.append("suspicious_early_cqj")
-    if amplitude > 1000 and steepness < 0.05:  # High signal but no growth
+    if amplitude > 1000 and steepness < 0.02:  # High signal but no growth - lowered threshold
         suspicious_patterns.append("high_amp_no_growth")
     
     if suspicious_patterns:
