@@ -18,7 +18,31 @@ def sigmoid(x, L, k, x0, B):
 
 def detect_amplification_start(cycles, rfu, threshold_factor=0.1):
     """
-    Detect when amplification starts
+    Detect when amplifi                             # FALLBACK TO RULE-BASED CLASSIFICATION
+                analysis['curve_classification'] = classify_curve(
+                    analysis.get('r2_score'),
+                    analysis.get('steepness'),
+                    analysis.get('quality_filters', {}).get('snr_check', {}).get('snr'),
+                    analysis.get('midpoint'),
+                    analysis.get('baseline'),
+                    analysis.get('amplitude')
+                )
+                # Mark as rule-based method - confidence already calculated by classify_curve
+                analysis['curve_classification']['method'] = 'Rule-based (ML failed)'
+                print(f"🔄 Fallback Result: {analysis['curve_classification'].get('classification')} via Rule-based (confidence: {analysis['curve_classification'].get('confidence', 0.5):.3f})")K TO RULE-BASED CLASSIFICATION
+                analysis['curve_classification'] = classify_curve(
+                    analysis.get('r2_score'),
+                    analysis.get('steepness'),
+                    analysis.get('quality_filters', {}).get('snr_check', {}).get('snr'),
+                    analysis.get('midpoint'),
+                    analysis.get('baseline'),
+                    analysis.get('amplitude')
+                )
+                # Mark as rule-based method and ensure confidence is present
+                analysis['curve_classification']['method'] = 'Rule-based (ML failed)'
+                if 'confidence' not in analysis['curve_classification']:
+                    analysis['curve_classification']['confidence'] = 0.5  # Default fallback confidence
+                print(f"🔄 Fallback Result: {analysis['curve_classification'].get('classification')} via Rule-based (confidence: {analysis['curve_classification'].get('confidence', 0.5):.3f})")lly starts
     Returns the cycle number where significant amplification begins
     """
     cycles = np.array(cycles)
@@ -283,30 +307,27 @@ def analyze_curve_quality(cycles, rfu, plot=False,
         min_amplitude_original = max(50, rfu_range * 0.3)  # Adaptive amplitude threshold
         r2_threshold = 0.9 if len(cycles) > 20 else 0.85  # Relaxed for shorter runs
 
-        # Original S-curve quality criteria - LOWERED steepness threshold for better sensitivity
-        original_s_curve_criteria = bool(r2 > r2_threshold and k > 0.02 and L > min_amplitude_original)
-        print(f"[S-CURVE DEBUG] Original criteria: R²={r2:.4f}>{r2_threshold}, k={k:.3f}>0.02, L={L:.1f}>{min_amplitude_original:.1f} -> {original_s_curve_criteria}")
+        # Original S-curve quality criteria
+        original_s_curve_criteria = bool(r2 > r2_threshold and k > 0.05 and L > min_amplitude_original)
 
         # ENHANCED FINAL CLASSIFICATION: Use original criteria for high-quality curves
-        # If original criteria pass with very high confidence, don't apply strict filters  
-        high_confidence_curve = (r2 > 0.99 and L > 1000 and k > 0.05)  # Lowered from 0.1 to 0.05
+        # If original criteria pass with very high confidence, don't apply strict filters
+        high_confidence_curve = (r2 > 0.99 and L > 1000 and k > 0.1)
         
         if high_confidence_curve:
             # For obviously excellent curves, use original criteria only
             enhanced_is_good_scurve = original_s_curve_criteria
-            print(f"[S-CURVE DEBUG] High confidence curve: R²={r2:.4f}, L={L:.1f}, k={k:.3f} -> enhanced={enhanced_is_good_scurve}")
         else:
             # For borderline curves, apply additional quality filters
             enhanced_is_good_scurve = original_s_curve_criteria and all_quality_checks_pass
-            print(f"[S-CURVE DEBUG] Regular curve: R²={r2:.4f}, L={L:.1f}, k={k:.3f}, original={original_s_curve_criteria}, quality_pass={all_quality_checks_pass} -> enhanced={enhanced_is_good_scurve}")
 
         # Determine rejection reason
         rejection_reason = None
         if not original_s_curve_criteria:
             if r2 <= r2_threshold:
                 rejection_reason = f"Poor R² fit ({r2:.3f} <= {r2_threshold})"
-            elif k <= 0.02:  # Updated to match new threshold
-                rejection_reason = f"Insufficient steepness ({k:.4f} <= 0.02)"
+            elif k <= 0.05:
+                rejection_reason = f"Insufficient steepness ({k:.4f} <= 0.05)"
             elif L <= min_amplitude_original:
                 rejection_reason = f"Insufficient amplitude ({L:.1f} <= {min_amplitude_original:.1f})"
         elif not start_cycle_valid:
@@ -535,41 +556,6 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
         # Add anomaly detection
         anomalies = detect_curve_anomalies(cycles, rfu)
         analysis['anomalies'] = anomalies
-        
-        # --- Calculate CQJ FIRST (BEFORE classification) ---
-        from cqj_calcj_utils import calculate_cqj as py_cqj
-        
-        # Prepare well dict for CQJ calculation with enhanced debugging
-        well_for_cqj = {
-            'raw_cycles': analysis.get('raw_cycles'),
-            'raw_rfu': analysis.get('raw_rfu'),
-            'amplitude': analysis.get('amplitude'),
-            'well_id': well_id  # Add well_id for debugging
-        }
-        threshold = analysis.get('threshold_value')
-        
-        # DEBUG: Check data availability before CQJ calculation
-        print(f"🔍 CQJ Calculation Input Debug for {well_id}:")
-        print(f"   raw_cycles available: {well_for_cqj['raw_cycles'] is not None}")
-        print(f"   raw_rfu available: {well_for_cqj['raw_rfu'] is not None}")
-        print(f"   threshold: {threshold}")
-        if well_for_cqj['raw_cycles'] and well_for_cqj['raw_rfu']:
-            print(f"   data length: cycles={len(well_for_cqj['raw_cycles'])}, rfu={len(well_for_cqj['raw_rfu'])}")
-            print(f"   max RFU: {max(well_for_cqj['raw_rfu'])}")
-        
-        cqj_val = py_cqj(well_for_cqj, threshold) if threshold is not None else None
-        
-        # Store CQJ value BEFORE classification
-        analysis['cqj'] = {channel_name: cqj_val}
-        analysis['cq_value'] = cqj_val  # Also store as cq_value for classification
-        
-        # DEBUG: Check CQJ storage
-        print(f"🔍 CQJ Storage Debug:")
-        print(f"   Channel name: '{channel_name}'")
-        print(f"   CQJ val: {cqj_val}")
-        print(f"   CQJ dict stored: {analysis['cqj']}")
-        print(f"   CQ value stored: {analysis['cq_value']}")
-        
         # Add curve classification - ML ENABLED WITH CONFIDENCE SAFEGUARDS + RULE-BASED FALLBACK
         if 'error' in analysis:
             analysis['curve_classification'] = {
@@ -615,18 +601,6 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                 print(f"⚠️ ML Failed for {well_id}: {e}")
                 print(f"🔄 Falling back to rule-based classification")
                 # FALLBACK TO RULE-BASED CLASSIFICATION
-                # Get CQJ value for this channel
-                cqj_for_channel = None
-                if 'cqj' in analysis and isinstance(analysis['cqj'], dict):
-                    cqj_for_channel = analysis['cqj'].get(channel_name)
-                
-                # DEBUG: Check CQJ retrieval
-                print(f"🔍 CQJ Retrieval Debug:")
-                print(f"   Channel name: {channel_name}")
-                print(f"   CQJ dict: {analysis.get('cqj', {})}")
-                print(f"   CQJ for channel: {cqj_for_channel}")
-                print(f"   CQ value stored: {analysis.get('cq_value', 'None')}")
-                
                 analysis['curve_classification'] = classify_curve(
                     analysis.get('r2_score', 0),
                     analysis.get('steepness', 0),
@@ -634,18 +608,35 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                     analysis.get('midpoint', 50),
                     analysis.get('baseline', 100),
                     amplitude=analysis.get('amplitude', 0),
-                    cq_value=cqj_for_channel
+                    cq_value=analysis.get('cq_value')
                 )
                 # Mark as rule-based method
                 analysis['curve_classification']['method'] = 'Rule-based (ML failed)'
                 print(f"� Fallback Result: {analysis['curve_classification'].get('classification')} via Rule-based")
 
-        # --- CQJ already calculated before classification above ---
-        # No need to recalculate CQJ here - it was done before classification
+        # --- Per-channel CQJ/CalcJ integration (dict, robust) ---
+        # Prepare well dict for CQJ/CalcJ utils
+        well_for_cqj = {
+            'raw_cycles': analysis.get('raw_cycles'),
+            'raw_rfu': analysis.get('raw_rfu'),
+            'amplitude': analysis.get('amplitude')
+        }
+        threshold = analysis.get('threshold_value')
+        cqj_val = py_cqj(well_for_cqj, threshold) if threshold is not None else None
+        # CalcJ calculation moved to frontend - backend should not calculate it
+        # calcj_val = py_calcj(well_for_cqj, threshold) if threshold is not None else None
+
+        # Store as dict for per-channel support (even if only one channel)
+        analysis['cqj'] = {channel_name: cqj_val}
+        # analysis['calcj'] = {channel_name: calcj_val}
 
         from app import get_pathogen_target
         test_code = data.get('test_code', None)
         analysis['pathogen_target'] = get_pathogen_target(test_code, channel_name) if test_code else channel_name
+        
+        # Preserve original cq_value from input data (imported CSV Cq value)
+        if 'cq_value' in data and data['cq_value'] is not None:
+            analysis['cq_value'] = data['cq_value']
 
         results[well_id] = analysis
 

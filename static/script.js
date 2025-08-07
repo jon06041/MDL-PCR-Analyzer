@@ -6165,6 +6165,7 @@ function populateResultsTable(individualResults) {
         let cqjDisplay = null;
         let calcjDisplay = null;
 
+        // Check for CQJ in multiple locations: nested object, direct value, or cqj_value field
         if (
             result.cqj && typeof result.cqj === 'object' && result.fluorophore &&
             result.cqj[result.fluorophore] !== undefined && result.cqj[result.fluorophore] !== null &&
@@ -6173,8 +6174,15 @@ function populateResultsTable(individualResults) {
         ) {
             cqjDisplay = Number(result.cqj[result.fluorophore]).toFixed(2);
             // console.log(`🔍 CQJ-DISPLAY - ${result.well}: CQJ ${cqjDisplay} for ${result.fluorophore} (raw: ${result.cqj[result.fluorophore]})`);
+        } else if (
+            result.cqj_value !== undefined && result.cqj_value !== null &&
+            !isNaN(result.cqj_value) && result.cqj_value !== -999 &&
+            result.cqj_value > 5 // Valid CQJ should be > cycle 5
+        ) {
+            cqjDisplay = Number(result.cqj_value).toFixed(2);
+            // console.log(`🔍 CQJ-DISPLAY - ${result.well}: CQJ ${cqjDisplay} from cqj_value field (raw: ${result.cqj_value})`);
         } else {
-            // console.log(`🔍 CQJ-DISPLAY - ${result.well}: No valid CQJ for ${result.fluorophore} (value: ${result.cqj?.[result.fluorophore]})`);
+            // console.log(`🔍 CQJ-DISPLAY - ${result.well}: No valid CQJ for ${result.fluorophore} (nested: ${result.cqj?.[result.fluorophore]}, direct: ${result.cqj_value})`);
         }
 
         // Check both nested object structure and direct value
@@ -9086,7 +9094,7 @@ function displayAnalysisHistory(sessions) {
                         <td>${calculatePositiveRate(session)}${getHistoryValidationMessage(session)}</td>
                         <td>${extractCycleInfo(session)}</td>
                         <td onclick="event.stopPropagation()">
-                            <button onclick="loadSessionDetails('${session.id}')" class="btn-small btn-primary">View</button>
+                            <button onclick="deleteSessionFromDB('${session.id}', event)" class="btn-small btn-warning">Delete from DB</button>
                             <button onclick="deleteSessionGroup('${session.id}', event)" class="btn-small btn-danger">Delete</button>
                         </td>
                     </tr>
@@ -14136,6 +14144,54 @@ function processCombinedSessionData(sessionDataArray) {
 }
 
 // Delete session functions
+async function deleteSessionFromDB(sessionId, event) {
+    if (event) {
+        event.stopPropagation();
+    }
+    
+    if (!confirm('⚠️ DELETE FROM DATABASE\n\nThis will permanently delete this session from the database.\nUse this to clear old data before reanalyzing with the CQJ fix.\n\nAre you sure?')) {
+        return;
+    }
+    
+    const deleteBtn = event && event.target ? event.target : null;
+    if (deleteBtn) {
+        deleteBtn.disabled = true;
+        deleteBtn.textContent = 'Deleting...';
+    }
+    
+    try {
+        console.log('🗑️ Deleting session from database:', sessionId);
+        const response = await fetch(`/delete_session/${sessionId}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            console.log('✅ Database deletion successful:', result);
+            alert(`✅ Session deleted from database!\n\nDeleted: ${result.wells_deleted} wells\nSession: ${sessionId}\n\nNow you can reanalyze with the fixed CQJ logic.`);
+            loadAnalysisHistory(); // Refresh the history
+        } else {
+            let errorText = '';
+            try {
+                const errorData = await response.json();
+                errorText = errorData.error || 'Unknown error';
+            } catch (e) {
+                errorText = `HTTP ${response.status}: ${response.statusText}`;
+            }
+            console.error('❌ Database deletion failed:', errorText);
+            alert('❌ Failed to delete from database: ' + errorText);
+        }
+    } catch (error) {
+        console.error('❌ Error deleting from database:', error);
+        alert('❌ Failed to delete from database: ' + error.message);
+    } finally {
+        if (deleteBtn) {
+            deleteBtn.disabled = false;
+            deleteBtn.textContent = 'Delete from DB';
+        }
+    }
+}
+
 async function deleteSessionGroup(sessionId, event) {
     // console.log('deleteSessionGroup called with sessionId:', sessionId, 'type:', typeof sessionId);
     

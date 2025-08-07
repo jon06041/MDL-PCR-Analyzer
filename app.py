@@ -1567,6 +1567,12 @@ def delete_session(session_id):
         print(f"[ERROR] Outer exception deleting session {session_id}: {e}\nTraceback:\n{tb}")
         return jsonify({'error': f'Failed to delete session: {str(e)}'}), 500
 
+# Alias for delete_session endpoint (for frontend compatibility)
+@app.route('/delete_session/<int:session_id>', methods=['DELETE'])
+def delete_session_alias(session_id):
+    """Alias for the main delete_session endpoint"""
+    return delete_session(session_id)
+
 # Alternative delete endpoint with enhanced error handling
 @app.route('/sessions/<int:session_id>/force-delete', methods=['DELETE'])
 def force_delete_session(session_id):

@@ -42,21 +42,15 @@ def process_with_sql_integration(amplification_data, samples_csv_data, fluoropho
     
     # Process amplification data to get curve analysis results
     analysis_results = process_csv_data(amplification_data)
-    # Preserve frontend-parsed sample_name and ORIGINAL imported Cq values 
-    # BUT DO NOT OVERRIDE calculated CQJ values in cq_value field
+    # Preserve frontend-parsed sample_name and cq_value so they are not lost
     if 'individual_results' in analysis_results:
         for well_id, well_result in analysis_results['individual_results'].items():
             original = amplification_data.get(well_id)
             if original:
                 if 'sample_name' in original and original['sample_name'] is not None:
                     well_result['sample_name'] = original['sample_name']
-                # CRITICAL FIX: Store calculated CQJ as 'cqj_value' and preserve original Cq as 'cq_value'
-                # Move calculated CQJ to cqj_value, then restore original imported Cq to cq_value
-                if 'cq_value' in well_result and well_result['cq_value'] is not None:
-                    well_result['cqj_value'] = well_result['cq_value']  # Save calculated CQJ
                 if 'cq_value' in original and original['cq_value'] is not None:
-                    well_result['cq_value'] = original['cq_value']  # Restore original imported Cq
-                    print(f"[SQL-CQJ-FIX] Well {well_id}: Stored calculated CQJ={well_result.get('cqj_value', 'None')} as cqj_value, restored original Cq={original['cq_value']} as cq_value")
+                    well_result['cq_value'] = original['cq_value']
     if not analysis_results.get('success', False):
         return analysis_results
     
@@ -129,25 +123,13 @@ def process_with_sql_integration(amplification_data, samples_csv_data, fluoropho
                     import re
                     well_normalized = re.sub(r'^([A-P])0(\d)$', r'\1\2', well_raw)
                     
-                    # Parse Cq value - STRICT validation for negative samples
+                    # Parse Cq value
                     cq_value = None
-                    if cq_raw:
-                        cq_str = str(cq_raw).lower().strip()
-                        # NEVER accept these common negative/invalid indicators
-                        invalid_cq_indicators = ['nan', 'n/a', '', 'cq', 'undetermined', 'no ct', 'no cq', 'neg', 'negative', '0', '0.0']
-                        if cq_str not in invalid_cq_indicators:
-                            try:
-                                parsed_cq = float(cq_raw)
-                                # Additional validation: reject unrealistic Cq values
-                                # Valid qPCR Cq range is typically 10-40 cycles
-                                if 10.0 <= parsed_cq <= 40.0:
-                                    cq_value = parsed_cq
-                                else:
-                                    print(f"[SQL-CQJ-REJECT] Well {well_normalized}: Rejected unrealistic Cq={parsed_cq} (outside 10-40 range)")
-                            except (ValueError, TypeError):
-                                print(f"[SQL-CQJ-REJECT] Well {well_normalized}: Could not parse Cq='{cq_raw}' as float")
-                        else:
-                            print(f"[SQL-CQJ-REJECT] Well {well_normalized}: Rejected invalid Cq indicator='{cq_str}'")
+                    if cq_raw and str(cq_raw).lower() not in ['nan', '', 'cq']:
+                        try:
+                            cq_value = float(cq_raw)
+                        except (ValueError, TypeError):
+                            pass
                     
                     sample_records.append({
                         'session_id': session_id,
@@ -208,46 +190,9 @@ def process_with_sql_integration(amplification_data, samples_csv_data, fluoropho
                         elif 'sample_name' not in well_result or well_result['sample_name'] is None:
                             well_result['sample_name'] = 'Unknown'
                         
-                        # CRITICAL FIX: NEVER import CSV Cq values for negative samples
-                        # Negative samples often have invalid placeholder Cq values in CSV that must be ignored
+                        # Only update cq_value if we found one in CSV
                         if well_id in cq_mapping:
-                            csv_cq = cq_mapping[well_id]
-                            calculated_cqj = well_result.get('cqj_value')  # This should be our calculated CQJ
-                            
-                            # Get classification to determine if CSV Cq should be imported
-                            classification = well_result.get('curve_classification', {}).get('classification', 'UNKNOWN')
-                            
-                            # ABSOLUTE RULE: NEVER import CSV Cq for negative/indeterminate samples
-                            # Only import for confirmed positive classifications AND reasonable Cq values
-                            if classification in ['POSITIVE', 'STRONG_POSITIVE', 'WEAK_POSITIVE'] and 10.0 <= csv_cq <= 40.0:
-                                # For positive samples with reasonable Cq, use CSV Cq as original imported value
-                                well_result['cq_value'] = csv_cq
-                                if calculated_cqj is not None:
-                                    well_result['cqj_value'] = calculated_cqj  # Keep calculated CQJ separate
-                                print(f"[SQL-CQJ-IMPORT] Well {well_id} ({classification}): Imported CSV Cq={csv_cq}, calculated CQJ={calculated_cqj}")
-                            else:
-                                # For ALL negative/indeterminate samples: REJECT CSV Cq, use None
-                                well_result['cq_value'] = None  # Force clear any Cq for negative samples
-                                if calculated_cqj is not None:
-                                    well_result['cqj_value'] = calculated_cqj  # Keep calculated CQJ if it exists
-                                well_result['csv_cq_rejected'] = csv_cq  # Track what we rejected for debugging
-                                print(f"[SQL-CQJ-REJECT] Well {well_id} ({classification}): REJECTED CSV Cq={csv_cq}, forcing cq_value=None")
-                        else:
-                            # No CSV Cq found - handle based on what we calculated
-                            calculated_cqj = well_result.get('cq_value')  # This might be our calculated CQJ
-                            if calculated_cqj is not None:
-                                # Move calculated value to cqj_value and clear cq_value for negatives
-                                classification = well_result.get('curve_classification', {}).get('classification', 'UNKNOWN')
-                                well_result['cqj_value'] = calculated_cqj
-                                if classification not in ['POSITIVE', 'STRONG_POSITIVE', 'WEAK_POSITIVE']:
-                                    well_result['cq_value'] = None  # Clear for negative samples
-                                    print(f"[SQL-CQJ-CLEAR] Well {well_id} ({classification}): Cleared cq_value for negative, kept CQJ={calculated_cqj}")
-                                else:
-                                    print(f"[SQL-CQJ-KEEP] Well {well_id} ({classification}): Kept calculated CQJ={calculated_cqj}")
-                            else:
-                                # No calculated CQJ either - ensure cq_value is None
-                                well_result['cq_value'] = None
-                                well_result['cqj_value'] = None
+                            well_result['cq_value'] = cq_mapping[well_id]
                         
                         # Always set fluorophore
                         well_result['fluorophore'] = fluorophore

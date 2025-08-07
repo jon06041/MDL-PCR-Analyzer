@@ -42,6 +42,12 @@ scores = {'positive_evidence': 0.0, 'negative_evidence': 0.0}
 # Consider ~30 criteria with weights
 ```
 
+**Edge Case Detection for Targeted ML**:
+- Classification function returns `edge_case: true` for borderline samples
+- Frontend highlights edge cases with subtle visual indicators
+- ML analysis triggered ONLY for edge cases, not all samples
+- Reduces computational overhead while focusing on uncertain classifications
+
 ### CQJ vs Cq Value Data Flow (CRITICAL)
 **Distinguish between imported Cq and calculated CQJ**:
 - `cq_value` = imported Cq from original data
@@ -83,6 +89,28 @@ try {
     // Your operation
 } finally {
     window.appState.uiState.isThresholdLoading = false;
+}
+```
+
+### Edge Case Detection & ML Batch Analysis
+**New workflow for targeted ML analysis**:
+- **Frontend Edge Case Highlighting**: Light visual highlight on curve classification badges for edge cases
+- **Edge Case Identification**: Use `edge_case: true` flag from classification results to mark borderline samples
+- **Targeted ML Analysis**: Run ML batch analysis ONLY on identified edge cases, not all samples
+- **Edge Case UI Pattern**: Subtle styling (light background, border, or icon) to make edge cases easily identifiable
+- **Batch Processing**: Count visible edge cases, then trigger ML analysis specifically for those samples
+
+```javascript
+// Frontend edge case detection pattern
+if (result.curve_classification.edge_case === true) {
+    // Apply light highlight styling
+    curveClassBadgeHTML += ' edge-case-highlight';
+}
+
+// ML batch analysis trigger for edge cases only
+const edgeCases = getVisibleEdgeCases();
+if (edgeCases.length > 0) {
+    triggerMLBatchAnalysis(edgeCases);
 }
 ```
 
