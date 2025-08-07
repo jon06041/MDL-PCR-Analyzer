@@ -602,12 +602,13 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                 print(f"🔄 Falling back to rule-based classification")
                 # FALLBACK TO RULE-BASED CLASSIFICATION
                 analysis['curve_classification'] = classify_curve(
-                    analysis.get('r2_score'),
-                    analysis.get('steepness'),
-                    analysis.get('quality_filters', {}).get('snr_check', {}).get('snr'),
-                    analysis.get('midpoint'),
-                    analysis.get('baseline'),
-                    analysis.get('amplitude')
+                    analysis.get('r2_score', 0),
+                    analysis.get('steepness', 0),
+                    analysis.get('quality_filters', {}).get('snr_check', {}).get('snr', 0),
+                    analysis.get('midpoint', 50),
+                    analysis.get('baseline', 100),
+                    amplitude=analysis.get('amplitude', 0),
+                    cq_value=analysis.get('cq_value')
                 )
                 # Mark as rule-based method
                 analysis['curve_classification']['method'] = 'Rule-based (ML failed)'

@@ -6135,7 +6135,16 @@ function populateResultsTable(individualResults) {
                 'SUSPICIOUS': 'curve-suspicious'
             };
             const badgeClass = classMap[result.curve_classification.classification] || 'curve-other';
-            curveClassBadgeHTML = `<span class="curve-badge ${badgeClass}" title="${result.curve_classification.reason || 'Rule-based Classification'}">${result.curve_classification.classification.replace('_', ' ')}</span>`;
+            
+            // Add edge case symbol if applicable
+            let edgeSymbol = '';
+            if (result.curve_classification.edge_case === true) {
+                const reasons = result.curve_classification.edge_case_reasons || [];
+                const reasonText = reasons.length > 0 ? reasons.join(', ') : 'borderline';
+                edgeSymbol = ` <span class="edge-symbol" title="Edge Case: ${reasonText}">🎯</span>`;
+            }
+            
+            curveClassBadgeHTML = `<span class="curve-badge ${badgeClass}" title="${result.curve_classification.reason || 'Rule-based Classification'}">${result.curve_classification.classification.replace('_', ' ')}${edgeSymbol}</span>`;
         } else if (typeof result.curve_classification === 'string') {
             curveClassBadgeHTML = `<span class="curve-badge curve-other" title="Legacy Classification">${result.curve_classification}</span>`;
         }
@@ -6205,7 +6214,6 @@ function populateResultsTable(individualResults) {
             <td><span class="fluorophore-tag fluorophore-${fluorophore.toLowerCase()}">${fluorophore}</span></td>
             <td>${strictBadgeHTML}</td>
             <td>${curveClassBadgeHTML}</td>
-            <!--<td><span class="strict-badge strict-js">${strictJsClass}</span></td>-->
             <td><span class="status ${statusClass}">${statusText}</span></td>
             <td>${formatNumber(result.r2_score ? result.r2_score.toFixed(4) : 'N/A')}</td>
             <td>${formatNumber(result.rmse ? result.rmse.toFixed(2) : 'N/A')}</td>
