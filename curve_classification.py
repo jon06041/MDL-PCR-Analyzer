@@ -65,15 +65,22 @@ def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, c
     has_valid_cqj = False
     cqj_suspicious = False
     
+    # DEBUG: Print CQJ value being received
+    print(f"🔍 CQJ Debug: cq_value={cq_value}, type={type(cq_value)}")
+    
     if cq_value is not None and cq_value != 'N/A' and cq_value != -999:
         try:
             cq_float = float(cq_value)
+            print(f"🔍 CQJ Debug: cq_float={cq_float}, valid check: {cq_float >= 5}")
             if cq_float >= 5:  # Valid CQJ start (no upper limit - pathogen specific)
                 has_valid_cqj = True
             elif cq_float < 5:  # Suspiciously early - could be machine error
                 cqj_suspicious = True
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as e:
+            print(f"🔍 CQJ Debug: Conversion error: {e}")
             pass  # Invalid CQJ, treat as no valid CQJ
+    else:
+        print(f"🔍 CQJ Debug: CQJ value is None, N/A, or -999")
     
     # DETECT MACHINE ERRORS / ANOMALIES (true SUSPICIOUS cases)
     suspicious_patterns = []

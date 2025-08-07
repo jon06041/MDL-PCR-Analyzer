@@ -42,6 +42,23 @@ scores = {'positive_evidence': 0.0, 'negative_evidence': 0.0}
 # Consider ~30 criteria with weights
 ```
 
+### CQJ vs Cq Value Data Flow (CRITICAL)
+**Distinguish between imported Cq and calculated CQJ**:
+- `cq_value` = imported Cq from original data
+- `CQJ` = calculated Cq at specific threshold (currently same number, but may differ)
+- Classification function expects CQJ, not imported cq_value
+
+```python
+# CORRECT sequencing in qpcr_analyzer.py
+# 1. Calculate CQJ BEFORE classification
+cqj_val = py_cqj(well_for_cqj, threshold)
+analysis['cqj'] = {channel_name: cqj_val}
+
+# 2. Pass CQJ to classification, not imported cq_value
+cqj_for_channel = analysis['cqj'].get(channel_name)
+classify_curve(..., cq_value=cqj_for_channel)  # cq_value param gets CQJ!
+```
+
 ### Frontend Loading Guards
 **Threshold frontend requires loading state management** to prevent infinite loops:
 ```javascript
@@ -119,6 +136,12 @@ Data flows: `MySQL tables` → `Flask API` → `Chart.js visualization` → `Use
 ### ML Classification Issues
 - **Problem**: Hard cutoff rejecting good curves
 - **Solution**: Use weighted classification in `curve_classification.py`
+
+### CQJ Classification Problems
+- **Problem**: "Good curve without CQJ crossing" error for perfect positives
+- **Root Cause**: CQJ dict `{'channel': cqj_val}` empty or CQJ retrieval failing
+- **Debug**: Check `analysis['cqj']` storage and `cqj_for_channel` retrieval
+- **Solution**: Ensure CQJ calculated before classification and channel names match
 
 ### Frontend Freezing
 - **Problem**: Infinite loops in threshold updates

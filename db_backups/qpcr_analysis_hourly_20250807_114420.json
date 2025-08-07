@@ -1,0 +1,8 @@
+{
+  "backup_type": "hourly",
+  "timestamp": "20250807_114420",
+  "description": "Automatic hourly backup",
+  "original_size": 28672,
+  "backup_size": 28672,
+  "md5_hash": "b73d3774419c18e0099ab4d4cffc92d5"
+}
