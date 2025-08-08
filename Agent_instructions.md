@@ -14,7 +14,9 @@
 2. **Edge Case → Pending Runs Integration**:
    - **Fixed**: SUSPICIOUS curves marked as edge cases ✅
    - **Fixed**: Batch ML analysis function implemented ✅  
-   - **Remaining**: Verify pending runs created for edge case workflows
+   - **Issue**: ML training data created during file runs BUT pending runs not appearing in dashboard
+   - **Issue**: Feedback submission still not working despite schema fix
+   - **Root Cause**: Disconnect between edge case detection and pending run creation workflow
 
 3. **ML Statistics & Feedback**:
    - **Fixed**: No more hardcoded "6 6" values ✅
