@@ -1,6 +1,35 @@
 # MDL-PCR-Analyzer: Comprehensive Agent Instructions & Progress Log
 
-## 🎯 **CURRENT STATUS: ML Classification & SNR Fixes** (August 6, 2025)
+## 🎯 **CURRENT STATUS: Remaining Issues After Fixes** (August 8, 2025)
+
+### 🔄 **PARTIALLY FIXED ISSUES STILL PENDING**
+
+#### **Critical Remaining Errors (2025-08-08)**:
+
+1. **MySQL Compliance Manager Missing Method**:
+   - **Error**: `'MySQLUnifiedComplianceManager' object has no attribute 'track_compliance_event'`
+   - **Impact**: Compliance tracking warnings during ML operations
+   - **Status**: Method missing from mysql_unified_compliance_manager.py
+
+2. **Edge Case → Pending Runs Integration**:
+   - **Fixed**: SUSPICIOUS curves marked as edge cases ✅
+   - **Fixed**: Batch ML analysis function implemented ✅  
+   - **Remaining**: Verify pending runs created for edge case workflows
+
+3. **ML Statistics & Feedback**:
+   - **Fixed**: No more hardcoded "6 6" values ✅
+   - **Fixed**: Real data showing 19 training samples ✅
+   - **Fixed**: Database schema (features_used column) ✅
+   - **Status**: Ready for testing
+
+### ✅ **RECENTLY COMPLETED FIXES**:
+
+- **ML Statistics Hardcoding**: Replaced with real ml_classifier.get_model_stats()
+- **Feedback 500 Error**: Fixed column name (features → features_used)
+- **Edge Case Function**: Added triggerMLBatchAnalysisForEdgeCases() with progress modal
+- **SUSPICIOUS Classification**: Now properly marked as edge cases
+
+## 🎯 **PREVIOUS STATUS: ML Classification & SNR Fixes** (August 6, 2025)
 
 ### ✅ **MAJOR ACHIEVEMENTS: ML Classification System Enhanced**
 

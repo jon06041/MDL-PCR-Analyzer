@@ -203,6 +203,31 @@ Data flows: `MySQL tables` → `Flask API` → `Chart.js visualization` → `Use
 - **Problem**: Empty evidence tracking
 - **Solution**: Check `unified_compliance_requirements` table population
 
+## Current Remaining Issues (2025-08-08)
+
+### MySQL Compliance Manager Missing Method
+- **Problem**: `'MySQLUnifiedComplianceManager' object has no attribute 'track_compliance_event'`
+- **Status**: Critical warning appearing during ML operations
+- **Impact**: Compliance tracking not working properly
+- **Root Cause**: Missing method implementation in mysql_unified_compliance_manager.py
+- **Solution Needed**: Add track_compliance_event method to MySQLUnifiedComplianceManager class
+
+### Edge Case Integration Status
+- **Fixed**: triggerMLBatchAnalysisForEdgeCases() function added to index.html
+- **Fixed**: SUSPICIOUS curves marked as edge cases
+- **Fixed**: Progress bar modal implemented
+- **Remaining**: Need to verify pending runs creation for edge cases
+- **Remaining**: Need to test full edge case → ML analysis workflow
+
+### ML Statistics Fixed
+- **Fixed**: No more hardcoded values (was showing "6 6" training samples)
+- **Fixed**: Real data now shows: 19 training samples, 5 classes, model v1.12
+- **Fixed**: ML feedback 500 error resolved (database schema column mismatch)
+
+### Feedback Submission
+- **Fixed**: Database schema issue (features_used vs features column)
+- **Status**: Should be working but needs testing with real submissions
+
 ## Project-Specific Conventions
 
 1. **Pathogen Codes**: Use uppercase (BVAB1, CTRACH, NGON) consistently
