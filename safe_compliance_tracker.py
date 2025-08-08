@@ -74,13 +74,15 @@ class SafeComplianceTracker:
             # Try to use the MySQL unified compliance manager if available
             try:
                 from mysql_unified_compliance_manager import MySQLUnifiedComplianceManager
-                # Get MySQL config from environment or use default
+                import os
+                # Get MySQL config from environment variables (same as app.py)
                 mysql_config = {
-                    'host': 'localhost',
-                    'port': 3306,
-                    'user': 'root',
-                    'password': '',
-                    'database': 'qpcr_analysis'
+                    'host': os.environ.get('MYSQL_HOST', '127.0.0.1'),
+                    'port': int(os.environ.get('MYSQL_PORT', 3306)),
+                    'user': os.environ.get('MYSQL_USER', 'qpcr_user'),
+                    'password': os.environ.get('MYSQL_PASSWORD', 'qpcr_password'),
+                    'database': os.environ.get('MYSQL_DATABASE', 'qpcr_analysis'),
+                    'charset': 'utf8mb4'
                 }
                 manager = MySQLUnifiedComplianceManager(mysql_config)
                 manager.track_compliance_event(
@@ -102,13 +104,15 @@ class SafeComplianceTracker:
             # Try to use the MySQL unified compliance manager if available
             try:
                 from mysql_unified_compliance_manager import MySQLUnifiedComplianceManager
-                # Get MySQL config from environment or use default
+                import os
+                # Get MySQL config from environment variables (same as app.py)
                 mysql_config = {
-                    'host': 'localhost',
-                    'port': 3306,
-                    'user': 'root',
-                    'password': '',
-                    'database': 'qpcr_analysis'
+                    'host': os.environ.get('MYSQL_HOST', '127.0.0.1'),
+                    'port': int(os.environ.get('MYSQL_PORT', 3306)),
+                    'user': os.environ.get('MYSQL_USER', 'qpcr_user'),
+                    'password': os.environ.get('MYSQL_PASSWORD', 'qpcr_password'),
+                    'database': os.environ.get('MYSQL_DATABASE', 'qpcr_analysis'),
+                    'charset': 'utf8mb4'
                 }
                 manager = MySQLUnifiedComplianceManager(mysql_config)
                 manager.track_compliance_event(

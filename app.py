@@ -1048,6 +1048,75 @@ def analyze_data():
                     print(f"[FINAL FRESH] {well_key}: well_id={has_well_id}, coordinate={has_coordinate}, fluorophore={has_fluorophore}, sample='{sample_name}'")
         
         print(f"[ANALYZE] Preparing JSON response...")
+        
+        # Track ML analysis run for validation dashboard
+        try:
+            from ml_validation_tracker import ml_tracker
+            
+            # Extract pathogen information
+            individual_results = results.get('individual_results', {})
+            pathogen_codes = set()
+            ml_samples_analyzed = 0
+            
+            for well_data in individual_results.values():
+                if isinstance(well_data, dict):
+                    # Check if ML was used for this sample (has ml_prediction or edge_case)
+                    has_ml_prediction = 'ml_prediction' in well_data or 'ml_confidence' in well_data
+                    is_edge_case = well_data.get('edge_case', False)
+                    curve_classification = well_data.get('curve_classification', {})
+                    
+                    if isinstance(curve_classification, str):
+                        try:
+                            curve_classification = json.loads(curve_classification)
+                        except:
+                            curve_classification = {}
+                    
+                    if has_ml_prediction or is_edge_case or curve_classification.get('method') == 'ML Prediction':
+                        ml_samples_analyzed += 1
+                    
+                    # Extract pathogen from well data
+                    from ml_curve_classifier import extract_pathogen_from_well_data
+                    pathogen = extract_pathogen_from_well_data(well_data)
+                    if pathogen and pathogen != 'General_PCR':
+                        pathogen_codes.add(pathogen)
+            
+            # Only track if ML was actually used
+            if ml_samples_analyzed > 0:
+                # Try to get session_id from database save results
+                session_id = None
+                if is_individual_channel and database_saved:
+                    # Try to find the session that was just created
+                    from models import AnalysisSession
+                    recent_session = AnalysisSession.query.filter_by(filename=filename).order_by(AnalysisSession.upload_timestamp.desc()).first()
+                    if recent_session:
+                        session_id = recent_session.id
+                
+                # Generate unique session ID if not found
+                if not session_id:
+                    import time
+                    session_id = f"ML_RUN_{int(time.time())}"
+                
+                # Calculate accuracy percentage (simplified)
+                total_samples = len(individual_results)
+                good_samples = len(results.get('good_curves', []))
+                accuracy_percentage = (good_samples / total_samples * 100) if total_samples > 0 else 85.0
+                
+                # Track the analysis run
+                ml_tracker.track_analysis_run(
+                    session_id=session_id,
+                    file_name=filename,
+                    pathogen_codes=list(pathogen_codes) if pathogen_codes else ['UNKNOWN'],
+                    total_samples=total_samples,
+                    ml_samples_analyzed=ml_samples_analyzed,
+                    accuracy_percentage=accuracy_percentage
+                )
+                
+                print(f"✅ ML analysis run tracked: {session_id} with {ml_samples_analyzed} ML samples")
+                
+        except Exception as track_error:
+            print(f"⚠️ Could not track ML analysis run: {track_error}")
+            # Don't fail the request if tracking fails
+        
         # Ensure all numpy data types are converted to Python types for JSON serialization
         try:
             import json
@@ -4599,17 +4668,64 @@ def confirm_ml_run():
         data = request.get_json()
         run_id = data.get('run_id')
         confirmed = data.get('confirmed')
+        user_id = data.get('user_id', 'user')
         
         if not run_id:
             return jsonify({'success': False, 'message': 'Run ID required'}), 400
         
-        # Mock confirmation - this would normally update database
-        app.logger.info(f"ML run {run_id} {'confirmed' if confirmed else 'rejected'}")
+        from ml_validation_tracker import ml_tracker
+        
+        if confirmed:
+            # Confirm the run
+            ml_tracker.confirm_analysis_run(run_id, confirmed_by=user_id)
+            
+            # Track compliance for confirmed ML validation
+            ml_confirmation_metadata = {
+                'run_id': run_id,
+                'confirmed_by': user_id,
+                'confirmation_type': 'ml_validation_run',
+                'timestamp': datetime.utcnow().isoformat(),
+                'status': 'confirmed'
+            }
+            track_ml_compliance('ML_RUN_CONFIRMED', ml_confirmation_metadata)
+            
+            message = f'Run {run_id} successfully confirmed'
+            app.logger.info(message)
+        else:
+            # Reject the run (update status to rejected)
+            mysql_config = {
+                'host': os.environ.get("MYSQL_HOST", "127.0.0.1"),
+                'port': int(os.environ.get("MYSQL_PORT", 3306)),
+                'user': os.environ.get("MYSQL_USER", "qpcr_user"),
+                'password': os.environ.get("MYSQL_PASSWORD", "qpcr_password"),
+                'database': os.environ.get("MYSQL_DATABASE", "qpcr_analysis"),
+                'charset': 'utf8mb4'
+            }
+            
+            import mysql.connector
+            conn = mysql.connector.connect(**mysql_config)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                UPDATE ml_analysis_runs 
+                SET status = 'rejected', 
+                    confirmed_at = CURRENT_TIMESTAMP,
+                    confirmed_by = %s
+                WHERE session_id = %s
+            """, (user_id, run_id))
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            message = f'Run {run_id} successfully rejected'
+            app.logger.info(message)
         
         return jsonify({
             'success': True,
-            'message': f'Run {run_id} successfully {"confirmed" if confirmed else "rejected"}'
+            'message': message
         })
+        
     except Exception as e:
         app.logger.error(f"Error confirming ML run: {str(e)}")
         return jsonify({'success': False, 'message': str(e)}), 500

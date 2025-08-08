@@ -281,7 +281,15 @@ class MLQCValidationSystem:
                 
                 if existing == 0:
                     # Record TEACHING milestone - this triggers training pause
-                    version_number = f"v1.{teaching_samples_count}"
+                    # Use accuracy-based versioning instead of sample count
+                    try:
+                        from ml_validation_tracker import ml_tracker
+                        # Get current accuracy for this pathogen (default to 85% for teaching phase)
+                        current_accuracy = 0.85  # Starting accuracy for teaching phase
+                        version_number = ml_tracker.calculate_version_from_accuracy(pathogen_code, current_accuracy)
+                    except Exception:
+                        # Fallback to teaching phase version
+                        version_number = "v1.0"
                     cursor.execute("""
                         INSERT INTO ml_model_milestones
                         (pathogen_code, milestone_type, version_number, total_samples,

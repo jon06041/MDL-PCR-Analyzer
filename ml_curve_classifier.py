@@ -981,8 +981,14 @@ class MLCurveClassifier:
         # Store accuracy in model stats
         self.last_accuracy = accuracy
         
-        # Track training event for general PCR model
-        model_version = f"1.{len(self.training_data)}"
+        # Track training event for general PCR model with accuracy-based versioning
+        try:
+            from ml_validation_tracker import ml_tracker
+            ml_tracker.update_pathogen_model_version('General_PCR', accuracy, {'accuracy': accuracy, 'samples': len(self.training_data)})
+            model_version = ml_tracker.calculate_version_from_accuracy('General_PCR', accuracy)
+        except Exception as e:
+            # Fallback to sample-based version if tracker fails
+            model_version = f"1.{len(self.training_data)}"
         ml_tracker.track_training_event(
             pathogen='General_PCR',
             training_samples=len(self.training_data),
@@ -995,7 +1001,7 @@ class MLCurveClassifier:
         # Update model version in database
         ml_tracker.update_pathogen_model_version(
             pathogen='General_PCR',
-            new_version=model_version,
+            accuracy=accuracy,
             metrics={
                 'accuracy': accuracy,
                 'training_samples': len(self.training_data),
@@ -1108,8 +1114,14 @@ class MLCurveClassifier:
         self.pathogen_models[pathogen] = pathogen_model
         self.pathogen_scalers[pathogen] = pathogen_scaler
         
-        # Track pathogen-specific training event
-        model_version = f"1.{len(pathogen_samples)}"
+        # Track pathogen-specific training event with accuracy-based versioning
+        try:
+            from ml_validation_tracker import ml_tracker
+            ml_tracker.update_pathogen_model_version(pathogen, accuracy, {'accuracy': accuracy, 'samples': len(pathogen_samples)})
+            model_version = ml_tracker.calculate_version_from_accuracy(pathogen, accuracy)
+        except Exception as e:
+            # Fallback to sample-based version if tracker fails  
+            model_version = f"1.{len(pathogen_samples)}"
         ml_tracker.track_training_event(
             pathogen=pathogen,
             training_samples=len(pathogen_samples),
@@ -1122,7 +1134,7 @@ class MLCurveClassifier:
         # Update pathogen-specific model version
         ml_tracker.update_pathogen_model_version(
             pathogen=pathogen,
-            new_version=model_version,
+            accuracy=accuracy,
             metrics={
                 'accuracy': accuracy,
                 'training_samples': len(pathogen_samples),
@@ -1188,12 +1200,28 @@ class MLCurveClassifier:
             'class_count': len(self.classes)
         }
         
+        # Add version based on accuracy
+        try:
+            from ml_validation_tracker import ml_tracker
+            stats['version'] = ml_tracker.calculate_version_from_accuracy('General_PCR', self.last_accuracy or 0.85)
+        except Exception:
+            # Fallback version calculation
+            if self.last_accuracy and self.last_accuracy >= 0.95:
+                stats['version'] = 'v2.0'
+            elif self.last_accuracy and self.last_accuracy >= 0.90:
+                stats['version'] = f"v1.{int((self.last_accuracy - 0.85) * 100)}"
+            else:
+                stats['version'] = 'v1.0'
+        
         if self.training_data:
-            # Class distribution
-            classifications = [sample['expert_classification'] for sample in self.training_data]
-            unique, counts = np.unique(classifications, return_counts=True)
-            # Convert numpy int64 to regular Python ints for JSON serialization
-            stats['class_distribution'] = dict(zip(unique, [int(count) for count in counts]))
+            # Class distribution - filter out None values
+            classifications = [sample['expert_classification'] for sample in self.training_data if sample.get('expert_classification') is not None]
+            if classifications:  # Only proceed if we have valid classifications
+                unique, counts = np.unique(classifications, return_counts=True)
+                # Convert numpy int64 to regular Python ints for JSON serialization
+                stats['class_distribution'] = dict(zip(unique, [int(count) for count in counts]))
+            else:
+                stats['class_distribution'] = {}
             
             # Pathogen-specific training sample counts
             pathogen_training_counts = {}

@@ -95,9 +95,9 @@ def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, c
         return {
             'classification': 'SUSPICIOUS',
             'confidence': 0.9,
-            'edge_case': False,
-            'edge_case_reasons': [],
-            'ml_recommended': False,
+            'edge_case': True,  # Mark suspicious as edge case for expert review
+            'edge_case_reasons': ['suspicious_machine_anomaly'],
+            'ml_recommended': True,  # These need expert decisions
             'flag_for_review': True,
             'reason': f"Machine error/anomaly: {', '.join(suspicious_patterns)}"
         }

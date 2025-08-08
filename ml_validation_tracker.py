@@ -176,8 +176,94 @@ class MLValidationTracker:
                 self.logger.error(f"Error tracking training event: {e}")
                 raise
     
-    def update_pathogen_model_version(self, pathogen, new_version, metrics):
-        """Update model version for a specific pathogen"""
+    def calculate_version_from_accuracy(self, pathogen, current_accuracy):
+        """Calculate version number based on accuracy improvements"""
+        with self.engine.connect() as conn:
+            try:
+                # Get previous version and accuracy for this pathogen
+                result = conn.execute(text("""
+                    SELECT version_number, model_metrics 
+                    FROM ml_model_versions 
+                    WHERE pathogen_code = :pathogen_code
+                    ORDER BY id DESC LIMIT 1
+                """), {'pathogen_code': pathogen}).fetchone()
+                
+                if result:
+                    # Parse previous accuracy from metrics
+                    prev_version = result[0] or "1.0"
+                    try:
+                        prev_metrics = json.loads(result[1] or '{}')
+                        prev_accuracy = prev_metrics.get('accuracy', 0.85)
+                    except:
+                        prev_accuracy = 0.85
+                    
+                    # Parse current version number
+                    try:
+                        if prev_version.startswith('v'):
+                            prev_version = prev_version[1:]
+                        major, minor = map(int, prev_version.split('.'))
+                    except:
+                        major, minor = 1, 0
+                        prev_accuracy = 0.85
+                else:
+                    # First version - start based on accuracy level
+                    major, minor = 1, 0
+                    prev_accuracy = 0.85
+                
+                # Version increment logic based on accuracy improvements
+                accuracy_gain = (current_accuracy - prev_accuracy) * 100
+                
+                if current_accuracy >= 0.95:  # 95%+ accuracy
+                    # Major version bump for excellent performance
+                    if major == 1:
+                        major = 2
+                        minor = 0
+                elif current_accuracy >= 0.92:  # 92-94% accuracy  
+                    # Significant minor version bump
+                    if accuracy_gain >= 3.0:  # 3+ percentage points improvement
+                        minor += 3
+                    elif accuracy_gain >= 1.5:  # 1.5+ percentage points improvement
+                        minor += 2
+                    elif accuracy_gain >= 0.5:  # 0.5+ percentage points improvement
+                        minor += 1
+                elif current_accuracy >= 0.89:  # 89-91% accuracy
+                    # Standard minor version bump
+                    if accuracy_gain >= 2.0:  # 2+ percentage points improvement
+                        minor += 2
+                    elif accuracy_gain >= 1.0:  # 1+ percentage points improvement
+                        minor += 1
+                elif current_accuracy >= 0.85:  # 85-88% accuracy  
+                    # Conservative version bump (training phase)
+                    if accuracy_gain >= 3.0:  # Significant improvement needed
+                        minor += 1
+                
+                # Generate new version
+                new_version = f"v{major}.{minor}"
+                
+                self.logger.info(f"Version calculation for {pathogen}: {prev_accuracy:.1%} -> {current_accuracy:.1%} = {new_version}")
+                return new_version
+                
+            except Exception as e:
+                self.logger.error(f"Error calculating version: {e}")
+                # Fallback to simple accuracy-based version
+                if current_accuracy >= 0.95:
+                    return "v2.0"  
+                elif current_accuracy >= 0.90:
+                    return f"v1.{int(current_accuracy * 100) - 85}"
+                else:
+                    return "v1.0"
+
+    def update_pathogen_model_version(self, pathogen, accuracy, metrics):
+        """Update model version for a specific pathogen based on accuracy"""
+        # Calculate version based on accuracy improvements
+        new_version = self.calculate_version_from_accuracy(pathogen, accuracy)
+        
+        # Add accuracy to metrics
+        if isinstance(metrics, dict):
+            metrics['accuracy'] = accuracy
+        else:
+            metrics = {'accuracy': accuracy}
+            
         with self.engine.connect() as conn:
             try:
                 # Create table if it doesn't exist
@@ -187,7 +273,7 @@ class MLValidationTracker:
                         pathogen_code VARCHAR(255) UNIQUE,
                         version_number VARCHAR(50),
                         model_metrics TEXT,
-                        last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        creation_date DATETIME DEFAULT CURRENT_TIMESTAMP,
                         INDEX idx_pathogen (pathogen_code)
                     )
                 """))
@@ -213,7 +299,7 @@ class MLValidationTracker:
                         UPDATE ml_model_versions 
                         SET version_number = :version_number, 
                             model_metrics = :model_metrics, 
-                            last_updated = CURRENT_TIMESTAMP 
+                            creation_date = CURRENT_TIMESTAMP 
                         WHERE pathogen_code = :pathogen_code
                     """), {
                         'version_number': new_version,
@@ -233,6 +319,7 @@ class MLValidationTracker:
                     })
                 
                 conn.commit()
+                self.logger.info(f"Updated model version for {pathogen}: {new_version} (accuracy: {accuracy:.1%})")
                 
             except Exception as e:
                 self.logger.error(f"Error updating model version: {e}")
@@ -374,51 +461,6 @@ class MLValidationTracker:
                 self.logger.error(f"Error getting teaching summary: {e}")
                 return {}
     
-    def track_analysis_run(self, session_id, file_name, pathogen_codes, total_samples, 
-                          ml_samples_analyzed, user_id='system'):
-        """Track analysis runs for validation dashboard"""
-        with self.engine.connect() as conn:
-            try:
-                # Create table if it doesn't exist
-                conn.execute(text("""
-                    CREATE TABLE IF NOT EXISTS ml_analysis_runs (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        session_id VARCHAR(255),
-                        file_name VARCHAR(255),
-                        pathogen_codes TEXT,
-                        total_samples INT,
-                        ml_samples_analyzed INT,
-                        accuracy_percentage DECIMAL(5,2) DEFAULT 85.0,
-                        status ENUM('pending', 'confirmed', 'rejected') DEFAULT 'pending',
-                        logged_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        confirmed_at DATETIME NULL,
-                        confirmed_by VARCHAR(255) NULL,
-                        overturned_count INT DEFAULT 0,
-                        confirmed_count INT DEFAULT 0,
-                        INDEX idx_session (session_id),
-                        INDEX idx_status (status),
-                        INDEX idx_logged_at (logged_at)
-                    )
-                """))
-                
-                conn.execute(text("""
-                    INSERT INTO ml_analysis_runs 
-                    (session_id, file_name, pathogen_codes, total_samples, ml_samples_analyzed)
-                    VALUES (:session_id, :file_name, :pathogen_codes, :total_samples, :ml_samples_analyzed)
-                """), {
-                    'session_id': session_id,
-                    'file_name': file_name,
-                    'pathogen_codes': json.dumps(pathogen_codes) if isinstance(pathogen_codes, list) else pathogen_codes,
-                    'total_samples': total_samples,
-                    'ml_samples_analyzed': ml_samples_analyzed
-                })
-                
-                conn.commit()
-                
-            except Exception as e:
-                self.logger.error(f"Error tracking analysis run: {e}")
-                raise
-    
     def update_training_status(self, pathogen, training_status, accuracy=None, reason=None):
         """Update training status for a pathogen model (active, paused, monitoring)"""
         with self.engine.connect() as conn:
@@ -549,6 +591,79 @@ class MLValidationTracker:
                 self.logger.error(f"Error checking pause recommendation: {e}")
                 return {'should_pause': False, 'reason': 'Error checking status'}
     
+    def track_analysis_run(self, session_id, file_name, pathogen_codes, total_samples, ml_samples_analyzed, accuracy_percentage=None):
+        """Track a complete analysis run for ML validation dashboard"""
+        with self.engine.connect() as conn:
+            try:
+                # Create table if it doesn't exist
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS ml_analysis_runs (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        session_id VARCHAR(255) UNIQUE,
+                        file_name VARCHAR(500),
+                        pathogen_codes JSON,
+                        total_samples INT,
+                        ml_samples_analyzed INT,
+                        accuracy_percentage DECIMAL(5,2),
+                        status ENUM('pending', 'confirmed', 'rejected') DEFAULT 'pending',
+                        logged_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        confirmed_at DATETIME NULL,
+                        confirmed_by VARCHAR(255) NULL,
+                        INDEX idx_session (session_id),
+                        INDEX idx_status (status),
+                        INDEX idx_logged (logged_at)
+                    )
+                """))
+                
+                # Insert or update analysis run
+                conn.execute(text("""
+                    INSERT INTO ml_analysis_runs 
+                    (session_id, file_name, pathogen_codes, total_samples, 
+                     ml_samples_analyzed, accuracy_percentage)
+                    VALUES (:session_id, :file_name, :pathogen_codes, :total_samples, 
+                            :ml_samples_analyzed, :accuracy_percentage)
+                    ON DUPLICATE KEY UPDATE
+                        ml_samples_analyzed = :ml_samples_analyzed,
+                        accuracy_percentage = :accuracy_percentage,
+                        logged_at = CURRENT_TIMESTAMP
+                """), {
+                    'session_id': str(session_id),
+                    'file_name': file_name,
+                    'pathogen_codes': json.dumps(pathogen_codes) if isinstance(pathogen_codes, list) else str(pathogen_codes),
+                    'total_samples': total_samples,
+                    'ml_samples_analyzed': ml_samples_analyzed,
+                    'accuracy_percentage': accuracy_percentage or 85.0
+                })
+                
+                conn.commit()
+                self.logger.info(f"Analysis run tracked: {session_id} with {ml_samples_analyzed} ML samples")
+                
+            except Exception as e:
+                self.logger.error(f"Error tracking analysis run: {e}")
+                raise
+
+    def confirm_analysis_run(self, session_id, confirmed_by='user'):
+        """Confirm an analysis run as validated"""
+        with self.engine.connect() as conn:
+            try:
+                conn.execute(text("""
+                    UPDATE ml_analysis_runs 
+                    SET status = 'confirmed', 
+                        confirmed_at = CURRENT_TIMESTAMP,
+                        confirmed_by = :confirmed_by
+                    WHERE session_id = :session_id
+                """), {
+                    'session_id': str(session_id),
+                    'confirmed_by': confirmed_by
+                })
+                
+                conn.commit()
+                self.logger.info(f"Analysis run confirmed: {session_id}")
+                
+            except Exception as e:
+                self.logger.error(f"Error confirming analysis run: {e}")
+                raise
+
     def get_training_status(self, pathogen=None):
         """Get training status for pathogen(s)"""
         with self.engine.connect() as conn:
