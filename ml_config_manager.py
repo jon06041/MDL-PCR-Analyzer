@@ -146,6 +146,22 @@ class MLConfigManager:
             logger.error(f"❌ Failed to get pathogen ML config: {e}")
             return []
     
+    def get_all_pathogen_configs(self):
+        """Get all pathogen ML configurations"""
+        try:
+            conn = self.get_db_connection()
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT * FROM ml_pathogen_config ORDER BY pathogen_code, fluorophore")
+                    results = cursor.fetchall()
+                    return results
+            finally:
+                conn.close()
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to get all pathogen ML configs: {e}")
+            return []
+    
     def set_pathogen_ml_enabled(self, pathogen_code, fluorophore, enabled, user_info=None):
         """Enable/disable ML for specific pathogen+fluorophore"""
         try:
@@ -201,39 +217,31 @@ class MLConfigManager:
             logger.error(f"Failed to log audit action: {e}")
     
     def populate_from_pathogen_library(self):
-        """Populate ML config from pathogen library - MySQL version"""
+        """Populate ML config from pathogen library - MySQL version
+        NOTE: Pathogen configs are now populated manually via populate_ml_config_simple.py
+        This method checks if configs exist and skips population if already present.
+        """
         try:
-            pathogen_config_path = os.path.join('config', 'concentration_controls.json')
-            if not os.path.exists(pathogen_config_path):
-                logger.warning("Pathogen config file not found - skipping population")
-                return
-            
-            with open(pathogen_config_path, 'r') as f:
-                pathogen_data = json.load(f)
-            
             conn = self.get_db_connection()
             try:
                 with conn.cursor() as cursor:
-                    for pathogen_code, pathogen_info in pathogen_data.items():
-                        fluorophores = pathogen_info.get('fluorophores', ['FAM', 'HEX', 'Texas Red', 'Cy5'])
-                        
-                        for fluorophore in fluorophores:
-                            # Insert default config if not exists
-                            cursor.execute("""
-                                INSERT IGNORE INTO ml_pathogen_config 
-                                (pathogen_code, fluorophore, ml_enabled, confidence_threshold, 
-                                 min_training_samples, max_training_samples)
-                                VALUES (%s, %s, FALSE, 0.7, 50, 1000)
-                            """, (pathogen_code, fluorophore))
+                    # Check if ml_pathogen_config table has data
+                    cursor.execute("SELECT COUNT(*) as count FROM ml_pathogen_config")
+                    result = cursor.fetchone()
                     
-                    conn.commit()
-                    logger.info("✅ Populated ML config from pathogen library")
+                    if result and result['count'] > 0:
+                        logger.info(f"✅ ML pathogen config already populated with {result['count']} configurations")
+                        return
+                    
+                    # If no configs exist, log a warning but don't fail
+                    logger.warning("⚠️ No ML pathogen configs found. Run populate_ml_config_simple.py to populate.")
                     
             finally:
                 conn.close()
                 
         except Exception as e:
-            logger.error(f"❌ Failed to populate from pathogen library: {e}")
+            logger.warning(f"⚠️ Could not check pathogen library population (non-critical): {e}")
+            # Don't raise the error - this is not critical for ML config manager initialization
     
     def get_system_config(self, config_key, default_value=None):
         """Get system-wide ML configuration"""

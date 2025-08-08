@@ -522,6 +522,16 @@ if database_url and database_url.startswith("mysql"):
         print("✅ Using MySQL database")
         print(f"📊 MySQL connection: {database_url.split('@')[1] if '@' in database_url else 'configured'}")
         mysql_configured = True
+        
+        # Define mysql_config for use by other components
+        mysql_config = {
+            'host': os.environ.get("MYSQL_HOST", "127.0.0.1"),
+            'port': int(os.environ.get("MYSQL_PORT", 3306)),
+            'user': os.environ.get("MYSQL_USER", "qpcr_user"),
+            'password': os.environ.get("MYSQL_PASSWORD", "qpcr_password"),
+            'database': os.environ.get("MYSQL_DATABASE", "qpcr_analysis"),
+            'charset': 'utf8mb4'
+        }
     except Exception as e:
         print(f"❌ CRITICAL: MySQL configuration failed: {e}")
         print("🔧 This is a CRITICAL ERROR - MySQL MUST work")
@@ -563,11 +573,14 @@ try:
     from ml_config_manager import MLConfigManager
     ml_config_manager = MLConfigManager(use_mysql=True, mysql_config=mysql_config)
     print("✅ ML Configuration Manager initialized with MySQL (SQLite permanently deprecated)")
+    print(f"🔍 DEBUG: ml_config_manager type: {type(ml_config_manager)}")
+    print(f"🔍 DEBUG: ml_config_manager is None: {ml_config_manager is None}")
 except Exception as e:
     error_msg = f"❌ CRITICAL: ML Configuration Manager failed to initialize with MySQL: {e}"
     print(error_msg)
     print("🚨 SYSTEM REQUIREMENT: MySQL connection required. SQLite is deprecated.")
     ml_config_manager = None
+    print(f"🔍 DEBUG: ml_config_manager set to None due to exception")
 
 # ML validation manager - configured for MySQL
 try:
@@ -599,15 +612,7 @@ except Exception as e:
 # Initialize unified compliance manager - FORCE MySQL only
 try:
     if mysql_configured:
-        # Use MySQL configuration for compliance
-        mysql_config = {
-            'host': os.environ.get("MYSQL_HOST", "127.0.0.1"),
-            'port': int(os.environ.get("MYSQL_PORT", 3306)),
-            'user': os.environ.get("MYSQL_USER", "qpcr_user"),
-            'password': os.environ.get("MYSQL_PASSWORD", "qpcr_password"),
-            'database': os.environ.get("MYSQL_DATABASE", "qpcr_analysis"),
-            'charset': 'utf8mb4'
-        }
+        # MySQL configuration already defined above
         # Initialize MySQL unified compliance manager
         unified_compliance_manager = MySQLUnifiedComplianceManager(mysql_config)
         print("✅ MySQL Unified Compliance Manager initialized")
@@ -2001,7 +2006,7 @@ def ml_analyze_curve():
                 app.logger.warning(f"Could not track ML prediction: {track_error}")
         
         # Get enhanced training stats breakdown with detailed pathogen information
-        general_samples = len([s for s in ml_classifier.training_data if not s.get('pathogen') or s.get('pathogen') == 'General_PCR'])
+        general_samples = len([s for s in ml_classifier.training_data if not s.get('pathogen') or str(s.get('pathogen', '')) == 'General_PCR'])
         
         # Create detailed pathogen breakdown
         pathogen_breakdown = {}
@@ -2091,7 +2096,7 @@ def ml_analyze_curve():
                 'current_test_samples': current_test_samples,
                 'current_test_pathogen': pathogen,
                 'pathogen_breakdown': pathogen_breakdown,
-                'pathogen_specific_samples': sum(v for k, v in pathogen_breakdown.items() if k != 'General_PCR')
+                'pathogen_specific_samples': sum(v for k, v in pathogen_breakdown.items() if str(k) != 'General_PCR')
             }
         })
         
@@ -2285,7 +2290,7 @@ def ml_submit_feedback():
             traceback.print_exc()
         
         # Get enhanced training stats breakdown with detailed pathogen information
-        general_samples = len([s for s in ml_classifier.training_data if not s.get('pathogen') or s.get('pathogen') == 'General_PCR'])
+        general_samples = len([s for s in ml_classifier.training_data if not s.get('pathogen') or str(s.get('pathogen', '')) == 'General_PCR'])
         
         # Create detailed pathogen breakdown
         pathogen_breakdown = {}
@@ -2293,7 +2298,7 @@ def ml_submit_feedback():
         
         for sample in ml_classifier.training_data:
             sample_pathogen = sample.get('pathogen', 'General_PCR')
-            # Ensure pathogen is a string for safe comparison
+            # Ensure pathogen is a string for safe comparison and dictionary operations
             sample_pathogen = str(sample_pathogen) if sample_pathogen is not None else 'General_PCR'
             
             if sample_pathogen not in pathogen_breakdown:
@@ -2331,7 +2336,7 @@ def ml_submit_feedback():
                 'current_test_samples': current_test_samples,
                 'current_test_pathogen': pathogen,
                 'pathogen_breakdown': pathogen_breakdown,
-                'pathogen_specific_samples': sum(v for k, v in pathogen_breakdown.items() if k != 'General_PCR')
+                'pathogen_specific_samples': sum(v for k, v in pathogen_breakdown.items() if str(k) != 'General_PCR')
             },
             'immediate_prediction': {
                 'classification': expert_classification,
@@ -3075,7 +3080,10 @@ def get_pathogen_ml_configs():
 def update_pathogen_ml_config(pathogen_code, fluorophore):
     """Enable/disable ML for specific pathogen+fluorophore"""
     try:
-        from ml_config_manager import ml_config_manager
+        global ml_config_manager
+        
+        if ml_config_manager is None:
+            return jsonify({'error': 'ML configuration manager not initialized'}), 503
         
         # URL decode parameters
         pathogen_code = unquote(pathogen_code)
@@ -3111,19 +3119,14 @@ def update_pathogen_ml_config(pathogen_code, fluorophore):
 def get_pathogen_ml_config(pathogen_code):
     """Get ML configuration for specific pathogen"""
     try:
-        from ml_config_manager import ml_config_manager
+        global ml_config_manager
+        print(f"🔍 DEBUG: get_pathogen_ml_config - ml_config_manager is None: {ml_config_manager is None}")
+        
+        if ml_config_manager is None:
+            return jsonify({'error': 'ML configuration manager not initialized'}), 503
         
         # URL decode the pathogen code
         pathogen_code = unquote(pathogen_code)
-        
-        # Safety check for ml_config_manager
-        if ml_config_manager is None:
-            app.logger.warning(f"ML config manager is None for pathogen config request: {pathogen_code}")
-            return jsonify({
-                'success': True,
-                'configs': [],  # Default to empty configs if manager unavailable
-                'note': 'Config manager unavailable, returned empty configs'
-            })
         
         fluorophore = request.args.get('fluorophore')
         configs = ml_config_manager.get_pathogen_ml_config(pathogen_code, fluorophore)
@@ -3141,7 +3144,10 @@ def get_pathogen_ml_config(pathogen_code):
 def get_system_ml_config():
     """Get system-wide ML configuration"""
     try:
-        from ml_config_manager import ml_config_manager
+        global ml_config_manager
+        
+        if ml_config_manager is None:
+            return jsonify({'error': 'ML configuration manager not initialized'}), 503
         
         config = {
             'ml_global_enabled': ml_config_manager.get_system_config('ml_global_enabled') == 'true',
@@ -3165,7 +3171,10 @@ def get_system_ml_config():
 def update_system_ml_config(config_key):
     """Update system-wide ML configuration (ADMIN ONLY - future role check)"""
     try:
-        from ml_config_manager import ml_config_manager
+        global ml_config_manager
+        
+        if ml_config_manager is None:
+            return jsonify({'error': 'ML configuration manager not initialized'}), 503
         
         data = request.get_json()
         value = str(data.get('value', ''))
@@ -3199,7 +3208,10 @@ def update_system_ml_config(config_key):
 def reset_ml_training_data():
     """Reset ML training data (DANGEROUS - ADMIN ONLY)"""
     try:
-        from ml_config_manager import ml_config_manager
+        global ml_config_manager
+        
+        if ml_config_manager is None:
+            return jsonify({'error': 'ML configuration manager not initialized'}), 503
         
         data = request.get_json()
         pathogen_code = data.get('pathogen_code')
@@ -3247,7 +3259,10 @@ def reset_ml_training_data():
 def get_ml_audit_log():
     """Get ML configuration audit log"""
     try:
-        from ml_config_manager import ml_config_manager
+        global ml_config_manager
+        
+        if ml_config_manager is None:
+            return jsonify({'error': 'ML configuration manager not initialized'}), 503
         
         limit = int(request.args.get('limit', 50))
         log_entries = ml_config_manager.get_audit_log(limit)
@@ -3265,7 +3280,7 @@ def get_ml_audit_log():
 def check_ml_enabled(pathogen_code, fluorophore):
     """Check if ML is enabled for specific pathogen+fluorophore"""
     try:
-        from ml_config_manager import ml_config_manager
+        global ml_config_manager
         
         # URL decode parameters
         pathogen_code = unquote(pathogen_code)

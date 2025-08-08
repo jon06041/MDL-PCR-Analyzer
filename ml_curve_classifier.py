@@ -58,6 +58,9 @@ class MLCurveClassifier:
         
         # Get amplitude to check for high-amplitude positives that might have challenging CQJ
         amplitude = existing_metrics.get('amplitude', 0)
+        # Ensure amplitude is always a number to prevent comparison errors
+        if amplitude is None or not isinstance(amplitude, (int, float)):
+            amplitude = 0
         
         # 🔧 CRITICAL DEBUG: Log what we received
         print(f"🔍 ML Feature Debug: amplitude={amplitude}, cqj_raw={cqj_raw} (type: {type(cqj_raw)}), calcj_raw={calcj_raw} (type: {type(calcj_raw)})")
