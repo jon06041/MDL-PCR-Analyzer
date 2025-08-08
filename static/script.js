@@ -6033,6 +6033,33 @@ async function triggerMLBatchAnalysisForEdgeCases() {
     
     console.log(`🎯 Starting ML batch analysis for ${edgeCases.length} edge cases`);
     
+    // Create progress modal
+    const progressModal = document.createElement('div');
+    progressModal.className = 'modal fade';
+    progressModal.id = 'mlBatchProgressModal';
+    progressModal.innerHTML = `
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">ML Batch Analysis Progress</h5>
+                </div>
+                <div class="modal-body">
+                    <p>Analyzing ${edgeCases.length} edge case samples...</p>
+                    <div class="progress">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                             id="mlBatchProgressBar" style="width: 0%"></div>
+                    </div>
+                    <p class="mt-2 text-muted" id="mlBatchProgressText">Starting analysis...</p>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(progressModal);
+    
+    // Show modal
+    const modal = new bootstrap.Modal(progressModal);
+    modal.show();
+    
     // Show loading state
     const mlBatchButton = document.getElementById('mlBatchAnalysisBtn');
     if (mlBatchButton) {
@@ -6041,6 +6068,15 @@ async function triggerMLBatchAnalysisForEdgeCases() {
     }
     
     try {
+        // Update progress
+        const progressBar = document.getElementById('mlBatchProgressBar');
+        const progressText = document.getElementById('mlBatchProgressText');
+        
+        if (progressBar && progressText) {
+            progressBar.style.width = '50%';
+            progressText.textContent = 'Running ML analysis...';
+        }
+        
         // Create a subset of results containing only edge cases
         const edgeCaseResults = {};
         edgeCases.forEach(edgeCase => {
@@ -6052,6 +6088,12 @@ async function triggerMLBatchAnalysisForEdgeCases() {
         
         console.log(`🎯 ML batch analysis completed for ${edgeCases.length} edge cases`);
         
+        // Update progress to complete
+        if (progressBar && progressText) {
+            progressBar.style.width = '100%';
+            progressText.textContent = 'Analysis complete!';
+        }
+        
         // Show success message
         if (mlBatchButton) {
             mlBatchButton.innerHTML = '✅ Analysis Complete';
@@ -6060,8 +6102,22 @@ async function triggerMLBatchAnalysisForEdgeCases() {
             }, 2000);
         }
         
+        // Close modal after brief delay
+        setTimeout(() => {
+            modal.hide();
+            document.body.removeChild(progressModal);
+        }, 1500);
+        
     } catch (error) {
         console.error('🎯 ML batch analysis failed:', error);
+        
+        // Update progress to error
+        const progressBar = document.getElementById('mlBatchProgressBar');
+        const progressText = document.getElementById('mlBatchProgressText');
+        if (progressBar && progressText) {
+            progressBar.classList.add('bg-danger');
+            progressText.textContent = 'Analysis failed!';
+        }
         
         // Show error state
         if (mlBatchButton) {
@@ -6071,6 +6127,12 @@ async function triggerMLBatchAnalysisForEdgeCases() {
                 countEdgeCases(); // Reset button text
             }, 3000);
         }
+        
+        // Close modal after delay
+        setTimeout(() => {
+            modal.hide();
+            document.body.removeChild(progressModal);
+        }, 2000);
     }
 }
 
