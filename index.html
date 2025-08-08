@@ -51,7 +51,7 @@
         <div class="header">
             <!-- Optional: Add a logo/image here -->
             <!-- <img src="/static/images/your-logo.png" alt="Company Logo" style="height: 50px; margin-bottom: 10px;"> -->
-            <h1>🧬 MDL PCR Analyzer - Enhanced</h1>
+            <h1>🧬 MDL PCR Analyzer</h1>
             <p>Upload your CFX Manager CSV file to analyze amplification curves with flexible cycle counts</p>
             <div class="features">
                 <span class="feature">✓ Variable Cycle Lengths</span>
@@ -805,6 +805,117 @@
                     notification.parentNode.removeChild(notification);
                 }
             }, 10000);
+        }
+        
+        // ML Batch Analysis for Edge Cases Function
+        function triggerMLBatchAnalysisForEdgeCases() {
+            console.log('🔬 Starting ML batch analysis for edge cases...');
+            
+            // Get edge case wells from the current analysis results
+            const edgeCaseWells = [];
+            if (window.allResults && window.allResults.individual_results) {
+                window.allResults.individual_results.forEach(result => {
+                    // Check if this well was marked as an edge case
+                    if (result.curve_classification && result.curve_classification.edge_case) {
+                        edgeCaseWells.push({
+                            well_id: result.well,
+                            sample: result.sample,
+                            channel: result.fluorophore,
+                            pathogen: result.pathogen_code,
+                            edge_case_reasons: result.curve_classification.edge_case_reasons,
+                            rfu_data: result.rfu_data,
+                            cycles: result.cycles,
+                            existing_metrics: result.metrics
+                        });
+                    }
+                });
+            }
+            
+            if (edgeCaseWells.length === 0) {
+                alert('No edge cases detected in current analysis results.');
+                return;
+            }
+            
+            console.log(`🎯 Found ${edgeCaseWells.length} edge cases to analyze`);
+            
+            // Show progress modal
+            const progressModal = document.createElement('div');
+            progressModal.className = 'modal fade show';
+            progressModal.style.display = 'block';
+            progressModal.innerHTML = `
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">🔬 ML Edge Case Analysis</h5>
+                        </div>
+                        <div class="modal-body">
+                            <p>Analyzing <strong>${edgeCaseWells.length}</strong> edge cases with ML classifier...</p>
+                            <div class="progress">
+                                <div id="mlProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" 
+                                     role="progressbar" style="width: 0%"></div>
+                            </div>
+                            <p id="mlProgressText" class="mt-2">Preparing analysis...</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(progressModal);
+            
+            // Process edge cases one by one
+            let processedCount = 0;
+            const progressBar = progressModal.querySelector('#mlProgressBar');
+            const progressText = progressModal.querySelector('#mlProgressText');
+            
+            function processNextEdgeCase() {
+                if (processedCount >= edgeCaseWells.length) {
+                    // Analysis complete
+                    progressText.textContent = 'Analysis complete! Updating results...';
+                    setTimeout(() => {
+                        progressModal.remove();
+                        alert(`ML analysis completed for ${edgeCaseWells.length} edge cases. Check the results table for updated classifications.`);
+                        // Optionally refresh the results table
+                        if (typeof refreshAnalysisResults === 'function') {
+                            refreshAnalysisResults();
+                        }
+                    }, 1000);
+                    return;
+                }
+                
+                const well = edgeCaseWells[processedCount];
+                const progress = Math.round((processedCount / edgeCaseWells.length) * 100);
+                progressBar.style.width = progress + '%';
+                progressText.textContent = `Analyzing ${well.well_id} (${processedCount + 1}/${edgeCaseWells.length})...`;
+                
+                // Send ML analysis request
+                fetch('/api/ml-predict', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        rfu_data: well.rfu_data,
+                        cycles: well.cycles,
+                        existing_metrics: well.existing_metrics,
+                        pathogen: well.pathogen,
+                        well_id: well.well_id,
+                        session_id: window.currentSessionId || 'edge_case_batch'
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    console.log(`✅ ML analysis completed for ${well.well_id}:`, data);
+                    processedCount++;
+                    setTimeout(processNextEdgeCase, 500); // Brief delay between requests
+                })
+                .catch(error => {
+                    console.error(`❌ ML analysis failed for ${well.well_id}:`, error);
+                    processedCount++;
+                    setTimeout(processNextEdgeCase, 500); // Continue even if one fails
+                });
+            }
+            
+            // Start processing
+            processNextEdgeCase();
         }
     });
     </script>
