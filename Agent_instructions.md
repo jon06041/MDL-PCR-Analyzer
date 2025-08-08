@@ -1,5 +1,14 @@
 # MDL-PCR-Analyzer: Comprehensive Agent Instructions & Progress Log
 
+## 🚨 **EMERGENCY SAFEGUARD ADDED** (August 8, 2025)
+
+### **CRITICAL: ML Config Database Reversion Protection**
+- **File**: `ml_config_safeguard.py` - Run immediately if ML configs missing
+- **Issue**: ML config database keeps losing pathogen/fluorophore mappings (127+ configs)
+- **Impact**: ML interface shows empty, breaks entire ML workflow  
+- **Usage**: `python3 ml_config_safeguard.py` - automatically restores from pathogen library
+- **Status**: EMERGENCY PROTECTION IN PLACE - root cause still unknown
+
 ## 🎯 **CURRENT STATUS: Remaining Issues After Fixes** (August 8, 2025)
 
 ### 🔄 **PARTIALLY FIXED ISSUES STILL PENDING**
