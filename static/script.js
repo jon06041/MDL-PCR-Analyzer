@@ -5870,6 +5870,12 @@ function updateCurveClassCell(wellKey, mlPrediction) {
             const curveClassCell = row.cells[4]; // Curve Class column is index 4
             
             if (curveClassCell && mlPrediction) {
+                // Check if this was originally an edge case by looking for existing edge case styling
+                const existingBadge = curveClassCell.querySelector('.curve-badge');
+                const hadEdgeCase = existingBadge && existingBadge.classList.contains('edge-case-highlight');
+                const existingEdgeSymbol = curveClassCell.querySelector('.edge-symbol');
+                const edgeSymbolHTML = existingEdgeSymbol ? existingEdgeSymbol.outerHTML : '';
+                
                 const classMap = {
                     'STRONG_POSITIVE': 'curve-strong-pos',
                     'POSITIVE': 'curve-pos', 
@@ -5883,7 +5889,10 @@ function updateCurveClassCell(wellKey, mlPrediction) {
                 const confidence = (mlPrediction.confidence * 100).toFixed(1);
                 const pathogenText = mlPrediction.pathogen ? ` (${mlPrediction.pathogen})` : '';
                 
-                curveClassCell.innerHTML = `<span class="curve-badge ${badgeClass}" title="ML: ${confidence}% confidence${pathogenText}">${mlPrediction.classification.replace('_', ' ')}</span>`;
+                // Preserve edge case styling and symbol if it was originally an edge case
+                const edgeClass = hadEdgeCase ? ' edge-case-highlight' : '';
+                
+                curveClassCell.innerHTML = `<span class="curve-badge ${badgeClass}${edgeClass}" title="ML: ${confidence}% confidence${pathogenText}">${mlPrediction.classification.replace('_', ' ')}${edgeSymbolHTML}</span>`;
             }
         }
     } catch (error) {
