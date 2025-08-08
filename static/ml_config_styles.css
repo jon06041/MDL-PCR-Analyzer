@@ -539,3 +539,104 @@
 @keyframes spin {
     to { transform: rotate(360deg); }
 }
+
+/* Database Connectivity Error Styles */
+.status-error {
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 20px 0;
+    text-align: center;
+}
+
+.status-error.database-error {
+    background: #f8d7da;
+    border: 1px solid #f5c6cb;
+    border-left: 5px solid #dc3545;
+    text-align: left;
+}
+
+.status-error.database-error h3 {
+    color: #721c24;
+    margin-top: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.status-error.database-error p {
+    color: #721c24;
+    margin: 10px 0;
+}
+
+.status-error.database-error pre {
+    background: #f1f3f4;
+    padding: 10px;
+    border-radius: 4px;
+    border-left: 3px solid #007bff;
+    margin: 15px 0;
+    overflow-x: auto;
+}
+
+.status-error.database-error code {
+    color: #d73527;
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+}
+
+.error-actions {
+    margin: 15px 0;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.retry-btn, .reload-btn {
+    background: #007bff;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background-color 0.2s;
+}
+
+.retry-btn:hover, .reload-btn:hover {
+    background: #0056b3;
+}
+
+.reload-btn {
+    background: #28a745;
+}
+
+.reload-btn:hover {
+    background: #1e7e34;
+}
+
+.error-details {
+    margin-top: 15px;
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 4px;
+    border: 1px solid #dee2e6;
+}
+
+.error-details summary {
+    cursor: pointer;
+    font-weight: bold;
+    color: #495057;
+    padding: 5px;
+}
+
+.error-details summary:hover {
+    background: #e9ecef;
+    border-radius: 3px;
+}
+
+.error-details p {
+    margin: 8px 0;
+    padding-left: 10px;
+    color: #6c757d;
+}

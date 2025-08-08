@@ -181,12 +181,49 @@
                 }
             } catch (error) {
                 console.error('Failed to load ML status overview:', error);
-                document.getElementById('mlStatusOverview').innerHTML = `
+                
+                // Check if this is a database connectivity issue
+                const isDbConnectivityIssue = error.message && (
+                    error.message.includes('MySQL') || 
+                    error.message.includes('database') ||
+                    error.message.includes('connection') ||
+                    error.message.includes('ECONNREFUSED') ||
+                    error.message.includes('timeout')
+                );
+                
+                const errorHtml = isDbConnectivityIssue ? `
+                    <div class="status-error database-error">
+                        <h3>🔌 Database Connection Issue</h3>
+                        <p><strong>Problem:</strong> MySQL database is not properly initialized or connected.</p>
+                        <p><strong>Solution:</strong> Run the following command to initialize MySQL tables:</p>
+                        <pre><code>python3 initialize_mysql_tables.py</code></pre>
+                        <p><strong>Root Cause:</strong> This system requires MySQL connectivity. SQLite support has been permanently removed.</p>
+                        <div class="error-actions">
+                            <button onclick="loadMLStatusOverview()" class="retry-btn">🔄 Retry Connection</button>
+                            <button onclick="window.location.reload()" class="reload-btn">♻️ Reload Page</button>
+                        </div>
+                        <details class="error-details">
+                            <summary>Technical Details</summary>
+                            <p><strong>Error:</strong> ${error.message}</p>
+                            <p><strong>Required Tables:</strong> ml_pathogen_config, ml_system_config, ml_audit_log</p>
+                            <p><strong>Note:</strong> This error occurs when MySQL tables are missing or MySQL connection fails.</p>
+                        </details>
+                    </div>
+                ` : `
                     <div class="status-error">
-                        <p>Failed to load ML status overview</p>
-                        <button onclick="loadMLStatusOverview()">Retry</button>
+                        <h3>⚠️ Configuration Load Error</h3>
+                        <p>Failed to load ML configuration data.</p>
+                        <div class="error-actions">
+                            <button onclick="loadMLStatusOverview()" class="retry-btn">🔄 Retry</button>
+                        </div>
+                        <details class="error-details">
+                            <summary>Error Details</summary>
+                            <p>${error.message}</p>
+                        </details>
                     </div>
                 `;
+                
+                document.getElementById('mlStatusOverview').innerHTML = errorHtml;
             }
         }
 

@@ -1,20 +1,37 @@
 # MDL PCR Analyzer - AI Coding Agent Instructions
 
+## 🚨 CRITICAL ALERT: NO SQLITE ALLOWED 🚨
+
+**SQLITE IS COMPLETELY DEPRECATED AND FORBIDDEN IN THIS PROJECT**
+
+❌ **NEVER use SQLite in any form:**
+- No `import sqlite3` statements
+- No `sqlite3.connect()` calls  
+- No `.db` file references
+- No SQLite syntax in any new code
+
+✅ **ALWAYS use MySQL exclusively:**
+- All database operations must use MySQL
+- Use `pymysql` or `mysql.connector` for connections
+- Legacy SQLite files archived in `legacy_sqlite_files/`
+
+**Why this matters:** SQLite was causing recurring database connectivity issues, missing ML requirements, and frontend failures. The system has been completely migrated to MySQL for reliability and performance.
+
 ## Architecture Overview
 
-This is a **Flask-based qPCR analysis system** with machine learning capabilities for curve classification and FDA compliance tracking. The system recently migrated from SQLite to MySQL.
+This is a **Flask-based qPCR analysis system** with machine learning capabilities for curve classification and FDA compliance tracking. The system has been **completely migrated from SQLite to MySQL**.
 
 ### Core Components
 - **Flask API** (`app.py`) - Main application with 4400+ lines handling analysis, ML, and compliance
-- **MySQL Database** - Primary data store (recently migrated from SQLite)
+- **MySQL Database** - Primary data store (**SQLite completely removed**)
 - **ML Classification** (`ml_curve_classifier.py`) - Weighted scoring system for curve analysis
 - **Compliance Dashboard** (`unified_compliance_dashboard.html`) - Single dashboard for all validation workflows
 - **Threshold Management** (`static/threshold_frontend.js`) - Advanced threshold calculation with loading guards
 
 ## Critical Development Patterns
 
-### Database Layer
-**ALWAYS use MySQL**, never SQLite. Connection pattern:
+### Database Layer - MYSQL ONLY
+**ALWAYS use MySQL**, SQLite is forbidden. Connection pattern:
 ```python
 # Use this pattern for ALL database connections
 mysql_config = {
@@ -172,6 +189,16 @@ Data flows: `MySQL tables` → `Flask API` → `Chart.js visualization` → `Use
 ### Database Connection Errors
 - **Problem**: Mixed SQLite/MySQL references
 - **Solution**: Use `initialize_mysql_tables.py` and remove all SQLite imports
+- **Frontend Error**: "Database connectivity not initialized - missing requirements"
+- **Root Cause**: MySQL tables not created or SQLite code still in use
+- **Fix**: Run `python3 initialize_mysql_tables.py` and check for SQLite imports
+
+### ML Config & Feedback Modal Issues  
+- **Problem**: ML config page loads but shows no data, feedback modal fails
+- **Frontend Message**: "⚠️ Database connectivity required for ML features"
+- **Root Cause**: Missing MySQL tables (`ml_prediction_tracking`, `ml_expert_decisions`, etc.)
+- **Solution**: Initialize MySQL tables and ensure no SQLite references in active files
+- **Critical Files**: `ml_config_manager.py`, `sql_integration.py`, `ml_validation_tracker.py`
 
 ### ML Classification Issues
 - **Problem**: Hard cutoff rejecting good curves

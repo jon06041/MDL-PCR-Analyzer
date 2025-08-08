@@ -557,13 +557,15 @@ app.register_blueprint(ml_run_api)
 print("✅ MySQL database configured and ready")
 print("MySQL database tables initialized")
 
-# Initialize ML configuration manager with MySQL
+# Initialize ML configuration manager with MySQL - NO SQLITE ALLOWED
 try:
-    # ML config manager will use the same MySQL connection as the main app
-    ml_config_manager = None  # Will be updated to use MySQL
-    print("ML Configuration Manager configured for MySQL")
+    from ml_config_manager import MLConfigManager
+    ml_config_manager = MLConfigManager(use_mysql=True, mysql_config=mysql_config)
+    print("✅ ML Configuration Manager initialized with MySQL (SQLite permanently deprecated)")
 except Exception as e:
-    print(f"Warning: Could not initialize ML Configuration Manager: {e}")
+    error_msg = f"❌ CRITICAL: ML Configuration Manager failed to initialize with MySQL: {e}"
+    print(error_msg)
+    print("🚨 SYSTEM REQUIREMENT: MySQL connection required. SQLite is deprecated.")
     ml_config_manager = None
 
 # ML validation manager - configured for MySQL
@@ -3029,13 +3031,37 @@ def reset_ml_batch_cancellation():
 def get_pathogen_ml_configs():
     """Get all pathogen ML configurations"""
     try:
-        from ml_config_manager import ml_config_manager
+        # Check if ML config manager is properly initialized
+        if ml_config_manager is None:
+            return jsonify({
+                'success': False,
+                'error': 'ML Configuration Manager not initialized',
+                'details': 'MySQL database connection required. SQLite support has been permanently removed.',
+                'solution': 'Run: python3 initialize_mysql_tables.py',
+                'database_issue': True
+            }), 503
+        
         configs = ml_config_manager.get_all_pathogen_configs()
         
         return jsonify({
             'success': True,
             'configs': configs
         })
+    except ConnectionError as e:
+        return jsonify({
+            'success': False,
+            'error': 'MySQL Database Connection Failed',
+            'details': str(e),
+            'solution': 'Check MySQL service is running and run: python3 initialize_mysql_tables.py',
+            'database_issue': True
+        }), 503
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': 'Configuration retrieval failed',
+            'details': str(e),
+            'database_issue': 'MySQL' in str(e) or 'connection' in str(e).lower()
+        }), 500
         
     except Exception as e:
         app.logger.error(f"Failed to get pathogen ML configs: {e}")

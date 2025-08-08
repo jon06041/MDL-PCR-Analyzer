@@ -1,9 +1,10 @@
 """
 ML Model Validation Manager
 Handles model performance tracking, versioning, and FDA compliance reporting
+Uses MySQL exclusively - NO SQLITE
 """
 
-import sqlite3
+import pymysql
 import json
 import logging
 import time
@@ -12,29 +13,51 @@ from typing import Dict, List, Optional, Tuple
 import os
 
 class MLModelValidationManager:
-    def __init__(self, db_path: str):
-        self.db_path = db_path
+    def __init__(self, use_mysql: bool = True, mysql_config: dict = None, db_path: str = None):
+        """
+        Initialize ML Model Validation Manager
+        
+        Args:
+            use_mysql (bool): Must be True - SQLite support removed
+            mysql_config (dict): MySQL connection configuration
+            db_path (str): Legacy parameter - ignored (SQLite deprecated)
+        """
+        if not use_mysql:
+            raise ValueError("ML Model Validation Manager requires MySQL configuration. SQLite support has been permanently removed.")
+        
+        if not mysql_config:
+            raise ValueError("MySQL configuration is required. SQLite not supported.")
+        
+        self.mysql_config = mysql_config
         self.logger = logging.getLogger(__name__)
+        self.logger.info("✅ ML Model Validation Manager initialized with MySQL (SQLite deprecated)")
         self.initialize_validation_schema()
     
     def get_db_connection(self):
-        """Get database connection with proper settings"""
-        conn = sqlite3.connect(self.db_path, timeout=30.0)  # 30 second timeout
-        # Enable WAL mode for better concurrent access
-        conn.execute('PRAGMA journal_mode=WAL')
-        conn.execute('PRAGMA synchronous=NORMAL')
-        conn.execute('PRAGMA cache_size=10000')
-        conn.execute('PRAGMA temp_store=MEMORY')
-        return conn
+        """Get MySQL database connection"""
+        try:
+            return pymysql.connect(
+                host=self.mysql_config['host'],
+                user=self.mysql_config['user'],
+                password=self.mysql_config['password'],
+                database=self.mysql_config['database'],
+                charset='utf8mb4',
+                autocommit=False,
+                cursorclass=pymysql.cursors.DictCursor
+            )
+        except Exception as e:
+            error_msg = f"CRITICAL: Failed to connect to MySQL for ML validation: {e}. SQLite is deprecated."
+            self.logger.error(error_msg)
+            raise ConnectionError(error_msg)
     
     def _execute_with_retry(self, operation_func, max_retries: int = 3, delay: float = 0.1):
-        """Execute database operation with retry logic for handling locks"""
+        """Execute database operation with retry logic for handling connection issues"""
         for attempt in range(max_retries):
             try:
                 return operation_func()
-            except sqlite3.OperationalError as e:
-                if "database is locked" in str(e) and attempt < max_retries - 1:
-                    self.logger.warning(f"Database locked, retrying in {delay} seconds (attempt {attempt + 1}/{max_retries})")
+            except pymysql.OperationalError as e:
+                if "Lock wait timeout" in str(e) and attempt < max_retries - 1:
+                    self.logger.warning(f"MySQL lock timeout, retrying in {delay} seconds (attempt {attempt + 1}/{max_retries})")
                     time.sleep(delay)
                     delay *= 2  # Exponential backoff
                     continue

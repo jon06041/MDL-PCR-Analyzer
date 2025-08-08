@@ -1,9 +1,10 @@
 """
 ML Configuration Management
 Handles pathogen-specific ML settings and safe data operations
+Uses MySQL exclusively - NO SQLITE
 """
 
-import sqlite3
+import pymysql
 import json
 import os
 import shutil
@@ -14,386 +15,383 @@ import logging
 logger = logging.getLogger(__name__)
 
 class MLConfigManager:
-    def __init__(self, db_path='qpcr_analysis.db'):
-        self.db_path = db_path
+    def __init__(self, use_mysql=True, mysql_config=None, db_path=None):
+        """
+        CRITICAL: This system uses MySQL ONLY. SQLite is deprecated.
+        
+        Args:
+            use_mysql: Must be True (SQLite deprecated)
+            mysql_config: MySQL connection configuration
+            db_path: Ignored - kept for backward compatibility only
+        """
+        if not use_mysql:
+            raise ValueError("CRITICAL ERROR: SQLite is deprecated. This system requires MySQL.")
+        
+        if not mysql_config:
+            raise ValueError("CRITICAL ERROR: MySQL configuration is required. SQLite not supported.")
+        
+        self.mysql_config = mysql_config
+        self.use_mysql = True
+        logger.info("✅ ML Config Manager initialized with MySQL (SQLite deprecated)")
         self.init_tables()
     
     def get_db_connection(self):
-        """Get database connection with proper settings"""
-        conn = sqlite3.connect(self.db_path, timeout=30.0)  # 30 second timeout
-        conn.row_factory = sqlite3.Row
-        # Enable WAL mode for better concurrent access
-        conn.execute('PRAGMA journal_mode=WAL')
-        conn.execute('PRAGMA synchronous=NORMAL')
-        conn.execute('PRAGMA cache_size=10000')
-        conn.execute('PRAGMA temp_store=MEMORY')
-        return conn
+        """Get MySQL database connection with proper settings"""
+        try:
+            connection = pymysql.connect(
+                host=self.mysql_config['host'],
+                port=self.mysql_config.get('port', 3306),
+                user=self.mysql_config['user'],
+                password=self.mysql_config['password'],
+                database=self.mysql_config['database'],
+                charset='utf8mb4',
+                autocommit=False,
+                cursorclass=pymysql.cursors.DictCursor
+            )
+            return connection
+        except Exception as e:
+            logger.error(f"❌ DATABASE CONNECTION FAILED: MySQL connection failed: {e}")
+            logger.error("🔧 Check your MySQL configuration and ensure the database is running")
+            raise ConnectionError(f"MySQL connection failed: {e}. Check your database configuration.")
     
     def init_tables(self):
-        """Initialize ML configuration tables"""
+        """Initialize ML configuration tables in MySQL - SQLite deprecated"""
         try:
-            with self.get_db_connection() as conn:
-                # Read and execute schema
-                schema_path = 'ml_config_schema.sql'
-                if os.path.exists(schema_path):
-                    with open(schema_path, 'r') as f:
-                        conn.executescript(f.read())
-                    logger.info("ML configuration tables initialized")
+            conn = self.get_db_connection()
+            try:
+                with conn.cursor() as cursor:
+                    # Create ml_pathogen_config table for MySQL
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS ml_pathogen_config (
+                            id INT AUTO_INCREMENT PRIMARY KEY,
+                            pathogen_code VARCHAR(50) NOT NULL,
+                            fluorophore VARCHAR(20) NOT NULL,
+                            ml_enabled BOOLEAN DEFAULT FALSE,
+                            confidence_threshold DECIMAL(3,2) DEFAULT 0.7,
+                            min_training_samples INT DEFAULT 50,
+                            max_training_samples INT DEFAULT 1000,
+                            auto_retrain BOOLEAN DEFAULT TRUE,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            UNIQUE KEY unique_pathogen_fluorophore (pathogen_code, fluorophore)
+                        ) ENGINE=InnoDB
+                    """)
+                    
+                    # Create ml_system_config table for MySQL
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS ml_system_config (
+                            id INT AUTO_INCREMENT PRIMARY KEY,
+                            config_key VARCHAR(100) NOT NULL UNIQUE,
+                            config_value TEXT,
+                            data_type ENUM('string', 'integer', 'float', 'boolean', 'json') DEFAULT 'string',
+                            description TEXT,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                        ) ENGINE=InnoDB
+                    """)
+                    
+                    # Create ml_config_audit_log table for MySQL
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS ml_config_audit_log (
+                            id INT AUTO_INCREMENT PRIMARY KEY,
+                            action VARCHAR(50) NOT NULL,
+                            pathogen_code VARCHAR(50),
+                            fluorophore VARCHAR(20),
+                            old_value TEXT,
+                            new_value TEXT,
+                            user_info TEXT,
+                            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            session_id VARCHAR(255),
+                            ip_address VARCHAR(45)
+                        ) ENGINE=InnoDB
+                    """)
+                    
+                    conn.commit()
+                    logger.info("✅ ML configuration tables initialized in MySQL")
                     
                     # Populate from pathogen library after schema setup
                     self.populate_from_pathogen_library()
-                else:
-                    logger.warning("ML config schema file not found")
+                    
+            finally:
+                conn.close()
+                
         except Exception as e:
-            logger.error(f"Failed to initialize ML config tables: {e}")
+            logger.error(f"❌ DATABASE INITIALIZATION FAILED: {e}")
+            logger.error("🔧 Make sure MySQL is running and tables can be created")
+            raise
     
     def get_pathogen_ml_config(self, pathogen_code, fluorophore=None):
         """Get ML configuration for specific pathogen/fluorophore"""
         try:
-            with self.get_db_connection() as conn:
-                if fluorophore:
-                    cursor = conn.execute(
-                        "SELECT * FROM ml_pathogen_config WHERE pathogen_code = ? AND fluorophore = ?",
-                        (pathogen_code, fluorophore)
-                    )
-                else:
-                    cursor = conn.execute(
-                        "SELECT * FROM ml_pathogen_config WHERE pathogen_code = ?",
-                        (pathogen_code,)
-                    )
+            conn = self.get_db_connection()
+            try:
+                with conn.cursor() as cursor:
+                    if fluorophore:
+                        cursor.execute(
+                            "SELECT * FROM ml_pathogen_config WHERE pathogen_code = %s AND fluorophore = %s",
+                            (pathogen_code, fluorophore)
+                        )
+                    else:
+                        cursor.execute(
+                            "SELECT * FROM ml_pathogen_config WHERE pathogen_code = %s",
+                            (pathogen_code,)
+                        )
+                    
+                    results = cursor.fetchall()
+                    return results
+            finally:
+                conn.close()
                 
-                results = cursor.fetchall()
-                return [dict(row) for row in results]
         except Exception as e:
-            logger.error(f"Failed to get pathogen ML config: {e}")
+            logger.error(f"❌ Failed to get pathogen ML config: {e}")
             return []
     
     def set_pathogen_ml_enabled(self, pathogen_code, fluorophore, enabled, user_info=None):
         """Enable/disable ML for specific pathogen+fluorophore"""
         try:
-            with self.get_db_connection() as conn:
-                # Get current state for audit
-                cursor = conn.execute(
-                    "SELECT ml_enabled FROM ml_pathogen_config WHERE pathogen_code = ? AND fluorophore = ?",
-                    (pathogen_code, fluorophore)
-                )
-                result = cursor.fetchone()
-                old_state = result[0] if result else None
-                
-                # Update or insert configuration
-                conn.execute("""
-                    INSERT OR REPLACE INTO ml_pathogen_config 
-                    (pathogen_code, fluorophore, ml_enabled, updated_at) 
-                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                """, (pathogen_code, fluorophore, enabled))
-                
-                # Log the change
-                self._log_audit_action(
-                    conn, 'toggle_ml', pathogen_code, fluorophore,
-                    str(old_state), str(enabled), user_info
-                )
-                
-                conn.commit()
-                logger.info(f"ML {'enabled' if enabled else 'disabled'} for {pathogen_code}/{fluorophore}")
-                return True
-                
-        except Exception as e:
-            logger.error(f"Failed to set pathogen ML config: {e}")
-            return False
-    
-    def is_ml_enabled_for_pathogen(self, pathogen_code, fluorophore):
-        """Check if ML is enabled for specific pathogen+fluorophore"""
-        try:
-            # First check global ML setting
-            if not self._is_global_ml_enabled():
-                return False
-            
-            with self.get_db_connection() as conn:
-                cursor = conn.execute(
-                    "SELECT ml_enabled FROM ml_pathogen_config WHERE pathogen_code = ? AND fluorophore = ?",
-                    (pathogen_code, fluorophore)
-                )
-                result = cursor.fetchone()
-                
-                # Default to enabled if no specific config found
-                return result[0] if result else True
-                
-        except Exception as e:
-            logger.error(f"Failed to check ML enabled status: {e}")
-            return False
-    
-    def get_system_config(self, key):
-        """Get system-wide configuration value"""
-        try:
-            with self.get_db_connection() as conn:
-                cursor = conn.execute(
-                    "SELECT config_value FROM ml_system_config WHERE config_key = ?",
-                    (key,)
-                )
-                result = cursor.fetchone()
-                return result[0] if result else None
-        except Exception as e:
-            logger.error(f"Failed to get system config {key}: {e}")
-            return None
-    
-    def set_system_config(self, key, value, user_info=None):
-        """Set system-wide configuration value"""
-        try:
-            with self.get_db_connection() as conn:
-                # Get old value for audit
-                cursor = conn.execute(
-                    "SELECT config_value FROM ml_system_config WHERE config_key = ?",
-                    (key,)
-                )
-                result = cursor.fetchone()
-                old_value = result[0] if result else None
-                
-                # Update configuration
-                conn.execute("""
-                    UPDATE ml_system_config 
-                    SET config_value = ?, updated_at = CURRENT_TIMESTAMP 
-                    WHERE config_key = ?
-                """, (value, key))
-                
-                if conn.total_changes == 0:
-                    logger.warning(f"System config key '{key}' not found")
-                    return False
-                
-                # Log the change
-                self._log_audit_action(
-                    conn, 'update_system_config', None, None,
-                    f"{key}:{old_value}", f"{key}:{value}", user_info
-                )
-                
-                conn.commit()
-                return True
-                
-        except Exception as e:
-            logger.error(f"Failed to set system config: {e}")
-            return False
-    
-    def reset_training_data(self, pathogen_code=None, fluorophore=None, user_info=None):
-        """
-        Reset ML training data (DANGEROUS OPERATION)
-        If pathogen_code is None, resets ALL training data
-        """
-        try:
-            # Create backup before reset
-            backup_path = self._create_training_backup()
-            
-            with self.get_db_connection() as conn:
-                if pathogen_code:
-                    # Reset specific pathogen data
-                    if fluorophore:
-                        # Specific pathogen+fluorophore
-                        conn.execute("""
-                            DELETE FROM ml_training_data 
-                            WHERE JSON_EXTRACT(metadata, '$.pathogen_code') = ? 
-                            AND JSON_EXTRACT(metadata, '$.fluorophore') = ?
-                        """, (pathogen_code, fluorophore))
-                        target = f"{pathogen_code}/{fluorophore}"
-                    else:
-                        # All fluorophores for pathogen
-                        conn.execute("""
-                            DELETE FROM ml_training_data 
-                            WHERE JSON_EXTRACT(metadata, '$.pathogen_code') = ?
-                        """, (pathogen_code,))
-                        target = pathogen_code
-                else:
-                    # Reset ALL training data
-                    conn.execute("DELETE FROM ml_training_data")
-                    target = "ALL"
-                
-                # Log the reset action
-                self._log_audit_action(
-                    conn, 'reset_training_data', pathogen_code, fluorophore,
-                    f"backup:{backup_path}", f"reset:{target}", user_info
-                )
-                
-                conn.commit()
-                
-                # Also remove model files
-                self._remove_model_files(pathogen_code, fluorophore)
-                
-                logger.warning(f"Training data reset for {target}. Backup: {backup_path}")
-                return True, backup_path
-                
-        except Exception as e:
-            logger.error(f"Failed to reset training data: {e}")
-            return False, None
-    
-    def get_all_pathogen_configs(self):
-        """Get all pathogen ML configurations"""
-        try:
-            with self.get_db_connection() as conn:
-                cursor = conn.execute("""
-                    SELECT pathogen_code, fluorophore, ml_enabled, training_locked, 
-                           min_confidence, updated_at
-                    FROM ml_pathogen_config 
-                    ORDER BY pathogen_code, fluorophore
-                """)
-                return [dict(row) for row in cursor.fetchall()]
-        except Exception as e:
-            logger.error(f"Failed to get all pathogen configs: {e}")
-            return []
-    
-    def get_enabled_pathogen_configs(self):
-        """Get only enabled pathogen ML configurations for UI filtering"""
-        try:
-            with self.get_db_connection() as conn:
-                cursor = conn.execute("""
-                    SELECT pathogen_code, fluorophore, ml_enabled, min_confidence
-                    FROM ml_pathogen_config 
-                    WHERE ml_enabled = 1
-                    ORDER BY pathogen_code, fluorophore
-                """)
-                return [dict(row) for row in cursor.fetchall()]
-        except Exception as e:
-            logger.error(f"Failed to get enabled pathogen configs: {e}")
-            return []
-    
-    def get_audit_log(self, limit=50):
-        """Get recent audit log entries"""
-        try:
-            with self.get_db_connection() as conn:
-                cursor = conn.execute("""
-                    SELECT * FROM ml_audit_log 
-                    ORDER BY timestamp DESC 
-                    LIMIT ?
-                """, (limit,))
-                return [dict(row) for row in cursor.fetchall()]
-        except Exception as e:
-            logger.error(f"Failed to get audit log: {e}")
-            return []
-    
-    def _is_global_ml_enabled(self):
-        """Check if ML is globally enabled"""
-        value = self.get_system_config('ml_global_enabled')
-        return value == 'true' if value else True
-    
-    def _log_audit_action(self, conn, action, pathogen_code, fluorophore, old_value, new_value, user_info):
-        """Log audit trail for sensitive operations"""
-        user_id = user_info.get('user_id', 'system') if user_info else 'system'
-        user_ip = user_info.get('ip', 'unknown') if user_info else 'unknown'
-        notes = user_info.get('notes', '') if user_info else ''
-        
-        conn.execute("""
-            INSERT INTO ml_audit_log 
-            (action, pathogen_code, fluorophore, old_value, new_value, user_id, user_ip, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (action, pathogen_code, fluorophore, old_value, new_value, user_id, user_ip, notes))
-    
-    def _create_training_backup(self):
-        """Create backup of training data before destructive operations"""
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_path = f"ml_training_backup_{timestamp}.json"
-            
-            # Export current training data
-            with self.get_db_connection() as conn:
-                cursor = conn.execute("SELECT * FROM ml_training_data")
-                data = [dict(row) for row in cursor.fetchall()]
-            
-            with open(backup_path, 'w') as f:
-                json.dump({
-                    'backup_timestamp': timestamp,
-                    'training_data': data
-                }, f, indent=2)
-            
-            return backup_path
-            
-        except Exception as e:
-            logger.error(f"Failed to create training backup: {e}")
-            return None
-    
-    def _remove_model_files(self, pathogen_code=None, fluorophore=None):
-        """Remove trained model files"""
-        try:
-            if pathogen_code:
-                if fluorophore:
-                    pattern = f"ml_model_{pathogen_code}_{fluorophore}_*"
-                else:
-                    pattern = f"ml_model_{pathogen_code}_*"
-            else:
-                pattern = "ml_model_*"
-            
-            # Find and remove matching model files
-            import glob
-            for file_path in glob.glob(pattern):
-                try:
-                    os.remove(file_path)
-                    logger.info(f"Removed model file: {file_path}")
-                except Exception as e:
-                    logger.warning(f"Failed to remove model file {file_path}: {e}")
+            conn = self.get_db_connection()
+            try:
+                with conn.cursor() as cursor:
+                    # Get current state for audit
+                    cursor.execute(
+                        "SELECT ml_enabled FROM ml_pathogen_config WHERE pathogen_code = %s AND fluorophore = %s",
+                        (pathogen_code, fluorophore)
+                    )
+                    result = cursor.fetchone()
+                    old_state = result['ml_enabled'] if result else None
                     
+                    # Update or insert configuration
+                    cursor.execute("""
+                        INSERT INTO ml_pathogen_config 
+                        (pathogen_code, fluorophore, ml_enabled, updated_at) 
+                        VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+                        ON DUPLICATE KEY UPDATE 
+                        ml_enabled = VALUES(ml_enabled), 
+                        updated_at = CURRENT_TIMESTAMP
+                    """, (pathogen_code, fluorophore, enabled))
+                    
+                    # Log the change
+                    self._log_audit_action(
+                        cursor, 'toggle_ml', pathogen_code, fluorophore,
+                        str(old_state), str(enabled), user_info
+                    )
+                    
+                    conn.commit()
+                    logger.info(f"✅ ML {'enabled' if enabled else 'disabled'} for {pathogen_code}/{fluorophore}")
+                    return True
+                    
+            finally:
+                conn.close()
+                
         except Exception as e:
-            logger.error(f"Failed to remove model files: {e}")
+            logger.error(f"❌ Failed to set pathogen ML enabled state: {e}")
+            return False
+    
+    def _log_audit_action(self, cursor, action, pathogen_code=None, fluorophore=None, 
+                         old_value=None, new_value=None, user_info=None):
+        """Log configuration changes for audit trail"""
+        try:
+            cursor.execute("""
+                INSERT INTO ml_config_audit_log 
+                (action, pathogen_code, fluorophore, old_value, new_value, user_info, timestamp)
+                VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            """, (action, pathogen_code, fluorophore, old_value, new_value, 
+                  json.dumps(user_info) if user_info else None))
+        except Exception as e:
+            logger.error(f"Failed to log audit action: {e}")
     
     def populate_from_pathogen_library(self):
-        """Populate ML config database from pathogen library JavaScript file"""
+        """Populate ML config from pathogen library - MySQL version"""
         try:
-            # Read the pathogen library JavaScript file
-            pathogen_lib_path = os.path.join('static', 'pathogen_library.js')
-            if not os.path.exists(pathogen_lib_path):
-                logger.warning("pathogen_library.js not found, skipping population")
-                return False
+            pathogen_config_path = os.path.join('config', 'concentration_controls.json')
+            if not os.path.exists(pathogen_config_path):
+                logger.warning("Pathogen config file not found - skipping population")
+                return
             
-            with open(pathogen_lib_path, 'r') as f:
-                content = f.read()
+            with open(pathogen_config_path, 'r') as f:
+                pathogen_data = json.load(f)
             
-            # Extract pathogen library data using simple parsing
-            # Look for the PATHOGEN_LIBRARY object
-            import re
-            
-            # Find the PATHOGEN_LIBRARY object
-            match = re.search(r'const PATHOGEN_LIBRARY\s*=\s*{(.*?)};', content, re.DOTALL)
-            if not match:
-                logger.warning("Could not find PATHOGEN_LIBRARY in pathogen_library.js")
-                return False
-            
-            # Parse the pathogen library content
-            pathogen_data = {}
-            lib_content = match.group(1)
-            
-            # Simple regex to extract pathogen entries
-            pathogen_matches = re.findall(r'"([^"]+)":\s*{([^}]+)}', lib_content)
-            
-            for pathogen_code, fluorophore_block in pathogen_matches:
-                fluorophore_matches = re.findall(r'"([^"]+)":\s*"([^"]+)"', fluorophore_block)
-                pathogen_data[pathogen_code] = {}
-                for fluorophore, target in fluorophore_matches:
-                    pathogen_data[pathogen_code][fluorophore] = target
-            
-            logger.info(f"Parsed {len(pathogen_data)} pathogens from pathogen library")
-            
-            # Populate database
-            with self.get_db_connection() as conn:
-                populated_count = 0
-                for pathogen_code, fluorophores in pathogen_data.items():
-                    for fluorophore, target in fluorophores.items():
-                        try:
-                            # Insert or ignore (don't overwrite existing configs)
-                            conn.execute("""
-                                INSERT OR IGNORE INTO ml_pathogen_config 
-                                (pathogen_code, fluorophore, ml_enabled, min_confidence) 
-                                VALUES (?, ?, 1, 0.7)
+            conn = self.get_db_connection()
+            try:
+                with conn.cursor() as cursor:
+                    for pathogen_code, pathogen_info in pathogen_data.items():
+                        fluorophores = pathogen_info.get('fluorophores', ['FAM', 'HEX', 'Texas Red', 'Cy5'])
+                        
+                        for fluorophore in fluorophores:
+                            # Insert default config if not exists
+                            cursor.execute("""
+                                INSERT IGNORE INTO ml_pathogen_config 
+                                (pathogen_code, fluorophore, ml_enabled, confidence_threshold, 
+                                 min_training_samples, max_training_samples)
+                                VALUES (%s, %s, FALSE, 0.7, 50, 1000)
                             """, (pathogen_code, fluorophore))
-                            
-                            if conn.total_changes > 0:
-                                populated_count += 1
-                                logger.debug(f"Added ML config: {pathogen_code}/{fluorophore} -> {target}")
-                                
-                        except Exception as e:
-                            logger.warning(f"Failed to insert {pathogen_code}/{fluorophore}: {e}")
-                
-                conn.commit()
-                logger.info(f"✅ Populated {populated_count} new ML configurations from pathogen library")
-                return True
+                    
+                    conn.commit()
+                    logger.info("✅ Populated ML config from pathogen library")
+                    
+            finally:
+                conn.close()
                 
         except Exception as e:
-            logger.error(f"Failed to populate from pathogen library: {e}")
+            logger.error(f"❌ Failed to populate from pathogen library: {e}")
+    
+    def get_system_config(self, config_key, default_value=None):
+        """Get system-wide ML configuration"""
+        try:
+            conn = self.get_db_connection()
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT config_value, data_type FROM ml_system_config WHERE config_key = %s",
+                        (config_key,)
+                    )
+                    result = cursor.fetchone()
+                    
+                    if result:
+                        value = result['config_value']
+                        data_type = result['data_type']
+                        
+                        # Convert value based on data type
+                        if data_type == 'integer':
+                            return int(value)
+                        elif data_type == 'float':
+                            return float(value)
+                        elif data_type == 'boolean':
+                            return value.lower() in ('true', '1', 'yes')
+                        elif data_type == 'json':
+                            return json.loads(value)
+                        else:
+                            return value
+                    
+                    return default_value
+                    
+            finally:
+                conn.close()
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to get system config: {e}")
+            return default_value
+    
+    def set_system_config(self, config_key, config_value, data_type='string', description=None):
+        """Set system-wide ML configuration"""
+        try:
+            conn = self.get_db_connection()
+            try:
+                with conn.cursor() as cursor:
+                    # Convert value to string for storage
+                    if data_type == 'json':
+                        value_str = json.dumps(config_value)
+                    else:
+                        value_str = str(config_value)
+                    
+                    cursor.execute("""
+                        INSERT INTO ml_system_config 
+                        (config_key, config_value, data_type, description, updated_at)
+                        VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        ON DUPLICATE KEY UPDATE 
+                        config_value = VALUES(config_value),
+                        data_type = VALUES(data_type),
+                        description = VALUES(description),
+                        updated_at = CURRENT_TIMESTAMP
+                    """, (config_key, value_str, data_type, description))
+                    
+                    conn.commit()
+                    logger.info(f"✅ Set system config: {config_key} = {config_value}")
+                    return True
+                    
+            finally:
+                conn.close()
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to set system config: {e}")
             return False
+    
+    def reset_training_data(self, pathogen_code=None, user_info=None):
+        """Reset ML training data with proper backup"""
+        try:
+            conn = self.get_db_connection()
+            try:
+                with conn.cursor() as cursor:
+                    # Create backup timestamp
+                    backup_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    
+                    if pathogen_code:
+                        # Reset specific pathogen
+                        cursor.execute("""
+                            UPDATE ml_pathogen_config 
+                            SET ml_enabled = FALSE, updated_at = CURRENT_TIMESTAMP
+                            WHERE pathogen_code = %s
+                        """, (pathogen_code,))
+                        
+                        self._log_audit_action(
+                            cursor, 'reset_training', pathogen_code, None,
+                            None, f'Reset at {backup_timestamp}', user_info
+                        )
+                        
+                        message = f"Training data reset for {pathogen_code}"
+                    else:
+                        # Reset all pathogens
+                        cursor.execute("""
+                            UPDATE ml_pathogen_config 
+                            SET ml_enabled = FALSE, updated_at = CURRENT_TIMESTAMP
+                        """)
+                        
+                        self._log_audit_action(
+                            cursor, 'reset_training', None, None,
+                            None, f'Global reset at {backup_timestamp}', user_info
+                        )
+                        
+                        message = "All training data reset"
+                    
+                    conn.commit()
+                    logger.info(f"✅ {message}")
+                    return True
+                    
+            finally:
+                conn.close()
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to reset training data: {e}")
+            return False
+    
+    def get_audit_log(self, limit=100, pathogen_code=None, action=None):
+        """Get configuration audit log"""
+        try:
+            conn = self.get_db_connection()
+            try:
+                with conn.cursor() as cursor:
+                    query = "SELECT * FROM ml_config_audit_log WHERE 1=1"
+                    params = []
+                    
+                    if pathogen_code:
+                        query += " AND pathogen_code = %s"
+                        params.append(pathogen_code)
+                    
+                    if action:
+                        query += " AND action = %s"
+                        params.append(action)
+                    
+                    query += " ORDER BY timestamp DESC LIMIT %s"
+                    params.append(limit)
+                    
+                    cursor.execute(query, params)
+                    results = cursor.fetchall()
+                    
+                    return results
+                    
+            finally:
+                conn.close()
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to get audit log: {e}")
+            return []
 
+# For backward compatibility, create a global instance when imported
+ml_config_manager = None
 
-# Global instance
-ml_config_manager = MLConfigManager()
+def get_ml_config_manager():
+    """Get the global ML config manager instance"""
+    global ml_config_manager
+    if ml_config_manager is None:
+        raise RuntimeError("❌ ML Config Manager not initialized. Call app initialization first.")
+    return ml_config_manager

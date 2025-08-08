@@ -1,6 +1,7 @@
 """
-SQL-based data integration for qPCR analysis
-Handles fluorophore-specific sample and Cq value matching using PostgreSQL temporary tables
+MySQL-based data integration for qPCR analysis
+Handles fluorophore-specific sample and Cq value matching using MySQL temporary tables
+CRITICAL: Uses MySQL ONLY - SQLite deprecated
 """
 
 import json
@@ -10,12 +11,27 @@ import os
 from qpcr_analyzer import process_csv_data, validate_csv_structure
 
 def get_database_engine():
-    """Get SQLite database engine"""
-    # Use SQLite database file from the project
-    sqlite_path = os.path.join(os.path.dirname(__file__), 'qpcr_analysis.db')
-    abs_path = os.path.abspath(sqlite_path)
-    print(f"[DEBUG] SQL integration DB path: {abs_path}")
-    return create_engine(f'sqlite:///{abs_path}')
+    """Get MySQL database engine - SQLite deprecated"""
+    # Get MySQL configuration from environment
+    mysql_host = os.environ.get("MYSQL_HOST", "127.0.0.1")
+    mysql_port = os.environ.get("MYSQL_PORT", "3306")
+    mysql_user = os.environ.get("MYSQL_USER", "qpcr_user")
+    mysql_password = os.environ.get("MYSQL_PASSWORD", "qpcr_password")
+    mysql_database = os.environ.get("MYSQL_DATABASE", "qpcr_analysis")
+    
+    mysql_url = f'mysql+pymysql://{mysql_user}:{mysql_password}@{mysql_host}:{mysql_port}/{mysql_database}'
+    print(f"[DEBUG] SQL integration using MySQL: {mysql_host}:{mysql_port}/{mysql_database}")
+    
+    try:
+        engine = create_engine(mysql_url, echo=False)
+        # Test connection
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return engine
+    except Exception as e:
+        print(f"❌ CRITICAL ERROR: MySQL connection failed in sql_integration: {e}")
+        print("🔧 Check MySQL configuration and ensure database is running")
+        raise ConnectionError(f"SQL Integration requires MySQL. Connection failed: {e}")
 
 def process_with_sql_integration(amplification_data, samples_csv_data, fluorophore):
     """
@@ -73,15 +89,15 @@ def process_with_sql_integration(amplification_data, samples_csv_data, fluoropho
         engine = get_database_engine()
         
         with engine.connect() as conn:
-            # Create temporary table for this session (SQLite syntax)
+            # Create temporary table for this session (MySQL syntax)
             conn.execute(text("""
-                CREATE TEMPORARY TABLE IF NOT EXISTS temp_samples (
-                    session_id TEXT,
-                    well_id TEXT,
-                    fluorophore TEXT,
-                    sample_name TEXT,
-                    cq_value REAL
-                )
+                CREATE TEMPORARY TABLE temp_samples (
+                    session_id VARCHAR(36),
+                    well_id VARCHAR(10),
+                    fluorophore VARCHAR(20),
+                    sample_name VARCHAR(255),
+                    cq_value DECIMAL(10,4)
+                ) ENGINE=MEMORY
             """))
             
             # Generate unique session ID for this analysis
@@ -197,7 +213,7 @@ def process_with_sql_integration(amplification_data, samples_csv_data, fluoropho
                         # Always set fluorophore
                         well_result['fluorophore'] = fluorophore
                 
-                # Clean up temporary table (SQLite will auto-drop on connection close)
+                # Clean up temporary table (MySQL handles session cleanup automatically)
                 conn.commit()
                 
             else:

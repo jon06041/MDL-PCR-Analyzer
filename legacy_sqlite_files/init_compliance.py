@@ -1,33 +1,56 @@
 #!/usr/bin/env python3
 """
 Initialize the compliance database schema and sample data
+Uses MySQL exclusively - NO SQLITE
 """
 
-import sqlite3
+import pymysql
 import json
-from unified_compliance_manager import UnifiedComplianceManager
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+def get_mysql_connection():
+    """Get MySQL connection using environment variables"""
+    mysql_host = os.environ.get("MYSQL_HOST", "127.0.0.1")
+    mysql_port = int(os.environ.get("MYSQL_PORT", "3306"))
+    mysql_user = os.environ.get("MYSQL_USER", "qpcr_user")
+    mysql_password = os.environ.get("MYSQL_PASSWORD", "qpcr_password")
+    mysql_database = os.environ.get("MYSQL_DATABASE", "qpcr_analysis")
+    
+    return pymysql.connect(
+        host=mysql_host,
+        port=mysql_port,
+        user=mysql_user,
+        password=mysql_password,
+        database=mysql_database,
+        charset='utf8mb4',
+        autocommit=True,
+        cursorclass=pymysql.cursors.DictCursor
+    )
 
 def initialize_compliance_schema():
-    """Initialize the full compliance schema with sample requirements"""
+    """Initialize the full compliance schema with sample requirements in MySQL"""
     
-    # Connect to database
-    conn = sqlite3.connect('qpcr_analysis.db', timeout=30.0)
-    conn.row_factory = sqlite3.Row
-    conn.execute('PRAGMA journal_mode=WAL')
+    # Connect to MySQL database
+    conn = get_mysql_connection()
     
-    print("Creating compliance schema...")
+    print("Creating compliance schema in MySQL...")
     
     # Create compliance_requirements table
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS compliance_requirements (
-            requirement_code TEXT PRIMARY KEY,
-            requirement_title TEXT NOT NULL,
-            requirement_description TEXT,
-            regulation_source TEXT NOT NULL,
-            section_number TEXT,
-            compliance_category TEXT NOT NULL,
-            criticality_level TEXT NOT NULL DEFAULT 'medium',
-            frequency TEXT NOT NULL DEFAULT 'monthly',
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS compliance_requirements (
+                requirement_code VARCHAR(255) PRIMARY KEY,
+                requirement_title VARCHAR(500) NOT NULL,
+                requirement_description TEXT,
+                regulation_source VARCHAR(255) NOT NULL,
+                section_number VARCHAR(100),
+                compliance_category VARCHAR(100) NOT NULL,
+                criticality_level VARCHAR(50) NOT NULL DEFAULT 'medium',
+                frequency VARCHAR(50) NOT NULL DEFAULT 'monthly',
             compliance_status TEXT NOT NULL DEFAULT 'unknown',
             auto_trackable BOOLEAN NOT NULL DEFAULT 1,
             created_date DATE DEFAULT CURRENT_DATE,
