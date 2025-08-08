@@ -39,6 +39,9 @@ class MLConfigManager:
                     with open(schema_path, 'r') as f:
                         conn.executescript(f.read())
                     logger.info("ML configuration tables initialized")
+                    
+                    # Populate from pathogen library after schema setup
+                    self.populate_from_pathogen_library()
                 else:
                     logger.warning("ML config schema file not found")
         except Exception as e:
@@ -325,6 +328,71 @@ class MLConfigManager:
                     
         except Exception as e:
             logger.error(f"Failed to remove model files: {e}")
+    
+    def populate_from_pathogen_library(self):
+        """Populate ML config database from pathogen library JavaScript file"""
+        try:
+            # Read the pathogen library JavaScript file
+            pathogen_lib_path = os.path.join('static', 'pathogen_library.js')
+            if not os.path.exists(pathogen_lib_path):
+                logger.warning("pathogen_library.js not found, skipping population")
+                return False
+            
+            with open(pathogen_lib_path, 'r') as f:
+                content = f.read()
+            
+            # Extract pathogen library data using simple parsing
+            # Look for the PATHOGEN_LIBRARY object
+            import re
+            
+            # Find the PATHOGEN_LIBRARY object
+            match = re.search(r'const PATHOGEN_LIBRARY\s*=\s*{(.*?)};', content, re.DOTALL)
+            if not match:
+                logger.warning("Could not find PATHOGEN_LIBRARY in pathogen_library.js")
+                return False
+            
+            # Parse the pathogen library content
+            pathogen_data = {}
+            lib_content = match.group(1)
+            
+            # Simple regex to extract pathogen entries
+            pathogen_matches = re.findall(r'"([^"]+)":\s*{([^}]+)}', lib_content)
+            
+            for pathogen_code, fluorophore_block in pathogen_matches:
+                fluorophore_matches = re.findall(r'"([^"]+)":\s*"([^"]+)"', fluorophore_block)
+                pathogen_data[pathogen_code] = {}
+                for fluorophore, target in fluorophore_matches:
+                    pathogen_data[pathogen_code][fluorophore] = target
+            
+            logger.info(f"Parsed {len(pathogen_data)} pathogens from pathogen library")
+            
+            # Populate database
+            with self.get_db_connection() as conn:
+                populated_count = 0
+                for pathogen_code, fluorophores in pathogen_data.items():
+                    for fluorophore, target in fluorophores.items():
+                        try:
+                            # Insert or ignore (don't overwrite existing configs)
+                            conn.execute("""
+                                INSERT OR IGNORE INTO ml_pathogen_config 
+                                (pathogen_code, fluorophore, ml_enabled, min_confidence) 
+                                VALUES (?, ?, 1, 0.7)
+                            """, (pathogen_code, fluorophore))
+                            
+                            if conn.total_changes > 0:
+                                populated_count += 1
+                                logger.debug(f"Added ML config: {pathogen_code}/{fluorophore} -> {target}")
+                                
+                        except Exception as e:
+                            logger.warning(f"Failed to insert {pathogen_code}/{fluorophore}: {e}")
+                
+                conn.commit()
+                logger.info(f"✅ Populated {populated_count} new ML configurations from pathogen library")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Failed to populate from pathogen library: {e}")
+            return False
 
 
 # Global instance
