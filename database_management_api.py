@@ -1,12 +1,15 @@
 """
 Database Management API endpoints for Flask app
 Provides web interface for backup management and ML validation tracking
+CRITICAL: Uses MySQL exclusively - SQLite deprecated
 """
 
 from flask import Blueprint, request, jsonify, render_template_string
-from database_backup_manager import DatabaseBackupManager, MLValidationTracker
+# Import MySQL-based validation tracker (SQLite backup manager deprecated)
+from ml_validation_tracker import MLValidationTracker
 import json
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 

@@ -3067,11 +3067,41 @@ class MLFeedbackInterface {
 
         } catch (error) {
             console.error('Feedback submission error:', error);
-            this.showTrainingNotification(
-                'Feedback Failed',
-                `❌ Error: ${error.message}`,
-                'error'
+            
+            // Check if this is a database connectivity issue
+            const isDbConnectivityIssue = error.message && (
+                error.message.includes('MySQL') || 
+                error.message.includes('database') ||
+                error.message.includes('connection') ||
+                error.message.includes('ECONNREFUSED') ||
+                error.message.includes('timeout') ||
+                error.message.includes('503') ||
+                error.message.includes('Server error: 503')
             );
+            
+            if (isDbConnectivityIssue) {
+                this.showTrainingNotification(
+                    '🔌 Database Connection Issue',
+                    `❌ MySQL database is not properly initialized or connected. ` +
+                    `Please run: python3 initialize_mysql_tables.py`,
+                    'error',
+                    8000 // Longer display time for important message
+                );
+                
+                // Also show detailed error in console
+                console.error('🔌 DATABASE CONNECTIVITY ERROR:', {
+                    error: error.message,
+                    requiredTables: ['ml_expert_decisions', 'ml_prediction_tracking', 'ml_model_versions'],
+                    solution: 'Run initialize_mysql_tables.py to create missing MySQL tables',
+                    note: 'SQLite support has been permanently removed - MySQL required'
+                });
+            } else {
+                this.showTrainingNotification(
+                    'Feedback Failed',
+                    `❌ Error: ${error.message}`,
+                    'error'
+                );
+            }
         } finally {
             // Reset submission flag
             this.submissionInProgress = false;

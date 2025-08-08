@@ -214,6 +214,13 @@ class MySQLUnifiedComplianceManager:
             cursor.close()
             conn.close()
 
+    def track_compliance_event(self, event_type: str, event_data: dict, user_id: str = 'system', session_id: str = None):
+        """
+        Track a compliance event (alias for log_compliance_event for backward compatibility)
+        This method exists to maintain compatibility with safe_compliance_tracker calls
+        """
+        return self.log_compliance_event(event_type, event_data, user_id, session_id)
+
     def _process_compliance_requirements(self, event_type: str, event_data: dict, event_id: int):
         """Process compliance requirements triggered by an event"""
         if event_type not in self.event_to_requirements_map:
