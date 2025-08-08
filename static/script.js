@@ -4599,16 +4599,16 @@ async function displayAnalysisResults(results) {
     // Ensure global is set before any UI/chart calls
     window.currentAnalysisResults = results;
     
-    // Check for automatic ML analysis (for future runs with trained models)
-    // Only check once per analysis session to prevent duplicate popups
-    if (window.mlFeedbackInterface && results && results.individual_results && !window.mlAnalysisChecked) {
-        window.mlAnalysisChecked = true; // Set flag to prevent duplicate checks
+    // Show ML notification banner (without auto-running analysis)
+    // User must manually click "Improve Results" to trigger ML analysis
+    if (window.mlFeedbackInterface && results && results.individual_results && !window.mlNotificationChecked) {
+        window.mlNotificationChecked = true; // Set flag to prevent duplicate notifications
         // Small delay to allow analysis results to be fully processed
         setTimeout(async () => {
             try {
-                await window.mlFeedbackInterface.checkForAutomaticMLAnalysis();
+                await window.mlFeedbackInterface.checkForMLNotification();
             } catch (error) {
-                console.log('ML automatic analysis check failed:', error);
+                console.log('ML notification check failed:', error);
             }
         }, 2000);
     }
@@ -4751,17 +4751,18 @@ async function displayAnalysisResults(results) {
     
     populateWellSelector(individualResults);
     
-    // Check for automatic ML analysis BEFORE populating table to show banner first
-    if (window.mlFeedbackInterface && results && results.individual_results && !window.mlAnalysisChecked) {
-        window.mlAnalysisChecked = true; // Set flag to prevent duplicate checks
+    // Show ML notification banner (without auto-running analysis) 
+    // User must manually click "Improve Results" to trigger ML analysis
+    if (window.mlFeedbackInterface && results && results.individual_results && !window.mlNotificationChecked) {
+        window.mlNotificationChecked = true; // Set flag to prevent duplicate notifications
         
         // Show ML banner first and wait for user choice before populating table
         try {
-            await window.mlFeedbackInterface.checkForAutomaticMLAnalysis();
+            await window.mlFeedbackInterface.checkForMLNotification();
             // Only populate table after ML banner has been handled
             populateResultsTable(individualResults);
         } catch (error) {
-            console.log('ML automatic analysis check failed:', error);
+            console.log('ML notification check failed:', error);
             // Still populate table if ML check fails
             populateResultsTable(individualResults);
         }
@@ -4984,17 +4985,18 @@ async function displayMultiFluorophoreResults(results) {
     }
     populateWellSelector(results.individual_results);
     
-    // Check for automatic ML analysis BEFORE populating table to show banner first
-    if (window.mlFeedbackInterface && results && results.individual_results && !window.mlAnalysisChecked) {
-        window.mlAnalysisChecked = true; // Set flag to prevent duplicate checks
+    // Show ML notification banner (without auto-running analysis)
+    // User must manually click "Improve Results" to trigger ML analysis
+    if (window.mlFeedbackInterface && results && results.individual_results && !window.mlNotificationChecked) {
+        window.mlNotificationChecked = true; // Set flag to prevent duplicate notifications
         
         // Show ML banner first and wait for user choice before populating table
         try {
-            await window.mlFeedbackInterface.checkForAutomaticMLAnalysis();
+            await window.mlFeedbackInterface.checkForMLNotification();
             // Only populate table after ML banner has been handled
             populateResultsTable(results.individual_results);
         } catch (error) {
-            console.log('ML automatic analysis check failed for multichannel:', error);
+            console.log('ML notification check failed for multichannel:', error);
             // Still populate table if ML check fails
             populateResultsTable(results.individual_results);
         }
@@ -5648,18 +5650,18 @@ async function enhanceResultsWithMLClassification(individualResults, force = fal
         return;
     }
 
-    // Check if user has explicitly skipped automatic ML analysis
-    // Allow forced analysis to bypass user choice (for parameter changes etc.)
-    if (window.mlAutoAnalysisUserChoice === 'skipped' && !force) {
-        console.log('🚫 ML Enhancement: User has skipped automatic ML analysis, not running enhancement');
+    // ⚠️ CRITICAL: Block ALL automatic ML enhancement unless explicitly user-requested
+    // ONLY allow ML to run when force='user-requested' (from "Improve Results" button)
+    if (force !== 'user-requested') {
+        console.log('🚫 ML Enhancement: BLOCKED - Only user-requested ML analysis allowed. Force value:', force);
         return;
     }
 
     const resultsKeys = Object.keys(individualResults);
     if (resultsKeys.length === 0) return;
     
-    // Skip if already processed and not forced (force = true for parameter changes)
-    if (!force) {
+    // Skip if already processed and not explicitly requested by user
+    if (!force || force !== 'user-requested') {
         const hasMLClassification = resultsKeys.some(key => 
             individualResults[key].ml_classification
         );
@@ -5903,8 +5905,9 @@ function triggerMLReClassification(reason = 'parameter change') {
         return;
     }
     
-    // Force re-classification with current analysis results
-    enhanceResultsWithMLClassification(currentAnalysisResults.individual_results, true);
+    // DISABLED: Force re-classification - user must manually trigger via "Improve Results"
+    console.log('🚫 ML Re-classification blocked - user must click "Improve Results" button');
+    // enhanceResultsWithMLClassification(currentAnalysisResults.individual_results, true);
 }
 
 // Hook into threshold value changes to trigger ML updates (ONLY for actual threshold value changes)
@@ -5992,11 +5995,10 @@ function countEdgeCases() {
     const edgeCases = getVisibleEdgeCases();
     const count = edgeCases.length;
     
-    // Update edge case counter in UI (if element exists)
-    const edgeCaseCounter = document.getElementById('edgeCaseCounter');
-    if (edgeCaseCounter) {
-        edgeCaseCounter.textContent = count;
-        edgeCaseCounter.style.display = count > 0 ? 'inline' : 'none';
+    // Update ONLY the main edge case counter (avoid duplication)
+    const edgeCaseCounterText = document.getElementById('edgeCaseCounterText');
+    if (edgeCaseCounterText) {
+        edgeCaseCounterText.textContent = `${count} detected`;
     }
     
     // Update ML batch analysis button
@@ -6004,12 +6006,15 @@ function countEdgeCases() {
     if (mlBatchButton) {
         mlBatchButton.disabled = count === 0;
         mlBatchButton.textContent = count > 0 ? 
-            `Analyze ${count} Edge Case${count !== 1 ? 's' : ''} with ML` : 
+            `Analyze ${count} Edge Case${count !== 1 ? 's' : ''}` : 
             'No Edge Cases to Analyze';
     }
     
     return count;
 }
+
+// Make countEdgeCases globally accessible for ML notification
+window.countEdgeCases = countEdgeCases;
 
 /**
  * Trigger ML batch analysis for edge cases only
@@ -6021,6 +6026,10 @@ async function triggerMLBatchAnalysisForEdgeCases() {
         console.log('🎯 No edge cases found for ML analysis');
         return;
     }
+
+    // Store pre-ML edge case count for notifications (before ML overwrites them)
+    window.preMLEdgeCaseCount = edgeCases.length;
+    console.log('💾 Stored pre-ML edge case count:', window.preMLEdgeCaseCount);
     
     console.log(`🎯 Starting ML batch analysis for ${edgeCases.length} edge cases`);
     
@@ -6038,8 +6047,8 @@ async function triggerMLBatchAnalysisForEdgeCases() {
             edgeCaseResults[edgeCase.wellKey] = edgeCase.result;
         });
         
-        // Trigger ML enhancement for edge cases only
-        await enhanceResultsWithMLClassification(edgeCaseResults, true);
+        // Trigger ML enhancement for edge cases only (user-requested)
+        await enhanceResultsWithMLClassification(edgeCaseResults, 'user-requested');
         
         console.log(`🎯 ML batch analysis completed for ${edgeCases.length} edge cases`);
         
@@ -6065,33 +6074,15 @@ async function triggerMLBatchAnalysisForEdgeCases() {
     }
 }
 
+// Make triggerMLBatchAnalysisForEdgeCases globally accessible for ML notification banner
+window.triggerMLBatchAnalysisForEdgeCases = triggerMLBatchAnalysisForEdgeCases;
+
 /**
  * Update the edge case counter in the UI
  */
 function updateEdgeCaseCounter() {
-    try {
-        const count = countEdgeCases();
-        const counterElement = document.getElementById('edgeCaseCounterText');
-        const buttonElement = document.getElementById('mlBatchAnalysisBtn');
-        
-        if (counterElement) {
-            counterElement.textContent = `${count} detected`;
-        }
-        
-        if (buttonElement) {
-            if (count > 0) {
-                buttonElement.disabled = false;
-                buttonElement.textContent = `Analyze ${count} Edge Cases`;
-                buttonElement.style.background = '#6f42c1';
-            } else {
-                buttonElement.disabled = true;
-                buttonElement.textContent = 'No Edge Cases to Analyze';
-                buttonElement.style.background = '#6c757d';
-            }
-        }
-    } catch (error) {
-        console.error('Error updating edge case counter:', error);
-    }
+    // Simplified: just call the main countEdgeCases function to avoid duplication
+    countEdgeCases();
 }
 
 function onScaleChange(newScale) {
@@ -7315,6 +7306,21 @@ function setAnalysisResults(newResults, source = 'unknown') {
     currentAnalysisResults = newResults;
     window.currentAnalysisResults = newResults;
     
+    // Store initial edge case count for ML notifications (fresh analysis only)
+    if (source.includes('fresh-analysis') && newResults && newResults.individual_results) {
+        setTimeout(() => {
+            // Count edge cases from fresh analysis results
+            const edgeCaseCount = Object.values(newResults.individual_results).filter(result => 
+                result.curve_classification && result.curve_classification.edge_case === true
+            ).length;
+            
+            if (edgeCaseCount > 0) {
+                window.preMLEdgeCaseCount = edgeCaseCount;
+                console.log('💾 Stored initial edge case count for ML notifications:', window.preMLEdgeCaseCount);
+            }
+        }, 100);
+    }
+    
     // Update export state based on source and data
     const isSessionLoaded = source.includes('history') || source.includes('session') || source.includes('load');
     updateExportState({ 
@@ -7608,10 +7614,10 @@ function combineMultiFluorophoreResultsSQL(allResults) {
         // }
     // });
     
-    // 🔧 ML FIX: Apply ML classification to combined multi-channel results
-    // This ensures multi-channel uploads get the same ML enhancement as single-channel
-    if (typeof enhanceResultsWithMLClassification === 'function' && combined.individual_results) {
-        console.log('🔍 ML-MULTICHANNEL: Applying ML classification to combined results');
+    // 🔧 DISABLED: ML enhancement for combined multi-channel results
+    // This is now disabled to prevent automatic ML analysis - user must click "Improve Results"
+    if (false && typeof enhanceResultsWithMLClassification === 'function' && combined.individual_results) {
+        console.log('🔍 ML-MULTICHANNEL: ML enhancement disabled - user must manually trigger');
         try {
             // Run ML enhancement on combined results (force=true to ensure it runs)
             enhanceResultsWithMLClassification(combined.individual_results, true);
@@ -9609,9 +9615,10 @@ transformedResults.individual_results[wellKey] = {
         // Set analysis results for proper display (permanent for history loading)
         setAnalysisResults(transformedResults, 'history-session-load');
         
-        // 🔍 ML ENHANCEMENT: Trigger ML classification for session data
-        if (typeof enhanceResultsWithMLClassification === 'function' && transformedResults.individual_results) {
-            console.log('🔍 ML Enhancement: Triggering ML classification for loaded session');
+        // 🔍 DISABLED: ML enhancement for session data
+        // This is now disabled to prevent automatic ML analysis - user must click "Improve Results"
+        if (false && typeof enhanceResultsWithMLClassification === 'function' && transformedResults.individual_results) {
+            console.log('🔍 ML Enhancement: ML enhancement disabled for loaded session - user must manually trigger');
             enhanceResultsWithMLClassification(transformedResults.individual_results, true);
         }
         
@@ -14292,9 +14299,10 @@ function processCombinedSessionData(sessionDataArray) {
         displayAnalysisResults(combinedResults);
     }
     
-    // CRITICAL FIX: Trigger ML enhancement for session-loaded data
-    if (window.mlFeedbackInterface && combinedIndividualResults) {
-        console.log('🤖 SESSION-ML: Triggering ML enhancement for session-loaded data');
+    // DISABLED: ML enhancement for session-loaded data
+    // This is now disabled to prevent automatic ML analysis - user must click "Improve Results"  
+    if (false && window.mlFeedbackInterface && combinedIndividualResults) {
+        console.log('🤖 SESSION-ML: ML enhancement disabled for session-loaded data - user must manually trigger');
         setTimeout(async () => {
             try {
                 // Check if ML enhancement should be triggered

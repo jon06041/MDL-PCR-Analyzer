@@ -8,6 +8,7 @@ import time
 from logging.handlers import RotatingFileHandler
 import numpy as np
 from datetime import datetime
+from decimal import Decimal
 from urllib.parse import unquote
 from dotenv import load_dotenv
 from qpcr_analyzer import process_csv_data, validate_csv_structure
@@ -1125,7 +1126,7 @@ def analyze_data():
             import numpy as np
             
             def convert_numpy_types(obj):
-                """Recursively convert numpy types to Python types"""
+                """Recursively convert numpy types and Decimal types to Python types"""
                 if isinstance(obj, dict):
                     return {key: convert_numpy_types(value) for key, value in obj.items()}
                 elif isinstance(obj, list):
@@ -1138,6 +1139,9 @@ def analyze_data():
                     return bool(obj)
                 elif isinstance(obj, np.ndarray):
                     return obj.tolist()
+                elif isinstance(obj, Decimal):
+                    # Handle Decimal objects from MySQL
+                    return float(obj)
                 else:
                     return obj
             
@@ -3112,6 +3116,15 @@ def get_pathogen_ml_config(pathogen_code):
         # URL decode the pathogen code
         pathogen_code = unquote(pathogen_code)
         
+        # Safety check for ml_config_manager
+        if ml_config_manager is None:
+            app.logger.warning(f"ML config manager is None for pathogen config request: {pathogen_code}")
+            return jsonify({
+                'success': True,
+                'configs': [],  # Default to empty configs if manager unavailable
+                'note': 'Config manager unavailable, returned empty configs'
+            })
+        
         fluorophore = request.args.get('fluorophore')
         configs = ml_config_manager.get_pathogen_ml_config(pathogen_code, fluorophore)
         
@@ -3257,6 +3270,17 @@ def check_ml_enabled(pathogen_code, fluorophore):
         # URL decode parameters
         pathogen_code = unquote(pathogen_code)
         fluorophore = unquote(fluorophore)
+        
+        # Safety check for ml_config_manager
+        if ml_config_manager is None:
+            app.logger.warning(f"ML config manager is None, defaulting to enabled for {pathogen_code}/{fluorophore}")
+            return jsonify({
+                'success': True,
+                'enabled': True,  # Default to enabled if config manager unavailable
+                'pathogen_code': pathogen_code,
+                'fluorophore': fluorophore,
+                'note': 'Config manager unavailable, defaulted to enabled'
+            })
         
         enabled = ml_config_manager.is_ml_enabled_for_pathogen(pathogen_code, fluorophore)
         

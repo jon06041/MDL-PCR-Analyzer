@@ -1850,6 +1850,39 @@ tr:hover::before {
     backdrop-filter: brightness(1.05);
 }
 
+/* Edge case notification within ML banner */
+.edge-case-notification {
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: rgba(255, 193, 7, 0.1);
+    border: 1px solid rgba(255, 193, 7, 0.3);
+    border-radius: 6px;
+    text-align: center;
+}
+
+.edge-case-notification .edge-case-badge {
+    background: linear-gradient(135deg, #ffc107, #e0a800);
+    color: #212529;
+    border: 1px solid #ffc107;
+    box-shadow: 0 2px 4px rgba(255, 193, 7, 0.3);
+}
+
+/* ML improvement notification - user-friendly styling */
+.ml-improvement-notification {
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: rgba(108, 117, 125, 0.1);
+    border: 1px solid rgba(108, 117, 125, 0.3);
+    border-radius: 6px;
+    text-align: center;
+}
+
+.improvement-info {
+    color: #495057;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
 .loading {
     position: fixed;
     top: 0;

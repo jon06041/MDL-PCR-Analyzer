@@ -4610,7 +4610,91 @@ class MLFeedbackInterface {
         }
     }
 
+    async checkForMLNotification() {
+        // Show ML notification banner without auto-running analysis
+        // This is called when new analysis results are loaded
+        
+        // Check if user already declined/skipped ML analysis
+        if (window.mlAutoAnalysisUserChoice === 'skipped') {
+            console.log('🔴 ML Notification: User previously skipped ML analysis, not showing banner');
+            return false;
+        }
+        
+        try {
+            // Get current test code from the uploaded experiment
+            const currentExperimentPattern = (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null;
+            const currentTestCode = (typeof extractTestCode === 'function' && currentExperimentPattern) ? 
+                extractTestCode(currentExperimentPattern) : null;
+                
+            console.log(`🧬 ML Notification: Current test code: ${currentTestCode} (from pattern: ${currentExperimentPattern})`);
+            
+            // Check if ML is enabled for this pathogen before showing notification
+            if (currentTestCode) {
+                console.log(`🔍 ML Notification: Checking ML enabled status for pathogen: "${currentTestCode}"`);
+                const mlEnabled = await this.checkMLEnabledForPathogen(currentTestCode);
+                if (!mlEnabled) {
+                    console.log(`🚫 ML Notification: ML disabled for pathogen ${currentTestCode}, not showing banner`);
+                    return false;
+                }
+                console.log(`✅ ML Notification: ML enabled for pathogen ${currentTestCode}, showing notification banner`);
+            } else {
+                console.log(`⚠️ ML Notification: No test code found, showing general ML notification`);
+            }
+            
+            const response = await fetch('/api/ml-stats');
+            if (response.ok) {
+                const result = await response.json();
+                if (result.success && result.stats) {
+                    const totalTrainingCount = result.stats.training_samples || 0;
+                    const pathogenModels = result.stats.pathogen_models || [];
+                    
+                    // Find pathogen-specific model if available
+                    const pathogenModel = pathogenModels.find(model => 
+                        model.pathogen_code === currentTestCode || 
+                        model.pathogen === currentTestCode
+                    );
+                    
+                    if (pathogenModel && pathogenModel.training_samples >= 10) {
+                        // Show pathogen-specific ML notification
+                        this.showMLAvailableNotification({
+                            type: 'pathogen-specific',
+                            pathogen: pathogenModel.pathogen || pathogenModel.pathogen_code,
+                            samples: pathogenModel.training_samples,
+                            stats: result.stats,
+                            onAccept: () => this.handleMLNotificationAccept(),
+                            onDecline: () => this.handleMLNotificationDecline()
+                        });
+                        return true;
+                    } else if (totalTrainingCount >= 10) {
+                        // Show cross-pathogen ML notification  
+                        this.showMLAvailableNotification({
+                            type: 'cross-pathogen',
+                            pathogen: currentTestCode || 'Mixed',
+                            samples: totalTrainingCount,
+                            stats: result.stats,
+                            onAccept: () => this.handleMLNotificationAccept(),
+                            onDecline: () => this.handleMLNotificationDecline()
+                        });
+                        return true;
+                    } else {
+                        console.log(`📊 ML Notification: Insufficient training data (${totalTrainingCount} total samples), not showing banner`);
+                        return false;
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Failed to check for ML notification:', error);
+        }
+        
+        return false;
+    }
+
     async checkForAutomaticMLAnalysis() {
+        // DEPRECATED: This function is now disabled to prevent auto-analysis
+        // Use checkForMLNotification() to show banner without auto-running
+        console.log('🚫 Auto-ML Analysis: Disabled - use manual "Improve Results" button instead');
+        return false;
+        
         // Check if we should automatically run ML analysis for this session
         // This is called when new analysis results are loaded
         
@@ -4776,6 +4860,36 @@ class MLFeedbackInterface {
         switch (type) {
             case 'pathogen-specific':
                 notificationClass = 'ml-notification-success';
+                // Get uncertain samples count for pathogen-specific analysis
+                // Priority: 1) Stored pre-ML count, 2) Current edge cases, 3) Direct analysis fallback
+                let pathogenUncertainCount = 0;
+                
+                // Check for stored pre-ML edge case count (before ML overwrote them)
+                if (window.preMLEdgeCaseCount && window.preMLEdgeCaseCount > 0) {
+                    pathogenUncertainCount = window.preMLEdgeCaseCount;
+                }
+                // Fallback to current edge case count
+                else if (window.countEdgeCases) {
+                    pathogenUncertainCount = window.countEdgeCases();
+                }
+                // Final fallback: count edge cases directly from results
+                if (pathogenUncertainCount === 0 && window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+                    pathogenUncertainCount = Object.values(window.currentAnalysisResults.individual_results).filter(result => 
+                        result.curve_classification && result.curve_classification.edge_case === true
+                    ).length;
+                }
+                
+                console.log('🔍 Pathogen ML Notification Debug: pathogenUncertainCount =', pathogenUncertainCount);
+                console.log('🔍 Pathogen ML Notification Debug: window.preMLEdgeCaseCount =', window.preMLEdgeCaseCount);
+                console.log('🔍 Pathogen ML Notification Debug: window.currentAnalysisResults?', !!window.currentAnalysisResults);
+                
+                const pathogenImprovementOption = pathogenUncertainCount > 0 ? `
+                    <div class="ml-improvement-notification">
+                        <span class="improvement-info">💡 ${pathogenUncertainCount} samples could benefit from ML analysis</span>
+                        <small style="display: block; margin-top: 4px;">Improve accuracy with pathogen-specific model</small>
+                    </div>
+                ` : '';
+                
                 notificationContent = `
                     <div class="ml-notification-content">
                         <div class="ml-notification-icon">🤖</div>
@@ -4783,12 +4897,17 @@ class MLFeedbackInterface {
                             <strong>Pathogen-Specific ML Analysis Available</strong><br>
                             🧬 Pathogen: <strong>${pathogen}</strong> | 
                             ✅ ML model trained with <strong>${samples}</strong> samples for this pathogen<br>
-                            <small>� Click "Start Analysis" to analyze all wells with the trained model</small>
+                            <small>💡 Enhanced accuracy with specialized model training</small>
+                            ${pathogenImprovementOption}
                         </div>
                         <div class="ml-notification-actions">
-                            <button class="ml-notification-btn primary" onclick="this.parentElement.parentElement.parentElement.acceptAction()">
-                                🚀 Start Analysis
-                            </button>
+                            ${pathogenUncertainCount > 0 ? `
+                                <button class="ml-notification-btn primary" onclick="this.parentElement.parentElement.parentElement.improveResults()">
+                                    ✨ Improve Results (${pathogenUncertainCount} samples)
+                                </button>
+                            ` : `
+                                <span class="text-muted">All classifications are confident - no improvement needed</span>
+                            `}
                             <button class="ml-notification-btn secondary" onclick="this.parentElement.parentElement.parentElement.declineAction()">
                                 ✕ Skip
                             </button>
@@ -4818,20 +4937,55 @@ class MLFeedbackInterface {
                     }
                 }
                 
+                // Get uncertain samples count for ML improvement - prioritize pre-ML count
+                let uncertainCount = 0;
+                
+                // Check for stored pre-ML edge case count (before ML overwrote them)  
+                if (window.preMLEdgeCaseCount && window.preMLEdgeCaseCount > 0) {
+                    uncertainCount = window.preMLEdgeCaseCount;
+                }
+                // Fallback to direct data analysis
+                else if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+                    uncertainCount = Object.values(window.currentAnalysisResults.individual_results).filter(result => 
+                        result.curve_classification && result.curve_classification.edge_case === true
+                    ).length;
+                }
+                // Final fallback to countEdgeCases if available
+                if (uncertainCount === 0 && window.countEdgeCases) {
+                    uncertainCount = window.countEdgeCases();
+                }
+                
+                console.log('🔍 ML Notification Debug: uncertainCount =', uncertainCount);
+                console.log('🔍 ML Notification Debug: window.preMLEdgeCaseCount =', window.preMLEdgeCaseCount);
+                console.log('🔍 ML Notification Debug: window.countEdgeCases exists?', !!window.countEdgeCases);
+                console.log('🔍 ML Notification Debug: window.currentAnalysisResults exists?', !!window.currentAnalysisResults);
+                console.log('🔍 ML Notification Debug: individual_results count:', Object.keys(window.currentAnalysisResults?.individual_results || {}).length);
+                
+                const mlImprovementOption = uncertainCount > 0 ? `
+                    <div class="ml-improvement-notification">
+                        <span class="improvement-info">💡 ${uncertainCount} samples could benefit from ML analysis</span>
+                    </div>
+                ` : '';
+                
                 notificationContent = `
                     <div class="ml-notification-content">
                         <div class="ml-notification-icon">🤖</div>
                         <div class="ml-notification-text">
-                            <strong>Cross-Pathogen ML Analysis Available</strong><br>
+                            <strong>Machine Learning Analysis Available</strong><br>
                             🧬 Current test: <strong>${pathogen}</strong> | 
-                            📚 ML model trained with <strong>${samples}</strong> samples including specific training for this test and General PCR<br>
-                            <small>💡 Model benefits from diverse training data across multiple pathogen types</small>
+                            📚 ML model trained with <strong>${samples}</strong> samples<br>
+                            <small>💡 Enhance classification accuracy with machine learning</small>
                             ${pathogenBreakdownText}
+                            ${mlImprovementOption}
                         </div>
                         <div class="ml-notification-actions">
-                            <button class="ml-notification-btn primary" onclick="this.parentElement.parentElement.parentElement.acceptAction()">
-                                🔄 Start Analysis
-                            </button>
+                            ${uncertainCount > 0 ? `
+                                <button class="ml-notification-btn primary" onclick="this.parentElement.parentElement.parentElement.improveResults()">
+                                    ✨ Improve Results (${uncertainCount} samples)
+                                </button>
+                            ` : `
+                                <span class="text-muted">All classifications are confident - no improvement needed</span>
+                            `}
                             <button class="ml-notification-btn secondary" onclick="this.parentElement.parentElement.parentElement.declineAction()">
                                 ✕ Skip
                             </button>
@@ -4869,6 +5023,26 @@ class MLFeedbackInterface {
             console.log('🟢 ML Banner: User ACCEPTED automatic ML analysis');
             window.mlAutoAnalysisUserChoice = 'accepted';
             if (onAccept) onAccept();
+            notification.remove();
+        };
+        
+        notification.analyzeEdgeCases = () => {
+            console.log('🎯 ML Banner: User chose to analyze EDGE CASES only');
+            window.mlAutoAnalysisUserChoice = 'edge-cases-only';
+            // Trigger edge case analysis with progress modal
+            if (window.triggerMLBatchAnalysisForEdgeCases) {
+                window.triggerMLBatchAnalysisForEdgeCases();
+            }
+            notification.remove();
+        };
+        
+        notification.improveResults = () => {
+            console.log('✨ ML Banner: User chose to IMPROVE RESULTS for uncertain samples');
+            window.mlAutoAnalysisUserChoice = 'improve-results';
+            // Trigger targeted ML analysis for uncertain classifications
+            if (window.triggerMLBatchAnalysisForEdgeCases) {
+                window.triggerMLBatchAnalysisForEdgeCases();
+            }
             notification.remove();
         };
         

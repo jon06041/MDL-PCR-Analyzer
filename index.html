@@ -143,26 +143,6 @@
                     <button class="control-btn redo-btn" id="showRedoBtn">REDO</button>
                     <button class="control-btn" id="exportBtn">Export Results</button>
                 </div>
-                <div class="edge-case-controls" style="margin-top: 10px; padding: 8px; background: #f8f9fa; border-radius: 6px; border: 1px solid #e0e0e0;">
-                    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-                        <span style="font-weight: 600; color: #495057;">Edge Cases:</span>
-                        <span class="badge" style="background: #ffc107; color: #212529; padding: 4px 8px; border-radius: 12px; font-size: 0.85rem; font-weight: 600;">
-                            <span id="edgeCaseCounter" style="display: none;">0</span>
-                            <span id="edgeCaseCounterText">0 detected</span>
-                        </span>
-                        <button 
-                            id="mlBatchAnalysisBtn" 
-                            class="control-btn" 
-                            style="background: #6f42c1; color: white; font-size: 0.85rem; padding: 6px 12px;"
-                            onclick="triggerMLBatchAnalysisForEdgeCases()"
-                            disabled>
-                            No Edge Cases to Analyze
-                        </button>
-                        <small style="color: #6c757d; font-style: italic;">
-                            Edge cases are borderline samples that benefit from ML analysis
-                        </small>
-                    </div>
-                </div>
             </div>
 
             <div class="chart-container" style="position: relative;">
@@ -807,17 +787,22 @@
             }, 10000);
         }
         
-        // ML Batch Analysis for Edge Cases Function
+        // ML Results Improvement Function - targets uncertain classifications
         function triggerMLBatchAnalysisForEdgeCases() {
-            console.log('🔬 Starting ML batch analysis for edge cases...');
+            console.log('✨ Starting ML improvement for uncertain classifications...');
             
-            // Get edge case wells from the current analysis results
-            const edgeCaseWells = [];
-            if (window.allResults && window.allResults.individual_results) {
-                window.allResults.individual_results.forEach(result => {
-                    // Check if this well was marked as an edge case
+            // Store pre-ML edge case count for notifications (before ML overwrites them)
+            const currentEdgeCaseCount = window.countEdgeCases ? window.countEdgeCases() : 0;
+            window.preMLEdgeCaseCount = currentEdgeCaseCount;
+            console.log('💾 Stored pre-ML edge case count:', window.preMLEdgeCaseCount);
+            
+            // Get samples that need ML improvement (internally: edge cases)
+            const uncertainSamples = [];
+            if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+                Object.values(window.currentAnalysisResults.individual_results).forEach(result => {
+                    // Check if this sample was marked as needing ML improvement
                     if (result.curve_classification && result.curve_classification.edge_case) {
-                        edgeCaseWells.push({
+                        uncertainSamples.push({
                             well_id: result.well,
                             sample: result.sample,
                             channel: result.fluorophore,
@@ -831,92 +816,146 @@
                 });
             }
             
-            if (edgeCaseWells.length === 0) {
-                alert('No edge cases detected in current analysis results.');
+            if (uncertainSamples.length === 0) {
+                console.log('ℹ️ No uncertain samples found - all classifications are confident');
+                // Create a user-friendly notification instead of alert
+                const notification = document.createElement('div');
+                notification.className = 'alert alert-info alert-dismissible fade show position-fixed';
+                notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+                notification.innerHTML = `
+                    <strong>✅ All Results Confident!</strong><br>
+                    All samples have reliable classifications. No ML improvement needed at this time.
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                `;
+                document.body.appendChild(notification);
+                setTimeout(() => notification.remove(), 4000);
                 return;
             }
             
-            console.log(`🎯 Found ${edgeCaseWells.length} edge cases to analyze`);
+            console.log(`🎯 Found ${uncertainSamples.length} uncertain samples to improve with ML`);
             
-            // Show progress modal
+            // Show enhanced progress modal with detailed edge case analysis
             const progressModal = document.createElement('div');
             progressModal.className = 'modal fade show';
             progressModal.style.display = 'block';
             progressModal.innerHTML = `
-                <div class="modal-dialog">
+                <div class="modal-dialog modal-lg">
                     <div class="modal-content">
-                        <div class="modal-header">
-                            <h5 class="modal-title">🔬 ML Edge Case Analysis</h5>
+                        <div class="modal-header" style="background: linear-gradient(135deg, #6f42c1 0%, #9f7aea 100%); color: white;">
+                            <h5 class="modal-title">✨ Improving Results with ML</h5>
                         </div>
                         <div class="modal-body">
-                            <p>Analyzing <strong>${edgeCaseWells.length}</strong> edge cases with ML classifier...</p>
-                            <div class="progress">
-                                <div id="mlProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" 
-                                     role="progressbar" style="width: 0%"></div>
+                            <div class="mb-3">
+                                <p><strong>🎯 Analyzing ${uncertainSamples.length} sample${uncertainSamples.length !== 1 ? 's' : ''} for improved accuracy</strong></p>
+                                <p class="text-muted">Using machine learning to enhance classification of uncertain samples</p>
                             </div>
-                            <p id="mlProgressText" class="mt-2">Preparing analysis...</p>
+                            
+                            <div class="progress mb-3" style="height: 8px;">
+                                <div id="mlProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" 
+                                     role="progressbar" style="width: 0%; background: linear-gradient(90deg, #6f42c1, #9f7aea);"></div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-8">
+                                    <p id="mlProgressText" class="mb-1">Preparing ML analysis...</p>
+                                    <small id="mlProgressDetail" class="text-muted">Initializing ML classifier...</small>
+                                </div>
+                                <div class="col-md-4 text-end">
+                                    <span id="mlProgressCount" class="badge bg-primary">0 / ${uncertainSamples.length}</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
             `;
             document.body.appendChild(progressModal);
             
-            // Process edge cases one by one
+            // Process uncertain samples one by one with enhanced progress tracking
             let processedCount = 0;
             const progressBar = progressModal.querySelector('#mlProgressBar');
             const progressText = progressModal.querySelector('#mlProgressText');
+            const progressDetail = progressModal.querySelector('#mlProgressDetail');
+            const progressCount = progressModal.querySelector('#mlProgressCount');
             
-            function processNextEdgeCase() {
-                if (processedCount >= edgeCaseWells.length) {
+            function processNextSample() {
+                if (processedCount >= uncertainSamples.length) {
                     // Analysis complete
-                    progressText.textContent = 'Analysis complete! Updating results...';
+                    progressBar.style.width = '100%';
+                    progressText.textContent = '✅ Analysis complete! Updating results...';
+                    progressDetail.textContent = 'Refreshing classifications and updating display...';
+                    progressCount.textContent = `${uncertainSamples.length} / ${uncertainSamples.length}`;
+                    
                     setTimeout(() => {
                         progressModal.remove();
-                        alert(`ML analysis completed for ${edgeCaseWells.length} edge cases. Check the results table for updated classifications.`);
-                        // Optionally refresh the results table
+                        
+                        // Show success notification
+                        const notification = document.createElement('div');
+                        notification.className = 'alert alert-success alert-dismissible fade show position-fixed';
+                        notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+                        notification.innerHTML = `
+                            <strong>✨ Results Improved!</strong><br>
+                            Successfully enhanced ${uncertainSamples.length} sample${uncertainSamples.length !== 1 ? 's' : ''} with ML analysis. 
+                            Check the results table for improved classifications.
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        `;
+                        document.body.appendChild(notification);
+                        
+                        // Auto-remove notification after 5 seconds
+                        setTimeout(() => notification.remove(), 5000);
+                        
+                        // Refresh the analysis results and edge case counter
                         if (typeof refreshAnalysisResults === 'function') {
                             refreshAnalysisResults();
                         }
-                    }, 1000);
+                        countEdgeCases(); // Update edge case counter
+                    }, 1500);
                     return;
                 }
                 
-                const well = edgeCaseWells[processedCount];
-                const progress = Math.round((processedCount / edgeCaseWells.length) * 100);
+                const sample = uncertainSamples[processedCount];
+                const progress = Math.round((processedCount / uncertainSamples.length) * 100);
+                
+                // Update progress elements
                 progressBar.style.width = progress + '%';
-                progressText.textContent = `Analyzing ${well.well_id} (${processedCount + 1}/${edgeCaseWells.length})...`;
+                progressText.textContent = `✨ Improving ${sample.well_id}`;
+                progressDetail.textContent = `Enhancing sample ${processedCount + 1} of ${uncertainSamples.length} • ${sample.edge_case_reasons || 'Uncertain classification'}`;
+                progressCount.textContent = `${processedCount} / ${uncertainSamples.length}`;
                 
                 // Send ML analysis request
-                fetch('/api/ml-predict', {
+                fetch('/api/ml-analyze-curve', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        rfu_data: well.rfu_data,
-                        cycles: well.cycles,
-                        existing_metrics: well.existing_metrics,
-                        pathogen: well.pathogen,
-                        well_id: well.well_id,
-                        session_id: window.currentSessionId || 'edge_case_batch'
+                        rfu_data: sample.rfu_data,
+                        cycles: sample.cycles,
+                        existing_metrics: sample.existing_metrics,
+                        pathogen: sample.pathogen,
+                        well_id: sample.well_id,
+                        session_id: window.currentSessionId || 'improve_results_batch'
                     })
                 })
                 .then(response => response.json())
                 .then(data => {
-                    console.log(`✅ ML analysis completed for ${well.well_id}:`, data);
+                    console.log(`✅ ML analysis completed for ${sample.well_id}:`, data);
                     processedCount++;
-                    setTimeout(processNextEdgeCase, 500); // Brief delay between requests
+                    setTimeout(processNextSample, 500); // Brief delay between requests
                 })
                 .catch(error => {
-                    console.error(`❌ ML analysis failed for ${well.well_id}:`, error);
+                    console.error(`❌ ML analysis failed for ${sample.well_id}:`, error);
                     processedCount++;
-                    setTimeout(processNextEdgeCase, 500); // Continue even if one fails
+                    setTimeout(processNextSample, 500); // Continue even if one fails
                 });
             }
             
             // Start processing
-            processNextEdgeCase();
+            processNextSample();
         }
+        
+        // Make function globally accessible for ML notification banner
+        // DISABLED: Use script.js version instead to avoid conflicts
+        // window.triggerMLBatchAnalysisForEdgeCases = triggerMLBatchAnalysisForEdgeCases;
     });
     </script>
 
