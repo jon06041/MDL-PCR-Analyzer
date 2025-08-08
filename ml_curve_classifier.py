@@ -881,14 +881,19 @@ class MLCurveClassifier:
         X = []
         y = []
         
-        for sample in self.training_data:
+        print(f"🔍 Preparing training data from {len(self.training_data)} samples...")
+        
+        for i, sample in enumerate(self.training_data):
             feature_vector = []
+            print(f"  Sample {i+1}: {sample.get('sample_identifier', 'unknown')} -> {sample.get('expert_classification', 'unknown')}")
+            
             for name in self.feature_names:
                 # Handle r2/r2_score compatibility
                 if name == 'r2' and 'r2' not in sample['features']:
                     value = sample['features'].get('r2_score', 0)
                 else:
-                    value = sample['features'][name]
+                    value = sample['features'].get(name, 0)  # Default to 0 if missing
+                
                 # Handle dictionary features (like cqj/calcj) by extracting numeric value
                 if isinstance(value, dict):
                     # Try to get a numeric value from the dict
@@ -915,22 +920,68 @@ class MLCurveClassifier:
                     try:
                         feature_vector.append(float(value))
                     except ValueError:
+                        print(f"⚠️  WARNING: Could not convert string '{value}' to float for feature '{name}' - using 0.0")
                         feature_vector.append(0.0)
                 else:
                     # Fallback for any other type
+                    print(f"⚠️  WARNING: Unexpected value type {type(value)} for feature '{name}': {value} - using 0.0")
                     feature_vector.append(0.0)
+            
             
             X.append(feature_vector)
             y.append(sample['expert_classification'])
         
-        X = np.array(X)
-        y = np.array(y)
+        # Validate and clean all data before numpy conversion
+        print(f"🔍 Validating {len(X)} feature vectors before numpy conversion...")
         
+        # Check for problematic values in feature vectors
+        cleaned_X = []
+        cleaned_y = []
+        
+        for i, (feature_vec, label) in enumerate(zip(X, y)):
+            # Validate feature vector
+            valid_features = []
+            has_issues = False
+            
+            for j, val in enumerate(feature_vec):
+                if val is None:
+                    print(f"⚠️  Sample {i+1}: Feature {self.feature_names[j]} is None - replacing with -1.0")
+                    valid_features.append(-1.0)
+                    has_issues = True
+                elif isinstance(val, str):
+                    try:
+                        float_val = float(val)
+                        valid_features.append(float_val)
+                        if has_issues:
+                            print(f"⚠️  Sample {i+1}: Feature {self.feature_names[j]} was string '{val}' - converted to {float_val}")
+                    except ValueError:
+                        print(f"⚠️  Sample {i+1}: Feature {self.feature_names[j]} invalid string '{val}' - replacing with 0.0")
+                        valid_features.append(0.0)
+                        has_issues = True
+                elif isinstance(val, (int, float)):
+                    valid_features.append(float(val))
+                else:
+                    print(f"⚠️  Sample {i+1}: Feature {self.feature_names[j]} unexpected type {type(val)}: {val} - replacing with 0.0")
+                    valid_features.append(0.0)
+                    has_issues = True
+            
+            # Validate label
+            if label is None or not isinstance(label, str):
+                print(f"⚠️  Sample {i+1}: Invalid label {label} - skipping sample")
+                continue
+                
+            cleaned_X.append(valid_features)
+            cleaned_y.append(label)
+            
+            if has_issues:
+                print(f"   Sample {i+1} cleaned: {self.training_data[i].get('sample_identifier', 'unknown')}")
+        
+        X = np.array(cleaned_X, dtype=np.float64)
+        y = np.array(cleaned_y)
+
         # Handle missing classes
         unique_classes = np.unique(y)
-        print(f"Training with {len(X)} samples, {len(unique_classes)} classes: {unique_classes}")
-        
-        # Split data
+        print(f"Training with {len(X)} samples, {len(unique_classes)} classes: {unique_classes}")        # Split data
         if len(X) > 20:
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
         else:
