@@ -211,8 +211,18 @@ class MLValidationTracker:
                     prev_accuracy = 0.85
                 
                 # Version increment logic based on accuracy improvements
+                # Ensure both accuracies are numeric to prevent None comparison errors
+                if current_accuracy is None:
+                    current_accuracy = 0.85
+                if prev_accuracy is None:
+                    prev_accuracy = 0.85
+                    
                 accuracy_gain = (current_accuracy - prev_accuracy) * 100
                 
+                # Ensure current_accuracy is valid for comparisons
+                if current_accuracy is None or not isinstance(current_accuracy, (int, float)):
+                    current_accuracy = 0.85
+                    
                 if current_accuracy >= 0.95:  # 95%+ accuracy
                     # Major version bump for excellent performance
                     if major == 1:

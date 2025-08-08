@@ -2296,17 +2296,20 @@ def ml_submit_feedback():
         pathogen_breakdown = {}
         current_test_samples = 0
         
+        # Ensure pathogen is safely converted to string for comparison
+        pathogen_str = str(pathogen) if pathogen is not None else 'General_PCR'
+        
         for sample in ml_classifier.training_data:
             sample_pathogen = sample.get('pathogen', 'General_PCR')
             # Ensure pathogen is a string for safe comparison and dictionary operations
-            sample_pathogen = str(sample_pathogen) if sample_pathogen is not None else 'General_PCR'
+            sample_pathogen_str = str(sample_pathogen) if sample_pathogen is not None else 'General_PCR'
             
-            if sample_pathogen not in pathogen_breakdown:
-                pathogen_breakdown[sample_pathogen] = 0
-            pathogen_breakdown[sample_pathogen] += 1
+            if sample_pathogen_str not in pathogen_breakdown:
+                pathogen_breakdown[sample_pathogen_str] = 0
+            pathogen_breakdown[sample_pathogen_str] += 1
             
             # Count samples for current test with safe string comparison
-            if pathogen and str(sample_pathogen) == str(pathogen):
+            if pathogen is not None and sample_pathogen_str == pathogen_str:
                 current_test_samples += 1
         
         total_samples = len(ml_classifier.training_data)
@@ -2336,7 +2339,7 @@ def ml_submit_feedback():
                 'current_test_samples': current_test_samples,
                 'current_test_pathogen': pathogen,
                 'pathogen_breakdown': pathogen_breakdown,
-                'pathogen_specific_samples': sum(v for k, v in pathogen_breakdown.items() if str(k) != 'General_PCR')
+                'pathogen_specific_samples': sum(v for k, v in pathogen_breakdown.items() if k != 'General_PCR')
             },
             'immediate_prediction': {
                 'classification': expert_classification,
