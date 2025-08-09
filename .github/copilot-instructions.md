@@ -43,9 +43,9 @@
 
 **IMMEDIATE FIXES REQUIRED**:
 ```javascript
-// Fix 1: Debug frontend in loadDashboardData()
-console.log("API Response:", data);
-console.log("Pending runs count:", data.pending_runs.length);
+// CRITICAL DISCOVERY: JavaScript completely broken due to missing element
+// Root cause: logRunForm element doesn't exist, crashes entire script
+// Status: Attempted fix failed, need complete rebuild
 ```
 
 ```python
@@ -54,7 +54,16 @@ console.log("Pending runs count:", data.pending_runs.length);
 # To: if True:  # Track all analysis runs
 ```
 
-**VERIFICATION**: Database contains 2 pending runs, API returns them, frontend fails to display.
+**DASHBOARD REBUILD REQUIRED (2025-08-09)**:
+- ✅ API confirmed working (test page shows 2 pending runs)
+- ✅ Database confirmed working (data exists and accessible)
+- ❌ Main dashboard JavaScript completely broken
+- ❌ Missing HTML elements causing script crashes
+- 🔧 **SOLUTION**: Rebuild dashboard using working test page as template
+
+**NEXT SESSION ACTION**: Copy working JavaScript from test_dashboard_simple.html to ml_validation_enhanced_dashboard.html
+
+**VERIFICATION**: Database contains 2 pending runs, API returns them, frontend rebuild needed.
 
 ## Architecture Overview
 

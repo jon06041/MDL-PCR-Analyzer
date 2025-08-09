@@ -4997,6 +4997,13 @@ if __name__ == '__main__':
     print(f"Starting qPCR Analyzer on {host}:{port}")
     print(f"Debug mode: {debug}")
     
+    # Quick test route for debugging dashboard
+    @app.route('/test-dashboard')
+    def test_dashboard():
+        """Serve the simple test dashboard for debugging"""
+        with open('test_dashboard_simple.html', 'r') as f:
+            return f.read()
+    
     # Start automatic database backup scheduler
     try:
         from backup_scheduler import BackupScheduler

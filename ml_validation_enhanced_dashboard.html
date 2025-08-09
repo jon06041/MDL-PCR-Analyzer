@@ -251,6 +251,7 @@
                 })
                 .then(data => {
                     console.log('📊 API data received:', data);
+                    console.log('📊 Pending runs count:', data.pending_runs ? data.pending_runs.length : 'No pending_runs array');
                     if (data.success) {
                         console.log('✅ Success flag found, updating dashboard');
                         dashboardData = data;
@@ -265,7 +266,6 @@
                 .catch(error => {
                     console.error('🚨 Fetch error:', error);
                 });
-        }
 
         function updateStatistics(stats) {
             document.getElementById('pendingCount').textContent = stats.pending_confirmation;
@@ -488,21 +488,23 @@
             });
         }
 
-        // Log new run form
-        document.getElementById('logRunForm').addEventListener('submit', function(e) {
-            e.preventDefault();
+        // Log new run form (only if form exists)
+        const logRunForm = document.getElementById('logRunForm');
+        if (logRunForm) {
+            logRunForm.addEventListener('submit', function(e) {
+                e.preventDefault();
 
-            const formData = {
-                run_id: document.getElementById('runId').value,
-                file_name: document.getElementById('fileName').value,
-                session_id: document.getElementById('sessionId').value || null,
-                pathogen_code: document.getElementById('pathogenCode').value || null,
-                total_samples: parseInt(document.getElementById('totalSamples').value) || 0,
-                completed_samples: parseInt(document.getElementById('completedSamples').value) || 0,
-                notes: document.getElementById('notes').value || null
-            };
+                const formData = {
+                    run_id: document.getElementById('runId').value,
+                    file_name: document.getElementById('fileName').value,
+                    session_id: document.getElementById('sessionId').value || null,
+                    pathogen_code: document.getElementById('pathogenCode').value || null,
+                    total_samples: parseInt(document.getElementById('totalSamples').value) || 0,
+                    completed_samples: parseInt(document.getElementById('completedSamples').value) || 0,
+                    notes: document.getElementById('notes').value || null
+                };
 
-            fetch('/api/ml-runs/log', {
+                fetch('/api/ml-runs/log', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -513,7 +515,7 @@
             .then(data => {
                 if (data.success) {
                     alert(data.message);
-                    document.getElementById('logRunForm').reset();
+                    logRunForm.reset();  // Use the variable instead of getElementById
                     refreshDashboard();
                     // Switch to pending tab
                     document.getElementById('pending-tab').click();
@@ -525,7 +527,8 @@
                 console.error('Error:', error);
                 alert('Error logging run');
             });
-        });
+            });  // Close the conditional block
+        }
 
         // Load dashboard data on page load
         document.addEventListener('DOMContentLoaded', function() {

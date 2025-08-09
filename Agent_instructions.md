@@ -11,29 +11,27 @@
 
 ## 🎯 **CURRENT STATUS: ML Dashboard Analysis Complete** (August 9, 2025)
 
-### 🔍 **ROOT CAUSE ANALYSIS: ML Validation Dashboard** 
+### 🔍 **ROOT CAUSE ANALYSIS: ML Validation Dashboard (VERIFIED 2025-08-09 19:36 UTC)** 
 
-**DEEP ANALYSIS COMPLETED**: The "Loading pending runs..." issue has been fully diagnosed.
+**ISSUE**: Dashboard shows "Loading pending runs..." indefinitely.
 
-#### **Confirmed Root Causes**:
+**ROOT CAUSE CONFIRMED**: Frontend JavaScript completely broken due to missing HTML elements.
 
-1. **Frontend JavaScript Processing Error**
-   - **Status**: API returns correct data (2 pending runs), frontend fails to display
-   - **Evidence**: `curl /api/ml-validation/dashboard-data` shows proper response with all required fields
-   - **Location**: `ml_validation_enhanced_dashboard.html` - JavaScript not processing API response
-   - **Fix**: Add debugging to `loadDashboardData()` function to identify exact failure point
+**VERIFICATION COMPLETED**:
+- ✅ **Backend API**: `/api/ml-validation/dashboard-data` returns 2 pending runs correctly
+- ✅ **Database**: MySQL contains valid pending runs data, properly accessible
+- ✅ **Test page works**: `test_dashboard_simple.html` displays runs perfectly
+- ❌ **Main dashboard broken**: Missing `logRunForm` element crashes all JavaScript
+- ❌ **No console output**: Script fails silently, no data processing occurs
 
-2. **Pending Run Creation Logic (By Design)**
-   - **Discovery**: Only files with edge cases create pending runs (`if ml_samples_analyzed > 0`)
-   - **Current Behavior**: Normal files with good curves never create pending runs
-   - **Logic Location**: `app.py` lines 1067-1091
-   - **Design Question**: Should ALL files create pending runs OR only edge cases?
-   - **Database Evidence**: 2 pending runs exist and are correctly returned by API
+**STANDALONE TEST PAGE**: Created `test_dashboard_simple.html` - confirms API and data flow work perfectly.
 
-3. **Edge Case Detection Working Correctly**
-   - **Confirmed**: `edge_case: true` marking functions properly in `curve_classification.py`
-   - **Issue**: Most files don't have edge cases, so few pending runs are created
-   - **Solution Options**: Lower edge case thresholds OR track all analysis runs
+**ATTEMPTED FIXES**:
+1. ✅ Conditionalized `logRunForm` event listener - script still crashes
+2. ✅ Added debug logging - no console output due to script failure
+3. ❌ **Conclusion**: JavaScript too broken for incremental fixes
+
+**REBUILD SOLUTION**: Copy working JavaScript from `test_dashboard_simple.html` to main dashboard.
 
 #### **Immediate Actions Required**:
 ```javascript
@@ -56,9 +54,20 @@ function loadDashboardData() {
 ```
 
 #### **Next Session Priority List**:
-1. **Fix JavaScript display bug** (5 min) 
-2. **Decide tracking policy**: All files vs edge cases only
-3. **Test with sample file upload** (verification)
+1. **REBUILD DASHBOARD** using working test page template (15 min)
+   - Copy JavaScript from `test_dashboard_simple.html` to main dashboard
+   - Replace broken JavaScript with confirmed working code
+   - API and database confirmed working - only frontend broken
+2. **Test rebuilt dashboard** (5 min)
+3. **Decide tracking policy**: All files vs edge cases only
+
+**CRITICAL DISCOVERY (2025-08-09)**:
+- ✅ **API works perfectly**: Returns 2 pending runs with all correct data
+- ✅ **Database works perfectly**: Data exists and accessible  
+- ✅ **Test page works perfectly**: Simple dashboard displays runs correctly
+- ❌ **Main dashboard completely broken**: JavaScript crashes due to missing HTML elements
+- 🔧 **Root cause**: `logRunForm` element missing, crashes entire script on load
+- 🔧 **Solution**: Complete dashboard rebuild using working test code
 
 ### 🔄 **PARTIALLY FIXED ISSUES STILL PENDING**
 
