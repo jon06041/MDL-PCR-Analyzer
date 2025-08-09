@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Test</title>
+</head>
+<body>
+    <h1>Testing ML Validation API</h1>
+    <div id="status">Loading...</div>
+    <div id="result"></div>
+    
+    <script>
+        console.log('🚀 Starting API test');
+        
+        fetch('/api/ml-validation/dashboard-data')
+            .then(response => {
+                console.log('📡 Response status:', response.status);
+                document.getElementById('status').innerHTML = `Response status: ${response.status}`;
+                return response.json();
+            })
+            .then(data => {
+                console.log('📊 Data received:', data);
+                document.getElementById('result').innerHTML = `
+                    <h3>API Response:</h3>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                `;
+                
+                if (data.success && data.pending_runs) {
+                    document.getElementById('status').innerHTML = `✅ SUCCESS: Found ${data.pending_runs.length} pending runs`;
+                } else {
+                    document.getElementById('status').innerHTML = `❌ ISSUE: success=${data.success}, pending_runs=${data.pending_runs?.length || 'undefined'}`;
+                }
+            })
+            .catch(error => {
+                console.error('🚨 Error:', error);
+                document.getElementById('status').innerHTML = `❌ ERROR: ${error.message}`;
+            });
+    </script>
+</body>
+</html>

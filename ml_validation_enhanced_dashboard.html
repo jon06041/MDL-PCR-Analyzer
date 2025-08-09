@@ -242,22 +242,28 @@
         }
 
         function loadDashboardData() {
+            console.log('🔍 Loading dashboard data...');
             // Load ML validation runs that were automatically captured during analysis
             fetch('/api/ml-validation/dashboard-data')
-                .then(response => response.json())
+                .then(response => {
+                    console.log('📡 API response status:', response.status);
+                    return response.json();
+                })
                 .then(data => {
+                    console.log('📊 API data received:', data);
                     if (data.success) {
+                        console.log('✅ Success flag found, updating dashboard');
                         dashboardData = data;
                         updateStatistics(data.statistics);
                         updatePendingRuns(data.pending_runs);
                         updateConfirmedRuns(data.recent_confirmed_runs);
                         updatePathogenStats(data.pathogen_performance);
                     } else {
-                        console.error('Error loading dashboard data:', data.error);
+                        console.error('❌ Error loading dashboard data:', data.error);
                     }
                 })
                 .catch(error => {
-                    console.error('Error:', error);
+                    console.error('🚨 Fetch error:', error);
                 });
         }
 
@@ -270,9 +276,11 @@
         }
 
         function updatePendingRuns(runs) {
+            console.log('🔄 Updating pending runs:', runs);
             const container = document.getElementById('pendingRunsList');
             
             if (runs.length === 0) {
+                console.log('ℹ️ No pending runs found');
                 container.innerHTML = `
                     <div class="text-center text-muted">
                         <i class="fas fa-check-circle fa-3x mb-3"></i>
@@ -283,6 +291,7 @@
                 return;
             }
 
+            console.log(`✅ Displaying ${runs.length} pending runs`);
             container.innerHTML = runs.map(run => `
                 <div class="run-card pending-run">
                     <div class="row align-items-center">
