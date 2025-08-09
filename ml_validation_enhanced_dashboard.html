@@ -241,51 +241,107 @@
             loadDashboardData();
         }
 
-        function loadDashboardData() {
+        async function loadDashboardData() {
             console.log('🔍 Loading dashboard data...');
-            // Load ML validation runs that were automatically captured during analysis
-            fetch('/api/ml-validation/dashboard-data')
-                .then(response => {
-                    console.log('📡 API response status:', response.status);
-                    return response.json();
-                })
-                .then(data => {
-                    console.log('📊 API data received:', data);
-                    console.log('📊 Pending runs count:', data.pending_runs ? data.pending_runs.length : 'No pending_runs array');
-                    if (data.success) {
-                        console.log('✅ Success flag found, updating dashboard');
-                        dashboardData = data;
-                        updateStatistics(data.statistics);
-                        updatePendingRuns(data.pending_runs);
-                        updateConfirmedRuns(data.recent_confirmed_runs);
-                        updatePathogenStats(data.pathogen_performance);
-                    } else {
-                        console.error('❌ Error loading dashboard data:', data.error);
+            
+            try {
+                // Load ML validation runs that were automatically captured during analysis
+                const response = await fetch('/api/ml-validation/dashboard-data');
+                console.log('📡 API response status:', response.status);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log('📊 API data received:', data);
+                console.log('📊 Pending runs count:', data.pending_runs ? data.pending_runs.length : 'No pending_runs array');
+                
+                if (data.success) {
+                    console.log('✅ Success flag found, updating dashboard');
+                    dashboardData = data;
+                    updateStatistics(data.statistics);
+                    updatePendingRuns(data.pending_runs);
+                    updateConfirmedRuns(data.recent_confirmed_runs);
+                    updatePathogenStats(data.pathogen_performance);
+                } else {
+                    console.error('❌ Error loading dashboard data:', data.error);
+                    // Show error in UI
+                    const container = document.getElementById('pendingRunsList');
+                    if (container) {
+                        container.innerHTML = `
+                            <div class="text-center text-danger">
+                                <i class="fas fa-exclamation-triangle fa-3x mb-3"></i>
+                                <h5>Error Loading Data</h5>
+                                <p>${data.error || 'Unknown error occurred'}</p>
+                            </div>
+                        `;
                     }
-                })
-                .catch(error => {
-                    console.error('🚨 Fetch error:', error);
-                });
+                }
+            } catch (error) {
+                console.error('🚨 Fetch error:', error);
+                // Show error in UI
+                const container = document.getElementById('pendingRunsList');
+                if (container) {
+                    container.innerHTML = `
+                        <div class="text-center text-danger">
+                            <i class="fas fa-exclamation-triangle fa-3x mb-3"></i>
+                            <h5>Connection Error</h5>
+                            <p>Failed to load dashboard data: ${error.message}</p>
+                        </div>
+                    `;
+                }
+            }
+        }
 
         function updateStatistics(stats) {
-            document.getElementById('pendingCount').textContent = stats.pending_confirmation;
-            document.getElementById('confirmedCount').textContent = stats.confirmed;
-            document.getElementById('rejectedCount').textContent = stats.rejected;
-            document.getElementById('avgAccuracy').textContent = (stats.average_accuracy * 100).toFixed(1) + '%';
-            document.getElementById('pendingTabCount').textContent = stats.pending_confirmation;
+            console.log('📊 Updating statistics:', stats);
+            
+            // Safely update each statistic with fallback values
+            const pendingCountEl = document.getElementById('pendingCount');
+            if (pendingCountEl) {
+                pendingCountEl.textContent = stats?.pending_confirmation || stats?.pending_count || 0;
+            }
+            
+            const confirmedCountEl = document.getElementById('confirmedCount');
+            if (confirmedCountEl) {
+                confirmedCountEl.textContent = stats?.confirmed || stats?.confirmed_count || 0;
+            }
+            
+            const rejectedCountEl = document.getElementById('rejectedCount');
+            if (rejectedCountEl) {
+                rejectedCountEl.textContent = stats?.rejected || stats?.rejected_count || 0;
+            }
+            
+            const avgAccuracyEl = document.getElementById('avgAccuracy');
+            if (avgAccuracyEl) {
+                const accuracy = stats?.average_accuracy || stats?.avg_accuracy || 0;
+                avgAccuracyEl.textContent = (accuracy * 100).toFixed(1) + '%';
+            }
+            
+            const pendingTabCountEl = document.getElementById('pendingTabCount');
+            if (pendingTabCountEl) {
+                pendingTabCountEl.textContent = stats?.pending_confirmation || stats?.pending_count || 0;
+            }
         }
 
         function updatePendingRuns(runs) {
             console.log('🔄 Updating pending runs:', runs);
             const container = document.getElementById('pendingRunsList');
             
-            if (runs.length === 0) {
+            if (!container) {
+                console.error('❌ pendingRunsList container not found');
+                return;
+            }
+            
+            if (!runs || !Array.isArray(runs) || runs.length === 0) {
                 console.log('ℹ️ No pending runs found');
                 container.innerHTML = `
                     <div class="text-center text-muted">
                         <i class="fas fa-check-circle fa-3x mb-3"></i>
                         <h5>No runs pending confirmation</h5>
                         <p>All logged runs have been processed.</p>
+                        <small class="text-muted">Found ${runs ? runs.length : 0} pending runs</small>
                     </div>
                 `;
                 return;
@@ -296,14 +352,14 @@
                 <div class="run-card pending-run">
                     <div class="row align-items-center">
                         <div class="col-md-8">
-                            <h6><i class="fas fa-file"></i> ${run.file_name}</h6>
+                            <h6><i class="fas fa-file"></i> ${run.file_name || 'Unknown File'}</h6>
                             <div class="row">
                                 <div class="col-md-6">
-                                    <small><strong>Run ID:</strong> ${run.run_id}</small><br>
-                                    <small><strong>Date:</strong> ${new Date(run.run_date).toLocaleString()}</small>
+                                    <small><strong>Run ID:</strong> ${run.run_id || 'N/A'}</small><br>
+                                    <small><strong>Date:</strong> ${run.run_date ? new Date(run.run_date).toLocaleString() : 'N/A'}</small>
                                 </div>
                                 <div class="col-md-6">
-                                    <small><strong>Samples:</strong> ${run.completed_samples}/${run.total_samples}</small><br>
+                                    <small><strong>Samples:</strong> ${run.completed_samples || 0}/${run.total_samples || 0}</small><br>
                                     <small><strong>Pathogen:</strong> ${run.pathogen_code || 'N/A'}</small>
                                 </div>
                             </div>
@@ -489,53 +545,67 @@
         }
 
         // Log new run form (only if form exists)
-        const logRunForm = document.getElementById('logRunForm');
-        if (logRunForm) {
-            logRunForm.addEventListener('submit', function(e) {
-                e.preventDefault();
+        function setupLogRunForm() {
+            const logRunForm = document.getElementById('logRunForm');
+            if (logRunForm) {
+                console.log('✅ Found logRunForm, setting up event listener');
+                logRunForm.addEventListener('submit', function(e) {
+                    e.preventDefault();
 
-                const formData = {
-                    run_id: document.getElementById('runId').value,
-                    file_name: document.getElementById('fileName').value,
-                    session_id: document.getElementById('sessionId').value || null,
-                    pathogen_code: document.getElementById('pathogenCode').value || null,
-                    total_samples: parseInt(document.getElementById('totalSamples').value) || 0,
-                    completed_samples: parseInt(document.getElementById('completedSamples').value) || 0,
-                    notes: document.getElementById('notes').value || null
-                };
+                    const formData = {
+                        run_id: document.getElementById('runId').value,
+                        file_name: document.getElementById('fileName').value,
+                        session_id: document.getElementById('sessionId').value || null,
+                        pathogen_code: document.getElementById('pathogenCode').value || null,
+                        total_samples: parseInt(document.getElementById('totalSamples').value) || 0,
+                        completed_samples: parseInt(document.getElementById('completedSamples').value) || 0,
+                        notes: document.getElementById('notes').value || null
+                    };
 
-                fetch('/api/ml-runs/log', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(formData)
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    alert(data.message);
-                    logRunForm.reset();  // Use the variable instead of getElementById
-                    refreshDashboard();
-                    // Switch to pending tab
-                    document.getElementById('pending-tab').click();
-                } else {
-                    alert('Error: ' + data.error);
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error logging run');
-            });
-            });  // Close the conditional block
+                    fetch('/api/ml-runs/log', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(formData)
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert(data.message);
+                        logRunForm.reset();
+                        refreshDashboard();
+                        // Switch to pending tab
+                        const pendingTab = document.getElementById('pending-tab');
+                        if (pendingTab) pendingTab.click();
+                    } else {
+                        alert('Error: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error logging run');
+                });
+                });
+            } else {
+                console.log('ℹ️ logRunForm element not found, skipping form setup');
+            }
         }
 
         // Load dashboard data on page load
         document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 DOM loaded, initializing dashboard...');
+            
+            // Setup form if it exists
+            setupLogRunForm();
+            
+            // Load initial data
             loadDashboardData();
             
             // Auto-refresh every 30 seconds
             setInterval(loadDashboardData, 30000);
+            
+            console.log('✅ Dashboard initialization complete');
         });
     </script>
 </body>

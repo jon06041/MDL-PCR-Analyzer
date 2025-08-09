@@ -1388,84 +1388,120 @@
         // ML Validation Functions - Enhanced with version control and pathogen models
         async function loadMLValidationData() {
             try {
-                // Load ML run statistics
-                const statsResponse = await fetch('/api/ml-runs/statistics');
-                if (statsResponse.ok) {
-                    const stats = await statsResponse.json();
-                    updateMLStatistics(stats);
-                }
+                console.log('🔍 Loading ML validation data for unified dashboard...');
 
-                // Load pending runs
-                const pendingResponse = await fetch('/api/ml-runs/pending');
-                if (pendingResponse.ok) {
-                    const pendingRuns = await pendingResponse.json();
-                    updatePendingRuns(pendingRuns);
-                }
-
-                // Load confirmed runs
-                const confirmedResponse = await fetch('/api/ml-runs/confirmed');
-                if (confirmedResponse.ok) {
-                    const confirmedRuns = await confirmedResponse.json();
-                    updateConfirmedRuns(confirmedRuns);
-                }
-
-                // Load pathogen models (version control data)
-                const modelsResponse = await fetch('/api/ml-validation-dashboard');
-                if (modelsResponse.ok) {
-                    const models = await modelsResponse.json();
-                    updatePathogenModels(models);
+                // Load statistics and dashboard data from the main API
+                const dashboardResponse = await fetch('/api/ml-validation/dashboard-data');
+                if (dashboardResponse.ok) {
+                    const dashboardData = await dashboardResponse.json();
+                    console.log('📊 Dashboard data received:', dashboardData);
+                    
+                    if (dashboardData.success) {
+                        updateMLStatistics(dashboardData.statistics);
+                        updatePendingRuns(dashboardData);
+                        updateConfirmedRuns(dashboardData);
+                        updatePathogenModels(dashboardData);
+                    } else {
+                        console.error('❌ Dashboard API error:', dashboardData.error);
+                        showErrorInMLSection('mlPendingRunsList', dashboardData.error || 'Unknown error');
+                    }
+                } else {
+                    console.error('❌ Dashboard API request failed:', dashboardResponse.status);
+                    showErrorInMLSection('mlPendingRunsList', `API request failed: ${dashboardResponse.status}`);
                 }
             } catch (error) {
-                console.error('Error loading ML validation data:', error);
-                showAlert('danger', 'Error loading ML validation data');
+                console.error('🚨 Error loading ML validation data:', error);
+                showErrorInMLSection('mlPendingRunsList', `Connection error: ${error.message}`);
+            }
+        }
+
+        function showErrorInMLSection(containerId, errorMessage) {
+            const container = document.getElementById(containerId);
+            if (container) {
+                container.innerHTML = `
+                    <div class="text-center text-danger py-4">
+                        <i class="fas fa-exclamation-triangle fa-3x mb-3"></i>
+                        <h5>Error Loading Data</h5>
+                        <p>${errorMessage}</p>
+                        <button class="btn btn-outline-primary btn-sm" onclick="loadMLValidationData()">
+                            <i class="fas fa-sync"></i> Retry
+                        </button>
+                    </div>
+                `;
             }
         }
 
         function updateMLStatistics(response) {
-            const stats = response.statistics || response; // Handle both nested and flat structures
+            console.log('📊 Updating ML statistics in unified dashboard:', response);
+            const stats = response?.statistics || response; // Handle both nested and flat structures
             
-            document.getElementById('mlPendingCount').textContent = stats.pending_runs || '-';
-            document.getElementById('mlConfirmedCount').textContent = stats.confirmed_runs || '-';
-            document.getElementById('mlTotalModels').textContent = stats.total_models || '3'; // Default pathogen models
-            document.getElementById('mlAvgAccuracy').textContent = `${(stats.average_accuracy || 0).toFixed(1)}%`;
+            // Safely update each statistic with fallback values
+            const mlPendingCountEl = document.getElementById('mlPendingCount');
+            if (mlPendingCountEl) {
+                mlPendingCountEl.textContent = stats?.pending_confirmation || stats?.pending_count || stats?.pending_runs || '-';
+            }
+            
+            const mlConfirmedCountEl = document.getElementById('mlConfirmedCount');
+            if (mlConfirmedCountEl) {
+                mlConfirmedCountEl.textContent = stats?.confirmed || stats?.confirmed_count || stats?.confirmed_runs || '-';
+            }
+            
+            const mlTotalModelsEl = document.getElementById('mlTotalModels');
+            if (mlTotalModelsEl) {
+                mlTotalModelsEl.textContent = stats?.total_models || '3'; // Default pathogen models
+            }
+            
+            const mlAvgAccuracyEl = document.getElementById('mlAvgAccuracy');
+            if (mlAvgAccuracyEl) {
+                const accuracy = stats?.average_accuracy || stats?.avg_accuracy || 0;
+                mlAvgAccuracyEl.textContent = `${(accuracy * 100).toFixed(1)}%`;
+            }
             
             // Update tab count
             const pendingTabCount = document.getElementById('mlPendingTabCount');
             if (pendingTabCount) {
-                pendingTabCount.textContent = stats.pending_runs || 0;
+                pendingTabCount.textContent = stats?.pending_confirmation || stats?.pending_count || stats?.pending_runs || 0;
             }
         }
 
         function updatePendingRuns(response) {
             const container = document.getElementById('mlPendingRunsList');
+            if (!container) {
+                console.error('❌ mlPendingRunsList container not found');
+                return;
+            }
+            
             const runs = response.pending_runs || response; // Handle both nested and flat arrays
             
-            if (!runs || runs.length === 0) {
+            if (!runs || !Array.isArray(runs) || runs.length === 0) {
+                console.log('ℹ️ No pending runs found for unified dashboard');
                 container.innerHTML = `
                     <div class="text-center text-muted py-4">
                         <i class="fas fa-check-circle fa-3x mb-3"></i>
                         <h5>No Pending Runs</h5>
                         <p>All ML runs have been reviewed and confirmed.</p>
+                        <small class="text-muted">Found ${runs ? runs.length : 0} pending runs</small>
                     </div>
                 `;
                 return;
             }
 
+            console.log(`✅ Displaying ${runs.length} pending runs in unified dashboard`);
             container.innerHTML = runs.map(run => `
                 <div class="card mb-3 border-warning">
                     <div class="card-body">
                         <div class="row align-items-center">
                             <div class="col-md-8">
                                 <h6 class="card-title mb-2">
-                                    <i class="fas fa-brain text-primary"></i> ${run.run_id}
+                                    <i class="fas fa-brain text-primary"></i> ${run.run_id || 'Unknown Run'}
                                 </h6>
                                 <div class="run-details">
-                                    <p class="mb-1"><strong>File:</strong> ${run.file_name}</p>
+                                    <p class="mb-1"><strong>File:</strong> ${run.file_name || 'Unknown File'}</p>
                                     <p class="mb-1"><strong>Pathogen:</strong> 
                                         <span class="badge bg-info">${run.pathogen_code || 'Unknown'}</span>
                                     </p>
                                     <p class="mb-1"><strong>Samples:</strong> ${run.completed_samples || 0}/${run.total_samples || 0}</p>
-                                    <p class="mb-1"><strong>Logged:</strong> ${new Date(run.logged_at).toLocaleString()}</p>
+                                    <p class="mb-1"><strong>Logged:</strong> ${run.logged_at ? new Date(run.logged_at).toLocaleString() : 'N/A'}</p>
                                     ${run.notes ? `<small class="text-muted"><strong>Notes:</strong> ${run.notes}</small>` : ''}
                                 </div>
                             </div>
@@ -1473,10 +1509,10 @@
                                 <div class="confirmation-question mb-2">
                                     <small class="text-muted">"All samples completed with proper results?"</small>
                                 </div>
-                                <button class="btn btn-success btn-sm me-2" onclick="confirmRun(${run.id}, '${run.run_id}', true)">
+                                <button class="btn btn-success btn-sm me-2" onclick="confirmRun(${run.id || 0}, '${run.run_id || 'unknown'}', true)">
                                     <i class="fas fa-check"></i> Yes, Confirm
                                 </button>
-                                <button class="btn btn-danger btn-sm" onclick="confirmRun(${run.id}, '${run.run_id}', false)">
+                                <button class="btn btn-danger btn-sm" onclick="confirmRun(${run.id || 0}, '${run.run_id || 'unknown'}', false)">
                                     <i class="fas fa-times"></i> No, Reject
                                 </button>
                             </div>
