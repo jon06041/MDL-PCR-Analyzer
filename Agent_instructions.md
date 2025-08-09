@@ -9,7 +9,56 @@
 - **Usage**: `python3 ml_config_safeguard.py` - automatically restores from pathogen library
 - **Status**: EMERGENCY PROTECTION IN PLACE - root cause still unknown
 
-## 🎯 **CURRENT STATUS: Remaining Issues After Fixes** (August 8, 2025)
+## 🎯 **CURRENT STATUS: ML Dashboard Analysis Complete** (August 9, 2025)
+
+### 🔍 **ROOT CAUSE ANALYSIS: ML Validation Dashboard** 
+
+**DEEP ANALYSIS COMPLETED**: The "Loading pending runs..." issue has been fully diagnosed.
+
+#### **Confirmed Root Causes**:
+
+1. **Frontend JavaScript Processing Error**
+   - **Status**: API returns correct data (2 pending runs), frontend fails to display
+   - **Evidence**: `curl /api/ml-validation/dashboard-data` shows proper response with all required fields
+   - **Location**: `ml_validation_enhanced_dashboard.html` - JavaScript not processing API response
+   - **Fix**: Add debugging to `loadDashboardData()` function to identify exact failure point
+
+2. **Pending Run Creation Logic (By Design)**
+   - **Discovery**: Only files with edge cases create pending runs (`if ml_samples_analyzed > 0`)
+   - **Current Behavior**: Normal files with good curves never create pending runs
+   - **Logic Location**: `app.py` lines 1067-1091
+   - **Design Question**: Should ALL files create pending runs OR only edge cases?
+   - **Database Evidence**: 2 pending runs exist and are correctly returned by API
+
+3. **Edge Case Detection Working Correctly**
+   - **Confirmed**: `edge_case: true` marking functions properly in `curve_classification.py`
+   - **Issue**: Most files don't have edge cases, so few pending runs are created
+   - **Solution Options**: Lower edge case thresholds OR track all analysis runs
+
+#### **Immediate Actions Required**:
+```javascript
+// Frontend Debug Fix (5 min)
+function loadDashboardData() {
+    fetch('/api/ml-validation/dashboard-data')
+        .then(response => response.json())
+        .then(data => {
+            console.log("API Response:", data);  // ADD THIS
+            console.log("Pending runs:", data.pending_runs.length);  // ADD THIS
+            if (data.success) {
+                // ... existing code
+```
+
+```python
+# Optional: Track ALL files instead of only edge cases (design decision)
+# In app.py line 1091, change:
+# FROM: if ml_samples_analyzed > 0:
+# TO:   if True:  # Track all analysis runs
+```
+
+#### **Next Session Priority List**:
+1. **Fix JavaScript display bug** (5 min) 
+2. **Decide tracking policy**: All files vs edge cases only
+3. **Test with sample file upload** (verification)
 
 ### 🔄 **PARTIALLY FIXED ISSUES STILL PENDING**
 

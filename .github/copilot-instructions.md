@@ -17,6 +17,45 @@
 
 **Why this matters:** SQLite was causing recurring database connectivity issues, missing ML requirements, and frontend failures. The system has been completely migrated to MySQL for reliability and performance.
 
+## 🔍 CRITICAL ISSUE ANALYSIS (2025-08-09)
+
+### **ML Validation Dashboard Root Cause Analysis**
+
+**ISSUE**: Dashboard shows "Loading pending runs..." indefinitely despite API returning correct data.
+
+**ROOT CAUSES IDENTIFIED**:
+
+1. **Frontend JavaScript Error**: Dashboard API works (returns 2 pending runs) but JavaScript fails to process response
+   - **Location**: `ml_validation_enhanced_dashboard.html` lines 240-270
+   - **Fix needed**: Add console.log debugging to `loadDashboardData()` function
+   - **Status**: API endpoints fixed, frontend processing broken
+
+2. **Pending Run Creation Logic**: Only edge cases create pending runs (by design)
+   - **Location**: `app.py` line 1091 - `if ml_samples_analyzed > 0:`
+   - **Current behavior**: Only files with `edge_case: true` or ML predictions get tracked
+   - **Design decision needed**: Track ALL files vs only edge cases
+   - **Database proof**: 2 pending runs exist, API returns them correctly
+
+3. **Slow Run Creation**: Most files with good curves don't create pending runs
+   - **Root cause**: `ml_samples_analyzed` only increments for edge cases
+   - **Location**: `app.py` lines 1067-1083
+   - **Options**: Lower edge case thresholds OR track all analysis runs
+
+**IMMEDIATE FIXES REQUIRED**:
+```javascript
+// Fix 1: Debug frontend in loadDashboardData()
+console.log("API Response:", data);
+console.log("Pending runs count:", data.pending_runs.length);
+```
+
+```python
+# Fix 2: Track all files (if desired) in app.py line 1091
+# Change from: if ml_samples_analyzed > 0:
+# To: if True:  # Track all analysis runs
+```
+
+**VERIFICATION**: Database contains 2 pending runs, API returns them, frontend fails to display.
+
 ## Architecture Overview
 
 This is a **Flask-based qPCR analysis system** with machine learning capabilities for curve classification and FDA compliance tracking. The system has been **completely migrated from SQLite to MySQL**.
