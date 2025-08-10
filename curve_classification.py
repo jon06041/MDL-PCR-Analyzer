@@ -68,9 +68,9 @@ def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, c
     if cq_value is not None and cq_value != 'N/A' and cq_value != -999:
         try:
             cq_float = float(cq_value)
-            if cq_float >= 5:  # Valid CQJ start (no upper limit - pathogen specific)
+            if cq_float >= 6:  # Valid CQJ start (no upper limit - pathogen specific)
                 has_valid_cqj = True
-            elif cq_float < 5:  # Suspiciously early - could be machine error
+            elif cq_float < 6:  # Suspiciously early - could be machine error
                 cqj_suspicious = True
         except (ValueError, TypeError):
             pass  # Invalid CQJ, treat as no valid CQJ
@@ -78,16 +78,16 @@ def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, c
     # DETECT MACHINE ERRORS / ANOMALIES (true SUSPICIOUS cases)
     suspicious_patterns = []
     
-    if amplitude > 500 and r2 < 0.5:  # High signal but terrible curve fit
-        suspicious_patterns.append("high_amplitude_poor_fit")
-    if steepness > 1.0:  # Impossibly steep (machine spike)
-        suspicious_patterns.append("impossible_steepness") 
+    #if amplitude > 500 and r2 < 0.5:  # High signal but terrible curve fit
+        #suspicious_patterns.append("high_amplitude_poor_fit")
+    #if steepness > 1.0:  # Impossibly steep (machine spike)
+        #suspicious_patterns.append("impossible_steepness") 
     if snr > 20 and r2 < 0.7:  # Great SNR but poor curve (noise artifact)
         suspicious_patterns.append("snr_curve_contradiction")
-    if midpoint < 3 and amplitude > 100:  # Impossibly early crossing
-        suspicious_patterns.append("impossible_early_crossing")
-    if cqj_suspicious and amplitude > 300:  # Early CQJ with significant amplitude
-        suspicious_patterns.append("suspicious_early_cqj")
+    #if midpoint < 3 and amplitude > 100:  # Impossibly early crossing
+        #suspicious_patterns.append("impossible_early_crossing")
+    #if cqj_suspicious and amplitude > 300:  # Early CQJ with significant amplitude
+        #suspicious_patterns.append("suspicious_early_cqj")
     if amplitude > 1000 and steepness < 0.05:  # High signal but no growth
         suspicious_patterns.append("high_amp_no_growth")
     
