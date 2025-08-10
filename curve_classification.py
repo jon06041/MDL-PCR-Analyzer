@@ -49,6 +49,8 @@ def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, c
     Everything else = EDGE CASE for ML review
     """
     
+    print(f"[CLASSIFY_DEBUG] Input: amp={amplitude}, r2={r2}, steep={steepness}, snr={snr}, cq={cq_value}")
+    
     # Validate inputs
     if amplitude is None:
         amplitude = 0
@@ -60,6 +62,22 @@ def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, c
         snr = 0
     if midpoint is None:
         midpoint = 50
+    
+    # BASELINE-CORRECTED AMPLITUDE CHECK for negative baselines
+    # If baseline is very negative, the "amplitude" might be misleading
+    baseline_corrected_amplitude = amplitude
+    if baseline < -100:  # Very negative baseline
+        # The actual signal level is amplitude + baseline
+        actual_signal_level = amplitude + baseline
+        print(f"[BASELINE_DEBUG] Negative baseline detected: baseline={baseline}, raw_amp={amplitude}, actual_signal={actual_signal_level}")
+        
+        # If actual signal is very low, treat as low amplitude
+        if actual_signal_level < 50:
+            baseline_corrected_amplitude = actual_signal_level
+            print(f"[BASELINE_DEBUG] Corrected amplitude from {amplitude} to {baseline_corrected_amplitude}")
+    
+    # Use corrected amplitude for classification
+    amplitude = baseline_corrected_amplitude
     
     # Check if CQJ is valid for positive evidence (not N/A and reasonable range)
     has_valid_cqj = False
@@ -117,7 +135,7 @@ def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, c
     # Focus on curve quality and signal strength, not CQJ timing
     confident_negative = (
         amplitude < 200 or          # Too weak signal
-        r2 < 0.70 or               # Poor curve fit  
+        r2 < 0.80 or               # Poor curve fit (RAISED from 0.70)
         steepness < 0.1 or         # Flat line
         snr < 1.5                  # Signal too noisy
         # Note: No CQJ timing limits - pathogen specific
@@ -144,6 +162,7 @@ def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, c
         }
     
     elif confident_negative:
+        print(f"[CLASSIFY_DEBUG] CONFIDENT_NEGATIVE triggered: amp<200={amplitude < 200}, r2<0.70={r2 < 0.70}, steep<0.1={steepness < 0.1}, snr<1.5={snr < 1.5}")
         return {
             'classification': 'NEGATIVE',
             'confidence': 0.90,
@@ -157,7 +176,7 @@ def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, c
     # NO CQJ LOGIC - ONLY for samples without valid CQJ
     elif not has_valid_cqj and not cqj_suspicious:
         # Good curve but no CQJ = INDETERMINATE (should have produced CQJ, needs redo)
-        if amplitude >= 300 and r2 >= 0.80 and steepness >= 0.15:
+        if amplitude >= 300 and r2 >= 0.80 and steepness >= 0.15:  
             return {
                 'classification': 'INDETERMINATE',
                 'confidence': 0.70,
@@ -203,18 +222,26 @@ def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, c
             edge_reasons.append("moderate_curve_quality")
         if 0.1 <= steepness < 0.3:
             edge_reasons.append("moderate_steepness")
-        if 1.5 <= snr < 4:
-            edge_reasons.append("moderate_snr")
+        #if 1.5 <= snr < 4:
+            #edge_reasons.append("moderate_snr")
         if has_valid_cqj and amplitude < 600:
             edge_reasons.append("valid_cqj_weak_signal")
-        if not has_valid_cqj and amplitude >= 200:
-            edge_reasons.append("no_cqj_moderate_signal")
+        #if not has_valid_cqj and amplitude >= 200:
+            #edge_reasons.append("no_cqj_moderate_signal")
             
         # Default edge case classification
-        if amplitude >= 300 and r2 >= 0.75:
+        # WEAK_POSITIVE requires valid CQJ crossing
+        if amplitude >= 300 and r2 >= 0.75 and has_valid_cqj:
             classification = "WEAK_POSITIVE"
-        else:
+            print(f"[DEBUG] Edge case WEAK_POSITIVE: amp={amplitude}, r2={r2}, has_cqj={has_valid_cqj}")
+        # INDETERMINATE requires good S-curve characteristics (good R² and steepness)
+        elif r2 >= 0.80 and steepness >= 0.15:
             classification = "INDETERMINATE"
+            print(f"[DEBUG] Edge case INDETERMINATE (good curve): r2={r2}, steepness={steepness}")
+        # Poor curves without CQJ or quality should be NEGATIVE
+        else:
+            classification = "NEGATIVE"
+            print(f"[DEBUG] Edge case NEGATIVE: amp={amplitude}, r2={r2}, steepness={steepness}, has_cqj={has_valid_cqj}")
             
         return {
             'classification': classification,

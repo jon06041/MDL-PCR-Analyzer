@@ -4690,10 +4690,8 @@ class MLFeedbackInterface {
     }
 
     async checkForAutomaticMLAnalysis() {
-        // DEPRECATED: This function is now disabled to prevent auto-analysis
-        // Use checkForMLNotification() to show banner without auto-running
-        console.log('🚫 Auto-ML Analysis: Disabled - use manual "Improve Results" button instead');
-        return false;
+        // Re-enabled automatic ML analysis check
+        console.log('� Auto-ML Analysis: Checking conditions for automatic ML analysis');
         
         // Check if we should automatically run ML analysis for this session
         // This is called when new analysis results are loaded
