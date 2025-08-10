@@ -1605,6 +1605,51 @@ def delete_all_sessions():
         print(f"[ERROR] Outer exception deleting all sessions: {e}\nTraceback:\n{tb}")
         return jsonify({'error': f'Database error: {str(e)}'}), 500
 
+# --- Update session results ---
+@app.route('/sessions/<int:session_id>/update', methods=['PUT'])
+def update_session_results(session_id):
+    """Update analysis results for a specific session"""
+    try:
+        data = request.get_json()
+        
+        session = AnalysisSession.query.get_or_404(session_id)
+        
+        # Update session metadata if provided
+        if 'notes' in data:
+            session.notes = data['notes']
+        
+        # Update individual well results if provided
+        if 'individual_results' in data:
+            individual_results = data['individual_results']
+            
+            for well_key, well_data in individual_results.items():
+                # Find existing well result
+                well_result = WellResult.query.filter_by(
+                    session_id=session_id,
+                    well_id=well_key
+                ).first()
+                
+                if well_result:
+                    # Update existing well result
+                    for field, value in well_data.items():
+                        if hasattr(well_result, field):
+                            # Handle JSON fields
+                            if field in ['raw_cycles', 'raw_rfu', 'fitted_curve', 'fit_parameters', 'parameter_errors', 'anomalies']:
+                                if isinstance(value, (dict, list)):
+                                    value = json.dumps(value)
+                            setattr(well_result, field, value)
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Session {session_id} updated successfully'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Failed to update session: {str(e)}'}), 500
+
 # --- Delete a single session and its results ---
 @app.route('/sessions/<int:session_id>', methods=['DELETE'])
 def delete_session(session_id):
@@ -1652,6 +1697,52 @@ def delete_session(session_id):
 def delete_session_alias(session_id):
     """Alias for the main delete_session endpoint"""
     return delete_session(session_id)
+
+# Delete multi-channel experiment (all sessions with same pattern)
+@app.route('/delete_experiment/<experiment_pattern>', methods=['DELETE'])
+def delete_experiment_by_pattern(experiment_pattern):
+    """Delete all sessions belonging to the same multi-channel experiment"""
+    try:
+        print(f"[DELETE EXPERIMENT] Looking for sessions with pattern: {experiment_pattern}")
+        
+        # Find all sessions with matching filename pattern
+        # Pattern matching for multi-channel sessions
+        sessions = AnalysisSession.query.filter(
+            AnalysisSession.filename.like(f'%{experiment_pattern}%')
+        ).all()
+        
+        if not sessions:
+            return jsonify({'error': f'No sessions found for experiment pattern: {experiment_pattern}'}), 404
+        
+        print(f"[DELETE EXPERIMENT] Found {len(sessions)} sessions to delete")
+        total_wells_deleted = 0
+        session_ids_deleted = []
+        
+        for session in sessions:
+            print(f"[DELETE EXPERIMENT] Deleting session {session.id}: {session.filename}")
+            
+            # Delete wells for this session
+            wells_deleted = WellResult.query.filter_by(session_id=session.id).delete()
+            total_wells_deleted += wells_deleted
+            
+            # Delete the session
+            session_ids_deleted.append(session.id)
+            db.session.delete(session)
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Deleted experiment {experiment_pattern}',
+            'sessions_deleted': len(session_ids_deleted),
+            'session_ids': session_ids_deleted,
+            'wells_deleted': total_wells_deleted
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"[DELETE EXPERIMENT ERROR] {str(e)}")
+        return jsonify({'error': f'Failed to delete experiment: {str(e)}'}), 500
 
 # Alternative delete endpoint with enhanced error handling
 @app.route('/sessions/<int:session_id>/force-delete', methods=['DELETE'])
@@ -4918,6 +5009,154 @@ def get_ml_pathogen_models():
     except Exception as e:
         app.logger.error(f"Error getting ML pathogen models: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-runs/<run_id>', methods=['GET'])
+def get_ml_run_by_id(run_id):
+    """Get a specific ML run by ID from database"""
+    try:
+        mysql_config = {
+            'host': os.environ.get("MYSQL_HOST", "127.0.0.1"),
+            'port': int(os.environ.get("MYSQL_PORT", 3306)),
+            'user': os.environ.get("MYSQL_USER", "qpcr_user"),
+            'password': os.environ.get("MYSQL_PASSWORD", "qpcr_password"),
+            'database': os.environ.get("MYSQL_DATABASE", "qpcr_analysis"),
+            'charset': 'utf8mb4'
+        }
+        
+        import mysql.connector
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Get the specific run from database
+        cursor.execute("""
+            SELECT session_id, file_name, pathogen_codes, total_samples, 
+                   ml_samples_analyzed, logged_at, accuracy_percentage, 
+                   status, confirmed_by, confirmed_at, notes
+            FROM ml_analysis_runs 
+            WHERE session_id = %s
+        """, (run_id,))
+        
+        run_data = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if not run_data:
+            return jsonify({'success': False, 'message': 'Run not found'}), 404
+            
+        # Parse pathogen codes
+        try:
+            pathogen_codes = json.loads(run_data['pathogen_codes']) if run_data['pathogen_codes'] else []
+            primary_pathogen = pathogen_codes[0] if pathogen_codes else 'UNKNOWN'
+        except:
+            primary_pathogen = run_data['pathogen_codes'] or 'UNKNOWN'
+            
+        # Format response
+        formatted_run = {
+            'run_id': run_data['session_id'],
+            'file_name': run_data['file_name'],
+            'pathogen_code': primary_pathogen,
+            'pathogen_codes': pathogen_codes,
+            'total_samples': run_data['total_samples'],
+            'completed_samples': run_data['ml_samples_analyzed'],
+            'ml_samples_analyzed': run_data['ml_samples_analyzed'],
+            'logged_at': run_data['logged_at'].isoformat() if run_data['logged_at'] else None,
+            'accuracy_percentage': float(run_data['accuracy_percentage']) if run_data['accuracy_percentage'] else 0.0,
+            'status': run_data['status'],
+            'confirmed_by': run_data['confirmed_by'],
+            'confirmed_at': run_data['confirmed_at'].isoformat() if run_data['confirmed_at'] else None,
+            'notes': run_data['notes'] or f"ML analyzed {run_data['ml_samples_analyzed']} samples"
+        }
+        
+        return jsonify({
+            'success': True,
+            'run': formatted_run
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error getting ML run {run_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/ml-runs/<run_id>', methods=['PUT'])
+def update_ml_run(run_id):
+    """Update an ML run's data in the database"""
+    try:
+        data = request.get_json()
+        
+        mysql_config = {
+            'host': os.environ.get("MYSQL_HOST", "127.0.0.1"),
+            'port': int(os.environ.get("MYSQL_PORT", 3306)),
+            'user': os.environ.get("MYSQL_USER", "qpcr_user"),
+            'password': os.environ.get("MYSQL_PASSWORD", "qpcr_password"),
+            'database': os.environ.get("MYSQL_DATABASE", "qpcr_analysis"),
+            'charset': 'utf8mb4'
+        }
+        
+        import mysql.connector
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor()
+        
+        # Build update query dynamically based on provided fields
+        update_fields = []
+        update_values = []
+        
+        if 'accuracy_percentage' in data:
+            update_fields.append('accuracy_percentage = %s')
+            update_values.append(float(data['accuracy_percentage']))
+            
+        if 'notes' in data:
+            update_fields.append('notes = %s')
+            update_values.append(data['notes'])
+            
+        if 'total_samples' in data:
+            update_fields.append('total_samples = %s')
+            update_values.append(int(data['total_samples']))
+            
+        if 'ml_samples_analyzed' in data:
+            update_fields.append('ml_samples_analyzed = %s')
+            update_values.append(int(data['ml_samples_analyzed']))
+            
+        if 'pathogen_codes' in data:
+            update_fields.append('pathogen_codes = %s')
+            pathogen_codes = data['pathogen_codes']
+            if isinstance(pathogen_codes, list):
+                update_values.append(json.dumps(pathogen_codes))
+            else:
+                update_values.append(str(pathogen_codes))
+        
+        if not update_fields:
+            return jsonify({'success': False, 'message': 'No valid fields to update'}), 400
+            
+        # Add the run_id for WHERE clause
+        update_values.append(run_id)
+        
+        # Execute update
+        update_query = f"""
+            UPDATE ml_analysis_runs 
+            SET {', '.join(update_fields)}, updated_at = NOW()
+            WHERE session_id = %s
+        """
+        
+        cursor.execute(update_query, update_values)
+        conn.commit()
+        
+        if cursor.rowcount == 0:
+            cursor.close()
+            conn.close()
+            return jsonify({'success': False, 'message': 'Run not found or no changes made'}), 404
+            
+        cursor.close()
+        conn.close()
+        
+        # Return updated run data
+        return jsonify({
+            'success': True,
+            'message': f'Updated {cursor.rowcount} record(s)',
+            'updated_fields': list(data.keys())
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error updating ML run {run_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/ml-runs/confirm', methods=['POST'])
 def confirm_ml_run():

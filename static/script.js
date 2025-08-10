@@ -9401,19 +9401,19 @@ function displayLocalAnalysisHistory(history) {
 
 async function loadSessionDetails(sessionId) {
     try {
-        // console.log('Loading session details for ID:', sessionId);
+        console.log(`🔄 Loading session ${sessionId} from database...`);
         
         // Check if this is a fresh load after refresh
         const pendingSessionLoad = localStorage.getItem('pendingSessionLoad');
         if (!pendingSessionLoad) {
             // First time - store session ID and refresh
-            // console.log('Storing session ID and refreshing browser');
+            console.log('Storing session ID and refreshing browser');
             safeSetItem(localStorage, 'pendingSessionLoad', sessionId);
             window.location.reload();
             return;
         } else if (pendingSessionLoad !== sessionId) {
             // Different session ID - store new one and refresh
-            // console.log('Different session - storing new ID and refreshing');
+            console.log('Different session - storing new ID and refreshing');
             safeSetItem(localStorage, 'pendingSessionLoad', sessionId);
             window.location.reload();
             return;
@@ -9421,44 +9421,44 @@ async function loadSessionDetails(sessionId) {
         
         // This is after refresh - clear the flag and proceed with loading
         localStorage.removeItem('pendingSessionLoad');
-        // console.log('Loading session after refresh:', sessionId);
+        console.log(`🔄 Loading session after refresh: ${sessionId}`);
         
         // Handle combined sessions
         if (typeof sessionId === 'string' && sessionId.startsWith('combined_')) {
             // After refresh, we need to rebuild combined sessions first
             if (!window.currentCombinedSessions) {
-                // console.log('Rebuilding combined sessions after refresh');
+                console.log('Rebuilding combined sessions after refresh');
                 await loadAnalysisHistoryOnly(); // 🛡️ Use non-contaminating version
             }
             
             const combinedSession = window.currentCombinedSessions?.find(s => s.id === sessionId);
             if (combinedSession) {
-                // console.log('Loading combined session data:', combinedSession);
+                console.log('Loading combined session data:', combinedSession);
                 displaySessionResults(combinedSession);
                 return;
             } else {
-                // console.error('Combined session not found in currentCombinedSessions:', window.currentCombinedSessions);
+                console.error('Combined session not found in currentCombinedSessions:', window.currentCombinedSessions);
                 throw new Error('Combined session not found');
             }
         }
         
-        // Handle individual database sessions
-        const response = await fetch(`/sessions/${sessionId}`);
-        const sessionData = await response.json();
-        
-        if (!sessionData.session) {
-            throw new Error('Session not found');
+        // 🆕 Use the new database loading function for individual sessions
+        const sessionData = await window.loadSessionFromDatabase(sessionId);
+        if (!sessionData) {
+            throw new Error('Failed to load session from database');
         }
         
         const session = sessionData.session;
-        const wells = sessionData.wells || [];
-        // console.log('Loaded session data:', {sessionName: session.filename, wellCount: wells.length});
+        console.log(`✅ Loaded session data: ${session.filename} with ${Object.keys(sessionData.individual_results || {}).length} wells`);
         
-        // Store session filename for pattern extraction
+        // Store session context for other functions
         window.currentSessionFilename = session.filename;
-        
-        // Store session ID for expert feedback functionality
         window.currentSessionId = sessionId;
+        
+        // Show session management buttons
+        if (window.updateSessionManagementUI) {
+            window.updateSessionManagementUI();
+        }
         
         // Transform the session data into the expected format
         // Use stored database values instead of recalculating from individual wells
@@ -13193,15 +13193,24 @@ let modalChart = null;
 
 function showWellModal(wellKey) {
     if (!currentAnalysisResults || !currentAnalysisResults.individual_results) {
-        // console.error('No analysis results available');
+        console.error('🚨 MODAL-ERROR: No analysis results available');
         return;
     }
     
     const wellResult = currentAnalysisResults.individual_results[wellKey];
     if (!wellResult) {
-        // console.error('Well result not found:', wellKey);
+        console.error('🚨 MODAL-ERROR: Well result not found:', wellKey);
         return;
     }
+    
+    // 🔍 DEBUG: Log the well data being shown in modal
+    console.log('🔍 MODAL-DEBUG: Opening modal for', wellKey, {
+        expert_classification: wellResult.curve_classification?.method === 'expert_feedback' ? wellResult.curve_classification : null,
+        ml_classification: wellResult.ml_classification,
+        curve_classification: wellResult.curve_classification,
+        amplitude: wellResult.amplitude,
+        is_good_scurve: wellResult.is_good_scurve
+    });
     
     // Build navigation list from currently visible table rows
     buildModalNavigationList();
@@ -14402,6 +14411,71 @@ async function deleteSessionFromDB(sessionId, event) {
         event.stopPropagation();
     }
     
+    // First check if this might be part of a multi-channel experiment
+    try {
+        console.log('🔍 Checking for multi-channel experiment before deletion...');
+        const checkResponse = await fetch('/api/sessions');
+        if (checkResponse.ok) {
+            const sessions = await checkResponse.json();
+            
+            // Find the session being deleted
+            const currentSession = sessions.find(s => s.id == sessionId);
+            if (currentSession) {
+                // Extract experiment pattern (remove fluorophore suffix)
+                const filename = currentSession.filename;
+                const experimentPattern = filename.replace(/_(?:FAM|HEX|Texas_Red|Cy5|ROX)(?:_processed)?$/, '');
+                
+                // Check for related sessions with same pattern
+                const relatedSessions = sessions.filter(s => {
+                    const sessionPattern = s.filename.replace(/_(?:FAM|HEX|Texas_Red|Cy5|ROX)(?:_processed)?$/, '');
+                    return sessionPattern === experimentPattern && s.id != sessionId;
+                });
+                
+                if (relatedSessions.length > 0) {
+                    const fluorophores = [currentSession, ...relatedSessions].map(s => {
+                        const match = s.filename.match(/_(FAM|HEX|Texas_Red|Cy5|ROX)(?:_processed)?$/);
+                        return match ? match[1] : 'Unknown';
+                    });
+                    
+                    const multiChannelConfirm = confirm(
+                        `⚠️ MULTI-CHANNEL EXPERIMENT DETECTED\n\n` +
+                        `This session appears to be part of a multi-channel experiment:\n` +
+                        `• Experiment: ${experimentPattern}\n` +
+                        `• Channels: ${fluorophores.join(', ')}\n\n` +
+                        `Do you want to delete ALL channels of this experiment?\n\n` +
+                        `• YES = Delete entire experiment (all ${fluorophores.length} channels)\n` +
+                        `• NO = Delete only this single channel (${fluorophores[0]})`
+                    );
+                    
+                    if (multiChannelConfirm) {
+                        // Delete entire experiment
+                        console.log('🗑️ Deleting entire multi-channel experiment:', experimentPattern);
+                        const response = await fetch(`/delete_experiment/${encodeURIComponent(experimentPattern)}`, {
+                            method: 'DELETE'
+                        });
+                        
+                        if (response.ok) {
+                            const result = await response.json();
+                            console.log('✅ Multi-channel experiment deletion successful:', result);
+                            alert(`✅ Multi-channel experiment deleted!\n\n${result.message}\nDeleted ${result.sessions_deleted} sessions with ${result.wells_deleted} total wells`);
+                            loadAnalysisHistory(); // Refresh the history
+                            return;
+                        } else {
+                            const errorData = await response.json().catch(() => ({}));
+                            console.error('❌ Multi-channel experiment deletion failed:', errorData);
+                            alert('❌ Failed to delete multi-channel experiment: ' + (errorData.error || 'Unknown error'));
+                            return;
+                        }
+                    }
+                    // If user chose NO, continue with single session deletion below
+                }
+            }
+        }
+    } catch (error) {
+        console.warn('⚠️ Could not check for multi-channel experiment:', error);
+        // Continue with single session deletion
+    }
+    
     if (!confirm('⚠️ DELETE FROM DATABASE\n\nThis will permanently delete this session from the database.\nUse this to clear old data before reanalyzing with the CQJ fix.\n\nAre you sure?')) {
         return;
     }
@@ -14413,7 +14487,7 @@ async function deleteSessionFromDB(sessionId, event) {
     }
     
     try {
-        console.log('🗑️ Deleting session from database:', sessionId);
+        console.log('🗑️ Deleting single session from database:', sessionId);
         const response = await fetch(`/delete_session/${sessionId}`, {
             method: 'DELETE'
         });
@@ -14695,4 +14769,305 @@ window.refreshResultsTable = function() {
     } else {
         console.warn('No current analysis results available for table refresh');
     }
+};
+
+// --- Session Database Management Functions ---
+
+/**
+ * Load a session from the database and populate the results table
+ * @param {number} sessionId - The session ID to load
+ */
+window.loadSessionFromDatabase = async function(sessionId) {
+    try {
+        console.log(`🔄 Loading session ${sessionId} from database...`);
+        
+        const response = await fetch(`/sessions/${sessionId}`);
+        if (!response.ok) {
+            throw new Error(`Failed to load session: ${response.statusText}`);
+        }
+        
+        const sessionData = await response.json();
+        
+        // Update global state with fresh database data
+        window.currentAnalysisResults = {
+            individual_results: sessionData.individual_results,
+            session: sessionData.session,
+            session_id: sessionId  // Ensure session ID is available for expert feedback loading
+        };
+        
+        // CRITICAL FIX: Use displayAnalysisResults instead of populateResultsTable
+        // This ensures event listeners for modal clicks are properly reattached
+        if (sessionData.individual_results) {
+            console.log(`🔄 Displaying session ${sessionId} results with ${Object.keys(sessionData.individual_results).length} wells`);
+            await displayAnalysisResults(window.currentAnalysisResults);
+            console.log(`✅ Session ${sessionId} loaded from database and displayed`);
+        }
+        
+        // Update UI elements
+        if (sessionData.session) {
+            document.getElementById('experimentPattern').textContent = sessionData.session.filename || '-';
+        }
+        
+        return sessionData;
+        
+    } catch (error) {
+        console.error(`❌ Failed to load session ${sessionId}:`, error);
+        alert(`Failed to load session: ${error.message}`);
+        return null;
+    }
+};
+
+/**
+ * Save current session changes to the database
+ * @param {number} sessionId - The session ID to update
+ * @param {object} updates - Object containing changes to save
+ */
+// Helper function to capture current DOM state of results table
+window.captureCurrentTableState = function() {
+    const table = document.getElementById('resultsTable');
+    if (!table) return {};
+    
+    const currentResults = {};
+    const rows = table.querySelectorAll('tbody tr');
+    
+    rows.forEach(row => {
+        const wellCell = row.querySelector('td[data-sort="well"]');
+        const resultCell = row.querySelector('td[data-sort="results"] select');
+        
+        if (wellCell) {
+            const wellId = wellCell.textContent.trim();
+            
+            // Find the corresponding well key in analysis results (might have fluorophore suffix)
+            let matchingWellKey = null;
+            if (window.currentAnalysisResults?.individual_results) {
+                // Direct match first
+                if (window.currentAnalysisResults.individual_results[wellId]) {
+                    matchingWellKey = wellId;
+                } else {
+                    // Search for wells that start with this wellId (for fluorophore suffixes)
+                    for (const key of Object.keys(window.currentAnalysisResults.individual_results)) {
+                        if (key.startsWith(wellId + '_') || key === wellId) {
+                            matchingWellKey = key;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            if (matchingWellKey && window.currentAnalysisResults.individual_results[matchingWellKey]) {
+                // Capture results (POS/NEG/REDO) changes from dropdown
+                if (resultCell) {
+                    window.currentAnalysisResults.individual_results[matchingWellKey].results = resultCell.value;
+                }
+                
+                // CRITICAL FIX: Don't try to parse curve classification from DOM badges
+                // Expert decisions are already stored in window.currentAnalysisResults
+                // The badges are just display - the real data is in the analysis results object
+                
+                currentResults[matchingWellKey] = window.currentAnalysisResults.individual_results[matchingWellKey];
+            }
+        }
+    });
+    
+    console.log('💾 Captured current table state:', Object.keys(currentResults).length, 'wells');
+    console.log('💾 Expert decisions preserved in analysis results object');
+    return currentResults;
+};
+
+window.saveSessionToDatabase = async function(sessionId, updates = {}) {
+    try {
+        console.log(`💾 Saving session ${sessionId} to database...`);
+        
+        // Capture current state from the DOM
+        const currentTableState = window.captureCurrentTableState();
+        
+        // Prepare update payload
+        const payload = {
+            individual_results: currentTableState,
+            ...updates
+        };
+        
+        console.log('💾 Saving payload:', payload);
+        
+        const response = await fetch(`/sessions/${sessionId}/update`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload)
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Failed to save session: ${response.statusText}`);
+        }
+        
+        const result = await response.json();
+        console.log(`✅ Session ${sessionId} saved successfully:`, result.message);
+        
+        // Update global state with saved data
+        if (window.currentAnalysisResults && currentTableState) {
+            window.currentAnalysisResults.individual_results = currentTableState;
+        }
+        
+        return result;
+        
+    } catch (error) {
+        console.error(`❌ Failed to save session ${sessionId}:`, error);
+        alert(`Failed to save session: ${error.message}`);
+        return null;
+    }
+};
+
+/**
+ * Confirm that data has been saved to database
+ * @param {number} sessionId - The session ID to verify
+ */
+window.verifySessionSaved = async function(sessionId) {
+    try {
+        console.log(`🔍 Verifying session ${sessionId} in database...`);
+        
+        const freshData = await loadSessionFromDatabase(sessionId);
+        if (freshData) {
+            console.log(`✅ Session ${sessionId} verified in database`);
+            return true;
+        }
+        
+        return false;
+        
+    } catch (error) {
+        console.error(`❌ Failed to verify session ${sessionId}:`, error);
+        return false;
+    }
+};
+
+// --- UI Event Handlers for Session Management ---
+
+// Initialize session management buttons when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    const saveBtn = document.getElementById('saveSessionBtn');
+    const reloadBtn = document.getElementById('reloadSessionBtn');
+    
+    if (saveBtn) {
+        saveBtn.addEventListener('click', async function() {
+            // Try to find a session ID if none is set
+            if (!window.currentSessionId) {
+                // Check URL params for session
+                const urlParams = new URLSearchParams(window.location.search);
+                const urlSession = urlParams.get('session');
+                if (urlSession) {
+                    window.currentSessionId = parseInt(urlSession);
+                }
+            }
+            
+            // If still no session, try to get the latest session
+            if (!window.currentSessionId) {
+                try {
+                    const response = await fetch('/sessions');
+                    const data = await response.json();
+                    if (data.sessions && data.sessions.length > 0) {
+                        window.currentSessionId = data.sessions[data.sessions.length - 1].id;
+                        console.log(`🔧 Using latest session ID: ${window.currentSessionId}`);
+                    }
+                } catch (e) {
+                    console.error('Failed to get sessions:', e);
+                }
+            }
+            
+            if (!window.currentSessionId) {
+                alert('No session loaded to save. Please load a session first.');
+                return;
+            }
+            
+            console.log(`💾 Saving session ${window.currentSessionId}...`);
+            const result = await window.saveSessionToDatabase(window.currentSessionId);
+            if (result) {
+                alert('Session saved successfully!');
+                
+                // Optionally verify the save
+                const verified = await window.verifySessionSaved(window.currentSessionId);
+                if (verified) {
+                    console.log('✅ Save verified successfully');
+                } else {
+                    console.warn('⚠️ Save verification failed');
+                }
+            }
+        });
+    }
+    
+    if (reloadBtn) {
+        reloadBtn.addEventListener('click', async function() {
+            // Try to find a session ID if none is set
+            if (!window.currentSessionId) {
+                // Check URL params for session
+                const urlParams = new URLSearchParams(window.location.search);
+                const urlSession = urlParams.get('session');
+                if (urlSession) {
+                    window.currentSessionId = parseInt(urlSession);
+                }
+            }
+            
+            // If still no session, try to get the latest session
+            if (!window.currentSessionId) {
+                try {
+                    const response = await fetch('/sessions');
+                    const data = await response.json();
+                    if (data.sessions && data.sessions.length > 0) {
+                        window.currentSessionId = data.sessions[data.sessions.length - 1].id;
+                        console.log(`🔧 Using latest session ID: ${window.currentSessionId}`);
+                    }
+                } catch (e) {
+                    console.error('Failed to get sessions:', e);
+                }
+            }
+            
+            if (!window.currentSessionId) {
+                alert('No session loaded to reload. Please load a session first.');
+                return;
+            }
+            
+            const confirmed = confirm('Reload session from database? Any unsaved changes will be lost.');
+            if (confirmed) {
+                console.log(`🔄 Reloading session ${window.currentSessionId}...`);
+                await window.loadSessionFromDatabase(window.currentSessionId);
+                alert('Session reloaded from database');
+            }
+        });
+    }
+});
+
+// Show/hide session management buttons based on whether a session is loaded
+window.updateSessionManagementUI = function() {
+    const saveBtn = document.getElementById('saveSessionBtn');
+    const reloadBtn = document.getElementById('reloadSessionBtn');
+    const hasSession = !!window.currentSessionId;
+    
+    console.log(`🔍 updateSessionManagementUI: hasSession=${hasSession}, currentSessionId=${window.currentSessionId}`);
+    console.log(`🔍 saveBtn exists: ${!!saveBtn}, reloadBtn exists: ${!!reloadBtn}`);
+    
+    if (saveBtn) {
+        saveBtn.style.display = hasSession ? 'inline-block' : 'none';
+        console.log(`🔍 saveBtn display set to: ${saveBtn.style.display}`);
+    }
+    if (reloadBtn) {
+        reloadBtn.style.display = hasSession ? 'inline-block' : 'none';
+        console.log(`🔍 reloadBtn display set to: ${reloadBtn.style.display}`);
+    }
+};
+
+// Debug function to force show buttons
+window.forceShowButtons = function() {
+    const saveBtn = document.getElementById('saveSessionBtn');
+    const reloadBtn = document.getElementById('reloadSessionBtn');
+    
+    if (saveBtn) {
+        saveBtn.style.display = 'inline-block';
+        console.log('🔧 Forced saveBtn to show');
+    }
+    if (reloadBtn) {
+        reloadBtn.style.display = 'inline-block';
+        console.log('🔧 Forced reloadBtn to show');
+    }
+    
+    // Also check current session state
+    console.log(`🔍 Current session state: sessionId=${window.currentSessionId}, filename=${window.currentSessionFilename}`);
 };
