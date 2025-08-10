@@ -652,6 +652,26 @@ class MLValidationTracker:
                 self.logger.error(f"Error tracking analysis run: {e}")
                 raise
 
+    def update_session_id(self, old_session_id, new_session_id):
+        """Update session_id for an existing analysis run"""
+        with self.engine.connect() as conn:
+            try:
+                conn.execute(text("""
+                    UPDATE ml_analysis_runs 
+                    SET session_id = :new_session_id
+                    WHERE session_id = :old_session_id
+                """), {
+                    'old_session_id': str(old_session_id),
+                    'new_session_id': str(new_session_id)
+                })
+                
+                conn.commit()
+                self.logger.info(f"Updated session_id from {old_session_id} to {new_session_id}")
+                
+            except Exception as e:
+                self.logger.error(f"Error updating session_id: {e}")
+                raise
+
     def confirm_analysis_run(self, session_id, confirmed_by='user'):
         """Confirm an analysis run as validated"""
         with self.engine.connect() as conn:

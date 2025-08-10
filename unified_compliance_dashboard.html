@@ -1448,7 +1448,7 @@
             
             const mlTotalModelsEl = document.getElementById('mlTotalModels');
             if (mlTotalModelsEl) {
-                mlTotalModelsEl.textContent = stats?.total_models || '3'; // Default pathogen models
+                mlTotalModelsEl.textContent = stats?.total_models || stats?.active_models || '0'; // Real data from database
             }
             
             const mlAvgAccuracyEl = document.getElementById('mlAvgAccuracy');
@@ -1506,15 +1506,18 @@
                                 </div>
                             </div>
                             <div class="col-md-4 text-end">
-                                <div class="confirmation-question mb-2">
-                                    <small class="text-muted">"All samples completed with proper results?"</small>
+                                <div class="confirmation-question mb-3">
+                                    <small class="text-muted">Pending ML validation run</small>
                                 </div>
-                                <button class="btn btn-success btn-sm me-2" onclick="confirmRun(${run.id || 0}, '${run.run_id || 'unknown'}', true)">
-                                    <i class="fas fa-check"></i> Yes, Confirm
-                                </button>
-                                <button class="btn btn-danger btn-sm" onclick="confirmRun(${run.id || 0}, '${run.run_id || 'unknown'}', false)">
-                                    <i class="fas fa-times"></i> No, Reject
-                                </button>
+                                <div class="btn-group-vertical d-grid gap-2">
+                                    <small class="text-info mb-2">
+                                        <i class="fas fa-info-circle"></i> 
+                                        Confirm this run from the main analysis page
+                                    </small>
+                                    <button class="btn btn-outline-danger btn-sm" onclick="deleteRun('${run.run_id || 'unknown'}')">
+                                        <i class="fas fa-trash"></i> Delete
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1682,6 +1685,37 @@
             } catch (error) {
                 console.error('Error confirming run:', error);
                 showAlert('danger', 'Error processing run confirmation. Please try again.');
+            }
+        }
+
+        // Delete a pending ML run
+        async function deleteRun(runId) {
+            if (!confirm('Are you sure you want to delete this pending run? This action cannot be undone.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/ml-runs/delete', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        run_id: runId
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    showAlert('success', `Run ${runId} deleted successfully!`);
+                    loadMLValidationData(); // Refresh all data
+                } else {
+                    showAlert('danger', `Error: ${result.message || result.error}`);
+                }
+            } catch (error) {
+                console.error('Error deleting run:', error);
+                showAlert('danger', 'Error deleting run. Please try again.');
             }
         }
 

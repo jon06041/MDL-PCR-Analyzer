@@ -9471,7 +9471,7 @@ async function loadSessionDetails(sessionId) {
         };
         
         // Transform well results
-        wells.forEach((well, index) => {
+        sessionData.wells.forEach((well, index) => {
             // Enhanced fluorophore detection for history loading
             let fluorophore = 'Unknown';
             let baseWellId = well.well_id;
@@ -14411,6 +14411,83 @@ async function deleteSessionFromDB(sessionId, event) {
         event.stopPropagation();
     }
     
+    // Handle combined sessions (they have string IDs like "combined_...")
+    if (typeof sessionId === 'string' && sessionId.startsWith('combined_')) {
+        console.log('🔍 Combined session detected for deletion:', sessionId);
+        
+        // Find the combined session in the history to get the real session IDs
+        const historyData = window.analysisHistory || [];
+        const combinedSession = historyData.find(session => session.id === sessionId);
+        
+        if (!combinedSession || !combinedSession.session_ids) {
+            alert('❌ Could not find session IDs for combined session. Please try deleting individual sessions instead.');
+            return;
+        }
+        
+        const realSessionIds = combinedSession.session_ids;
+        const confirmDelete = confirm(
+            `⚠️ DELETE COMBINED SESSION FROM DATABASE\n\n` +
+            `This will permanently delete ${realSessionIds.length} individual sessions from the database:\n` +
+            `${realSessionIds.join(', ')}\n\n` +
+            `This action cannot be undone. Are you sure?`
+        );
+        
+        if (!confirmDelete) {
+            return;
+        }
+        
+        const deleteBtn = event && event.target ? event.target : null;
+        if (deleteBtn) {
+            deleteBtn.disabled = true;
+            deleteBtn.textContent = 'Deleting...';
+        }
+        
+        try {
+            let totalWellsDeleted = 0;
+            let successCount = 0;
+            
+            // Delete each individual session
+            for (const realSessionId of realSessionIds) {
+                console.log(`🗑️ Deleting individual session ${realSessionId} from database...`);
+                
+                const response = await fetch(`/delete_session/${realSessionId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    totalWellsDeleted += result.wells_deleted || 0;
+                    successCount++;
+                    console.log(`✅ Session ${realSessionId} deleted: ${result.wells_deleted} wells`);
+                } else {
+                    const errorData = await response.json().catch(() => ({}));
+                    console.error(`❌ Failed to delete session ${realSessionId}:`, errorData);
+                    alert(`❌ Failed to delete session ${realSessionId}: ${errorData.error || 'Unknown error'}`);
+                }
+            }
+            
+            if (successCount === realSessionIds.length) {
+                alert(`✅ Combined session deleted from database!\n\nDeleted ${successCount} sessions with ${totalWellsDeleted} total wells`);
+                loadAnalysisHistory(); // Refresh the history
+            } else {
+                alert(`⚠️ Partial deletion completed.\n\nDeleted ${successCount}/${realSessionIds.length} sessions with ${totalWellsDeleted} total wells`);
+                loadAnalysisHistory(); // Refresh the history
+            }
+            
+        } catch (error) {
+            console.error('❌ Error deleting combined session from database:', error);
+            alert('❌ Failed to delete combined session from database: ' + error.message);
+        } finally {
+            if (deleteBtn) {
+                deleteBtn.disabled = false;
+                deleteBtn.textContent = 'Delete from DB';
+            }
+        }
+        
+        return; // Exit early for combined sessions
+    }
+    
+    // Original logic for regular numeric session IDs
     // First check if this might be part of a multi-channel experiment
     try {
         console.log('🔍 Checking for multi-channel experiment before deletion...');
@@ -14994,8 +15071,16 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    if (reloadBtn) {
-        reloadBtn.addEventListener('click', async function() {
+    // Add confirm button event listener
+    const confirmBtn = document.getElementById('confirmRunBtn');
+    if (confirmBtn) {
+        confirmBtn.addEventListener('click', async function() {
+            // Confirm run functionality
+            const confirmed = confirm('Are you sure all the results are accurate and ready to confirm?');
+            if (!confirmed) {
+                return;
+            }
+            
             // Try to find a session ID if none is set
             if (!window.currentSessionId) {
                 // Check URL params for session
@@ -15013,24 +15098,70 @@ document.addEventListener('DOMContentLoaded', function() {
                     const data = await response.json();
                     if (data.sessions && data.sessions.length > 0) {
                         window.currentSessionId = data.sessions[data.sessions.length - 1].id;
-                        console.log(`🔧 Using latest session ID: ${window.currentSessionId}`);
+                        console.log(`🔧 Using latest session ID for confirmation: ${window.currentSessionId}`);
                     }
                 } catch (e) {
-                    console.error('Failed to get sessions:', e);
+                    console.error('Failed to get sessions for confirmation:', e);
                 }
             }
             
             if (!window.currentSessionId) {
-                alert('No session loaded to reload. Please load a session first.');
+                alert('No session loaded to confirm. Please load a session first.');
                 return;
             }
             
-            const confirmed = confirm('Reload session from database? Any unsaved changes will be lost.');
-            if (confirmed) {
-                console.log(`🔄 Reloading session ${window.currentSessionId}...`);
-                await window.loadSessionFromDatabase(window.currentSessionId);
-                alert('Session reloaded from database');
+            try {
+                // Send confirmation to ML validation system
+                console.log(`✅ Confirming run for session ${window.currentSessionId}...`);
+                
+                // Prepare the confirmation data for the existing ML runs confirm endpoint
+                const confirmationData = {
+                    run_id: window.currentSessionId,
+                    run_log_id: window.currentSessionId,  // Send both field names
+                    confirmed: true,
+                    is_confirmed: true,  // Send both field names
+                    user_id: 'analyst',
+                    confirmed_by: 'analyst'  // Send both field names
+                };
+                
+                const response = await fetch('/api/ml-runs/confirm', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(confirmationData)
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    alert('✅ Run confirmed successfully!\n\nThe analysis has been moved to the confirmed runs section in the ML Validation dashboard.');
+                    console.log('✅ Run confirmation successful:', result);
+                    
+                    // Redirect to confirmed section of dashboard
+                    window.open('/unified-compliance-dashboard', '_blank');
+                } else {
+                    const errorData = await response.json().catch(() => ({}));
+                    console.error('❌ Run confirmation failed:', errorData);
+                    alert('❌ Failed to confirm run: ' + (errorData.message || errorData.error || 'Unknown error'));
+                }
+                
+            } catch (error) {
+                console.error('❌ Error confirming run:', error);
+                alert('❌ Failed to confirm run: ' + error.message);
             }
+        });
+    }
+    
+    if (reloadBtn) {
+        reloadBtn.addEventListener('click', async function() {
+            // This is now just a reload button, not confirm
+            if (!window.currentSessionId) {
+                alert('No session loaded to reload.');
+                return;
+            }
+            
+            // Reload the current session
+            window.location.reload();
         });
     }
 });

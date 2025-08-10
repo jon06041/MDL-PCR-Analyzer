@@ -146,6 +146,32 @@ class MLConfigManager:
             logger.error(f"❌ Failed to get pathogen ML config: {e}")
             return []
     
+    def is_ml_enabled_for_pathogen(self, pathogen_code, fluorophore=None):
+        """Check if ML is enabled for specific pathogen/fluorophore"""
+        try:
+            conn = self.get_db_connection()
+            try:
+                with conn.cursor() as cursor:
+                    if fluorophore:
+                        cursor.execute(
+                            "SELECT ml_enabled FROM ml_pathogen_config WHERE pathogen_code = %s AND fluorophore = %s",
+                            (pathogen_code, fluorophore)
+                        )
+                    else:
+                        cursor.execute(
+                            "SELECT ml_enabled FROM ml_pathogen_config WHERE pathogen_code = %s",
+                            (pathogen_code,)
+                        )
+                    
+                    result = cursor.fetchone()
+                    return bool(result and result[0]) if result else False
+            finally:
+                conn.close()
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to check ML enabled status: {e}")
+            return False
+    
     def get_all_pathogen_configs(self):
         """Get all pathogen ML configurations"""
         try:
@@ -161,6 +187,19 @@ class MLConfigManager:
         except Exception as e:
             logger.error(f"❌ Failed to get all pathogen ML configs: {e}")
             return []
+
+    def is_ml_enabled_for_pathogen(self, pathogen_code, fluorophore):
+        """Check if ML is enabled for a specific pathogen/fluorophore combination"""
+        try:
+            config = self.get_pathogen_ml_config(pathogen_code, fluorophore)
+            if config:
+                return config[0].get('ml_enabled', False)
+            else:
+                # Default to False if no config found
+                return False
+        except Exception as e:
+            logger.error(f"❌ Failed to check ML enabled status for {pathogen_code}/{fluorophore}: {e}")
+            return False
     
     def set_pathogen_ml_enabled(self, pathogen_code, fluorophore, enabled, user_info=None):
         """Enable/disable ML for specific pathogen+fluorophore"""

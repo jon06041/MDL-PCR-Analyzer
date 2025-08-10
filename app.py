@@ -5,6 +5,7 @@ import re
 import traceback
 import logging
 import time
+import pymysql
 from logging.handlers import RotatingFileHandler
 import numpy as np
 from datetime import datetime
@@ -1088,41 +1089,30 @@ def analyze_data():
                     if pathogen and pathogen != 'General_PCR':
                         pathogen_codes.add(pathogen)
             
-            # Only track if ML was actually used
-            if ml_samples_analyzed > 0:
-                # Try to get session_id from database save results
-                session_id = None
-                if is_individual_channel and database_saved:
-                    # Try to find the session that was just created
-                    from models import AnalysisSession
-                    recent_session = AnalysisSession.query.filter_by(filename=filename).order_by(AnalysisSession.upload_timestamp.desc()).first()
-                    if recent_session:
-                        session_id = recent_session.id
-                
-                # Generate unique session ID if not found
-                if not session_id:
-                    import time
-                    session_id = f"ML_RUN_{int(time.time())}"
-                
-                # Calculate accuracy percentage (simplified)
-                total_samples = len(individual_results)
-                good_samples = len(results.get('good_curves', []))
-                accuracy_percentage = (good_samples / total_samples * 100) if total_samples > 0 else 85.0
-                
-                # Track the analysis run
-                ml_tracker.track_analysis_run(
-                    session_id=session_id,
-                    file_name=filename,
-                    pathogen_codes=list(pathogen_codes) if pathogen_codes else ['UNKNOWN'],
-                    total_samples=total_samples,
-                    ml_samples_analyzed=ml_samples_analyzed,
-                    accuracy_percentage=accuracy_percentage
-                )
-                
-                print(f"✅ ML analysis run tracked: {session_id} with {ml_samples_analyzed} ML samples")
-                
+            # Track ALL analysis runs for pathogen version validation and accuracy tracking
+            # Every analysis run should be tracked regardless of ML edge case usage
+            # Use filename as initial session_id, which will be updated to database session_id when saved
+            session_id = filename
+            
+            # Calculate accuracy percentage (simplified)
+            total_samples = len(individual_results)
+            good_samples = len(results.get('good_curves', []))
+            accuracy_percentage = (good_samples / total_samples * 100) if total_samples > 0 else 85.0
+            
+            # Track the analysis run
+            ml_tracker.track_analysis_run(
+                session_id=session_id,
+                file_name=filename,
+                pathogen_codes=list(pathogen_codes) if pathogen_codes else ['UNKNOWN'],
+                total_samples=total_samples,
+                ml_samples_analyzed=ml_samples_analyzed,
+                accuracy_percentage=accuracy_percentage
+            )
+            
+            print(f"✅ Analysis run tracked: {session_id} with {ml_samples_analyzed} ML samples")
+            
         except Exception as track_error:
-            print(f"⚠️ Could not track ML analysis run: {track_error}")
+            print(f"⚠️ Could not track analysis run: {track_error}")
             # Don't fail the request if tracking fails
         
         # Ensure all numpy data types are converted to Python types for JSON serialization
@@ -1552,6 +1542,14 @@ def save_combined_session():
             print(f"Forced commit error (combined): {commit_error}")
             raise
         
+        # Update ML tracking with the actual database session_id
+        try:
+            from ml_validation_tracker import ml_tracker
+            # Update any existing ML analysis run with the filename to use the database session_id
+            ml_tracker.update_session_id(old_session_id=display_name, new_session_id=session.id)
+        except Exception as ml_update_error:
+            print(f"Warning: Could not update ML tracking session_id: {ml_update_error}")
+
         return jsonify({
             'success': True,
             'message': f'Combined session saved with {well_count} wells',
@@ -3871,18 +3869,39 @@ def get_ml_validation_dashboard_data():
             app.logger.error(f"Error fetching pending runs: {str(e)}")
             # Continue with empty pending_runs list
         
+        # Get confirmed runs count for statistics
+        confirmed_count = 0
+        total_accuracy = 0.0
+        try:
+            # Create a new connection for confirmed runs stats
+            conn2 = mysql.connector.connect(**mysql_config)
+            cursor2 = conn2.cursor()
+            cursor2.execute("""
+                SELECT COUNT(*) as count, AVG(accuracy_percentage) as avg_acc
+                FROM ml_analysis_runs 
+                WHERE status = 'confirmed'
+            """)
+            result = cursor2.fetchone()
+            if result:
+                confirmed_count = result[0] or 0
+                total_accuracy = float(result[1] or 0.0)
+            cursor2.close()
+            conn2.close()
+        except Exception as e:
+            app.logger.error(f"Error getting confirmed runs stats: {str(e)}")
+            
         # Prepare dashboard response with required success field for frontend
         dashboard_data = {
             'success': True,  # Required by frontend JavaScript
             'statistics': {
                 'pending_count': len(pending_runs),
                 'pending_confirmation': len(pending_runs),  # Frontend expects this field name
-                'confirmed_count': 0,  # Will be populated with actual confirmed runs
-                'confirmed': 0,  # Alternative field name frontend may expect
+                'confirmed_count': confirmed_count,  # Actual confirmed runs count
+                'confirmed': confirmed_count,  # Alternative field name frontend may expect
                 'rejected': 0,  # Frontend expects this field
-                'total_runs': len(pending_runs),
-                'avg_accuracy': 88.5,  # Sample data
-                'average_accuracy': 0.885  # Frontend expects this field (as decimal)
+                'total_runs': len(pending_runs) + confirmed_count,
+                'avg_accuracy': total_accuracy,  # Real data from database
+                'average_accuracy': total_accuracy / 100.0 if total_accuracy > 0 else 0.0  # Frontend expects this field (as decimal)
             },
             'summary': {
                 'active_models': len([m for m in model_versions if m.get('version_number')]),
@@ -5163,9 +5182,9 @@ def confirm_ml_run():
     """Confirm or reject an ML validation run"""
     try:
         data = request.get_json()
-        run_id = data.get('run_id')
-        confirmed = data.get('confirmed')
-        user_id = data.get('user_id', 'user')
+        run_id = data.get('run_id') or data.get('run_log_id')  # Accept both names
+        confirmed = data.get('confirmed') or data.get('is_confirmed')  # Accept both names
+        user_id = data.get('user_id') or data.get('confirmed_by', 'user')  # Accept both names
         
         if not run_id:
             return jsonify({'success': False, 'message': 'Run ID required'}), 400
@@ -5225,6 +5244,60 @@ def confirm_ml_run():
         
     except Exception as e:
         app.logger.error(f"Error confirming ML run: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/ml-runs/delete', methods=['POST'])
+def delete_pending_ml_run():
+    """Delete a pending ML run"""
+    try:
+        data = request.get_json()
+        run_id = data.get('run_id')
+        
+        if not run_id:
+            return jsonify({'success': False, 'message': 'Missing run_id'}), 400
+        
+        # Get database configuration
+        mysql_config = {
+            'host': os.environ.get('MYSQL_HOST', 'localhost'),
+            'user': os.environ.get('MYSQL_USER', 'qpcr_user'),
+            'password': os.environ.get('MYSQL_PASSWORD', 'qpcr_password'),
+            'database': os.environ.get('MYSQL_DATABASE', 'qpcr_analysis')
+        }
+        
+        # Use pymysql for the deletion
+        conn = pymysql.connect(**mysql_config)
+        cursor = conn.cursor()
+        
+        try:
+            # Delete the pending run from ml_analysis_runs table (not ml_prediction_tracking)
+            cursor.execute("""
+                DELETE FROM ml_analysis_runs 
+                WHERE session_id = %s AND status = 'pending'
+            """, (run_id,))
+            
+            rows_affected = cursor.rowcount
+            
+            if rows_affected == 0:
+                return jsonify({
+                    'success': False, 
+                    'message': 'Run not found or already confirmed'
+                }), 404
+            
+            conn.commit()
+            
+            app.logger.info(f"Deleted pending ML run {run_id}")
+            
+            return jsonify({
+                'success': True,
+                'message': f'Successfully deleted pending run {run_id}'
+            })
+            
+        finally:
+            cursor.close()
+            conn.close()
+        
+    except Exception as e:
+        app.logger.error(f"Error deleting ML run: {str(e)}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
 if __name__ == '__main__':
