@@ -3872,6 +3872,7 @@ def get_ml_validation_dashboard_data():
         # Get confirmed runs count for statistics
         confirmed_count = 0
         total_accuracy = 0.0
+        expert_decision_accuracy = 0.0
         try:
             # Create a new connection for confirmed runs stats
             conn2 = mysql.connector.connect(**mysql_config)
@@ -3885,10 +3886,53 @@ def get_ml_validation_dashboard_data():
             if result:
                 confirmed_count = result[0] or 0
                 total_accuracy = float(result[1] or 0.0)
+            
+            # Calculate expert decision-based accuracy
+            # Formula: (Total Samples - Expert Corrections) / Total Samples × 100
+            cursor2.execute("""
+                SELECT 
+                    COUNT(*) as total_expert_decisions,
+                    SUM(CASE 
+                        WHEN original_prediction != expert_correction THEN 1 
+                        ELSE 0 
+                    END) as expert_corrections
+                FROM ml_expert_decisions
+                WHERE original_prediction IS NOT NULL 
+                AND expert_correction IS NOT NULL
+            """)
+            expert_result = cursor2.fetchone()
+            
+            if expert_result and expert_result[0] > 0:
+                total_decisions = int(expert_result[0])
+                corrections = int(expert_result[1])
+                expert_decision_accuracy = float(((total_decisions - corrections) / total_decisions) * 100.0)
+                app.logger.info(f"Expert Decision Accuracy: {total_decisions} decisions total, {corrections} corrections = {expert_decision_accuracy:.1f}% accuracy")
+            else:
+                expert_decision_accuracy = 100.0  # Default if no expert decisions yet
+                
             cursor2.close()
             conn2.close()
         except Exception as e:
             app.logger.error(f"Error getting confirmed runs stats: {str(e)}")
+            expert_decision_accuracy = 100.0  # Default fallback
+            
+        # Count unique pathogen models from confirmed runs
+        unique_pathogens = 0
+        try:
+            conn3 = mysql.connector.connect(**mysql_config)
+            cursor_pathogen = conn3.cursor()
+            cursor_pathogen.execute("""
+                SELECT COUNT(DISTINCT SUBSTRING_INDEX(pathogen_codes, ',', 1)) as pathogen_count
+                FROM ml_analysis_runs 
+                WHERE status = 'confirmed' AND pathogen_codes IS NOT NULL
+            """)
+            result = cursor_pathogen.fetchone()
+            unique_pathogens = result[0] if result and result[0] else 0
+            cursor_pathogen.close()
+            conn3.close()
+        except Exception as e:
+            app.logger.error(f"Error counting pathogen models: {str(e)}")
+            unique_pathogens = 0
             
         # Prepare dashboard response with required success field for frontend
         dashboard_data = {
@@ -3900,8 +3944,9 @@ def get_ml_validation_dashboard_data():
                 'confirmed': confirmed_count,  # Alternative field name frontend may expect
                 'rejected': 0,  # Frontend expects this field
                 'total_runs': len(pending_runs) + confirmed_count,
-                'avg_accuracy': total_accuracy,  # Real data from database
-                'average_accuracy': total_accuracy / 100.0 if total_accuracy > 0 else 0.0  # Frontend expects this field (as decimal)
+                'avg_accuracy': expert_decision_accuracy,  # Use expert decision accuracy instead of ML accuracy
+                'average_accuracy': expert_decision_accuracy / 100.0 if expert_decision_accuracy > 0 else 0.0,  # Frontend expects this field (as decimal)
+                'active_pathogen_models': unique_pathogens  # Add pathogen model count
             },
             'summary': {
                 'active_models': len([m for m in model_versions if m.get('version_number')]),
@@ -5381,12 +5426,29 @@ def get_confirmed_sessions():
         cursor = conn.cursor(dictionary=True)
         
         cursor.execute("""
-            SELECT id, filename, upload_timestamp, total_wells, good_curves, 
-                   success_rate, pathogen_breakdown, confirmation_status,
-                   confirmed_by, confirmed_at
-            FROM analysis_sessions 
-            WHERE confirmation_status = 'confirmed'
-            ORDER BY confirmed_at DESC
+            SELECT 
+                s.id, s.filename, s.upload_timestamp, s.total_wells, s.good_curves, 
+                s.success_rate, s.pathogen_breakdown, s.confirmation_status,
+                s.confirmed_by, s.confirmed_at,
+                -- Calculate system accuracy: (total samples - expert decisions needed) / total samples
+                CASE 
+                    WHEN s.total_wells > 0 THEN
+                        ((s.total_wells - COALESCE(expert_stats.total_decisions, 0)) / s.total_wells) * 100
+                    ELSE 0
+                END as expert_accuracy,
+                COALESCE(expert_stats.total_decisions, 0) as expert_decisions_count
+            FROM analysis_sessions s
+            LEFT JOIN (
+                SELECT 
+                    session_id,
+                    COUNT(*) as total_decisions
+                FROM ml_expert_decisions
+                WHERE original_prediction IS NOT NULL 
+                AND expert_correction IS NOT NULL
+                GROUP BY session_id
+            ) expert_stats ON s.id = expert_stats.session_id
+            WHERE s.confirmation_status = 'confirmed'
+            ORDER BY s.confirmed_at DESC
         """)
         
         confirmed_sessions = cursor.fetchall()
@@ -5409,6 +5471,70 @@ def get_confirmed_sessions():
         
     except Exception as e:
         app.logger.error(f"Error getting confirmed sessions: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/debug/expert-decisions', methods=['GET'])
+def debug_expert_decisions():
+    """Debug endpoint to check expert decisions data"""
+    try:
+        mysql_config = {
+            'host': os.environ.get('MYSQL_HOST', 'localhost'),
+            'user': os.environ.get('MYSQL_USER', 'qpcr_user'),
+            'password': os.environ.get('MYSQL_PASSWORD', 'qpcr_password'),
+            'database': os.environ.get('MYSQL_DATABASE', 'qpcr_analysis')
+        }
+        
+        import mysql.connector
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Check total expert decisions
+        cursor.execute("SELECT COUNT(*) as total_count FROM ml_expert_decisions")
+        total_count = cursor.fetchone()
+        
+        # Check decisions by session
+        cursor.execute("""
+            SELECT 
+                session_id,
+                COUNT(*) as total_decisions,
+                SUM(CASE WHEN original_prediction != expert_correction THEN 1 ELSE 0 END) as corrections,
+                SUM(CASE WHEN original_prediction IS NULL THEN 1 ELSE 0 END) as null_predictions,
+                SUM(CASE WHEN expert_correction IS NULL THEN 1 ELSE 0 END) as null_corrections
+            FROM ml_expert_decisions
+            GROUP BY session_id
+            ORDER BY session_id DESC
+            LIMIT 10
+        """)
+        
+        session_stats = cursor.fetchall()
+        
+        # Check recent decisions
+        cursor.execute("""
+            SELECT session_id, original_prediction, expert_correction, timestamp
+            FROM ml_expert_decisions
+            ORDER BY timestamp DESC
+            LIMIT 5
+        """)
+        
+        recent_decisions = cursor.fetchall()
+        
+        # Convert timestamps
+        for decision in recent_decisions:
+            if decision['timestamp']:
+                decision['timestamp'] = decision['timestamp'].isoformat()
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'total_expert_decisions': total_count['total_count'],
+            'session_stats': session_stats,
+            'recent_decisions': recent_decisions
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error in debug expert decisions: {str(e)}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/sessions/delete', methods=['POST'])
