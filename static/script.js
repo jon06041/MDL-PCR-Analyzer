@@ -4607,6 +4607,7 @@ async function displayAnalysisResults(results) {
         setTimeout(async () => {
             try {
                 await window.mlFeedbackInterface.checkForMLNotification();
+                console.log("DEBUG: Called checkForMLNotification after analysis results");
             } catch (error) {
                 console.log('ML notification check failed:', error);
             }
