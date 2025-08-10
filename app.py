@@ -5246,6 +5246,245 @@ def confirm_ml_run():
         app.logger.error(f"Error confirming ML run: {str(e)}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
+@app.route('/api/sessions/confirm', methods=['POST'])
+def confirm_analysis_session():
+    """Confirm or reject an analysis session (rule-based or ML)"""
+    try:
+        data = request.get_json()
+        session_id = data.get('session_id')
+        confirmed = data.get('confirmed', True)
+        user_id = data.get('confirmed_by', 'user')
+        
+        if not session_id:
+            return jsonify({'success': False, 'message': 'Session ID required'}), 400
+        
+        # Get database configuration
+        mysql_config = {
+            'host': os.environ.get('MYSQL_HOST', 'localhost'),
+            'user': os.environ.get('MYSQL_USER', 'qpcr_user'),
+            'password': os.environ.get('MYSQL_PASSWORD', 'qpcr_password'),
+            'database': os.environ.get('MYSQL_DATABASE', 'qpcr_analysis')
+        }
+        
+        import mysql.connector
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor()
+        
+        # Check if session exists
+        cursor.execute("SELECT id, filename FROM analysis_sessions WHERE id = %s", (session_id,))
+        session = cursor.fetchone()
+        
+        if not session:
+            return jsonify({'success': False, 'message': f'Session {session_id} not found'}), 404
+        
+        session_filename = session[1]
+        
+        if confirmed:
+            # Confirm the session
+            cursor.execute("""
+                UPDATE analysis_sessions 
+                SET confirmation_status = 'confirmed',
+                    confirmed_by = %s,
+                    confirmed_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+            """, (user_id, session_id))
+            
+            message = f'Session {session_id} ({session_filename}) successfully confirmed'
+            app.logger.info(message)
+        else:
+            # Reject the session
+            cursor.execute("""
+                UPDATE analysis_sessions 
+                SET confirmation_status = 'rejected',
+                    confirmed_by = %s,
+                    confirmed_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+            """, (user_id, session_id))
+            
+            message = f'Session {session_id} ({session_filename}) successfully rejected'
+            app.logger.info(message)
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': message,
+            'session_id': session_id,
+            'status': 'confirmed' if confirmed else 'rejected'
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error confirming session: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/sessions/pending', methods=['GET'])
+def get_pending_sessions():
+    """Get all pending analysis sessions"""
+    try:
+        mysql_config = {
+            'host': os.environ.get('MYSQL_HOST', 'localhost'),
+            'user': os.environ.get('MYSQL_USER', 'qpcr_user'),
+            'password': os.environ.get('MYSQL_PASSWORD', 'qpcr_password'),
+            'database': os.environ.get('MYSQL_DATABASE', 'qpcr_analysis')
+        }
+        
+        import mysql.connector
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("""
+            SELECT id, filename, upload_timestamp, total_wells, good_curves, 
+                   success_rate, pathogen_breakdown, confirmation_status,
+                   confirmed_by, confirmed_at
+            FROM analysis_sessions 
+            WHERE confirmation_status = 'pending'
+            ORDER BY upload_timestamp DESC
+        """)
+        
+        pending_sessions = cursor.fetchall()
+        
+        # Convert timestamps to strings for JSON serialization
+        for session in pending_sessions:
+            if session['upload_timestamp']:
+                session['upload_timestamp'] = session['upload_timestamp'].isoformat()
+            if session['confirmed_at']:
+                session['confirmed_at'] = session['confirmed_at'].isoformat()
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'pending_sessions': pending_sessions,
+            'count': len(pending_sessions)
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error getting pending sessions: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/sessions/confirmed', methods=['GET'])
+def get_confirmed_sessions():
+    """Get all confirmed analysis sessions"""
+    try:
+        mysql_config = {
+            'host': os.environ.get('MYSQL_HOST', 'localhost'),
+            'user': os.environ.get('MYSQL_USER', 'qpcr_user'),
+            'password': os.environ.get('MYSQL_PASSWORD', 'qpcr_password'),
+            'database': os.environ.get('MYSQL_DATABASE', 'qpcr_analysis')
+        }
+        
+        import mysql.connector
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("""
+            SELECT id, filename, upload_timestamp, total_wells, good_curves, 
+                   success_rate, pathogen_breakdown, confirmation_status,
+                   confirmed_by, confirmed_at
+            FROM analysis_sessions 
+            WHERE confirmation_status = 'confirmed'
+            ORDER BY confirmed_at DESC
+        """)
+        
+        confirmed_sessions = cursor.fetchall()
+        
+        # Convert timestamps to strings for JSON serialization
+        for session in confirmed_sessions:
+            if session['upload_timestamp']:
+                session['upload_timestamp'] = session['upload_timestamp'].isoformat()
+            if session['confirmed_at']:
+                session['confirmed_at'] = session['confirmed_at'].isoformat()
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'confirmed_sessions': confirmed_sessions,
+            'count': len(confirmed_sessions)
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error getting confirmed sessions: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/sessions/delete', methods=['POST'])
+def delete_pending_session():
+    """Delete a pending analysis session"""
+    try:
+        data = request.get_json()
+        session_id = data.get('session_id')
+        
+        if not session_id:
+            return jsonify({'success': False, 'message': 'Missing session_id'}), 400
+        
+        # Get database configuration
+        mysql_config = {
+            'host': os.environ.get('MYSQL_HOST', 'localhost'),
+            'user': os.environ.get('MYSQL_USER', 'qpcr_user'),
+            'password': os.environ.get('MYSQL_PASSWORD', 'qpcr_password'),
+            'database': os.environ.get('MYSQL_DATABASE', 'qpcr_analysis')
+        }
+        
+        import mysql.connector
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor()
+        
+        try:
+            # First check if session exists and is pending
+            cursor.execute("""
+                SELECT id, filename, confirmation_status FROM analysis_sessions 
+                WHERE id = %s
+            """, (session_id,))
+            
+            session = cursor.fetchone()
+            
+            if not session:
+                return jsonify({
+                    'success': False, 
+                    'message': f'Session {session_id} not found'
+                }), 404
+            
+            if session[2] != 'pending':
+                return jsonify({
+                    'success': False, 
+                    'message': f'Can only delete pending sessions. Session {session_id} is {session[2]}'
+                }), 400
+            
+            # Delete associated well results first
+            cursor.execute("DELETE FROM well_results WHERE session_id = %s", (session_id,))
+            
+            # Delete the session
+            cursor.execute("DELETE FROM analysis_sessions WHERE id = %s", (session_id,))
+            
+            rows_affected = cursor.rowcount
+            
+            if rows_affected == 0:
+                return jsonify({
+                    'success': False, 
+                    'message': f'Failed to delete session {session_id}'
+                }), 500
+            
+            conn.commit()
+            
+            app.logger.info(f"Deleted pending session {session_id} ({session[1]})")
+            
+            return jsonify({
+                'success': True,
+                'message': f'Successfully deleted pending session {session_id} ({session[1]})'
+            })
+            
+        finally:
+            cursor.close()
+            conn.close()
+        
+    except Exception as e:
+        app.logger.error(f"Error deleting session: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 @app.route('/api/ml-runs/delete', methods=['POST'])
 def delete_pending_ml_run():
     """Delete a pending ML run"""

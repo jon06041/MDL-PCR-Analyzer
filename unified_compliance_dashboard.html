@@ -1388,30 +1388,85 @@
         // ML Validation Functions - Enhanced with version control and pathogen models
         async function loadMLValidationData() {
             try {
-                console.log('🔍 Loading ML validation data for unified dashboard...');
+                console.log('🔍 Loading session validation data for unified dashboard...');
 
-                // Load statistics and dashboard data from the main API
-                const dashboardResponse = await fetch('/api/ml-validation/dashboard-data');
-                if (dashboardResponse.ok) {
-                    const dashboardData = await dashboardResponse.json();
-                    console.log('📊 Dashboard data received:', dashboardData);
+                // Load pending sessions from the new session endpoint
+                const pendingResponse = await fetch('/api/sessions/pending');
+                let pendingCount = 0;
+                if (pendingResponse.ok) {
+                    const pendingData = await pendingResponse.json();
+                    console.log('📊 Pending sessions data received:', pendingData);
                     
-                    if (dashboardData.success) {
-                        updateMLStatistics(dashboardData.statistics);
-                        updatePendingRuns(dashboardData);
-                        updateConfirmedRuns(dashboardData);
-                        updatePathogenModels(dashboardData);
+                    if (pendingData.success) {
+                        pendingCount = pendingData.count || 0;
+                        updatePendingRuns(pendingData);
                     } else {
-                        console.error('❌ Dashboard API error:', dashboardData.error);
-                        showErrorInMLSection('mlPendingRunsList', dashboardData.error || 'Unknown error');
+                        console.error('❌ Pending sessions API error:', pendingData.message);
+                        showErrorInMLSection('mlPendingRunsList', pendingData.message || 'Unknown error');
                     }
                 } else {
-                    console.error('❌ Dashboard API request failed:', dashboardResponse.status);
-                    showErrorInMLSection('mlPendingRunsList', `API request failed: ${dashboardResponse.status}`);
+                    console.error('❌ Pending sessions API request failed:', pendingResponse.status);
+                    showErrorInMLSection('mlPendingRunsList', `API request failed: ${pendingResponse.status}`);
                 }
+
+                // Load confirmed sessions from the new session endpoint
+                const confirmedResponse = await fetch('/api/sessions/confirmed');
+                let confirmedCount = 0;
+                if (confirmedResponse.ok) {
+                    const confirmedData = await confirmedResponse.json();
+                    console.log('📊 Confirmed sessions data received:', confirmedData);
+                    
+                    if (confirmedData.success) {
+                        confirmedCount = confirmedData.count || 0;
+                        updateConfirmedRuns(confirmedData);
+                    } else {
+                        console.error('❌ Confirmed sessions API error:', confirmedData.message);
+                        showErrorInMLSection('mlConfirmedRunsList', confirmedData.message || 'Unknown error');
+                    }
+                } else {
+                    console.error('❌ Confirmed sessions API request failed:', confirmedResponse.status);
+                    showErrorInMLSection('mlConfirmedRunsList', `API request failed: ${confirmedResponse.status}`);
+                }
+
+                // Update session statistics
+                updateSessionStatistics(pendingCount, confirmedCount);
+
+                // Load ML statistics (keep this for ML metrics)
+                try {
+                    const statsResponse = await fetch('/api/ml-validation/dashboard-data');
+                    if (statsResponse.ok) {
+                        const statsData = await statsResponse.json();
+                        if (statsData.success) {
+                            updateMLStatistics(statsData.statistics);
+                            updatePathogenModels(statsData);
+                        }
+                    }
+                } catch (e) {
+                    console.log('ML statistics not available:', e.message);
+                }
+
             } catch (error) {
-                console.error('🚨 Error loading ML validation data:', error);
+                console.error('🚨 Error loading session validation data:', error);
                 showErrorInMLSection('mlPendingRunsList', `Connection error: ${error.message}`);
+            }
+        }
+
+        function updateSessionStatistics(pendingCount, confirmedCount) {
+            // Update the main statistics with session counts
+            const mlPendingCountEl = document.getElementById('mlPendingCount');
+            if (mlPendingCountEl) {
+                mlPendingCountEl.textContent = pendingCount;
+            }
+            
+            const mlConfirmedCountEl = document.getElementById('mlConfirmedCount');
+            if (mlConfirmedCountEl) {
+                mlConfirmedCountEl.textContent = confirmedCount;
+            }
+            
+            // Update tab count
+            const pendingTabCount = document.getElementById('mlPendingTabCount');
+            if (pendingTabCount) {
+                pendingTabCount.textContent = pendingCount;
             }
         }
 
@@ -1471,50 +1526,50 @@
                 return;
             }
             
-            const runs = response.pending_runs || response; // Handle both nested and flat arrays
+            const sessions = response.pending_sessions || response; // Handle both nested and flat arrays
             
-            if (!runs || !Array.isArray(runs) || runs.length === 0) {
-                console.log('ℹ️ No pending runs found for unified dashboard');
+            if (!sessions || !Array.isArray(sessions) || sessions.length === 0) {
+                console.log('ℹ️ No pending sessions found for unified dashboard');
                 container.innerHTML = `
                     <div class="text-center text-muted py-4">
                         <i class="fas fa-check-circle fa-3x mb-3"></i>
-                        <h5>No Pending Runs</h5>
-                        <p>All ML runs have been reviewed and confirmed.</p>
-                        <small class="text-muted">Found ${runs ? runs.length : 0} pending runs</small>
+                        <h5>No Pending Sessions</h5>
+                        <p>All analysis sessions have been reviewed and confirmed.</p>
+                        <small class="text-muted">Found ${sessions ? sessions.length : 0} pending sessions</small>
                     </div>
                 `;
                 return;
             }
 
-            console.log(`✅ Displaying ${runs.length} pending runs in unified dashboard`);
-            container.innerHTML = runs.map(run => `
+            console.log(`✅ Displaying ${sessions.length} pending sessions in unified dashboard`);
+            container.innerHTML = sessions.map(session => `
                 <div class="card mb-3 border-warning">
                     <div class="card-body">
                         <div class="row align-items-center">
                             <div class="col-md-8">
                                 <h6 class="card-title mb-2">
-                                    <i class="fas fa-brain text-primary"></i> ${run.run_id || 'Unknown Run'}
+                                    <i class="fas fa-flask text-primary"></i> Session ${session.id}
                                 </h6>
                                 <div class="run-details">
-                                    <p class="mb-1"><strong>File:</strong> ${run.file_name || 'Unknown File'}</p>
-                                    <p class="mb-1"><strong>Pathogen:</strong> 
-                                        <span class="badge bg-info">${run.pathogen_code || 'Unknown'}</span>
+                                    <p class="mb-1"><strong>File:</strong> ${session.filename || 'Unknown File'}</p>
+                                    <p class="mb-1"><strong>Pathogen Info:</strong> 
+                                        <span class="badge bg-info">${session.pathogen_breakdown || 'Unknown'}</span>
                                     </p>
-                                    <p class="mb-1"><strong>Samples:</strong> ${run.completed_samples || 0}/${run.total_samples || 0}</p>
-                                    <p class="mb-1"><strong>Logged:</strong> ${run.logged_at ? new Date(run.logged_at).toLocaleString() : 'N/A'}</p>
-                                    ${run.notes ? `<small class="text-muted"><strong>Notes:</strong> ${run.notes}</small>` : ''}
+                                    <p class="mb-1"><strong>Wells:</strong> ${session.good_curves || 0}/${session.total_wells || 0} (${(session.success_rate || 0).toFixed(1)}%)</p>
+                                    <p class="mb-1"><strong>Created:</strong> ${session.upload_timestamp ? new Date(session.upload_timestamp).toLocaleString() : 'N/A'}</p>
+                                    <small class="text-muted"><strong>Status:</strong> ${session.confirmation_status}</small>
                                 </div>
                             </div>
                             <div class="col-md-4 text-end">
                                 <div class="confirmation-question mb-3">
-                                    <small class="text-muted">Pending ML validation run</small>
+                                    <small class="text-muted">Pending analysis session</small>
                                 </div>
                                 <div class="btn-group-vertical d-grid gap-2">
                                     <small class="text-info mb-2">
                                         <i class="fas fa-info-circle"></i> 
-                                        Confirm this run from the main analysis page
+                                        Confirm this session from the main analysis page
                                     </small>
-                                    <button class="btn btn-outline-danger btn-sm" onclick="deleteRun('${run.run_id || 'unknown'}')">
+                                    <button class="btn btn-outline-danger btn-sm" onclick="deleteSession('${session.id}')">
                                         <i class="fas fa-trash"></i> Delete
                                     </button>
                                 </div>
@@ -1528,15 +1583,15 @@
         function updateConfirmedRuns(response) {
             const container = document.getElementById('mlConfirmedRunsList');
             
-            // Extract the actual runs array from the API response
-            const runs = response.confirmed_runs || [];
+            // Extract the actual sessions array from the API response
+            const sessions = response.confirmed_sessions || [];
             
-            if (!Array.isArray(runs) || runs.length === 0) {
+            if (!Array.isArray(sessions) || sessions.length === 0) {
                 container.innerHTML = `
                     <div class="text-center text-muted py-4">
                         <i class="fas fa-history fa-3x mb-3"></i>
-                        <h5>No Confirmed Runs</h5>
-                        <p>Confirmed ML validation runs will appear here.</p>
+                        <h5>No Confirmed Sessions</h5>
+                        <p>Confirmed analysis sessions will appear here.</p>
                     </div>
                 `;
                 return;
@@ -1547,27 +1602,29 @@
                     <table class="table table-hover">
                         <thead class="table-light">
                             <tr>
-                                <th><i class="fas fa-id-badge"></i> Run ID</th>
+                                <th><i class="fas fa-id-badge"></i> Session ID</th>
                                 <th><i class="fas fa-file"></i> File</th>
-                                <th><i class="fas fa-virus"></i> Pathogen</th>
-                                <th><i class="fas fa-vial"></i> Samples</th>
-                                <th><i class="fas fa-percentage"></i> Accuracy</th>
+                                <th><i class="fas fa-virus"></i> Pathogen Info</th>
+                                <th><i class="fas fa-vial"></i> Wells</th>
+                                <th><i class="fas fa-percentage"></i> Success Rate</th>
+                                <th><i class="fas fa-user"></i> Confirmed By</th>
                                 <th><i class="fas fa-calendar"></i> Confirmed</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${runs.map(run => `
+                            ${sessions.map(session => `
                                 <tr>
-                                    <td><strong>${run.run_id}</strong></td>
-                                    <td>${run.file_name}</td>
-                                    <td><span class="badge bg-info">${run.pathogen_code || 'N/A'}</span></td>
-                                    <td>${run.completed_samples || 0}/${run.total_samples || 0}</td>
+                                    <td><strong>${session.id}</strong></td>
+                                    <td>${session.filename}</td>
+                                    <td><span class="badge bg-info">${session.pathogen_breakdown || 'N/A'}</span></td>
+                                    <td>${session.good_curves || 0}/${session.total_wells || 0}</td>
                                     <td>
-                                        <span class="badge ${run.accuracy_score >= 90 ? 'bg-success' : run.accuracy_score >= 70 ? 'bg-warning' : 'bg-danger'}">
-                                            ${run.accuracy_score ? run.accuracy_score.toFixed(1) + '%' : 'N/A'}
+                                        <span class="badge ${session.success_rate >= 90 ? 'bg-success' : session.success_rate >= 70 ? 'bg-warning' : 'bg-danger'}">
+                                            ${session.success_rate ? session.success_rate.toFixed(1) + '%' : 'N/A'}
                                         </span>
                                     </td>
-                                    <td><small>${new Date(run.confirmed_at).toLocaleString()}</small></td>
+                                    <td><small>${session.confirmed_by || 'N/A'}</small></td>
+                                    <td><small>${session.confirmed_at ? new Date(session.confirmed_at).toLocaleString() : 'N/A'}</small></td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -1719,6 +1776,37 @@
             }
         }
 
+        // Delete a pending analysis session
+        async function deleteSession(sessionId) {
+            if (!confirm('Are you sure you want to delete this pending session? This action cannot be undone.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/sessions/delete', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        session_id: sessionId
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    showAlert('success', `Session ${sessionId} deleted successfully!`);
+                    loadMLValidationData(); // Refresh all data
+                } else {
+                    showAlert('danger', `Error: ${result.message || result.error}`);
+                }
+            } catch (error) {
+                console.error('Error deleting session:', error);
+                showAlert('danger', 'Error deleting session. Please try again.');
+            }
+        }
+
         // Load ML validation data when the ML tab is activated
         document.addEventListener('DOMContentLoaded', function() {
             const mlTab = document.getElementById('ml-validation-tab');
@@ -1727,6 +1815,37 @@
                     loadMLValidationData();
                 });
             }
+            
+            // Handle URL fragments to navigate to specific tabs
+            function handleURLFragment() {
+                const hash = window.location.hash;
+                if (hash === '#ml-confirmed') {
+                    // Activate the ML validation main tab first
+                    const mlMainTab = document.getElementById('ml-validation-tab');
+                    if (mlMainTab) {
+                        const mlMainTabInstance = new bootstrap.Tab(mlMainTab);
+                        mlMainTabInstance.show();
+                        
+                        // Then activate the confirmed runs sub-tab
+                        setTimeout(() => {
+                            const confirmedTab = document.getElementById('ml-confirmed-tab');
+                            if (confirmedTab) {
+                                const confirmedTabInstance = new bootstrap.Tab(confirmedTab);
+                                confirmedTabInstance.show();
+                                
+                                // Load ML validation data if not already loaded
+                                loadMLValidationData();
+                            }
+                        }, 100);
+                    }
+                }
+            }
+            
+            // Handle fragment on page load
+            handleURLFragment();
+            
+            // Handle fragment on hash change (if user navigates with back/forward)
+            window.addEventListener('hashchange', handleURLFragment);
         });
     </script>
 </body>

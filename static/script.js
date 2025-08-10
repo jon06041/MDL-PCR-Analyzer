@@ -15111,20 +15111,17 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             
             try {
-                // Send confirmation to ML validation system
-                console.log(`✅ Confirming run for session ${window.currentSessionId}...`);
+                // Send confirmation to session validation system (new approach)
+                console.log(`✅ Confirming session ${window.currentSessionId}...`);
                 
-                // Prepare the confirmation data for the existing ML runs confirm endpoint
+                // Use the new session-based confirmation endpoint
                 const confirmationData = {
-                    run_id: window.currentSessionId,
-                    run_log_id: window.currentSessionId,  // Send both field names
+                    session_id: window.currentSessionId,
                     confirmed: true,
-                    is_confirmed: true,  // Send both field names
-                    user_id: 'analyst',
-                    confirmed_by: 'analyst'  // Send both field names
+                    confirmed_by: 'analyst'
                 };
                 
-                const response = await fetch('/api/ml-runs/confirm', {
+                const response = await fetch('/api/sessions/confirm', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -15134,20 +15131,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 if (response.ok) {
                     const result = await response.json();
-                    alert('✅ Run confirmed successfully!\n\nThe analysis has been moved to the confirmed runs section in the ML Validation dashboard.');
-                    console.log('✅ Run confirmation successful:', result);
+                    alert('✅ Session confirmed successfully!\n\nThe analysis has been moved to the confirmed section in the dashboard.');
+                    console.log('✅ Session confirmation successful:', result);
                     
-                    // Redirect to confirmed section of dashboard
-                    window.open('/unified-compliance-dashboard', '_blank');
+                    // Redirect to confirmed section of unified compliance dashboard
+                    window.open('/unified-compliance-dashboard#ml-confirmed', '_blank');
                 } else {
                     const errorData = await response.json().catch(() => ({}));
-                    console.error('❌ Run confirmation failed:', errorData);
-                    alert('❌ Failed to confirm run: ' + (errorData.message || errorData.error || 'Unknown error'));
+                    console.error('❌ Session confirmation failed:', errorData);
+                    alert('❌ Failed to confirm session: ' + (errorData.message || errorData.error || 'Unknown error'));
                 }
                 
             } catch (error) {
-                console.error('❌ Error confirming run:', error);
-                alert('❌ Failed to confirm run: ' + error.message);
+                console.error('❌ Error confirming session:', error);
+                alert('❌ Failed to confirm session: ' + error.message);
             }
         });
     }
