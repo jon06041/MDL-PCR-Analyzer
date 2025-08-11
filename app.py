@@ -5665,6 +5665,60 @@ def get_confirmed_sessions():
         app.logger.error(f"✗ Full traceback: {traceback.format_exc()}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
+@app.route('/api/fix/railway-validation-status', methods=['GET'])
+def fix_railway_validation_status():
+    """Fix validation_status column size in unified_compliance_events"""
+    try:
+        from sqlalchemy import create_engine, text
+        
+        if not mysql_configured:
+            return jsonify({'error': 'MySQL not configured'}), 503
+        
+        # Build connection URL
+        if mysql_config.get('url'):
+            db_url = mysql_config['url']
+            if db_url.startswith('mysql://'):
+                db_url = db_url.replace('mysql://', 'mysql+pymysql://', 1)
+        else:
+            db_url = f"mysql+pymysql://{mysql_config['user']}:{mysql_config['password']}@{mysql_config['host']}:{mysql_config['port']}/{mysql_config['database']}?charset=utf8mb4"
+        
+        engine = create_engine(db_url)
+        results = []
+        
+        with engine.connect() as conn:
+            # Check current column definition
+            result = conn.execute(text("SHOW COLUMNS FROM unified_compliance_events LIKE 'validation_status'"))
+            current_def = result.fetchone()
+            if current_def:
+                results.append(f"Current validation_status definition: {current_def}")
+            
+            # Expand validation_status column to VARCHAR(50)
+            try:
+                conn.execute(text("ALTER TABLE unified_compliance_events MODIFY COLUMN validation_status VARCHAR(50)"))
+                conn.commit()
+                results.append("✅ Expanded validation_status column to VARCHAR(50)")
+            except Exception as e:
+                results.append(f"❌ Failed to expand validation_status column: {str(e)}")
+            
+            # Verify the change
+            result = conn.execute(text("SHOW COLUMNS FROM unified_compliance_events LIKE 'validation_status'"))
+            new_def = result.fetchone()
+            if new_def:
+                results.append(f"New validation_status definition: {new_def}")
+            
+        return jsonify({
+            'success': True,
+            'results': results,
+            'message': 'validation_status column fix completed'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'error_type': type(e).__name__
+        }), 500
+
 @app.route('/api/fix/railway-evidence-trigger', methods=['GET'])
 def fix_railway_evidence_trigger():
     """Trigger evidence generation for confirmed sessions in Railway"""
