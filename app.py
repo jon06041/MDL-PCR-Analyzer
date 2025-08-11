@@ -5665,7 +5665,7 @@ def get_confirmed_sessions():
         app.logger.error(f"✗ Full traceback: {traceback.format_exc()}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
-@app.route('/api/fix/railway-schema', methods=['POST'])
+@app.route('/api/fix/railway-schema', methods=['GET'])
 def fix_railway_schema():
     """Fix Railway database schema by adding missing columns"""
     try:
