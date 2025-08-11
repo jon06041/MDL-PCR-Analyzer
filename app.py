@@ -5502,10 +5502,11 @@ def get_pending_sessions():
             return jsonify({'success': True, 'pending_sessions': [], 'count': 0})
 
         app.logger.info("✓ analysis_sessions table exists, executing pending sessions query")
-        # Use very simple query to avoid Railway constraint issues
+        # Restore pathogen_breakdown but handle it safely for Railway
         cursor.execute("""
             SELECT id, filename, upload_timestamp, total_wells, good_curves, 
-                   success_rate, confirmation_status, confirmed_by, confirmed_at
+                   success_rate, pathogen_breakdown, confirmation_status, 
+                   confirmed_by, confirmed_at
             FROM analysis_sessions 
             WHERE confirmation_status = 'pending'
             ORDER BY upload_timestamp DESC
@@ -5515,26 +5516,27 @@ def get_pending_sessions():
         pending_sessions = cursor.fetchall()
         app.logger.info(f"✓ Found {len(pending_sessions)} pending sessions")
         
-        # Convert timestamps to strings for JSON serialization
+        # Convert timestamps and handle JSON fields safely for Railway
         for session in pending_sessions:
             try:
                 if session['upload_timestamp']:
                     session['upload_timestamp'] = session['upload_timestamp'].isoformat()
                 if session['confirmed_at']:
                     session['confirmed_at'] = session['confirmed_at'].isoformat()
-                # Handle any JSON fields safely
-                if 'pathogen_breakdown' in session and session['pathogen_breakdown']:
-                    if isinstance(session['pathogen_breakdown'], str):
-                        # Already a string, keep as is
-                        pass
-                    else:
-                        # Convert to string if it's an object
+                # Handle pathogen_breakdown safely - Railway might return it as bytes or different format
+                if session.get('pathogen_breakdown'):
+                    if isinstance(session['pathogen_breakdown'], (bytes, bytearray)):
+                        session['pathogen_breakdown'] = session['pathogen_breakdown'].decode('utf-8')
+                    elif not isinstance(session['pathogen_breakdown'], str):
                         session['pathogen_breakdown'] = str(session['pathogen_breakdown'])
+                else:
+                    session['pathogen_breakdown'] = None
             except Exception as convert_error:
                 app.logger.error(f"✗ Error converting session data: {convert_error}")
                 # Set problematic fields to safe defaults
                 session['upload_timestamp'] = None
                 session['confirmed_at'] = None
+                session['pathogen_breakdown'] = None
         
         cursor.close()
         conn.close()
@@ -5606,7 +5608,8 @@ def get_confirmed_sessions():
         app.logger.info("Executing confirmed sessions query")
         cursor.execute("""
             SELECT id, filename, upload_timestamp, total_wells, good_curves, 
-                   success_rate, confirmation_status, confirmed_by, confirmed_at
+                   success_rate, pathogen_breakdown, confirmation_status,
+                   confirmed_by, confirmed_at
             FROM analysis_sessions 
             WHERE confirmation_status = 'confirmed'
             ORDER BY confirmed_at DESC
@@ -5616,26 +5619,27 @@ def get_confirmed_sessions():
         confirmed_sessions = cursor.fetchall()
         app.logger.info(f"✓ Found {len(confirmed_sessions)} confirmed sessions")
         
-        # Convert timestamps to strings for JSON serialization
+        # Convert timestamps and handle JSON fields safely for Railway
         for session in confirmed_sessions:
             try:
                 if session['upload_timestamp']:
                     session['upload_timestamp'] = session['upload_timestamp'].isoformat()
                 if session['confirmed_at']:
                     session['confirmed_at'] = session['confirmed_at'].isoformat()
-                # Handle any JSON fields safely
-                if 'pathogen_breakdown' in session and session['pathogen_breakdown']:
-                    if isinstance(session['pathogen_breakdown'], str):
-                        # Already a string, keep as is
-                        pass
-                    else:
-                        # Convert to string if it's an object
+                # Handle pathogen_breakdown safely - Railway might return it as bytes or different format
+                if session.get('pathogen_breakdown'):
+                    if isinstance(session['pathogen_breakdown'], (bytes, bytearray)):
+                        session['pathogen_breakdown'] = session['pathogen_breakdown'].decode('utf-8')
+                    elif not isinstance(session['pathogen_breakdown'], str):
                         session['pathogen_breakdown'] = str(session['pathogen_breakdown'])
+                else:
+                    session['pathogen_breakdown'] = None
             except Exception as convert_error:
                 app.logger.error(f"✗ Error converting session data: {convert_error}")
                 # Set problematic fields to safe defaults
                 session['upload_timestamp'] = None
                 session['confirmed_at'] = None
+                session['pathogen_breakdown'] = None
         
         cursor.close()
         conn.close()
