@@ -5455,7 +5455,10 @@ def get_pending_sessions():
     try:
         # Use Railway-compatible mysql.connector config
         if not mysql_configured:
+            app.logger.error("MySQL not configured for pending sessions")
             return jsonify({'error': 'MySQL not configured'}), 503
+        
+        app.logger.info(f"Getting pending sessions with config: host={mysql_config.get('host')}, db={mysql_config.get('database')}")
         
         # Create mysql.connector compatible config from global mysql_config
         connector_config = {
@@ -5465,13 +5468,26 @@ def get_pending_sessions():
             'password': mysql_config['password'],
             'database': mysql_config['database'],
             'charset': mysql_config.get('charset', 'utf8mb4'),
-            'autocommit': True
+            'autocommit': True,
+            'use_unicode': True,
+            'collation': 'utf8mb4_unicode_ci'
         }
             
         import mysql.connector
+        app.logger.info("Attempting mysql.connector connection for pending sessions")
         conn = mysql.connector.connect(**connector_config)
         cursor = conn.cursor(dictionary=True)
         
+        # Test table exists first
+        cursor.execute("SHOW TABLES LIKE 'analysis_sessions'")
+        table_exists = cursor.fetchone()
+        if not table_exists:
+            app.logger.error("analysis_sessions table does not exist")
+            cursor.close()
+            conn.close()
+            return jsonify({'success': True, 'pending_sessions': [], 'count': 0})
+
+        app.logger.info("Table exists, executing pending sessions query")
         cursor.execute("""
             SELECT id, filename, upload_timestamp, total_wells, good_curves, 
                    success_rate, pathogen_breakdown, confirmation_status,
@@ -5480,8 +5496,10 @@ def get_pending_sessions():
             WHERE confirmation_status = 'pending'
             ORDER BY upload_timestamp DESC
         """)
+        app.logger.info("Query executed successfully")
         
         pending_sessions = cursor.fetchall()
+        app.logger.info(f"Found {len(pending_sessions)} pending sessions")
         
         # Convert timestamps to strings for JSON serialization
         for session in pending_sessions:
@@ -5499,6 +5517,12 @@ def get_pending_sessions():
             'count': len(pending_sessions)
         })
         
+    except mysql.connector.Error as mysql_error:
+        app.logger.error(f"MySQL connector error in pending sessions: {str(mysql_error)}")
+        return jsonify({'success': False, 'message': f'Database error: {str(mysql_error)}'}), 500
+    except ImportError as import_error:
+        app.logger.error(f"Import error for mysql.connector: {str(import_error)}")
+        return jsonify({'success': False, 'message': f'Database driver error: {str(import_error)}'}), 500
     except Exception as e:
         app.logger.error(f"Error getting pending sessions: {str(e)}")
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -5526,33 +5550,20 @@ def get_confirmed_sessions():
         conn = mysql.connector.connect(**connector_config)
         cursor = conn.cursor(dictionary=True)
         
+        app.logger.info("Testing confirmed sessions table access")
+        
+        # Simplified query without complex JOINs for Railway compatibility
         cursor.execute("""
-            SELECT 
-                s.id, s.filename, s.upload_timestamp, s.total_wells, s.good_curves, 
-                s.success_rate, s.pathogen_breakdown, s.confirmation_status,
-                s.confirmed_by, s.confirmed_at,
-                -- Calculate system accuracy: (total samples - expert decisions needed) / total samples
-                CASE 
-                    WHEN s.total_wells > 0 THEN
-                        ((s.total_wells - COALESCE(expert_stats.total_decisions, 0)) / s.total_wells) * 100
-                    ELSE 0
-                END as expert_accuracy,
-                COALESCE(expert_stats.total_decisions, 0) as expert_decisions_count
-            FROM analysis_sessions s
-            LEFT JOIN (
-                SELECT 
-                    session_id,
-                    COUNT(*) as total_decisions
-                FROM ml_expert_decisions
-                WHERE original_prediction IS NOT NULL 
-                AND expert_correction IS NOT NULL
-                GROUP BY session_id
-            ) expert_stats ON s.id = expert_stats.session_id
-            WHERE s.confirmation_status = 'confirmed'
-            ORDER BY s.confirmed_at DESC
+            SELECT id, filename, upload_timestamp, total_wells, good_curves, 
+                   success_rate, pathogen_breakdown, confirmation_status,
+                   confirmed_by, confirmed_at
+            FROM analysis_sessions 
+            WHERE confirmation_status = 'confirmed'
+            ORDER BY confirmed_at DESC
         """)
         
         confirmed_sessions = cursor.fetchall()
+        app.logger.info(f"Found {len(confirmed_sessions)} confirmed sessions")
         
         # Convert timestamps to strings for JSON serialization
         for session in confirmed_sessions:
@@ -5570,9 +5581,88 @@ def get_confirmed_sessions():
             'count': len(confirmed_sessions)
         })
         
+    except mysql.connector.Error as mysql_error:
+        app.logger.error(f"MySQL connector error in confirmed sessions: {str(mysql_error)}")
+        return jsonify({'success': False, 'message': f'Database error: {str(mysql_error)}'}), 500
+    except ImportError as import_error:
+        app.logger.error(f"Import error for mysql.connector: {str(import_error)}")
+        return jsonify({'success': False, 'message': f'Database driver error: {str(import_error)}'}), 500
     except Exception as e:
         app.logger.error(f"Error getting confirmed sessions: {str(e)}")
         return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/debug/sessions-test', methods=['GET'])
+def debug_sessions():
+    """Debug endpoint to test what's causing sessions 500 errors"""
+    try:
+        # Test 1: Check if mysql.connector is available
+        try:
+            import mysql.connector
+            connector_available = True
+        except ImportError as e:
+            return jsonify({
+                'success': False, 
+                'error': 'mysql.connector not available',
+                'details': str(e)
+            }), 500
+        
+        # Test 2: Check mysql config
+        if not mysql_configured:
+            return jsonify({
+                'success': False,
+                'error': 'MySQL not configured',
+                'mysql_config_available': False
+            }), 503
+            
+        # Test 3: Test connection
+        connector_config = {
+            'host': mysql_config['host'],
+            'port': mysql_config['port'],
+            'user': mysql_config['user'], 
+            'password': mysql_config['password'],
+            'database': mysql_config['database'],
+            'charset': mysql_config.get('charset', 'utf8mb4'),
+            'autocommit': True
+        }
+        
+        conn = mysql.connector.connect(**connector_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Test 4: Check if table exists
+        cursor.execute("SHOW TABLES LIKE 'analysis_sessions'")
+        table_exists = cursor.fetchone()
+        
+        # Test 5: Count rows in table
+        cursor.execute("SELECT COUNT(*) as total FROM analysis_sessions")
+        total_count = cursor.fetchone()['total']
+        
+        cursor.execute("SELECT COUNT(*) as pending FROM analysis_sessions WHERE confirmation_status = 'pending'")
+        pending_count = cursor.fetchone()['pending']
+        
+        cursor.execute("SELECT COUNT(*) as confirmed FROM analysis_sessions WHERE confirmation_status = 'confirmed'")
+        confirmed_count = cursor.fetchone()['confirmed']
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'connector_available': connector_available,
+            'mysql_configured': mysql_configured,
+            'table_exists': table_exists is not None,
+            'total_sessions': total_count,
+            'pending_sessions': pending_count,
+            'confirmed_sessions': confirmed_count,
+            'config_host': mysql_config['host'],
+            'config_database': mysql_config['database']
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'error_type': type(e).__name__
+        }), 500
 
 @app.route('/api/debug/expert-decisions', methods=['GET'])
 def debug_expert_decisions():
