@@ -12,15 +12,32 @@ from qpcr_analyzer import process_csv_data, validate_csv_structure
 
 def get_database_engine():
     """Get MySQL database engine - SQLite deprecated"""
-    # Get MySQL configuration from environment
-    mysql_host = os.environ.get("MYSQL_HOST", "127.0.0.1")
-    mysql_port = os.environ.get("MYSQL_PORT", "3306")
-    mysql_user = os.environ.get("MYSQL_USER", "qpcr_user")
-    mysql_password = os.environ.get("MYSQL_PASSWORD", "qpcr_password")
-    mysql_database = os.environ.get("MYSQL_DATABASE", "qpcr_analysis")
+    # Priority: DATABASE_URL > individual env variables > defaults
+    database_url = os.environ.get("DATABASE_URL")
     
-    mysql_url = f'mysql+pymysql://{mysql_user}:{mysql_password}@{mysql_host}:{mysql_port}/{mysql_database}'
-    print(f"[DEBUG] SQL integration using MySQL: {mysql_host}:{mysql_port}/{mysql_database}")
+    if database_url:
+        # Railway provides DATABASE_URL, use it directly
+        # Convert mysql:// to mysql+pymysql:// if needed
+        if database_url.startswith("mysql://"):
+            database_url = database_url.replace("mysql://", "mysql+pymysql://", 1)
+        
+        # Ensure charset=utf8mb4 is included for proper sample name handling
+        if "charset=" not in database_url:
+            separator = "&" if "?" in database_url else "?"
+            database_url = f"{database_url}{separator}charset=utf8mb4"
+        
+        mysql_url = database_url
+        print(f"[DEBUG] SQL integration using DATABASE_URL: {database_url.split('@')[1] if '@' in database_url else 'configured'}")
+    else:
+        # Fallback to individual environment variables
+        mysql_host = os.environ.get("MYSQL_HOST", "127.0.0.1")
+        mysql_port = os.environ.get("MYSQL_PORT", "3306")
+        mysql_user = os.environ.get("MYSQL_USER", "qpcr_user")
+        mysql_password = os.environ.get("MYSQL_PASSWORD", "qpcr_password")
+        mysql_database = os.environ.get("MYSQL_DATABASE", "qpcr_analysis")
+        
+        mysql_url = f'mysql+pymysql://{mysql_user}:{mysql_password}@{mysql_host}:{mysql_port}/{mysql_database}?charset=utf8mb4'
+        print(f"[DEBUG] SQL integration using individual vars: {mysql_host}:{mysql_port}/{mysql_database}")
     
     try:
         engine = create_engine(mysql_url, echo=False)
