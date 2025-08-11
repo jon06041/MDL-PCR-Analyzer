@@ -4622,31 +4622,6 @@ def get_unified_compliance_dashboard_data():
         app.logger.error(f"Error getting unified compliance dashboard data: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/unified-compliance/requirements', methods=['GET'])
-def get_compliance_requirements():
-    """Get all compliance requirements with filtering"""
-    try:
-        if not unified_compliance_manager:
-            return jsonify({'error': 'Unified Compliance Manager not available'}), 503
-        
-        # Get query parameters
-        category = request.args.get('category')
-        status = request.args.get('status')
-        regulation_number = request.args.get('regulation_number')
-        
-        # Get requirements
-        requirements = unified_compliance_manager.get_requirements(
-            category=category,
-            status=status,
-            regulation_number=regulation_number
-        )
-        
-        return jsonify(requirements)
-        
-    except Exception as e:
-        app.logger.error(f"Error getting compliance requirements: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
 @app.route('/api/unified-compliance/requirement/<int:requirement_id>/status', methods=['PUT'])
 def update_requirement_status(requirement_id):
     """Update the status of a specific compliance requirement"""
@@ -5449,13 +5424,10 @@ def confirm_analysis_session():
 def get_pending_sessions():
     """Get all pending analysis sessions"""
     try:
-        mysql_config = {
-            'host': os.environ.get('MYSQL_HOST', 'localhost'),
-            'user': os.environ.get('MYSQL_USER', 'qpcr_user'),
-            'password': os.environ.get('MYSQL_PASSWORD', 'qpcr_password'),
-            'database': os.environ.get('MYSQL_DATABASE', 'qpcr_analysis')
-        }
-        
+        # Use the global mysql_config that handles DATABASE_URL parsing
+        if not mysql_configured:
+            return jsonify({'error': 'MySQL not configured'}), 503
+            
         import mysql.connector
         conn = mysql.connector.connect(**mysql_config)
         cursor = conn.cursor(dictionary=True)
@@ -5495,13 +5467,10 @@ def get_pending_sessions():
 def get_confirmed_sessions():
     """Get all confirmed analysis sessions"""
     try:
-        mysql_config = {
-            'host': os.environ.get('MYSQL_HOST', 'localhost'),
-            'user': os.environ.get('MYSQL_USER', 'qpcr_user'),
-            'password': os.environ.get('MYSQL_PASSWORD', 'qpcr_password'),
-            'database': os.environ.get('MYSQL_DATABASE', 'qpcr_analysis')
-        }
-        
+        # Use the global mysql_config that handles DATABASE_URL parsing
+        if not mysql_configured:
+            return jsonify({'error': 'MySQL not configured'}), 503
+            
         import mysql.connector
         conn = mysql.connector.connect(**mysql_config)
         cursor = conn.cursor(dictionary=True)
