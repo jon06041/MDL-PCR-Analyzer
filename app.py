@@ -628,6 +628,13 @@ else:
 
 db.init_app(app)
 
+# Helper function to get validated MySQL config for endpoints
+def get_mysql_config():
+    """Get the global MySQL config, ensuring Railway DATABASE_URL compatibility"""
+    if not mysql_configured:
+        raise Exception("MySQL not configured - check DATABASE_URL or MySQL environment variables")
+    return mysql_config
+
 # Create tables for database
 with app.app_context():
     try:
@@ -4983,14 +4990,8 @@ def get_ml_runs_pending():
     try:
         from ml_validation_tracker import ml_tracker
         
-        mysql_config = {
-            'host': os.environ.get("MYSQL_HOST", "127.0.0.1"),
-            'port': int(os.environ.get("MYSQL_PORT", 3306)),
-            'user': os.environ.get("MYSQL_USER", "qpcr_user"),
-            'password': os.environ.get("MYSQL_PASSWORD", "qpcr_password"),
-            'database': os.environ.get("MYSQL_DATABASE", "qpcr_analysis"),
-            'charset': 'utf8mb4'
-        }
+        # Use the global mysql_config that handles DATABASE_URL
+        mysql_config = get_mysql_config()
         
         import mysql.connector
         conn = mysql.connector.connect(**mysql_config)
@@ -5134,14 +5135,8 @@ def get_ml_pathogen_models():
 def get_ml_run_by_id(run_id):
     """Get a specific ML run by ID from database"""
     try:
-        mysql_config = {
-            'host': os.environ.get("MYSQL_HOST", "127.0.0.1"),
-            'port': int(os.environ.get("MYSQL_PORT", 3306)),
-            'user': os.environ.get("MYSQL_USER", "qpcr_user"),
-            'password': os.environ.get("MYSQL_PASSWORD", "qpcr_password"),
-            'database': os.environ.get("MYSQL_DATABASE", "qpcr_analysis"),
-            'charset': 'utf8mb4'
-        }
+        # Use the global mysql_config that handles DATABASE_URL
+        mysql_config = get_mysql_config()
         
         import mysql.connector
         conn = mysql.connector.connect(**mysql_config)
