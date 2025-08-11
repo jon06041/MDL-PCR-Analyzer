@@ -678,26 +678,47 @@ class MySQLUnifiedComplianceManager:
         try:
             requirements_list = []
             for req_id, req_data in self.compliance_requirements.items():
-                # Get evidence count for this requirement
+                # Get evidence count from compliance_evidence table
                 cursor.execute('''
                     SELECT COUNT(*) FROM compliance_evidence 
                     WHERE requirement_id = %s
                 ''', (req_id,))
                 event_count = cursor.fetchone()[0]
                 
-                # Check if currently tracking
+                # Check if currently tracking from compliance_evidence
                 cursor.execute('''
                     SELECT COUNT(*) FROM compliance_evidence 
                     WHERE requirement_id = %s 
                     AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
                 ''', (req_id,))
-                currently_tracking = cursor.fetchone()[0] > 0
+                recently_tracked = cursor.fetchone()[0] > 0
                 
-                # Determine implementation status based on tracking and evidence
-                if currently_tracking and event_count > 0:
-                    implementation_status = 'active'  # Currently tracking with evidence
-                elif event_count > 0:
-                    implementation_status = 'partial'  # Has evidence but not recent
+                # ALSO check compliance_requirements_tracking table (Railway compatibility)
+                cursor.execute('''
+                    SELECT compliance_status, evidence_count 
+                    FROM compliance_requirements_tracking 
+                    WHERE requirement_id = %s
+                ''', (req_id,))
+                tracking_result = cursor.fetchone()
+                
+                if tracking_result:
+                    tracking_status, tracking_evidence_count = tracking_result
+                    # Use tracking evidence count if higher
+                    if tracking_evidence_count and tracking_evidence_count > event_count:
+                        event_count = tracking_evidence_count
+                    # Railway uses 'in_progress' for actively tracking
+                    if tracking_status == 'in_progress':
+                        recently_tracked = True
+                
+                currently_tracking = recently_tracked or event_count > 0
+                
+                # Determine implementation status - ANY evidence = active tracking
+                if event_count > 0 or recently_tracked:
+                    implementation_status = 'active'  # ANY evidence shows as currently tracking
+                elif req_data.get('auto_trackable', False):
+                    implementation_status = 'ready_to_implement'  # Can be auto-tracked
+                else:
+                    implementation_status = 'planned'  # Future implementation
                 elif req_data.get('auto_trackable', False):
                     implementation_status = 'ready_to_implement'  # Can be auto-tracked
                 else:
