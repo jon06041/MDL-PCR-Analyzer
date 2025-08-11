@@ -719,10 +719,6 @@ class MySQLUnifiedComplianceManager:
                     implementation_status = 'ready_to_implement'  # Can be auto-tracked
                 else:
                     implementation_status = 'planned'  # Future implementation
-                elif req_data.get('auto_trackable', False):
-                    implementation_status = 'ready_to_implement'  # Can be auto-tracked
-                else:
-                    implementation_status = 'planned'  # Future implementation
                 
                 requirements_list.append({
                     'id': req_id,
