@@ -394,6 +394,33 @@ class MLFeedbackInterface {
         if (mlPredictionDisplay) mlPredictionDisplay.style.display = 'none';
     }
 
+    hideMLTeachingOnly() {
+        /**
+         * Hide only ML teaching/feedback elements while keeping analysis active
+         * Useful when you want to disable further learning but keep current ML working
+         */
+        console.log('ML Feedback Interface: Hiding ML teaching elements only (keeping analysis active)');
+        
+        // Hide only feedback-related elements, keep analysis button and prediction display
+        const mlFeedbackBtn = document.getElementById('ml-feedback-btn');
+        const mlFeedbackForm = document.getElementById('ml-feedback-form');
+        
+        if (mlFeedbackBtn) {
+            mlFeedbackBtn.style.display = 'none';
+            console.log('ML Feedback Interface: ML feedback button hidden');
+        }
+        if (mlFeedbackForm) {
+            mlFeedbackForm.style.display = 'none';
+            console.log('ML Feedback Interface: ML feedback form hidden');
+        }
+        
+        // Keep these elements visible:
+        // - ml-analyze-btn (Analyze with ML button)
+        // - ml-prediction-display (ML results)
+        // - ml-stats-display (ML model stats)
+        // - ML section title
+    }
+
     async refreshMLSectionConfiguration() {
         /**
          * Refresh the ML section visibility based on current configuration
@@ -411,8 +438,22 @@ class MLFeedbackInterface {
             const existingSection = document.getElementById('ml-feedback-section');
             if (existingSection) {
                 this.showMLSection();
+                
+                // Check if we should disable teaching while keeping analysis
+                const shouldDisableTeaching = await this.shouldDisableMLTeaching();
+                if (shouldDisableTeaching) {
+                    this.hideMLTeachingOnly();
+                }
             } else {
                 this.addMLSectionToModal();
+                
+                // Check if we should disable teaching after adding the section
+                setTimeout(async () => {
+                    const shouldDisableTeaching = await this.shouldDisableMLTeaching();
+                    if (shouldDisableTeaching) {
+                        this.hideMLTeachingOnly();
+                    }
+                }, 100);
             }
         }
     }
@@ -570,8 +611,9 @@ class MLFeedbackInterface {
             // Get pathogen-specific ML configuration
             const pathogenResponse = await fetch(`/api/ml-config/pathogen/${encodeURIComponent(pathogenInfo.pathogen)}`);
             if (!pathogenResponse.ok) {
-                console.log('ML Config Check: Failed to get pathogen config, showing ML feedback');
-                return false; // Show ML feedback if we can't get pathogen config
+                // During database connectivity issues, hide ML elements to prevent broken state
+                console.log('ML Config Check: Failed to get pathogen config (database connectivity issue), hiding ML feedback');
+                return true; // Hide ML feedback if we can't get pathogen config
             }
             const pathogenConfigResponse = await pathogenResponse.json();
             
@@ -608,7 +650,39 @@ class MLFeedbackInterface {
             
         } catch (error) {
             console.error('ML Config Check: Error checking ML feedback visibility:', error);
-            return false; // Show ML feedback on error to be safe
+            
+            // During database connectivity issues, hide ML elements to prevent broken functionality
+            if (error.message && (error.message.includes('Failed to fetch') || error.message.includes('Network Error'))) {
+                console.log('ML Config Check: Database connectivity issue detected, hiding ML feedback');
+                return true; // Hide ML feedback during connectivity issues
+            }
+            
+            return false; // Show ML feedback for other types of errors
+        }
+    }
+
+    async shouldDisableMLTeaching() {
+        /**
+         * Check if ML teaching (feedback submission) should be disabled
+         * while keeping current ML predictions active
+         */
+        try {
+            // Check for a specific ML teaching disable flag
+            const response = await fetch('/api/ml-config/teaching-status');
+            if (response.ok) {
+                const data = await response.json();
+                if (data.success && data.config) {
+                    return data.config.disable_teaching === true;
+                }
+            }
+            
+            // For now, you can manually enable this by uncommenting the line below
+            return true; // Uncomment to disable ML teaching while keeping predictions
+            
+            return false; // Teaching enabled by default
+        } catch (error) {
+            console.error('ML Teaching Check: Error checking teaching status:', error);
+            return false; // Default to allowing teaching
         }
     }
 
