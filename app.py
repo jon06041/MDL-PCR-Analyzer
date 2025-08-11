@@ -606,14 +606,29 @@ if database_url and database_url.startswith("mysql"):
         mysql_configured = True
         
         # Define mysql_config for use by other components
-        mysql_config = {
-            'host': os.environ.get("MYSQL_HOST", "127.0.0.1"),
-            'port': int(os.environ.get("MYSQL_PORT", 3306)),
-            'user': os.environ.get("MYSQL_USER", "qpcr_user"),
-            'password': os.environ.get("MYSQL_PASSWORD", "qpcr_password"),
-            'database': os.environ.get("MYSQL_DATABASE", "qpcr_analysis"),
-            'charset': 'utf8mb4'
-        }
+        # Parse the database_url to get individual components for mysql.connector
+        if database_url:
+            from urllib.parse import urlparse
+            parsed = urlparse(database_url)
+            mysql_config = {
+                'host': parsed.hostname or '127.0.0.1',
+                'port': parsed.port or 3306,
+                'user': parsed.username or 'qpcr_user',
+                'password': parsed.password or 'qpcr_password',
+                'database': parsed.path.lstrip('/') if parsed.path else 'qpcr_analysis',
+                'charset': 'utf8mb4'
+            }
+            print(f"✅ Parsed mysql_config from DATABASE_URL: {mysql_config['host']}:{mysql_config['port']}/{mysql_config['database']}")
+        else:
+            # Fallback to individual environment variables
+            mysql_config = {
+                'host': os.environ.get("MYSQL_HOST", "127.0.0.1"),
+                'port': int(os.environ.get("MYSQL_PORT", 3306)),
+                'user': os.environ.get("MYSQL_USER", "qpcr_user"),
+                'password': os.environ.get("MYSQL_PASSWORD", "qpcr_password"),
+                'database': os.environ.get("MYSQL_DATABASE", "qpcr_analysis"),
+                'charset': 'utf8mb4'
+            }
     except Exception as e:
         print(f"❌ CRITICAL: MySQL configuration failed: {e}")
         print("🔧 This is a CRITICAL ERROR - MySQL MUST work")
@@ -4697,12 +4712,27 @@ def get_compliance_summary():
 
 @app.route('/api/unified-compliance/requirements', methods=['GET'])
 def get_unified_compliance_requirements():
-    """Get all compliance requirements with their tracking status"""
+    """Get all compliance requirements with filtering and tracking status"""
     try:
         if not unified_compliance_manager:
             return jsonify({'error': 'Unified Compliance Manager not available'}), 503
         
-        requirements = unified_compliance_manager.get_requirements_status()
+        # Check if filtering parameters are provided (for evidence tracking)
+        category = request.args.get('category')
+        status = request.args.get('status')
+        regulation_number = request.args.get('regulation_number')
+        
+        if any([category, status, regulation_number]):
+            # Use the filtering method for evidence tracking
+            requirements = unified_compliance_manager.get_requirements(
+                category=category,
+                status=status,
+                regulation_number=regulation_number
+            )
+        else:
+            # Use the status method for dashboard overview
+            requirements = unified_compliance_manager.get_requirements_status()
+        
         return jsonify(requirements)
         
     except Exception as e:
