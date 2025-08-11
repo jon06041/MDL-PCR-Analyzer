@@ -493,13 +493,47 @@ quota_exceeded = False
 # Priority: DATABASE_URL > .env variables > Error
 database_url = os.environ.get("DATABASE_URL")
 
+# Debug: Print all available environment variables that might be MySQL-related
+print("🔍 DEBUG: Available MySQL-related environment variables:")
+for key, value in os.environ.items():
+    if any(keyword in key.upper() for keyword in ['MYSQL', 'DATABASE', 'DB']):
+        # Mask password for security
+        display_value = '***HIDDEN***' if 'PASSWORD' in key.upper() or 'PASS' in key.upper() else value
+        print(f"  {key} = {display_value}")
+
 # If DATABASE_URL is not set, try to construct it from individual env vars
 if not database_url:
-    mysql_host = os.environ.get("MYSQL_HOST", "127.0.0.1")
-    mysql_port = os.environ.get("MYSQL_PORT", "3306")
-    mysql_user = os.environ.get("MYSQL_USER", "qpcr_user")
-    mysql_password = os.environ.get("MYSQL_PASSWORD", "qpcr_password")
-    mysql_database = os.environ.get("MYSQL_DATABASE", "qpcr_analysis")
+    # Try Railway's common MySQL variable patterns
+    mysql_host = (os.environ.get("MYSQL_HOST") or 
+                  os.environ.get("MYSQLHOST") or 
+                  os.environ.get("DB_HOST") or 
+                  "127.0.0.1")
+    mysql_port = (os.environ.get("MYSQL_PORT") or 
+                  os.environ.get("MYSQLPORT") or 
+                  os.environ.get("DB_PORT") or 
+                  "3306")
+    mysql_user = (os.environ.get("MYSQL_USER") or 
+                  os.environ.get("MYSQLUSER") or 
+                  os.environ.get("DB_USER") or 
+                  os.environ.get("MYSQL_USERNAME") or
+                  "qpcr_user")
+    mysql_password = (os.environ.get("MYSQL_PASSWORD") or 
+                      os.environ.get("MYSQLPASSWORD") or 
+                      os.environ.get("DB_PASSWORD") or 
+                      os.environ.get("MYSQL_ROOT_PASSWORD") or
+                      "qpcr_password")
+    mysql_database = (os.environ.get("MYSQL_DATABASE") or 
+                      os.environ.get("MYSQLDATABASE") or 
+                      os.environ.get("DB_NAME") or 
+                      os.environ.get("MYSQL_DB") or
+                      "qpcr_analysis")
+    
+    print(f"🔍 Resolved MySQL connection details:")
+    print(f"  Host: {mysql_host}")
+    print(f"  Port: {mysql_port}")
+    print(f"  User: {mysql_user}")
+    print(f"  Database: {mysql_database}")
+    print(f"  Password: {'***SET***' if mysql_password != 'qpcr_password' else '***DEFAULT***'}")
     
     # Try to construct MySQL URL from individual components
     if all([mysql_host, mysql_port, mysql_user, mysql_password, mysql_database]):
