@@ -429,7 +429,6 @@
             grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
             gap: 15px;
         }
-        }
         
         .stats-header {
             font-weight: bold;
@@ -740,17 +739,95 @@
             // Convert analysis results to validation format
             for (const [wellKey, result] of Object.entries(analysisResults)) {
                 if (result.ml_prediction && result.ml_confidence !== undefined) {
+                    
+                    // CRITICAL FIX: Use the same CalcJ logic as the main results table
+                    // to avoid modal/table mismatch where modal shows "N/A" but table shows values
+                    let calcjDisplay = null;
+                    
+                    // First try nested object structure (recalculated values)
+                    if (result.calcj && typeof result.calcj === 'object' && result.fluorophore &&
+                        result.calcj[result.fluorophore] !== undefined && 
+                        result.calcj[result.fluorophore] !== null &&
+                        !isNaN(result.calcj[result.fluorophore]) && 
+                        result.calcj[result.fluorophore] !== -999 &&
+                        result.calcj[result.fluorophore] > 0) {
+                        calcjDisplay = Number(result.calcj[result.fluorophore]);
+                    } 
+                    // Fall back to direct value (but filter out -999 sentinel values)
+                    else if (result.calcj_value !== undefined && 
+                             result.calcj_value !== null &&
+                             !isNaN(result.calcj_value) && 
+                             result.calcj_value !== 'N/A' && 
+                             result.calcj_value !== -999 && 
+                             result.calcj_value > 0) {
+                        calcjDisplay = Number(result.calcj_value);
+                    }
+                    
+                    // Similarly fix CQJ to use the same logic as main table
+                    let cqjDisplay = null;
+                    if (result.cqj && typeof result.cqj === 'object' && result.fluorophore &&
+                        result.cqj[result.fluorophore] !== undefined && 
+                        result.cqj[result.fluorophore] !== null &&
+                        !isNaN(result.cqj[result.fluorophore]) && 
+                        result.cqj[result.fluorophore] !== -999 &&
+                        result.cqj[result.fluorophore] > 5) {
+                        cqjDisplay = Number(result.cqj[result.fluorophore]);
+                    } else if (result.cqj_value !== undefined && 
+                               result.cqj_value !== null &&
+                               !isNaN(result.cqj_value) && 
+                               result.cqj_value !== -999 &&
+                               result.cqj_value > 5) {
+                        cqjDisplay = Number(result.cqj_value);
+                    }
+                    
+                    // Get the final classification result using same hierarchy as main table
+                    let finalClassification = null;
+                    let classificationMethod = 'unknown';
+                    
+                    // 1. Expert feedback (highest priority)
+                    if (result.curve_classification && 
+                        result.curve_classification.classification &&
+                        result.curve_classification.method === 'expert_feedback') {
+                        finalClassification = result.curve_classification.classification;
+                        classificationMethod = 'expert';
+                    }
+                    // 2. ML classification (preferred)
+                    else if (result.ml_classification && result.ml_classification.classification) {
+                        finalClassification = result.ml_classification.classification;
+                        classificationMethod = 'ml_enhanced';
+                    }
+                    // 3. Rule-based classification
+                    else if (result.curve_classification && result.curve_classification.classification) {
+                        finalClassification = result.curve_classification.classification;
+                        classificationMethod = 'rule_based';
+                    }
+                    // 4. Legacy string classification
+                    else if (typeof result.curve_classification === 'string') {
+                        finalClassification = result.curve_classification;
+                        classificationMethod = 'legacy';
+                    }
+                    // 5. Fallback to ML prediction if no other classification
+                    else if (result.ml_prediction) {
+                        finalClassification = result.ml_prediction;
+                        classificationMethod = 'ml_fallback';
+                    }
+                    
                     currentSession.wells.push({
                         wellId: wellKey,
                         sampleName: result.sample_name || result.sample || wellKey,
                         pathogenCode: result.test_code || result.pathogen_code,
                         fluorophore: result.fluorophore,
+                        
+                        // Store both ML prediction and final classification for comparison
                         mlPrediction: result.ml_prediction,
                         mlConfidence: result.ml_confidence,
+                        finalClassification: finalClassification,
+                        classificationMethod: classificationMethod,
+                        
                         expertDecision: null,
                         validated: false,
-                        cqj: result.cqj_value || result.cqj,
-                        calcj: result.calcj_value || result.calcj,
+                        cqj: cqjDisplay,
+                        calcj: calcjDisplay,
                         amplitude: result.amplitude,
                         r_squared: result.r_squared
                     });
@@ -795,18 +872,31 @@
         
         function createWellCard(well) {
             const cardClass = well.validated ? 
-                (well.expertDecision === well.mlPrediction ? 'validated' : 'override') : '';
+                (well.expertDecision === well.finalClassification ? 'validated' : 'override') : '';
+                
+            // Show final classification (same as main table) with method indicator
+            const classificationDisplay = well.finalClassification || 'UNKNOWN';
+            const methodIndicator = {
+                'expert': '✓',
+                'ml_enhanced': '🤖',
+                'rule_based': '',
+                'legacy': '⚡',
+                'ml_fallback': '🤖'
+            }[well.classificationMethod] || '';
                 
             return `
                 <div class="well-card ${cardClass}" data-well-id="${well.wellId}">
                     <div class="well-header">
                         <div class="well-id">${well.wellId}</div>
-                        <div class="ml-prediction prediction-${well.mlPrediction.toLowerCase()}">
-                            ${well.mlPrediction}
+                        <div class="ml-prediction prediction-${classificationDisplay.toLowerCase()}">
+                            ${classificationDisplay.replace('_', ' ')} ${methodIndicator}
                         </div>
                         <div class="confidence-score">
-                            ${Math.round(well.mlConfidence * 100)}% confidence
+                            ${well.mlConfidence ? Math.round(well.mlConfidence * 100) + '% ML confidence' : 'No ML confidence'}
                         </div>
+                        ${well.mlPrediction !== well.finalClassification ? 
+                            `<div class="classification-note">ML Prediction: ${well.mlPrediction}</div>` : 
+                            ''}
                     </div>
                     
                     <div class="well-details">
@@ -824,11 +914,11 @@
                         </div>
                         <div class="detail-item">
                             <div class="detail-label">CQJ</div>
-                            <div class="detail-value">${well.cqj || 'N/A'}</div>
+                            <div class="detail-value">${well.cqj !== null && well.cqj !== undefined && !isNaN(well.cqj) ? Number(well.cqj).toFixed(2) : 'N/A'}</div>
                         </div>
                         <div class="detail-item">
                             <div class="detail-label">CalcJ</div>
-                            <div class="detail-value">${well.calcj || 'N/A'}</div>
+                            <div class="detail-value">${well.calcj !== null && well.calcj !== undefined && !isNaN(well.calcj) && well.calcj > 0 ? Number(well.calcj).toExponential(2) : 'N/A'}</div>
                         </div>
                         <div class="detail-item">
                             <div class="detail-label">R²</div>
@@ -908,7 +998,7 @@
                     well.validated = true;
                     currentSession.validatedWells++;
                     
-                    if (well.expertDecision === well.mlPrediction) {
+                    if (well.expertDecision === well.finalClassification) {
                         currentSession.correctPredictions++;
                     } else {
                         currentSession.expertOverrides++;
@@ -917,7 +1007,7 @@
                 
                 // Update UI
                 const card = document.querySelector(`[data-well-id="${wellId}"]`);
-                card.classList.add(well.expertDecision === well.mlPrediction ? 'validated' : 'override');
+                card.classList.add(well.expertDecision === well.finalClassification ? 'validated' : 'override');
                 
                 const confirmBtn = card.querySelector('.btn');
                 confirmBtn.textContent = '✓ Validated';
