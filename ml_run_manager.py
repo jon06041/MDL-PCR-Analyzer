@@ -13,7 +13,11 @@ class MLRunManager:
     def __init__(self):
         # Use MySQL connection from environment
         self.database_url = os.environ.get("DATABASE_URL")
-        if not self.database_url:
+        if self.database_url:
+            # Convert Railway's mysql:// to mysql+pymysql:// format
+            if self.database_url.startswith("mysql://"):
+                self.database_url = self.database_url.replace("mysql://", "mysql+pymysql://", 1)
+        else:
             mysql_host = os.environ.get("MYSQL_HOST", "127.0.0.1")
             mysql_port = os.environ.get("MYSQL_PORT", "3306")
             mysql_user = os.environ.get("MYSQL_USER", "qpcr_user")
