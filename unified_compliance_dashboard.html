@@ -1058,11 +1058,6 @@
                 <span class="evidence-badge ${hasEvidence ? 'evidence-found' : 'evidence-missing'}">
                     ${hasEvidence ? `Evidence Found (${evidenceCount})` : 'No Evidence'}
                 </span>
-                ${hasEvidence ? `
-                    <button class="btn btn-sm btn-outline-primary mt-2" onclick="showSimpleEvidence('${reqCode}', ${evidenceCount})">
-                        <i class="fas fa-eye"></i> View Evidence
-                    </button>
-                ` : ''}
             `;
         }
 

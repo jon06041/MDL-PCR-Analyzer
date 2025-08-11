@@ -65,6 +65,66 @@
 
 **VERIFICATION**: Database contains 2 pending runs, API returns them, frontend rebuild needed.
 
+## 🧹 DUPLICATE PREVENTION & CLEANUP SYSTEM (2025-08-11)
+
+### **Critical Duplicate Issues Fixed**
+
+**DUPLICATE ML ANALYSIS RUNS**:
+- **Problem**: Same base file creates multiple pending runs for each fluorophore channel (FAM, HEX, Texas Red, Cy5)
+- **Example**: `AcBVPanelPCR3_2576724_CFX366953` had 4 duplicate sessions (225-229)
+- **Root Cause**: ML analysis system creates separate runs per channel instead of consolidating per base file
+- **Solution**: Use `fix_comprehensive_duplicates_v2.py` for cleanup and prevention
+
+**COMPLIANCE EVIDENCE COUNT MISMATCHES**:
+- **Problem**: Dashboard shows "Evidence Found (20)" but database has only 4 records
+- **Root Cause**: API vs database count discrepancies, regulation number mismatches between modal and container
+- **Solution**: Comprehensive validation and cleanup script with dry-run capability
+
+### **Duplicate Prevention Tools**
+
+**Main Cleanup Script**: `fix_comprehensive_duplicates_v2.py`
+```bash
+# Dry run to see what would be fixed
+python3 fix_comprehensive_duplicates_v2.py --dry-run
+
+# Actually fix the duplicates
+python3 fix_comprehensive_duplicates_v2.py
+
+# Fix only ML duplicates
+python3 fix_comprehensive_duplicates_v2.py --ml-only
+
+# Fix only compliance evidence
+python3 fix_comprehensive_duplicates_v2.py --compliance-only
+```
+
+**Prevention Module**: `duplicate_prevention.py`
+- Validates base filenames before creating ML runs
+- Prevents multiple pending runs for same file
+- Provides deduplication utilities for compliance evidence
+- Use `from duplicate_prevention import validate_unique_ml_run` in new code
+
+**Critical Pattern - Always Check Before Creating ML Runs**:
+```python
+from duplicate_prevention import validate_unique_ml_run
+
+# Before creating ML analysis run
+base_filename = filename.split(' - ')[0]  # Remove channel suffix
+if not validate_unique_ml_run(base_filename):
+    print(f"Skipping duplicate ML run for {base_filename}")
+    return
+    
+# Proceed with ML run creation...
+```
+
+**Database Maintenance Commands**:
+```bash
+# Quick duplicate check
+python3 -c "from duplicate_prevention import quick_duplicate_check; quick_duplicate_check()"
+
+# Cross-environment cleanup (when switching computers/databases)
+python3 fix_comprehensive_duplicates_v2.py --cross-env
+```
+
 ## Architecture Overview
 
 This is a **Flask-based qPCR analysis system** with machine learning capabilities for curve classification and FDA compliance tracking. The system has been **completely migrated from SQLite to MySQL**.

@@ -290,7 +290,7 @@ class MySQLUnifiedComplianceManager:
             conn.close()
 
     def _create_compliance_evidence(self, requirement_id: str, event_id: int, event_data: dict):
-        """Create compliance evidence record with smart deduplication"""
+        """Create compliance evidence record"""
         conn = self.get_connection()
         cursor = conn.cursor()
         
@@ -298,40 +298,10 @@ class MySQLUnifiedComplianceManager:
             requirement_spec = self.compliance_requirements[requirement_id]
             evidence_type = requirement_spec['evidence_types'][0] if requirement_spec['evidence_types'] else 'general_evidence'
             
-            # Create evidence hash for deduplication
+            # Create evidence hash
             evidence_str = f"{requirement_id}:{event_id}:{json.dumps(event_data, sort_keys=True)}"
             evidence_hash = hashlib.sha256(evidence_str.encode()).hexdigest()
             
-            # Smart deduplication: for analysis events, check for same file + fluorophore
-            if event_data.get('filename') and event_data.get('fluorophore'):
-                # Check if we already have evidence for this file + fluorophore combination
-                cursor.execute('''
-                    SELECT COUNT(*) FROM compliance_evidence ce
-                    JOIN unified_compliance_events uce ON ce.event_id = uce.id
-                    WHERE ce.requirement_id = %s 
-                    AND JSON_EXTRACT(uce.event_data, '$.filename') = %s
-                    AND JSON_EXTRACT(uce.event_data, '$.fluorophore') = %s
-                ''', (requirement_id, event_data['filename'], event_data['fluorophore']))
-                
-                existing_file_count = cursor.fetchone()[0]
-                
-                if existing_file_count > 0:
-                    self.logger.debug(f"Evidence already exists for {requirement_id} with file {event_data['filename']} + {event_data['fluorophore']}")
-                    return  # Skip duplicate file analysis
-            else:
-                # Fallback to hash-based deduplication for non-analysis events
-                cursor.execute('''
-                    SELECT COUNT(*) FROM compliance_evidence 
-                    WHERE requirement_id = %s AND evidence_hash = %s
-                ''', (requirement_id, evidence_hash))
-                
-                existing_count = cursor.fetchone()[0]
-                
-                if existing_count > 0:
-                    self.logger.debug(f"Evidence already exists for {requirement_id} with hash {evidence_hash[:16]}...")
-                    return  # Skip duplicate evidence
-            
-            # Insert new evidence record
             cursor.execute('''
                 INSERT INTO compliance_evidence 
                 (requirement_id, event_id, evidence_type, evidence_data, evidence_hash)
@@ -339,7 +309,6 @@ class MySQLUnifiedComplianceManager:
             ''', (requirement_id, event_id, evidence_type, json.dumps(event_data), evidence_hash))
             
             conn.commit()
-            self.logger.debug(f"Created new evidence for {requirement_id}")
             
         except Exception as e:
             self.logger.error(f"Error creating compliance evidence: {e}")
@@ -669,86 +638,6 @@ class MySQLUnifiedComplianceManager:
         except Exception as e:
             self.logger.error(f"Error getting requirements status: {e}")
             return []
-        finally:
-            cursor.close()
-            conn.close()
-
-    def reset_evidence_counts_to_baseline(self, max_evidence_per_requirement: int = 20):
-        """
-        Reset evidence counts to reasonable baseline numbers for production
-        Keeps only the most recent evidence records for each requirement
-        """
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        try:
-            self.logger.info(f"Resetting evidence counts to baseline (max {max_evidence_per_requirement} per requirement)")
-            
-            total_removed = 0
-            
-            # Get all requirements with excessive evidence
-            cursor.execute('''
-                SELECT requirement_id, COUNT(*) as count
-                FROM compliance_evidence 
-                GROUP BY requirement_id
-                HAVING count > %s
-                ORDER BY count DESC
-            ''', (max_evidence_per_requirement,))
-            
-            excessive_requirements = cursor.fetchall()
-            
-            for requirement_id, current_count in excessive_requirements:
-                # Keep only the most recent evidence records
-                cursor.execute('''
-                    SELECT id FROM compliance_evidence 
-                    WHERE requirement_id = %s
-                    ORDER BY created_at DESC
-                    LIMIT %s, 999999
-                ''', (requirement_id, max_evidence_per_requirement))
-                
-                ids_to_remove = [row[0] for row in cursor.fetchall()]
-                
-                if ids_to_remove:
-                    placeholders = ','.join(['%s'] * len(ids_to_remove))
-                    cursor.execute(f'''
-                        DELETE FROM compliance_evidence 
-                        WHERE id IN ({placeholders})
-                    ''', ids_to_remove)
-                    
-                    removed_count = cursor.rowcount
-                    total_removed += removed_count
-                    self.logger.info(f"Reduced {requirement_id} from {current_count} to {max_evidence_per_requirement} records ({removed_count} removed)")
-            
-            # Recalculate evidence counts in tracking table
-            cursor.execute('''
-                SELECT requirement_id, COUNT(*) as actual_count
-                FROM compliance_evidence 
-                GROUP BY requirement_id
-            ''')
-            actual_counts = cursor.fetchall()
-            
-            for requirement_id, actual_count in actual_counts:
-                cursor.execute('''
-                    UPDATE compliance_requirements_tracking 
-                    SET evidence_count = %s,
-                        compliance_percentage = %s,
-                        updated_at = %s
-                    WHERE requirement_id = %s
-                ''', (
-                    actual_count,
-                    min(100.0, (actual_count / 10) * 100),
-                    datetime.datetime.now(),
-                    requirement_id
-                ))
-            
-            conn.commit()
-            self.logger.info(f"Evidence baseline reset completed. Total records removed: {total_removed}")
-            return total_removed
-            
-        except Exception as e:
-            self.logger.error(f"Error resetting evidence baseline: {e}")
-            conn.rollback()
-            return 0
         finally:
             cursor.close()
             conn.close()

@@ -9,6 +9,88 @@
 - **Usage**: `python3 ml_config_safeguard.py` - automatically restores from pathogen library
 - **Status**: EMERGENCY PROTECTION IN PLACE - root cause still unknown
 
+## 🧹 **DUPLICATE PREVENTION & CLEANUP SYSTEM** (August 11, 2025)
+
+### **Critical Duplicate Issues Identified & Fixed**
+
+**DUPLICATE ML ANALYSIS RUNS**:
+- **Problem**: Same base file (e.g., `AcBVPanelPCR3_2576724_CFX366953`) creates multiple pending runs for each fluorophore channel (FAM, HEX, Texas Red, Cy5)
+- **Impact**: ML validation dashboard shows 4-5 duplicate sessions for the same analysis file
+- **Root Cause**: ML analysis system creates separate runs per channel instead of consolidating per base file
+- **Fix Applied**: Automated cleanup script removes duplicates, keeps most recent run per base file
+
+**COMPLIANCE EVIDENCE COUNT MISMATCHES**:
+- **Problem**: Dashboard containers show "Evidence Found (20)" but actual database contains only 4 unique records
+- **Impact**: User confusion, inflated compliance metrics, regulatory reporting inaccuracies
+- **Root Cause**: API vs database count discrepancies, regulation number mismatches between modal and container elements
+- **Fix Applied**: Comprehensive validation and cleanup with dry-run testing capability
+
+### **Duplicate Prevention Tools**
+
+**Main Cleanup Script**: `fix_comprehensive_duplicates_v2.py`
+```bash
+# Dry run to see what would be fixed (ALWAYS run first)
+python3 fix_comprehensive_duplicates_v2.py --dry-run
+
+# Actually fix the duplicates
+python3 fix_comprehensive_duplicates_v2.py
+
+# Fix only ML duplicates
+python3 fix_comprehensive_duplicates_v2.py --ml-only
+
+# Fix only compliance evidence
+python3 fix_comprehensive_duplicates_v2.py --compliance-only
+
+# Cross-environment cleanup (when switching computers/databases)
+python3 fix_comprehensive_duplicates_v2.py --cross-env
+```
+
+**Prevention Module**: `duplicate_prevention.py`
+- Validates base filenames before creating ML runs
+- Prevents multiple pending runs for same file
+- Provides deduplication utilities for compliance evidence
+- Essential for new ML run creation code
+
+**CRITICAL DEVELOPMENT PATTERN - Always Check Before Creating ML Runs**:
+```python
+from duplicate_prevention import validate_unique_ml_run
+
+# Before creating any ML analysis run
+base_filename = filename.split(' - ')[0]  # Remove channel suffix
+if not validate_unique_ml_run(base_filename):
+    print(f"Skipping duplicate ML run for {base_filename}")
+    return
+    
+# Only proceed with ML run creation if unique
+create_ml_analysis_run(...)
+```
+
+**Database Maintenance Commands**:
+```bash
+# Quick duplicate check without fixing
+python3 -c "from duplicate_prevention import quick_duplicate_check; quick_duplicate_check()"
+
+# Emergency cleanup for new environment
+python3 fix_comprehensive_duplicates_v2.py --cross-env --dry-run
+```
+
+### **Integration Requirements**
+
+**For ML Run Creation (Required)**:
+- Always import and use `validate_unique_ml_run()` before creating new pending runs
+- Use base filename (remove fluorophore channel suffix) for duplicate detection
+- Log skipped duplicates for debugging
+
+**For Compliance Evidence (Required)**:
+- Use hash-based deduplication for generic evidence
+- Use file+fluorophore deduplication for analysis-specific evidence
+- Implement evidence count validation in dashboard API responses
+
+**Cross-Environment Usage**:
+- Run cleanup script with `--dry-run` first when switching computers
+- Use `--cross-env` flag for comprehensive environment migration
+- Always validate database state before and after cleanup operations
+
 ## 🎯 **CURRENT STATUS: ML Dashboard Analysis Complete** (August 9, 2025)
 
 ### 🔍 **ROOT CAUSE ANALYSIS: ML Validation Dashboard (VERIFIED 2025-08-09 19:36 UTC)** 
