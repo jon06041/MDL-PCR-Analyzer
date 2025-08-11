@@ -495,45 +495,81 @@ database_url = os.environ.get("DATABASE_URL")
 
 # Debug: Print all available environment variables that might be MySQL-related
 print("🔍 DEBUG: Available MySQL-related environment variables:")
+mysql_vars_found = False
 for key, value in os.environ.items():
     if any(keyword in key.upper() for keyword in ['MYSQL', 'DATABASE', 'DB']):
         # Mask password for security
         display_value = '***HIDDEN***' if 'PASSWORD' in key.upper() or 'PASS' in key.upper() else value
         print(f"  {key} = {display_value}")
+        mysql_vars_found = True
+
+if not mysql_vars_found:
+    print("  ❌ NO MySQL-related environment variables found!")
+    print("🔍 DEBUG: ALL environment variables (first 10):")
+    for i, (key, value) in enumerate(os.environ.items()):
+        if i >= 10:
+            print(f"  ... and {len(os.environ) - 10} more variables")
+            break
+        display_value = '***HIDDEN***' if any(secret in key.upper() for secret in ['PASSWORD', 'SECRET', 'KEY', 'TOKEN']) else value
+        print(f"  {key} = {display_value}")
 
 # If DATABASE_URL is not set, try to construct it from individual env vars
 if not database_url:
-    # Try Railway's common MySQL variable patterns
-    mysql_host = (os.environ.get("MYSQL_HOST") or 
-                  os.environ.get("MYSQLHOST") or 
-                  os.environ.get("DB_HOST") or 
-                  "127.0.0.1")
-    mysql_port = (os.environ.get("MYSQL_PORT") or 
-                  os.environ.get("MYSQLPORT") or 
-                  os.environ.get("DB_PORT") or 
-                  "3306")
-    mysql_user = (os.environ.get("MYSQL_USER") or 
-                  os.environ.get("MYSQLUSER") or 
-                  os.environ.get("DB_USER") or 
-                  os.environ.get("MYSQL_USERNAME") or
-                  "qpcr_user")
-    mysql_password = (os.environ.get("MYSQL_PASSWORD") or 
-                      os.environ.get("MYSQLPASSWORD") or 
-                      os.environ.get("DB_PASSWORD") or 
-                      os.environ.get("MYSQL_ROOT_PASSWORD") or
-                      "qpcr_password")
-    mysql_database = (os.environ.get("MYSQL_DATABASE") or 
-                      os.environ.get("MYSQLDATABASE") or 
-                      os.environ.get("DB_NAME") or 
-                      os.environ.get("MYSQL_DB") or
-                      "qpcr_analysis")
+    # First, check for Railway's exact variable names
+    print("🔍 Checking Railway's exact MySQL variable names:")
+    railway_mysql_url = os.environ.get("MYSQL_URL")
+    railway_mysql_database = os.environ.get("MYSQL_DATABASE") 
+    railway_mysql_host = os.environ.get("MYSQL_HOST")
+    railway_mysql_port = os.environ.get("MYSQL_PORT")
+    railway_mysql_user = os.environ.get("MYSQL_USER")
+    railway_mysql_password = os.environ.get("MYSQL_PASSWORD")
     
-    print(f"🔍 Resolved MySQL connection details:")
-    print(f"  Host: {mysql_host}")
-    print(f"  Port: {mysql_port}")
-    print(f"  User: {mysql_user}")
-    print(f"  Database: {mysql_database}")
-    print(f"  Password: {'***SET***' if mysql_password != 'qpcr_password' else '***DEFAULT***'}")
+    print(f"  MYSQL_URL = {'***SET***' if railway_mysql_url else 'NOT SET'}")
+    print(f"  MYSQL_HOST = {railway_mysql_host or 'NOT SET'}")
+    print(f"  MYSQL_PORT = {railway_mysql_port or 'NOT SET'}")
+    print(f"  MYSQL_USER = {railway_mysql_user or 'NOT SET'}")
+    print(f"  MYSQL_PASSWORD = {'***SET***' if railway_mysql_password else 'NOT SET'}")
+    print(f"  MYSQL_DATABASE = {railway_mysql_database or 'NOT SET'}")
+    
+    # If Railway provided MYSQL_URL directly, use it
+    if railway_mysql_url:
+        database_url = railway_mysql_url
+        # Convert mysql:// to mysql+pymysql:// if needed
+        if database_url.startswith("mysql://"):
+            database_url = database_url.replace("mysql://", "mysql+pymysql://", 1)
+        print(f"✅ Using Railway's MYSQL_URL: {database_url.split('@')[1] if '@' in database_url else 'configured'}")
+    else:
+        # Try Railway's common MySQL variable patterns
+        mysql_host = (railway_mysql_host or 
+                      os.environ.get("MYSQLHOST") or 
+                      os.environ.get("DB_HOST") or 
+                      "127.0.0.1")
+        mysql_port = (railway_mysql_port or 
+                      os.environ.get("MYSQLPORT") or 
+                      os.environ.get("DB_PORT") or 
+                      "3306")
+        mysql_user = (railway_mysql_user or 
+                      os.environ.get("MYSQLUSER") or 
+                      os.environ.get("DB_USER") or 
+                      os.environ.get("MYSQL_USERNAME") or
+                      "qpcr_user")
+        mysql_password = (railway_mysql_password or 
+                          os.environ.get("MYSQLPASSWORD") or 
+                          os.environ.get("DB_PASSWORD") or 
+                          os.environ.get("MYSQL_ROOT_PASSWORD") or
+                          "qpcr_password")
+        mysql_database = (railway_mysql_database or 
+                          os.environ.get("MYSQLDATABASE") or 
+                          os.environ.get("DB_NAME") or 
+                          os.environ.get("MYSQL_DB") or
+                          "qpcr_analysis")
+        
+        print(f"🔍 Resolved MySQL connection details:")
+        print(f"  Host: {mysql_host}")
+        print(f"  Port: {mysql_port}")
+        print(f"  User: {mysql_user}")
+        print(f"  Database: {mysql_database}")
+        print(f"  Password: {'***SET***' if mysql_password != 'qpcr_password' else '***DEFAULT***'}")
     
     # Try to construct MySQL URL from individual components
     if all([mysql_host, mysql_port, mysql_user, mysql_password, mysql_database]):
