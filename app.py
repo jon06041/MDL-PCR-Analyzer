@@ -4717,21 +4717,23 @@ def get_unified_compliance_requirements():
         if not unified_compliance_manager:
             return jsonify({'error': 'Unified Compliance Manager not available'}), 503
         
-        # Check if filtering parameters are provided (for evidence tracking)
-        category = request.args.get('category')
-        status = request.args.get('status')
-        regulation_number = request.args.get('regulation_number')
+        # Check if we should use the status format (for overview dashboard)
+        use_status_format = request.args.get('format') == 'status'
         
-        if any([category, status, regulation_number]):
-            # Use the filtering method for evidence tracking
+        if use_status_format:
+            # Use the status method for dashboard overview
+            requirements = unified_compliance_manager.get_requirements_status()
+        else:
+            # Use the detailed filtering method by default (for evidence tracking)
+            category = request.args.get('category')
+            status = request.args.get('status') 
+            regulation_number = request.args.get('regulation_number')
+            
             requirements = unified_compliance_manager.get_requirements(
                 category=category,
                 status=status,
                 regulation_number=regulation_number
             )
-        else:
-            # Use the status method for dashboard overview
-            requirements = unified_compliance_manager.get_requirements_status()
         
         return jsonify(requirements)
         

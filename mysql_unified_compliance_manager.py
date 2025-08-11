@@ -180,6 +180,42 @@ class MySQLUnifiedComplianceManager:
                 }
         
         self.logger.info(f"Loaded {len(self.compliance_requirements)} software-trackable requirements")
+        
+        # Initialize all requirements in database
+        self._initialize_requirements_in_database()
+
+    def _initialize_requirements_in_database(self):
+        """Ensure all compliance requirements are in the database"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            for req_id, req_spec in self.compliance_requirements.items():
+                # Check if requirement already exists
+                cursor.execute('''
+                    SELECT id FROM compliance_requirements_tracking 
+                    WHERE requirement_id = %s
+                ''', (req_id,))
+                
+                if not cursor.fetchone():
+                    # Create initial tracking record
+                    cursor.execute('''
+                        INSERT INTO compliance_requirements_tracking 
+                        (requirement_id, requirement_category, evidence_count, 
+                         compliance_percentage, compliance_status, validation_criteria)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    ''', (req_id, req_spec['category'], 0, 0.0, 'not_started',
+                          json.dumps(req_spec.get('validation_criteria', {}))))
+            
+            conn.commit()
+            self.logger.info(f"Initialized {len(self.compliance_requirements)} requirements in database")
+            
+        except Exception as e:
+            self.logger.error(f"Error initializing requirements in database: {e}")
+            conn.rollback()
+        finally:
+            cursor.close()
+            conn.close()
 
     def log_compliance_event(self, event_type: str, event_data: dict, user_id: str = 'system', session_id: str = None):
         """Log a compliance-relevant event"""
@@ -510,6 +546,8 @@ class MySQLUnifiedComplianceManager:
                 if category and req_spec['category'] != category:
                     continue
                 if status and requirement['implementation_status'] != status:
+                    continue
+                if regulation_number and regulation_number.lower() not in req_id.lower():
                     continue
                 
                 requirements.append(requirement)
