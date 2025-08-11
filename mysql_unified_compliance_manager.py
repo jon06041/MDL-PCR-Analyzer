@@ -693,13 +693,24 @@ class MySQLUnifiedComplianceManager:
                 ''', (req_id,))
                 currently_tracking = cursor.fetchone()[0] > 0
                 
+                # Determine implementation status based on tracking and evidence
+                if currently_tracking and event_count > 0:
+                    implementation_status = 'active'  # Currently tracking with evidence
+                elif event_count > 0:
+                    implementation_status = 'partial'  # Has evidence but not recent
+                elif req_data.get('auto_trackable', False):
+                    implementation_status = 'ready_to_implement'  # Can be auto-tracked
+                else:
+                    implementation_status = 'planned'  # Future implementation
+                
                 requirements_list.append({
                     'id': req_id,
                     'title': req_data['title'],
                     'category': req_data['category'],
                     'event_count': event_count,
                     'currently_tracking': currently_tracking,
-                    'auto_trackable': req_data.get('auto_trackable', False)
+                    'auto_trackable': req_data.get('auto_trackable', False),
+                    'implementation_status': implementation_status
                 })
             
             return requirements_list
