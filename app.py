@@ -577,6 +577,11 @@ if not database_url:
         print(f"✓ Constructed MySQL URL from environment variables")
 
 if database_url and database_url.startswith("mysql"):
+    # Convert Railway's mysql:// to mysql+pymysql:// format for Flask-SQLAlchemy
+    if database_url.startswith("mysql://"):
+        database_url = database_url.replace("mysql://", "mysql+pymysql://", 1)
+        print(f"🔧 Converted MySQL URL format for Flask-SQLAlchemy compatibility")
+    
     # MySQL configuration - REQUIRED
     try:
         app.config["SQLALCHEMY_DATABASE_URI"] = database_url

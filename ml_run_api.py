@@ -76,7 +76,11 @@ def confirm_run():
         import os
         
         database_url = os.environ.get("DATABASE_URL")
-        if not database_url:
+        if database_url:
+            # Convert Railway's mysql:// to mysql+pymysql:// format
+            if database_url.startswith("mysql://"):
+                database_url = database_url.replace("mysql://", "mysql+pymysql://", 1)
+        else:
             mysql_host = os.environ.get("MYSQL_HOST", "127.0.0.1")
             mysql_port = os.environ.get("MYSQL_PORT", "3306")
             mysql_user = os.environ.get("MYSQL_USER", "qpcr_user")
