@@ -5665,6 +5665,223 @@ def get_confirmed_sessions():
         app.logger.error(f"✗ Full traceback: {traceback.format_exc()}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
+@app.route('/api/fix/railway-tracking-status', methods=['GET'])
+def fix_railway_tracking_status():
+    """Update compliance_requirements_tracking to show requirements in Currently Tracking section"""
+    try:
+        from sqlalchemy import create_engine, text
+        
+        if not mysql_configured:
+            return jsonify({'error': 'MySQL not configured'}), 503
+        
+        # Build connection URL
+        if mysql_config.get('url'):
+            db_url = mysql_config['url']
+            if db_url.startswith('mysql://'):
+                db_url = db_url.replace('mysql://', 'mysql+pymysql://', 1)
+        else:
+            db_url = f"mysql+pymysql://{mysql_config['user']}:{mysql_config['password']}@{mysql_config['host']}:{mysql_config['port']}/{mysql_config['database']}?charset=utf8mb4"
+        
+        engine = create_engine(db_url)
+        results = []
+        
+        with engine.connect() as conn:
+            # Check current state of compliance_requirements_tracking
+            result = conn.execute(text("""
+                SELECT requirement_id, compliance_status, evidence_count, compliance_percentage 
+                FROM compliance_requirements_tracking 
+                ORDER BY requirement_id
+            """))
+            current_tracking = result.fetchall()
+            results.append(f"Current tracking records: {len(current_tracking)}")
+            for track in current_tracking:
+                results.append(f"  {track[0]}: status={track[1]}, evidence={track[2]}, percentage={track[3]}")
+            
+            # Get requirements that have evidence in the last 30 days
+            result = conn.execute(text("""
+                SELECT DISTINCT requirement_id, COUNT(*) as evidence_count
+                FROM compliance_evidence 
+                WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                GROUP BY requirement_id
+            """))
+            active_requirements = dict(result.fetchall())
+            results.append(f"Requirements with recent evidence: {active_requirements}")
+            
+            # Update requirements that have evidence to "in_progress" status
+            for req_id, evidence_count in active_requirements.items():
+                try:
+                    # Update the compliance_requirements_tracking table
+                    conn.execute(text("""
+                        UPDATE compliance_requirements_tracking 
+                        SET compliance_status = 'in_progress',
+                            evidence_count = :evidence_count,
+                            compliance_percentage = CASE
+                                WHEN :evidence_count >= 10 THEN 100.0
+                                WHEN :evidence_count > 0 THEN (:evidence_count * 10.0)
+                                ELSE 0.0
+                            END,
+                            last_evidence_timestamp = NOW(),
+                            updated_at = NOW()
+                        WHERE requirement_id = :req_id
+                    """), {"req_id": req_id, "evidence_count": evidence_count})
+                    
+                    conn.commit()
+                    results.append(f"✅ Updated {req_id} to 'in_progress' with {evidence_count} evidence")
+                    
+                except Exception as e:
+                    results.append(f"❌ Failed to update {req_id}: {str(e)}")
+            
+            # Also make sure requirements show as "currently_tracking" in the overview logic
+            # This maps compliance_status values to what the overview expects
+            status_mapping = {
+                'in_progress': 'currently_tracking',
+                'completed': 'currently_tracking'  
+            }
+            
+            # Show final state
+            result = conn.execute(text("""
+                SELECT requirement_id, compliance_status, evidence_count, compliance_percentage 
+                FROM compliance_requirements_tracking 
+                WHERE compliance_status IN ('in_progress', 'completed')
+                ORDER BY requirement_id
+            """))
+            final_tracking = result.fetchall()
+            results.append(f"Final tracking records with progress: {len(final_tracking)}")
+            for track in final_tracking:
+                results.append(f"  {track[0]}: status={track[1]}, evidence={track[2]}, percentage={track[3]}")
+            
+            # Check if these should appear in "Currently Tracking" section
+            result = conn.execute(text("""
+                SELECT COUNT(*) as currently_tracking_count
+                FROM compliance_requirements_tracking 
+                WHERE compliance_status IN ('in_progress', 'completed') 
+                   OR evidence_count > 0
+            """))
+            tracking_count = result.fetchone()[0]
+            results.append(f"Requirements that should show in Currently Tracking: {tracking_count}")
+            
+        return jsonify({
+            'success': True,
+            'results': results,
+            'message': 'Compliance tracking status update completed'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'error_type': type(e).__name__
+        }), 500
+
+@app.route('/api/fix/railway-tracking-status', methods=['GET'])
+def fix_railway_tracking_status():
+    """Update compliance_requirements_tracking table to populate Currently Tracking overview section"""
+    try:
+        from sqlalchemy import create_engine, text
+        
+        if not mysql_configured:
+            return jsonify({'error': 'MySQL not configured'}), 503
+        
+        # Build connection URL
+        if mysql_config.get('url'):
+            db_url = mysql_config['url']
+            if db_url.startswith('mysql://'):
+                db_url = db_url.replace('mysql://', 'mysql+pymysql://', 1)
+        else:
+            db_url = f"mysql+pymysql://{mysql_config['user']}:{mysql_config['password']}@{mysql_config['host']}:{mysql_config['port']}/{mysql_config['database']}?charset=utf8mb4"
+        
+        engine = create_engine(db_url)
+        results = []
+        
+        with engine.connect() as conn:
+            # Check current compliance_requirements_tracking table
+            result = conn.execute(text("SELECT COUNT(*) FROM compliance_requirements_tracking"))
+            total_requirements = result.fetchone()[0]
+            results.append(f"Total requirements in tracking table: {total_requirements}")
+            
+            # Show current status breakdown
+            result = conn.execute(text("""
+                SELECT compliance_status, COUNT(*) as count 
+                FROM compliance_requirements_tracking 
+                GROUP BY compliance_status
+            """))
+            current_status = dict(result.fetchall())
+            results.append(f"Current status breakdown: {current_status}")
+            
+            # Check which requirements have evidence
+            result = conn.execute(text("""
+                SELECT DISTINCT ce.requirement_id, COUNT(*) as evidence_count
+                FROM compliance_evidence ce
+                WHERE ce.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                GROUP BY ce.requirement_id
+            """))
+            requirements_with_evidence = dict(result.fetchall())
+            results.append(f"Requirements with recent evidence: {requirements_with_evidence}")
+            
+            # Update requirements that have evidence to 'in_progress' status
+            updates_made = 0
+            for req_id, evidence_count in requirements_with_evidence.items():
+                try:
+                    # Update the compliance_requirements_tracking table
+                    result = conn.execute(text("""
+                        UPDATE compliance_requirements_tracking 
+                        SET compliance_status = 'in_progress',
+                            evidence_count = :evidence_count,
+                            compliance_percentage = CASE
+                                WHEN :evidence_count >= 10 THEN 100.0
+                                WHEN :evidence_count > 0 THEN (:evidence_count * 10.0)
+                                ELSE 0.0
+                            END,
+                            last_evidence_timestamp = NOW()
+                        WHERE requirement_id = :req_id
+                    """), {"req_id": req_id, "evidence_count": evidence_count})
+                    
+                    if result.rowcount > 0:
+                        updates_made += 1
+                        results.append(f"✅ Updated {req_id} to in_progress with {evidence_count} evidence")
+                    else:
+                        results.append(f"⚠️ No matching requirement found for {req_id}")
+                        
+                except Exception as e:
+                    results.append(f"❌ Failed to update {req_id}: {str(e)}")
+            
+            conn.commit()
+            results.append(f"Total updates made: {updates_made}")
+            
+            # Show final status breakdown
+            result = conn.execute(text("""
+                SELECT compliance_status, COUNT(*) as count 
+                FROM compliance_requirements_tracking 
+                GROUP BY compliance_status
+            """))
+            final_status = dict(result.fetchall())
+            results.append(f"Final status breakdown: {final_status}")
+            
+            # Show requirements that should appear in Currently Tracking
+            result = conn.execute(text("""
+                SELECT requirement_id, requirement_category, evidence_count, compliance_percentage
+                FROM compliance_requirements_tracking 
+                WHERE compliance_status = 'in_progress' 
+                ORDER BY evidence_count DESC
+            """))
+            tracking_requirements = result.fetchall()
+            results.append(f"Requirements that should show in Currently Tracking: {len(tracking_requirements)}")
+            for req in tracking_requirements:
+                results.append(f"  - {req[0]} ({req[1]}): {req[2]} evidence, {req[3]}% complete")
+            
+        return jsonify({
+            'success': True,
+            'results': results,
+            'message': 'Compliance tracking status update completed'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'error_type': type(e).__name__
+        }), 500
+
 @app.route('/api/fix/railway-requirement-status', methods=['GET'])
 def fix_railway_requirement_status():
     """Update unified_compliance_requirements status to show in Currently Tracking section"""
