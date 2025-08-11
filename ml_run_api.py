@@ -80,6 +80,11 @@ def confirm_run():
             # Convert Railway's mysql:// to mysql+pymysql:// format
             if database_url.startswith("mysql://"):
                 database_url = database_url.replace("mysql://", "mysql+pymysql://", 1)
+            
+            # Ensure charset=utf8mb4 is included for proper character handling
+            if "charset=" not in database_url:
+                separator = "&" if "?" in database_url else "?"
+                database_url = f"{database_url}{separator}charset=utf8mb4"
         else:
             mysql_host = os.environ.get("MYSQL_HOST", "127.0.0.1")
             mysql_port = os.environ.get("MYSQL_PORT", "3306")

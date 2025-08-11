@@ -18,6 +18,11 @@ class MLValidationTracker:
             # Convert Railway's mysql:// to mysql+pymysql:// format
             if self.database_url.startswith("mysql://"):
                 self.database_url = self.database_url.replace("mysql://", "mysql+pymysql://", 1)
+            
+            # Ensure charset=utf8mb4 is included for proper character handling
+            if "charset=" not in self.database_url:
+                separator = "&" if "?" in self.database_url else "?"
+                self.database_url = f"{self.database_url}{separator}charset=utf8mb4"
         else:
             mysql_host = os.environ.get("MYSQL_HOST", "127.0.0.1")
             mysql_port = os.environ.get("MYSQL_PORT", "3306")

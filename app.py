@@ -537,6 +537,12 @@ if not database_url:
         # Convert mysql:// to mysql+pymysql:// if needed
         if database_url.startswith("mysql://"):
             database_url = database_url.replace("mysql://", "mysql+pymysql://", 1)
+        
+        # Ensure charset=utf8mb4 is included for proper sample name handling
+        if "charset=" not in database_url:
+            separator = "&" if "?" in database_url else "?"
+            database_url = f"{database_url}{separator}charset=utf8mb4"
+        
         print(f"✅ Using Railway's MYSQL_URL: {database_url.split('@')[1] if '@' in database_url else 'configured'}")
     else:
         # Try Railway's common MySQL variable patterns
