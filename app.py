@@ -5665,6 +5665,69 @@ def get_confirmed_sessions():
         app.logger.error(f"✗ Full traceback: {traceback.format_exc()}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
+@app.route('/api/test/railway-mysql', methods=['GET'])
+def test_railway_mysql():
+    """Test Railway MySQL connection using SQLAlchemy instead of mysql.connector"""
+    try:
+        # Use the same database setup as the rest of the app
+        if not mysql_configured:
+            return jsonify({'error': 'MySQL not configured', 'mysql_configured': False}), 503
+        
+        # Use SQLAlchemy engine instead of mysql.connector
+        from sqlalchemy import create_engine, text
+        
+        # Build connection URL
+        if mysql_config.get('url'):
+            # Use DATABASE_URL if available
+            db_url = mysql_config['url']
+            if db_url.startswith('mysql://'):
+                db_url = db_url.replace('mysql://', 'mysql+pymysql://', 1)
+        else:
+            # Build URL from components
+            db_url = f"mysql+pymysql://{mysql_config['user']}:{mysql_config['password']}@{mysql_config['host']}:{mysql_config['port']}/{mysql_config['database']}?charset=utf8mb4"
+        
+        engine = create_engine(db_url)
+        
+        # Test basic connection
+        with engine.connect() as conn:
+            # Test 1: Basic query
+            result = conn.execute(text("SELECT 1 as test"))
+            test_value = result.fetchone()[0]
+            
+            # Test 2: Check if analysis_sessions table exists
+            result = conn.execute(text("SHOW TABLES LIKE 'analysis_sessions'"))
+            table_exists = result.fetchone() is not None
+            
+            # Test 3: Count sessions if table exists
+            session_counts = {}
+            if table_exists:
+                result = conn.execute(text("SELECT COUNT(*) FROM analysis_sessions"))
+                session_counts['total'] = result.fetchone()[0]
+                
+                result = conn.execute(text("SELECT COUNT(*) FROM analysis_sessions WHERE confirmation_status = 'pending'"))
+                session_counts['pending'] = result.fetchone()[0]
+                
+                result = conn.execute(text("SELECT COUNT(*) FROM analysis_sessions WHERE confirmation_status = 'confirmed'"))
+                session_counts['confirmed'] = result.fetchone()[0]
+            
+            return jsonify({
+                'success': True,
+                'engine': 'SQLAlchemy + PyMySQL',
+                'test_query': test_value,
+                'table_exists': table_exists,
+                'session_counts': session_counts,
+                'mysql_config_host': mysql_config.get('host'),
+                'mysql_config_db': mysql_config.get('database')
+            })
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'error_type': type(e).__name__,
+            'mysql_configured': mysql_configured
+        }), 500
+
 @app.route('/api/debug/sessions-status', methods=['GET'])
 def debug_sessions_status():
     """Simple diagnostic endpoint that returns status instead of logging"""
