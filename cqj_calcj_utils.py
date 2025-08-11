@@ -266,41 +266,33 @@ def calculate_calcj_with_controls(well_data, threshold, all_well_results, test_c
         control_type = None
         upper_key = well_key.upper()
         
-        # More aggressive pattern matching for embedded control indicators
-        # HIGH control patterns (including embedded H patterns)
-        if (well_key.startswith('H_') or '_H_' in well_key or upper_key.startswith('HIGH') or
-            'HIGH' in upper_key or 'H1' in upper_key or 'H2' in upper_key or 'H3' in upper_key or
-            'POS' in upper_key or 'POSITIVE' in upper_key or 
-            '1E7' in upper_key or '10E7' in upper_key or '1E+7' in upper_key or
-            well_key.endswith('H') or 'A05H' in upper_key or 'A06H' in upper_key or 'A07H' in upper_key):
-            control_type = 'H'
-        # MEDIUM control patterns (including embedded M patterns)
-        elif (well_key.startswith('M_') or '_M_' in well_key or upper_key.startswith('MEDIUM') or
-              'MEDIUM' in upper_key or 'M1' in upper_key or 'M2' in upper_key or 'M3' in upper_key or
-              'MED' in upper_key or '1E5' in upper_key or '10E5' in upper_key or '1E+5' in upper_key or
-              well_key.endswith('M') or 'B08M' in upper_key or 'B09M' in upper_key or 'B10M' in upper_key):
-            control_type = 'M'
-        # LOW control patterns (including embedded L patterns)
-        elif (well_key.startswith('L_') or '_L_' in well_key or upper_key.startswith('LOW') or
-              'LOW' in upper_key or 'L1' in upper_key or 'L2' in upper_key or 'L3' in upper_key or
-              '1E3' in upper_key or '10E3' in upper_key or '1E+3' in upper_key or
-              well_key.endswith('L') or 'C11L' in upper_key or 'C12L' in upper_key or 'C13L' in upper_key):
-            control_type = 'L'
-        # Also check sample_name if available with same aggressive patterns
-        elif well.get('sample_name'):
-            upper_sample = well.get('sample_name', '').upper()
+        # First, use the dedicated control detection function
+        control_type = determine_control_type_python(well_key, well)
+        
+        # Check sample_name for control patterns (H-, M-, L-)
+        if not control_type and well.get('sample_name'):
             sample_name = well.get('sample_name', '')
-            if ('HIGH' in upper_sample or 'POS' in upper_sample or 'H1' in upper_sample or
-                '1E7' in upper_sample or '10E7' in upper_sample or '1E+7' in upper_sample or
-                sample_name.endswith('H') or 'A05H' in upper_sample or 'A06H' in upper_sample or 'A07H' in upper_sample):
+            upper_sample = sample_name.upper()
+            
+            # Look for H-, M-, L- patterns in sample name (most reliable for BVPanel tests)
+            if 'H-' in sample_name:
+                control_type = 'H'
+                print(f"[CALCJ-DEBUG] Found H control by sample name: {well_key} (sample: {sample_name})")
+            elif 'M-' in sample_name:
+                control_type = 'M'
+                print(f"[CALCJ-DEBUG] Found M control by sample name: {well_key} (sample: {sample_name})")
+            elif 'L-' in sample_name:
+                control_type = 'L'
+                print(f"[CALCJ-DEBUG] Found L control by sample name: {well_key} (sample: {sample_name})")
+            # Also check for other control indicators in sample name
+            elif ('HIGH' in upper_sample or 'POS' in upper_sample or 'H1' in upper_sample or
+                  '1E7' in upper_sample or '10E7' in upper_sample or '1E+7' in upper_sample):
                 control_type = 'H'
             elif ('MEDIUM' in upper_sample or 'MED' in upper_sample or 'M1' in upper_sample or
-                  '1E5' in upper_sample or '10E5' in upper_sample or '1E+5' in upper_sample or
-                  sample_name.endswith('M') or 'B08M' in upper_sample or 'B09M' in upper_sample or 'B10M' in upper_sample):
+                  '1E5' in upper_sample or '10E5' in upper_sample or '1E+5' in upper_sample):
                 control_type = 'M'
             elif ('LOW' in upper_sample or 'L1' in upper_sample or
-                  '1E3' in upper_sample or '10E3' in upper_sample or '1E+3' in upper_sample or
-                  sample_name.endswith('L') or 'C11L' in upper_sample or 'C12L' in upper_sample or 'C13L' in upper_sample):
+                  '1E3' in upper_sample or '10E3' in upper_sample or '1E+3' in upper_sample):
                 control_type = 'L'
             
         if control_type and well.get('cqj_value') is not None:
