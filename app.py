@@ -5502,10 +5502,10 @@ def get_pending_sessions():
             return jsonify({'success': True, 'pending_sessions': [], 'count': 0})
 
         app.logger.info("✓ analysis_sessions table exists, executing pending sessions query")
+        # Use very simple query to avoid Railway constraint issues
         cursor.execute("""
             SELECT id, filename, upload_timestamp, total_wells, good_curves, 
-                   success_rate, pathogen_breakdown, confirmation_status,
-                   confirmed_by, confirmed_at
+                   success_rate, confirmation_status, confirmed_by, confirmed_at
             FROM analysis_sessions 
             WHERE confirmation_status = 'pending'
             ORDER BY upload_timestamp DESC
@@ -5517,10 +5517,24 @@ def get_pending_sessions():
         
         # Convert timestamps to strings for JSON serialization
         for session in pending_sessions:
-            if session['upload_timestamp']:
-                session['upload_timestamp'] = session['upload_timestamp'].isoformat()
-            if session['confirmed_at']:
-                session['confirmed_at'] = session['confirmed_at'].isoformat()
+            try:
+                if session['upload_timestamp']:
+                    session['upload_timestamp'] = session['upload_timestamp'].isoformat()
+                if session['confirmed_at']:
+                    session['confirmed_at'] = session['confirmed_at'].isoformat()
+                # Handle any JSON fields safely
+                if 'pathogen_breakdown' in session and session['pathogen_breakdown']:
+                    if isinstance(session['pathogen_breakdown'], str):
+                        # Already a string, keep as is
+                        pass
+                    else:
+                        # Convert to string if it's an object
+                        session['pathogen_breakdown'] = str(session['pathogen_breakdown'])
+            except Exception as convert_error:
+                app.logger.error(f"✗ Error converting session data: {convert_error}")
+                # Set problematic fields to safe defaults
+                session['upload_timestamp'] = None
+                session['confirmed_at'] = None
         
         cursor.close()
         conn.close()
@@ -5592,8 +5606,7 @@ def get_confirmed_sessions():
         app.logger.info("Executing confirmed sessions query")
         cursor.execute("""
             SELECT id, filename, upload_timestamp, total_wells, good_curves, 
-                   success_rate, pathogen_breakdown, confirmation_status,
-                   confirmed_by, confirmed_at
+                   success_rate, confirmation_status, confirmed_by, confirmed_at
             FROM analysis_sessions 
             WHERE confirmation_status = 'confirmed'
             ORDER BY confirmed_at DESC
@@ -5605,10 +5618,24 @@ def get_confirmed_sessions():
         
         # Convert timestamps to strings for JSON serialization
         for session in confirmed_sessions:
-            if session['upload_timestamp']:
-                session['upload_timestamp'] = session['upload_timestamp'].isoformat()
-            if session['confirmed_at']:
-                session['confirmed_at'] = session['confirmed_at'].isoformat()
+            try:
+                if session['upload_timestamp']:
+                    session['upload_timestamp'] = session['upload_timestamp'].isoformat()
+                if session['confirmed_at']:
+                    session['confirmed_at'] = session['confirmed_at'].isoformat()
+                # Handle any JSON fields safely
+                if 'pathogen_breakdown' in session and session['pathogen_breakdown']:
+                    if isinstance(session['pathogen_breakdown'], str):
+                        # Already a string, keep as is
+                        pass
+                    else:
+                        # Convert to string if it's an object
+                        session['pathogen_breakdown'] = str(session['pathogen_breakdown'])
+            except Exception as convert_error:
+                app.logger.error(f"✗ Error converting session data: {convert_error}")
+                # Set problematic fields to safe defaults
+                session['upload_timestamp'] = None
+                session['confirmed_at'] = None
         
         cursor.close()
         conn.close()
@@ -5633,6 +5660,68 @@ def get_confirmed_sessions():
         import traceback
         app.logger.error(f"✗ Full traceback: {traceback.format_exc()}")
         return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/debug/sessions-status', methods=['GET'])
+def debug_sessions_status():
+    """Simple diagnostic endpoint that returns status instead of logging"""
+    status = {}
+    
+    # Test 1: mysql.connector availability
+    try:
+        import mysql.connector
+        status['mysql_connector'] = 'Available'
+    except ImportError as e:
+        status['mysql_connector'] = f'NOT AVAILABLE: {str(e)}'
+        return jsonify(status), 500
+    
+    # Test 2: MySQL configuration
+    if not mysql_configured:
+        status['mysql_config'] = 'NOT CONFIGURED'
+        return jsonify(status), 500
+    else:
+        status['mysql_config'] = 'Configured'
+        status['mysql_host'] = mysql_config.get('host', 'unknown')
+        status['mysql_database'] = mysql_config.get('database', 'unknown')
+    
+    # Test 3: Database connection
+    try:
+        connector_config = {
+            'host': mysql_config['host'],
+            'port': mysql_config['port'],
+            'user': mysql_config['user'], 
+            'password': mysql_config['password'],
+            'database': mysql_config['database'],
+            'charset': mysql_config.get('charset', 'utf8mb4'),
+            'autocommit': True
+        }
+        
+        conn = mysql.connector.connect(**connector_config)
+        status['database_connection'] = 'SUCCESS'
+        
+        # Test 4: Table check
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SHOW TABLES LIKE 'analysis_sessions'")
+        table_exists = cursor.fetchone()
+        status['analysis_sessions_table'] = 'EXISTS' if table_exists else 'MISSING'
+        
+        # Test 5: Count sessions
+        if table_exists:
+            cursor.execute("SELECT COUNT(*) as total FROM analysis_sessions")
+            total = cursor.fetchone()['total']
+            status['total_sessions'] = total
+            
+            cursor.execute("SELECT COUNT(*) as pending FROM analysis_sessions WHERE confirmation_status = 'pending'")
+            pending = cursor.fetchone()['pending'] 
+            status['pending_sessions'] = pending
+        
+        cursor.close()
+        conn.close()
+        
+    except Exception as e:
+        status['database_connection'] = f'FAILED: {str(e)}'
+        return jsonify(status), 500
+    
+    return jsonify(status), 200
 
 @app.route('/api/debug/sessions-test', methods=['GET'])
 def debug_sessions():
