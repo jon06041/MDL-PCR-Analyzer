@@ -5453,12 +5453,22 @@ def confirm_analysis_session():
 def get_pending_sessions():
     """Get all pending analysis sessions"""
     try:
+        app.logger.info("=== PENDING SESSIONS ENDPOINT CALLED ===")
+        
+        # Test mysql.connector import first
+        try:
+            import mysql.connector
+            app.logger.info("✓ mysql.connector imported successfully")
+        except ImportError as e:
+            app.logger.error(f"✗ mysql.connector import failed: {e}")
+            return jsonify({'error': 'mysql.connector not available', 'details': str(e)}), 500
+        
         # Use Railway-compatible mysql.connector config
         if not mysql_configured:
-            app.logger.error("MySQL not configured for pending sessions")
+            app.logger.error("✗ MySQL not configured for pending sessions")
             return jsonify({'error': 'MySQL not configured'}), 503
         
-        app.logger.info(f"Getting pending sessions with config: host={mysql_config.get('host')}, db={mysql_config.get('database')}")
+        app.logger.info(f"✓ MySQL configured: host={mysql_config.get('host')}, db={mysql_config.get('database')}")
         
         # Create mysql.connector compatible config from global mysql_config
         connector_config = {
@@ -5472,22 +5482,26 @@ def get_pending_sessions():
             'use_unicode': True,
             'collation': 'utf8mb4_unicode_ci'
         }
-            
-        import mysql.connector
+        
+        app.logger.info(f"✓ Connector config prepared: {connector_config['host']}:{connector_config['port']}")
+        
         app.logger.info("Attempting mysql.connector connection for pending sessions")
         conn = mysql.connector.connect(**connector_config)
+        app.logger.info("✓ Database connection established")
         cursor = conn.cursor(dictionary=True)
+        app.logger.info("✓ Database cursor created")
         
         # Test table exists first
+        app.logger.info("Checking if analysis_sessions table exists")
         cursor.execute("SHOW TABLES LIKE 'analysis_sessions'")
         table_exists = cursor.fetchone()
         if not table_exists:
-            app.logger.error("analysis_sessions table does not exist")
+            app.logger.error("✗ analysis_sessions table does not exist")
             cursor.close()
             conn.close()
             return jsonify({'success': True, 'pending_sessions': [], 'count': 0})
 
-        app.logger.info("Table exists, executing pending sessions query")
+        app.logger.info("✓ analysis_sessions table exists, executing pending sessions query")
         cursor.execute("""
             SELECT id, filename, upload_timestamp, total_wells, good_curves, 
                    success_rate, pathogen_breakdown, confirmation_status,
@@ -5496,10 +5510,10 @@ def get_pending_sessions():
             WHERE confirmation_status = 'pending'
             ORDER BY upload_timestamp DESC
         """)
-        app.logger.info("Query executed successfully")
+        app.logger.info("✓ Query executed successfully")
         
         pending_sessions = cursor.fetchall()
-        app.logger.info(f"Found {len(pending_sessions)} pending sessions")
+        app.logger.info(f"✓ Found {len(pending_sessions)} pending sessions")
         
         # Convert timestamps to strings for JSON serialization
         for session in pending_sessions:
@@ -5510,6 +5524,7 @@ def get_pending_sessions():
         
         cursor.close()
         conn.close()
+        app.logger.info("✓ Database connection closed, returning response")
         
         return jsonify({
             'success': True,
@@ -5518,22 +5533,39 @@ def get_pending_sessions():
         })
         
     except mysql.connector.Error as mysql_error:
-        app.logger.error(f"MySQL connector error in pending sessions: {str(mysql_error)}")
+        app.logger.error(f"✗ MySQL connector error in pending sessions: {str(mysql_error)}")
+        app.logger.error(f"✗ MySQL error code: {mysql_error.errno if hasattr(mysql_error, 'errno') else 'unknown'}")
         return jsonify({'success': False, 'message': f'Database error: {str(mysql_error)}'}), 500
     except ImportError as import_error:
-        app.logger.error(f"Import error for mysql.connector: {str(import_error)}")
+        app.logger.error(f"✗ Import error for mysql.connector: {str(import_error)}")
         return jsonify({'success': False, 'message': f'Database driver error: {str(import_error)}'}), 500
     except Exception as e:
-        app.logger.error(f"Error getting pending sessions: {str(e)}")
+        app.logger.error(f"✗ Unexpected error getting pending sessions: {str(e)}")
+        app.logger.error(f"✗ Error type: {type(e).__name__}")
+        import traceback
+        app.logger.error(f"✗ Full traceback: {traceback.format_exc()}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/sessions/confirmed', methods=['GET'])
 def get_confirmed_sessions():
     """Get all confirmed analysis sessions"""
     try:
+        app.logger.info("=== CONFIRMED SESSIONS ENDPOINT CALLED ===")
+        
+        # Test mysql.connector import first
+        try:
+            import mysql.connector
+            app.logger.info("✓ mysql.connector imported successfully")
+        except ImportError as e:
+            app.logger.error(f"✗ mysql.connector import failed: {e}")
+            return jsonify({'error': 'mysql.connector not available', 'details': str(e)}), 500
+        
         # Use Railway-compatible mysql.connector config
         if not mysql_configured:
+            app.logger.error("✗ MySQL not configured for confirmed sessions")
             return jsonify({'error': 'MySQL not configured'}), 503
+        
+        app.logger.info(f"✓ MySQL configured: host={mysql_config.get('host')}, db={mysql_config.get('database')}")
         
         # Create mysql.connector compatible config from global mysql_config
         connector_config = {
@@ -5545,14 +5577,19 @@ def get_confirmed_sessions():
             'charset': mysql_config.get('charset', 'utf8mb4'),
             'autocommit': True
         }
-            
-        import mysql.connector
+        
+        app.logger.info(f"✓ Connector config prepared: {connector_config['host']}:{connector_config['port']}")
+        
+        app.logger.info("Attempting mysql.connector connection for confirmed sessions")
         conn = mysql.connector.connect(**connector_config)
+        app.logger.info("✓ Database connection established")
         cursor = conn.cursor(dictionary=True)
+        app.logger.info("✓ Database cursor created")
         
         app.logger.info("Testing confirmed sessions table access")
         
         # Simplified query without complex JOINs for Railway compatibility
+        app.logger.info("Executing confirmed sessions query")
         cursor.execute("""
             SELECT id, filename, upload_timestamp, total_wells, good_curves, 
                    success_rate, pathogen_breakdown, confirmation_status,
@@ -5561,9 +5598,10 @@ def get_confirmed_sessions():
             WHERE confirmation_status = 'confirmed'
             ORDER BY confirmed_at DESC
         """)
+        app.logger.info("✓ Query executed successfully")
         
         confirmed_sessions = cursor.fetchall()
-        app.logger.info(f"Found {len(confirmed_sessions)} confirmed sessions")
+        app.logger.info(f"✓ Found {len(confirmed_sessions)} confirmed sessions")
         
         # Convert timestamps to strings for JSON serialization
         for session in confirmed_sessions:
@@ -5574,6 +5612,7 @@ def get_confirmed_sessions():
         
         cursor.close()
         conn.close()
+        app.logger.info("✓ Database connection closed, returning response")
         
         return jsonify({
             'success': True,
@@ -5582,13 +5621,17 @@ def get_confirmed_sessions():
         })
         
     except mysql.connector.Error as mysql_error:
-        app.logger.error(f"MySQL connector error in confirmed sessions: {str(mysql_error)}")
+        app.logger.error(f"✗ MySQL connector error in confirmed sessions: {str(mysql_error)}")
+        app.logger.error(f"✗ MySQL error code: {mysql_error.errno if hasattr(mysql_error, 'errno') else 'unknown'}")
         return jsonify({'success': False, 'message': f'Database error: {str(mysql_error)}'}), 500
     except ImportError as import_error:
-        app.logger.error(f"Import error for mysql.connector: {str(import_error)}")
+        app.logger.error(f"✗ Import error for mysql.connector: {str(import_error)}")
         return jsonify({'success': False, 'message': f'Database driver error: {str(import_error)}'}), 500
     except Exception as e:
-        app.logger.error(f"Error getting confirmed sessions: {str(e)}")
+        app.logger.error(f"✗ Unexpected error getting confirmed sessions: {str(e)}")
+        app.logger.error(f"✗ Error type: {type(e).__name__}")
+        import traceback
+        app.logger.error(f"✗ Full traceback: {traceback.format_exc()}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/debug/sessions-test', methods=['GET'])
