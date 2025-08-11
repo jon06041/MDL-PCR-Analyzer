@@ -97,7 +97,7 @@ def process_with_sql_integration(amplification_data, samples_csv_data, fluoropho
                     fluorophore VARCHAR(20),
                     sample_name VARCHAR(255),
                     cq_value DECIMAL(10,4)
-                ) ENGINE=MEMORY
+                ) ENGINE=MEMORY DEFAULT CHARSET=utf8mb4
             """))
             
             # Generate unique session ID for this analysis
