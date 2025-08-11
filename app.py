@@ -1202,17 +1202,24 @@ def analyze_data():
             good_samples = len(results.get('good_curves', []))
             accuracy_percentage = (good_samples / total_samples * 100) if total_samples > 0 else 85.0
             
-            # Track the analysis run
-            ml_tracker.track_analysis_run(
-                session_id=session_id,
-                file_name=filename,
-                pathogen_codes=list(pathogen_codes) if pathogen_codes else ['UNKNOWN'],
-                total_samples=total_samples,
-                ml_samples_analyzed=ml_samples_analyzed,
-                accuracy_percentage=accuracy_percentage
-            )
+            # Track the analysis run with duplicate prevention
+            from duplicate_prevention import prevent_ml_run_duplicate, extract_base_filename
             
-            print(f"✅ Analysis run tracked: {session_id} with {ml_samples_analyzed} ML samples")
+            # Use base filename to prevent multichannel duplicates
+            base_filename = extract_base_filename(filename)
+            
+            if prevent_ml_run_duplicate(base_filename, list(pathogen_codes) if pathogen_codes else ['UNKNOWN']):
+                ml_tracker.track_analysis_run(
+                    session_id=session_id,
+                    file_name=filename,
+                    pathogen_codes=list(pathogen_codes) if pathogen_codes else ['UNKNOWN'],
+                    total_samples=total_samples,
+                    ml_samples_analyzed=ml_samples_analyzed,
+                    accuracy_percentage=accuracy_percentage
+                )
+                print(f"✅ Analysis run tracked: {session_id} with {ml_samples_analyzed} ML samples")
+            else:
+                print(f"⚠️ Skipped duplicate ML run for base filename: {base_filename}")
             
         except Exception as track_error:
             print(f"⚠️ Could not track analysis run: {track_error}")
@@ -5386,13 +5393,8 @@ def confirm_analysis_session():
         if not session_id:
             return jsonify({'success': False, 'message': 'Session ID required'}), 400
         
-        # Get database configuration
-        mysql_config = {
-            'host': os.environ.get('MYSQL_HOST', 'localhost'),
-            'user': os.environ.get('MYSQL_USER', 'qpcr_user'),
-            'password': os.environ.get('MYSQL_PASSWORD', 'qpcr_password'),
-            'database': os.environ.get('MYSQL_DATABASE', 'qpcr_analysis')
-        }
+        # Get database configuration using global helper
+        mysql_config = get_mysql_config()
         
         import mysql.connector
         conn = mysql.connector.connect(**mysql_config)
@@ -5451,12 +5453,23 @@ def confirm_analysis_session():
 def get_pending_sessions():
     """Get all pending analysis sessions"""
     try:
-        # Use the global mysql_config that handles DATABASE_URL parsing
+        # Use Railway-compatible mysql.connector config
         if not mysql_configured:
             return jsonify({'error': 'MySQL not configured'}), 503
+        
+        # Create mysql.connector compatible config from global mysql_config
+        connector_config = {
+            'host': mysql_config['host'],
+            'port': mysql_config['port'],
+            'user': mysql_config['user'], 
+            'password': mysql_config['password'],
+            'database': mysql_config['database'],
+            'charset': mysql_config.get('charset', 'utf8mb4'),
+            'autocommit': True
+        }
             
         import mysql.connector
-        conn = mysql.connector.connect(**mysql_config)
+        conn = mysql.connector.connect(**connector_config)
         cursor = conn.cursor(dictionary=True)
         
         cursor.execute("""
@@ -5494,12 +5507,23 @@ def get_pending_sessions():
 def get_confirmed_sessions():
     """Get all confirmed analysis sessions"""
     try:
-        # Use the global mysql_config that handles DATABASE_URL parsing
+        # Use Railway-compatible mysql.connector config
         if not mysql_configured:
             return jsonify({'error': 'MySQL not configured'}), 503
+        
+        # Create mysql.connector compatible config from global mysql_config
+        connector_config = {
+            'host': mysql_config['host'],
+            'port': mysql_config['port'],
+            'user': mysql_config['user'], 
+            'password': mysql_config['password'],
+            'database': mysql_config['database'],
+            'charset': mysql_config.get('charset', 'utf8mb4'),
+            'autocommit': True
+        }
             
         import mysql.connector
-        conn = mysql.connector.connect(**mysql_config)
+        conn = mysql.connector.connect(**connector_config)
         cursor = conn.cursor(dictionary=True)
         
         cursor.execute("""
@@ -5711,13 +5735,24 @@ def delete_pending_ml_run():
         cursor = conn.cursor()
         
         try:
-            # Delete the pending run from ml_analysis_runs table (not ml_prediction_tracking)
+            # For multichannel runs, we may need to delete by base filename pattern
+            # First try exact session_id match
             cursor.execute("""
                 DELETE FROM ml_analysis_runs 
                 WHERE session_id = %s AND status = 'pending'
             """, (run_id,))
             
             rows_affected = cursor.rowcount
+            
+            # If no exact match, try base filename pattern for multichannel
+            if rows_affected == 0:
+                from duplicate_prevention import extract_base_filename
+                base_filename = extract_base_filename(run_id)
+                cursor.execute("""
+                    DELETE FROM ml_analysis_runs 
+                    WHERE file_name LIKE %s AND status = 'pending'
+                """, (f"{base_filename}%",))
+                rows_affected = cursor.rowcount
             
             if rows_affected == 0:
                 return jsonify({
@@ -5727,11 +5762,11 @@ def delete_pending_ml_run():
             
             conn.commit()
             
-            app.logger.info(f"Deleted pending ML run {run_id}")
+            app.logger.info(f"Deleted {rows_affected} pending ML run(s) for {run_id}")
             
             return jsonify({
                 'success': True,
-                'message': f'Successfully deleted pending run {run_id}'
+                'message': f'Successfully deleted {rows_affected} pending run(s) for {run_id}'
             })
             
         finally:
