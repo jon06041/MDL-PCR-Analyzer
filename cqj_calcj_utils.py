@@ -259,7 +259,15 @@ def calculate_calcj_with_controls(well_data, threshold, all_well_results, test_c
     # Find H/M/L control wells
     control_cqj = {}
     print(f"[CALCJ-DEBUG] Well {well_id}: Searching for controls in {len(all_well_results)} wells")
+    
+    # Debug: List first few wells to see the data structure
+    debug_count = 0
     for well_key, well in all_well_results.items():
+        if debug_count < 3:  # Show first 3 wells for debugging
+            sample_name = well.get('sample_name', '') if well else ''
+            print(f"[CALCJ-DEBUG] Sample well {well_key}: sample_name='{sample_name}'")
+            debug_count += 1
+        
         if not well_key or not well:
             continue
             
