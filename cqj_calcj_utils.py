@@ -258,6 +258,7 @@ def calculate_calcj_with_controls(well_data, threshold, all_well_results, test_c
     
     # Find H/M/L control wells
     control_cqj = {}
+    print(f"[CALCJ-DEBUG] Well {well_id}: Searching for controls in {len(all_well_results)} wells")
     for well_key, well in all_well_results.items():
         if not well_key or not well:
             continue
