@@ -7,7 +7,14 @@ from flask import Blueprint, jsonify, request
 from ml_run_manager import MLRunManager
 
 ml_run_api = Blueprint('ml_run_api', __name__)
-run_manager = MLRunManager()
+run_manager = None  # Initialize lazily
+
+def get_run_manager():
+    """Get or create ML run manager instance"""
+    global run_manager
+    if run_manager is None:
+        run_manager = MLRunManager()
+    return run_manager
 
 @ml_run_api.route('/api/ml-runs/log', methods=['POST'])
 def log_run():
@@ -19,7 +26,7 @@ def log_run():
         if not all(field in data for field in required_fields):
             return jsonify({'error': 'Missing required fields: run_id, file_name'}), 400
         
-        log_id = run_manager.log_run(
+        log_id = get_run_manager().log_run(
             run_id=data['run_id'],
             file_name=data['file_name'],
             session_id=data.get('session_id'),
@@ -45,7 +52,7 @@ def log_run():
 def get_pending_runs():
     """Get all runs waiting for confirmation"""
     try:
-        pending_runs = run_manager.get_pending_runs()
+        pending_runs = get_run_manager().get_pending_runs()
         return jsonify({
             'success': True,
             'count': len(pending_runs),
@@ -89,7 +96,7 @@ def confirm_run():
         run_id = row.run_id
         
         # Use the MLRunManager's confirm_run method
-        success = run_manager.confirm_run(
+        success = get_run_manager().confirm_run(
             run_id=run_id,
             confirmed=data['is_confirmed']
         )
@@ -111,7 +118,7 @@ def get_confirmed_runs():
     """Get all confirmed runs with accuracy data"""
     try:
         limit = request.args.get('limit', 50, type=int)
-        confirmed_runs = run_manager.get_confirmed_runs(limit)
+        confirmed_runs = get_run_manager().get_confirmed_runs(limit)
         return jsonify({
             'success': True,
             'count': len(confirmed_runs),
@@ -124,7 +131,7 @@ def get_confirmed_runs():
 def get_run_statistics():
     """Get statistics for all runs"""
     try:
-        stats = run_manager.get_run_statistics()
+        stats = get_run_manager().get_run_statistics()
         return jsonify({
             'success': True,
             'statistics': stats
@@ -136,9 +143,9 @@ def get_run_statistics():
 def get_dashboard_data():
     """Get comprehensive data for ML run management dashboard"""
     try:
-        stats = run_manager.get_run_statistics()
-        pending_runs = run_manager.get_pending_runs()
-        recent_confirmed = run_manager.get_confirmed_runs(10)
+        stats = get_run_manager().get_run_statistics()
+        pending_runs = get_run_manager().get_pending_runs()
+        recent_confirmed = get_run_manager().get_confirmed_runs(10)
         
         return jsonify({
             'success': True,
