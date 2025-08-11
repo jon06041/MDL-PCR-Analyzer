@@ -5665,6 +5665,129 @@ def get_confirmed_sessions():
         app.logger.error(f"✗ Full traceback: {traceback.format_exc()}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
+@app.route('/api/fix/railway-requirement-status', methods=['GET'])
+def fix_railway_requirement_status():
+    """Update unified_compliance_requirements status to show in Currently Tracking section"""
+    try:
+        from sqlalchemy import create_engine, text
+        
+        if not mysql_configured:
+            return jsonify({'error': 'MySQL not configured'}), 503
+        
+        # Build connection URL
+        if mysql_config.get('url'):
+            db_url = mysql_config['url']
+            if db_url.startswith('mysql://'):
+                db_url = db_url.replace('mysql://', 'mysql+pymysql://', 1)
+        else:
+            db_url = f"mysql+pymysql://{mysql_config['user']}:{mysql_config['password']}@{mysql_config['host']}:{mysql_config['port']}/{mysql_config['database']}?charset=utf8mb4"
+        
+        engine = create_engine(db_url)
+        results = []
+        
+        with engine.connect() as conn:
+            # Check if unified_compliance_requirements table exists
+            result = conn.execute(text("SHOW TABLES LIKE 'unified_compliance_requirements'"))
+            requirements_table_exists = result.fetchone() is not None
+            results.append(f"unified_compliance_requirements table exists: {requirements_table_exists}")
+            
+            if not requirements_table_exists:
+                # Create the table if it doesn't exist
+                try:
+                    conn.execute(text("""
+                        CREATE TABLE unified_compliance_requirements (
+                            id INT AUTO_INCREMENT PRIMARY KEY,
+                            regulation_number VARCHAR(50) NOT NULL,
+                            requirement_text TEXT NOT NULL,
+                            category VARCHAR(100),
+                            status ENUM('ready_to_implement', 'partial_implementation', 'currently_tracking', 'planned_features') DEFAULT 'ready_to_implement',
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                    """))
+                    conn.commit()
+                    results.append("✅ Created unified_compliance_requirements table")
+                    requirements_table_exists = True
+                except Exception as e:
+                    results.append(f"❌ Failed to create unified_compliance_requirements table: {str(e)}")
+                    return jsonify({'success': False, 'results': results}), 500
+            
+            if requirements_table_exists:
+                # Check what requirements currently exist
+                result = conn.execute(text("SELECT COUNT(*) FROM unified_compliance_requirements"))
+                current_count = result.fetchone()[0]
+                results.append(f"Current requirements count: {current_count}")
+                
+                if current_count == 0:
+                    # Add basic requirements
+                    basic_requirements = [
+                        ("FDA_CFR_21", "Software Validation Controls", "validation", "currently_tracking"),
+                        ("FDA_CFR_21", "Data Integrity Assurance", "validation", "currently_tracking"),
+                        ("FDA_CFR_21", "Electronic Record Generation", "validation", "currently_tracking"),
+                        ("FDA_CFR_21", "Archive Protection", "compliance", "ready_to_implement"),
+                        ("FDA_CFR_21", "User Access Controls", "security", "ready_to_implement")
+                    ]
+                    
+                    for reg_num, req_text, category, status in basic_requirements:
+                        try:
+                            conn.execute(text("""
+                                INSERT INTO unified_compliance_requirements 
+                                (regulation_number, requirement_text, category, status) 
+                                VALUES (:reg_num, :req_text, :category, :status)
+                            """), {"reg_num": reg_num, "req_text": req_text, "category": category, "status": status})
+                        except Exception as e:
+                            results.append(f"❌ Failed to add requirement {req_text}: {str(e)}")
+                    
+                    conn.commit()
+                    results.append("✅ Added basic compliance requirements")
+                else:
+                    # Update existing requirements that have evidence to 'currently_tracking'
+                    try:
+                        # Find requirements that have evidence in the last 30 days
+                        result = conn.execute(text("""
+                            SELECT DISTINCT ce.requirement_id 
+                            FROM compliance_evidence ce
+                            WHERE ce.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                        """))
+                        active_requirements = [row[0] for row in result.fetchall()]
+                        results.append(f"Requirements with recent evidence: {active_requirements}")
+                        
+                        # Update their status to currently_tracking
+                        for req_id in active_requirements:
+                            conn.execute(text("""
+                                UPDATE unified_compliance_requirements 
+                                SET status = 'currently_tracking', updated_at = NOW()
+                                WHERE regulation_number = :req_id OR requirement_text LIKE :req_pattern
+                            """), {"req_id": req_id, "req_pattern": f"%{req_id}%"})
+                        
+                        conn.commit()
+                        results.append(f"✅ Updated {len(active_requirements)} requirements to 'currently_tracking' status")
+                        
+                    except Exception as e:
+                        results.append(f"❌ Failed to update requirement statuses: {str(e)}")
+                
+                # Show final status breakdown
+                result = conn.execute(text("""
+                    SELECT status, COUNT(*) as count 
+                    FROM unified_compliance_requirements 
+                    GROUP BY status
+                """))
+                status_counts = dict(result.fetchall())
+                results.append(f"Final status breakdown: {status_counts}")
+            
+        return jsonify({
+            'success': True,
+            'results': results,
+            'message': 'Requirement status update completed'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'error_type': type(e).__name__
+        }), 500
+
 @app.route('/api/fix/railway-evidence-schema-fix', methods=['GET'])
 def fix_railway_evidence_schema_fix():
     """Fix compliance_evidence table schema by adding missing columns"""
