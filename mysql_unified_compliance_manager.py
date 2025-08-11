@@ -68,7 +68,11 @@ class MySQLUnifiedComplianceManager:
 
     def get_connection(self):
         """Get MySQL database connection"""
-        return mysql.connector.connect(**self.mysql_config)
+        # Ensure charset is specified for proper Unicode handling
+        config = self.mysql_config.copy()
+        if 'charset' not in config:
+            config['charset'] = 'utf8mb4'
+        return mysql.connector.connect(**config)
 
     def initialize_tables(self):
         """Create MySQL tables for unified compliance tracking"""
@@ -77,86 +81,119 @@ class MySQLUnifiedComplianceManager:
         
         try:
             # Create unified compliance events table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS unified_compliance_events (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    event_type VARCHAR(100) NOT NULL,
-                    event_data JSON,
-                    user_id VARCHAR(100),
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    session_id VARCHAR(200),
-                    compliance_hash VARCHAR(64),
-                    validation_status ENUM('pending', 'validated', 'failed') DEFAULT 'pending',
-                    INDEX idx_event_type (event_type),
-                    INDEX idx_timestamp (timestamp),
-                    INDEX idx_user_id (user_id),
-                    INDEX idx_session_id (session_id)
-                )
-            ''')
+            try:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS unified_compliance_events (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        event_type VARCHAR(100) NOT NULL,
+                        event_data JSON,
+                        user_id VARCHAR(100),
+                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        session_id VARCHAR(200),
+                        compliance_hash VARCHAR(64),
+                        validation_status ENUM('pending', 'validated', 'failed') DEFAULT 'pending',
+                        INDEX idx_event_type (event_type),
+                        INDEX idx_timestamp (timestamp),
+                        INDEX idx_user_id (user_id),
+                        INDEX idx_session_id (session_id)
+                    )
+                ''')
+                self.logger.info("Created unified_compliance_events table")
+            except Exception as e:
+                self.logger.error(f"Error creating unified_compliance_events table: {e}")
             
             # Create compliance requirements tracking table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS compliance_requirements_tracking (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    requirement_id VARCHAR(100) NOT NULL,
-                    requirement_category VARCHAR(50),
-                    compliance_status ENUM('not_started', 'in_progress', 'completed', 'validated') DEFAULT 'not_started',
-                    evidence_count INT DEFAULT 0,
-                    last_evidence_timestamp DATETIME,
-                    validation_criteria JSON,
-                    compliance_percentage DECIMAL(5,2) DEFAULT 0.00,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    INDEX idx_requirement_id (requirement_id),
-                    INDEX idx_category (requirement_category),
-                    INDEX idx_status (compliance_status)
-                )
-            ''')
+            try:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS compliance_requirements_tracking (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        requirement_id VARCHAR(100) NOT NULL,
+                        requirement_category VARCHAR(50),
+                        compliance_status ENUM('not_started', 'in_progress', 'completed', 'validated') DEFAULT 'not_started',
+                        evidence_count INT DEFAULT 0,
+                        last_evidence_timestamp DATETIME,
+                        validation_criteria JSON,
+                        compliance_percentage DECIMAL(5,2) DEFAULT 0.00,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        INDEX idx_requirement_id (requirement_id),
+                        INDEX idx_category (requirement_category),
+                        INDEX idx_status (compliance_status)
+                    )
+                ''')
+                self.logger.info("Created compliance_requirements_tracking table")
+            except Exception as e:
+                self.logger.error(f"Error creating compliance_requirements_tracking table: {e}")
             
-            # Create compliance evidence table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS compliance_evidence (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    requirement_id VARCHAR(100) NOT NULL,
-                    event_id INT,
-                    evidence_type VARCHAR(100),
-                    evidence_data JSON,
-                    evidence_hash VARCHAR(64),
-                    validation_status ENUM('pending', 'validated', 'rejected') DEFAULT 'pending',
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    validated_at DATETIME NULL,
-                    validator_id VARCHAR(100),
-                    FOREIGN KEY (event_id) REFERENCES unified_compliance_events(id),
-                    INDEX idx_requirement_id (requirement_id),
-                    INDEX idx_evidence_type (evidence_type),
-                    INDEX idx_validation_status (validation_status)
-                )
-            ''')
+            # Create compliance evidence table (note: this depends on unified_compliance_events)
+            try:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS compliance_evidence (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        requirement_id VARCHAR(100) NOT NULL,
+                        event_id INT,
+                        evidence_type VARCHAR(100),
+                        evidence_data JSON,
+                        evidence_hash VARCHAR(64),
+                        validation_status ENUM('pending', 'validated', 'rejected') DEFAULT 'pending',
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        validated_at DATETIME NULL,
+                        validator_id VARCHAR(100),
+                        INDEX idx_requirement_id (requirement_id),
+                        INDEX idx_event_id (event_id),
+                        INDEX idx_evidence_type (evidence_type),
+                        INDEX idx_validation_status (validation_status)
+                    )
+                ''')
+                
+                # Add foreign key constraint separately to handle dependency issues
+                try:
+                    cursor.execute('''
+                        SELECT COUNT(*) FROM information_schema.table_constraints 
+                        WHERE constraint_name = 'fk_compliance_evidence_event_id' 
+                        AND table_name = 'compliance_evidence'
+                    ''')
+                    if cursor.fetchone()[0] == 0:
+                        cursor.execute('''
+                            ALTER TABLE compliance_evidence 
+                            ADD CONSTRAINT fk_compliance_evidence_event_id 
+                            FOREIGN KEY (event_id) REFERENCES unified_compliance_events(id)
+                        ''')
+                except Exception as fk_error:
+                    self.logger.warning(f"Could not add foreign key constraint: {fk_error}")
+                    
+                self.logger.info("Created compliance_evidence table")
+            except Exception as e:
+                self.logger.error(f"Error creating compliance_evidence table: {e}")
             
             # Create user access log for compliance tracking
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS unified_user_access_log (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    user_id VARCHAR(100),
-                    session_id VARCHAR(200),
-                    access_type VARCHAR(50),
-                    ip_address VARCHAR(45),
-                    user_agent TEXT,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    compliance_relevant BOOLEAN DEFAULT TRUE,
-                    INDEX idx_user_id (user_id),
-                    INDEX idx_timestamp (timestamp),
-                    INDEX idx_access_type (access_type)
-                )
-            ''')
+            try:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS unified_user_access_log (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        user_id VARCHAR(100),
+                        session_id VARCHAR(200),
+                        access_type VARCHAR(50),
+                        ip_address VARCHAR(45),
+                        user_agent TEXT,
+                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        compliance_relevant BOOLEAN DEFAULT TRUE,
+                        INDEX idx_user_id (user_id),
+                        INDEX idx_timestamp (timestamp),
+                        INDEX idx_access_type (access_type)
+                    )
+                ''')
+                self.logger.info("Created unified_user_access_log table")
+            except Exception as e:
+                self.logger.error(f"Error creating unified_user_access_log table: {e}")
             
             conn.commit()
-            self.logger.info("Unified compliance tables initialized successfully")
+            self.logger.info("Unified compliance tables initialization completed")
             
         except Exception as e:
-            self.logger.error(f"Error initializing unified compliance tables: {e}")
+            self.logger.error(f"Error in unified compliance tables initialization: {e}")
             conn.rollback()
-            raise
+            # Don't raise here - allow app to continue even if some tables fail
         finally:
             cursor.close()
             conn.close()
@@ -354,47 +391,74 @@ class MySQLUnifiedComplianceManager:
         cursor = conn.cursor(dictionary=True)
         
         try:
-            # Get compliance requirements summary
-            cursor.execute('''
-                SELECT requirement_category, 
-                       COUNT(*) as total_requirements,
-                       SUM(CASE WHEN compliance_status = 'completed' THEN 1 ELSE 0 END) as completed,
-                       AVG(compliance_percentage) as avg_percentage
-                FROM compliance_requirements_tracking
-                GROUP BY requirement_category
-            ''')
-            requirements_summary = cursor.fetchall()
+            # Initialize default values in case queries return empty results
+            requirements_summary = []
+            recent_events = []
+            evidence_summary = []
+            overall_metrics = {
+                'total_requirements': 0,
+                'completed_requirements': 0, 
+                'overall_percentage': 0.0
+            }
             
-            # Get recent compliance events
-            cursor.execute('''
-                SELECT event_type, COUNT(*) as count, DATE(timestamp) as date
-                FROM unified_compliance_events
-                WHERE timestamp >= DATE_SUB(NOW(), INTERVAL %s DAY)
-                GROUP BY event_type, DATE(timestamp)
-                ORDER BY date DESC, count DESC
-                LIMIT 100
-            ''', (days,))
-            recent_events = cursor.fetchall()
+            # Get compliance requirements summary - with error handling
+            try:
+                cursor.execute('''
+                    SELECT requirement_category, 
+                           COUNT(*) as total_requirements,
+                           SUM(CASE WHEN compliance_status = 'completed' THEN 1 ELSE 0 END) as completed,
+                           AVG(compliance_percentage) as avg_percentage
+                    FROM compliance_requirements_tracking
+                    GROUP BY requirement_category
+                ''')
+                requirements_summary = cursor.fetchall() or []
+            except Exception as e:
+                self.logger.warning(f"Could not fetch requirements summary: {e}")
+                requirements_summary = []
             
-            # Get compliance evidence summary
-            cursor.execute('''
-                SELECT ce.evidence_type, ce.validation_status, COUNT(*) as count
-                FROM compliance_evidence ce
-                JOIN unified_compliance_events uce ON ce.event_id = uce.id
-                WHERE uce.timestamp >= DATE_SUB(NOW(), INTERVAL %s DAY)
-                GROUP BY ce.evidence_type, ce.validation_status
-            ''', (days,))
-            evidence_summary = cursor.fetchall()
+            # Get recent compliance events - with error handling
+            try:
+                cursor.execute('''
+                    SELECT event_type, COUNT(*) as count, DATE(timestamp) as date
+                    FROM unified_compliance_events
+                    WHERE timestamp >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                    GROUP BY event_type, DATE(timestamp)
+                    ORDER BY date DESC, count DESC
+                    LIMIT 100
+                ''', (days,))
+                recent_events = cursor.fetchall() or []
+            except Exception as e:
+                self.logger.warning(f"Could not fetch recent events: {e}")
+                recent_events = []
             
-            # Get overall compliance metrics
-            cursor.execute('''
-                SELECT 
-                    COUNT(DISTINCT requirement_id) as total_requirements,
-                    SUM(CASE WHEN compliance_status = 'completed' THEN 1 ELSE 0 END) as completed_requirements,
-                    AVG(compliance_percentage) as overall_percentage
-                FROM compliance_requirements_tracking
-            ''')
-            overall_metrics = cursor.fetchone()
+            # Get compliance evidence summary - with error handling
+            try:
+                cursor.execute('''
+                    SELECT ce.evidence_type, ce.validation_status, COUNT(*) as count
+                    FROM compliance_evidence ce
+                    JOIN unified_compliance_events uce ON ce.event_id = uce.id
+                    WHERE uce.timestamp >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                    GROUP BY ce.evidence_type, ce.validation_status
+                ''', (days,))
+                evidence_summary = cursor.fetchall() or []
+            except Exception as e:
+                self.logger.warning(f"Could not fetch evidence summary: {e}")
+                evidence_summary = []
+            
+            # Get overall compliance metrics - with error handling
+            try:
+                cursor.execute('''
+                    SELECT 
+                        COUNT(DISTINCT requirement_id) as total_requirements,
+                        SUM(CASE WHEN compliance_status = 'completed' THEN 1 ELSE 0 END) as completed_requirements,
+                        COALESCE(AVG(compliance_percentage), 0.0) as overall_percentage
+                    FROM compliance_requirements_tracking
+                ''')
+                result = cursor.fetchone()
+                if result:
+                    overall_metrics = result
+            except Exception as e:
+                self.logger.warning(f"Could not fetch overall metrics: {e}")
             
             return {
                 'success': True,
