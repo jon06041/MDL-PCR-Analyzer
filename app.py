@@ -5665,6 +5665,70 @@ def get_confirmed_sessions():
         app.logger.error(f"✗ Full traceback: {traceback.format_exc()}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
+@app.route('/api/fix/railway-schema', methods=['POST'])
+def fix_railway_schema():
+    """Fix Railway database schema by adding missing columns"""
+    try:
+        # Use SQLAlchemy to add missing columns safely
+        from sqlalchemy import create_engine, text
+        
+        if not mysql_configured:
+            return jsonify({'error': 'MySQL not configured'}), 503
+        
+        # Build connection URL
+        if mysql_config.get('url'):
+            db_url = mysql_config['url']
+            if db_url.startswith('mysql://'):
+                db_url = db_url.replace('mysql://', 'mysql+pymysql://', 1)
+        else:
+            db_url = f"mysql+pymysql://{mysql_config['user']}:{mysql_config['password']}@{mysql_config['host']}:{mysql_config['port']}/{mysql_config['database']}?charset=utf8mb4"
+        
+        engine = create_engine(db_url)
+        results = []
+        
+        with engine.connect() as conn:
+            # Check current columns in analysis_sessions
+            result = conn.execute(text("SHOW COLUMNS FROM analysis_sessions"))
+            existing_columns = [row[0] for row in result.fetchall()]
+            results.append(f"Existing columns: {existing_columns}")
+            
+            # Add missing columns if they don't exist
+            required_columns = {
+                'confirmation_status': "VARCHAR(50) DEFAULT 'pending'",
+                'confirmed_by': "VARCHAR(255) DEFAULT NULL",
+                'confirmed_at': "DATETIME DEFAULT NULL"
+            }
+            
+            for column_name, column_def in required_columns.items():
+                if column_name not in existing_columns:
+                    try:
+                        sql = f"ALTER TABLE analysis_sessions ADD COLUMN {column_name} {column_def}"
+                        conn.execute(text(sql))
+                        conn.commit()
+                        results.append(f"✅ Added column: {column_name}")
+                    except Exception as e:
+                        results.append(f"❌ Failed to add {column_name}: {str(e)}")
+                else:
+                    results.append(f"✓ Column {column_name} already exists")
+            
+            # Verify final schema
+            result = conn.execute(text("SHOW COLUMNS FROM analysis_sessions"))
+            final_columns = [row[0] for row in result.fetchall()]
+            results.append(f"Final columns: {final_columns}")
+            
+        return jsonify({
+            'success': True,
+            'results': results,
+            'message': 'Schema update completed'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'error_type': type(e).__name__
+        }), 500
+
 @app.route('/api/test/railway-mysql', methods=['GET'])
 def test_railway_mysql():
     """Test Railway MySQL connection using SQLAlchemy instead of mysql.connector"""
