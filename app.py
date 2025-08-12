@@ -5370,128 +5370,166 @@ def validate_system_compliance():
 def get_encryption_evidence_for_compliance():
     """Get encryption evidence for specific compliance requirements"""
     try:
-        from encryption_evidence_generator import EncryptionEvidenceGenerator
-        
         # Get regulation filter if provided
         regulation = request.args.get('regulation', '').upper()
         requirement_code = request.args.get('requirement_code', '')
         
-        # Generate current encryption evidence
-        generator = EncryptionEvidenceGenerator()
-        evidence = generator.generate_comprehensive_evidence()
+        # MySQL connection
+        import mysql.connector
+        mysql_config = {
+            'host': os.environ.get("MYSQL_HOST", "127.0.0.1"),
+            'port': int(os.environ.get("MYSQL_PORT", 3306)),
+            'user': os.environ.get("MYSQL_USER", "qpcr_user"),
+            'password': os.environ.get("MYSQL_PASSWORD", "qpcr_password"),
+            'database': os.environ.get("MYSQL_DATABASE", "qpcr_analysis"),
+            'charset': 'utf8mb4'
+        }
         
-        # Filter evidence by regulation if requested
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Build query based on regulation filter
         if regulation:
-            if regulation in evidence['compliance_mapping']:
-                filtered_evidence = {
-                    'regulation': regulation,
-                    'requirement_details': evidence['compliance_mapping'][regulation],
-                    'implementation_status': evidence['encryption_evidence'],
-                    'test_results': evidence['test_results'],
-                    'compliance_score': calculate_regulation_compliance_score(evidence, regulation),
-                    'evidence_files': get_regulation_evidence_files(evidence, regulation),
-                    'timestamp': evidence['timestamp']
-                }
-                return jsonify({
-                    'success': True,
-                    'evidence': filtered_evidence
-                })
+            # Map regulation to requirement patterns
+            if regulation == 'FDA_CFR_21':
+                query = """
+                SELECT ce.requirement_id, ce.evidence_type, ce.evidence_data, ce.created_at,
+                       crt.compliance_status, crt.evidence_count
+                FROM compliance_evidence ce
+                LEFT JOIN compliance_requirements_tracking crt ON ce.requirement_id = crt.requirement_id
+                WHERE ce.requirement_id LIKE 'FDA_CFR_21_%' OR ce.requirement_id LIKE 'CFR_%'
+                ORDER BY ce.created_at DESC
+                """
+            elif regulation == 'HIPAA':
+                query = """
+                SELECT ce.requirement_id, ce.evidence_type, ce.evidence_data, ce.created_at,
+                       crt.compliance_status, crt.evidence_count
+                FROM compliance_evidence ce
+                LEFT JOIN compliance_requirements_tracking crt ON ce.requirement_id = crt.requirement_id
+                WHERE ce.requirement_id LIKE 'HIPAA_%'
+                ORDER BY ce.created_at DESC
+                """
+            elif regulation == 'ISO_27001':
+                query = """
+                SELECT ce.requirement_id, ce.evidence_type, ce.evidence_data, ce.created_at,
+                       crt.compliance_status, crt.evidence_count
+                FROM compliance_evidence ce
+                LEFT JOIN compliance_requirements_tracking crt ON ce.requirement_id = crt.requirement_id
+                WHERE ce.requirement_id LIKE 'ISO_27001_%'
+                ORDER BY ce.created_at DESC
+                """
             else:
-                return jsonify({
-                    'success': False,
-                    'error': f'No encryption evidence found for regulation: {regulation}'
-                }), 404
+                query = """
+                SELECT ce.requirement_id, ce.evidence_type, ce.evidence_data, ce.created_at,
+                       crt.compliance_status, crt.evidence_count
+                FROM compliance_evidence ce
+                LEFT JOIN compliance_requirements_tracking crt ON ce.requirement_id = crt.requirement_id
+                WHERE ce.evidence_type LIKE '%encryption%' OR ce.evidence_type LIKE '%crypto%' OR ce.evidence_type LIKE '%security%'
+                ORDER BY ce.created_at DESC
+                """
+        else:
+            # Get all encryption-related evidence
+            query = """
+            SELECT ce.requirement_id, ce.evidence_type, ce.evidence_data, ce.created_at,
+                   crt.compliance_status, crt.evidence_count
+            FROM compliance_evidence ce
+            LEFT JOIN compliance_requirements_tracking crt ON ce.requirement_id = crt.requirement_id
+            WHERE ce.evidence_type LIKE '%encryption%' OR ce.evidence_type LIKE '%crypto%' OR ce.evidence_type LIKE '%security%'
+            ORDER BY ce.created_at DESC
+            """
         
-        # Return all evidence if no filter
+        cursor.execute(query)
+        evidence_records = cursor.fetchall()
+        
+        # Format evidence for response
+        requirements = []
+        for record in evidence_records:
+            requirements.append({
+                'requirement_id': record['requirement_id'],
+                'evidence_type': record['evidence_type'],
+                'evidence_data': record['evidence_data'],
+                'created_at': record['created_at'].isoformat() if record['created_at'] else None,
+                'compliance_status': record['compliance_status'],
+                'evidence_count': record['evidence_count'],
+                'validation_status': 'validated' if record['compliance_status'] == 'completed' else 'pending'
+            })
+        
+        conn.close()
+        
         return jsonify({
             'success': True,
-            'evidence': evidence,
-            'summary': {
-                'total_tests': len(evidence['test_results']),
-                'passed_tests': sum(1 for test in evidence['test_results'].values() if test.get('passed')),
-                'compliance_score': calculate_overall_compliance_score(evidence),
-                'regulations_covered': list(evidence['compliance_mapping'].keys())
-            }
+            'regulation': regulation or 'ALL',
+            'requirements': requirements,
+            'total_evidence': len(requirements),
+            'status': 'operational' if requirements else 'no_evidence'
         })
         
     except Exception as e:
         app.logger.error(f"Error getting encryption evidence: {str(e)}")
         return jsonify({
             'success': False,
-            'error': f'Failed to generate encryption evidence: {str(e)}'
+            'error': f'Failed to retrieve encryption evidence: {str(e)}'
         }), 500
 
 @app.route('/api/unified-compliance/encryption-evidence/<requirement_code>', methods=['GET'])
 def get_encryption_evidence_for_requirement(requirement_code):
     """Get specific encryption evidence for a compliance requirement"""
     try:
-        from encryption_evidence_generator import EncryptionEvidenceGenerator
-        
-        # Map requirement codes to regulations
-        requirement_regulation_mapping = {
-            # FDA CFR 21 Part 11
-            'FDA_CFR_21_PART_11_10': 'FDA_CFR_21_PART_11',
-            'FDA_CFR_21_PART_11_30': 'FDA_CFR_21_PART_11',
-            'FDA_CFR_21_PART_11_100': 'FDA_CFR_21_PART_11',
-            'FDA_CFR_21_PART_11_200': 'FDA_CFR_21_PART_11',
-            # HIPAA Security Rule
-            'HIPAA_SECURITY_164_308': 'HIPAA_SECURITY_RULE',
-            'HIPAA_SECURITY_164_310': 'HIPAA_SECURITY_RULE', 
-            'HIPAA_SECURITY_164_312': 'HIPAA_SECURITY_RULE',
-            'HIPAA_SECURITY_164_314': 'HIPAA_SECURITY_RULE',
-            # ISO 27001
-            'ISO_27001_A_10_1': 'ISO_27001',
-            'ISO_27001_A_13_1': 'ISO_27001',
-            'ISO_27001_A_18_1': 'ISO_27001'
+        # MySQL connection
+        import mysql.connector
+        mysql_config = {
+            'host': os.environ.get("MYSQL_HOST", "127.0.0.1"),
+            'port': int(os.environ.get("MYSQL_PORT", 3306)),
+            'user': os.environ.get("MYSQL_USER", "qpcr_user"),
+            'password': os.environ.get("MYSQL_PASSWORD", "qpcr_password"),
+            'database': os.environ.get("MYSQL_DATABASE", "qpcr_analysis"),
+            'charset': 'utf8mb4'
         }
         
-        regulation = requirement_regulation_mapping.get(requirement_code)
-        if not regulation:
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Query for specific requirement evidence
+        query = """
+        SELECT ce.requirement_id, ce.evidence_type, ce.evidence_data, ce.created_at,
+               ce.validation_status, crt.compliance_status, crt.evidence_count
+        FROM compliance_evidence ce
+        LEFT JOIN compliance_requirements_tracking crt ON ce.requirement_id = crt.requirement_id
+        WHERE ce.requirement_id = %s
+        ORDER BY ce.created_at DESC
+        LIMIT 1
+        """
+        
+        cursor.execute(query, (requirement_code,))
+        evidence_record = cursor.fetchone()
+        
+        if not evidence_record:
+            conn.close()
             return jsonify({
                 'success': False,
-                'error': f'No encryption mapping found for requirement: {requirement_code}'
+                'error': f'No evidence found for requirement: {requirement_code}'
             }), 404
         
-        # Generate evidence
-        generator = EncryptionEvidenceGenerator()
-        evidence = generator.generate_comprehensive_evidence()
-        
-        if regulation not in evidence['compliance_mapping']:
-            return jsonify({
-                'success': False,
-                'error': f'No encryption evidence available for regulation: {regulation}'
-            }), 404
-        
-        # Create specific evidence for this requirement
-        requirement_evidence = {
-            'requirement_code': requirement_code,
-            'regulation': regulation,
-            'requirement_details': evidence['compliance_mapping'][regulation],
-            'encryption_controls': evidence['compliance_mapping'][regulation]['encryption_controls'],
-            'evidence_files': evidence['compliance_mapping'][regulation]['evidence_files'],
-            'implementation_tests': {
-                test_name: test_result 
-                for test_name, test_result in evidence['test_results'].items()
-                if test_result.get('passed', False)
-            },
-            'compliance_status': 'COMPLIANT' if all(
-                test.get('passed', False) for test in evidence['test_results'].values()
-            ) else 'PARTIAL_COMPLIANCE',
-            'recommendations': generate_encryption_recommendations(evidence, regulation),
-            'timestamp': evidence['timestamp']
-        }
-        
-        return jsonify({
+        # Format the response
+        response_data = {
             'success': True,
-            'requirement_code': requirement_code,
-            'evidence': requirement_evidence
-        })
+            'requirement_id': evidence_record['requirement_id'],
+            'evidence_type': evidence_record['evidence_type'],
+            'evidence_data': evidence_record['evidence_data'],
+            'created_at': evidence_record['created_at'].isoformat() if evidence_record['created_at'] else None,
+            'validation_status': evidence_record['validation_status'] or 'pending',
+            'implementation_status': evidence_record['compliance_status'] or 'in_progress',
+            'evidence_count': evidence_record['evidence_count'] or 0
+        }
+        
+        conn.close()
+        return jsonify(response_data)
         
     except Exception as e:
-        app.logger.error(f"Error getting requirement encryption evidence: {str(e)}")
+        app.logger.error(f"Error getting encryption evidence for {requirement_code}: {str(e)}")
         return jsonify({
             'success': False,
-            'error': f'Failed to get evidence for requirement {requirement_code}: {str(e)}'
+            'error': f'Failed to retrieve evidence for {requirement_code}: {str(e)}'
         }), 500
 
 # Helper functions for encryption evidence
