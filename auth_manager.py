@@ -475,6 +475,19 @@ class AuthManager:
         user_permissions = self.PERMISSIONS.get(user_role, [])
         return required_permission in user_permissions
     
+    # Public methods for testing and evidence generation
+    def hash_password(self, password: str) -> str:
+        """Public method to hash password for testing purposes"""
+        password_hash, salt = self._hash_password(password)
+        return f"{password_hash}:{salt}"
+    
+    def verify_password(self, password: str, stored_hash: str) -> bool:
+        """Public method to verify password for testing purposes"""
+        if ':' in stored_hash:
+            password_hash, salt = stored_hash.split(':', 1)
+            return self._verify_password(password, password_hash, salt)
+        return False
+    
     def _log_permission_audit(self, user_id: int, username: str, action: str, permission: str, 
                             granted: bool, ip_address: str = None, user_agent: str = None, 
                             session_id: str = None, resource: str = None):
@@ -547,6 +560,7 @@ def require_auth(permission_required=None):
         
         return decorated_function
     return decorator
+
 
 def require_role(min_role_level):
     """Decorator to require minimum role level"""

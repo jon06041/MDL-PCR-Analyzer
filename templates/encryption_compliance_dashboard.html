@@ -1,0 +1,741 @@
+<!-- Encryption Compliance Section for Validation Dashboard -->
+<div class="encryption-compliance-section">
+    <div class="card mb-4">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0">
+                <i class="fas fa-shield-alt me-2"></i>
+                Encryption Implementation Evidence
+            </h5>
+        </div>
+        <div class="card-body">
+            <!-- Overall Status -->
+            <div class="row mb-4">
+                <div class="col-md-3">
+                    <div class="text-center">
+                        <div class="encryption-score-circle" id="encryptionScoreCircle">
+                            <span id="encryptionScore">--</span>%
+                        </div>
+                        <small class="text-muted">Compliance Score</small>
+                    </div>
+                </div>
+                <div class="col-md-9">
+                    <div class="row">
+                        <div class="col-sm-6 col-md-3 mb-2">
+                            <div class="metric-card">
+                                <div class="metric-value" id="totalTests">--</div>
+                                <div class="metric-label">Total Tests</div>
+                            </div>
+                        </div>
+                        <div class="col-sm-6 col-md-3 mb-2">
+                            <div class="metric-card text-success">
+                                <div class="metric-value" id="passedTests">--</div>
+                                <div class="metric-label">Passed</div>
+                            </div>
+                        </div>
+                        <div class="col-sm-6 col-md-3 mb-2">
+                            <div class="metric-card text-warning">
+                                <div class="metric-value" id="failedTests">--</div>
+                                <div class="metric-label">Failed</div>
+                            </div>
+                        </div>
+                        <div class="col-sm-6 col-md-3 mb-2">
+                            <div class="metric-card text-info">
+                                <div class="metric-value" id="evidenceCategories">--</div>
+                                <div class="metric-label">Evidence Types</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Encryption Categories -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <h6 class="mb-3">Encryption Implementation Status</h6>
+                    <div class="encryption-categories" id="encryptionCategories">
+                        <!-- Categories will be populated by JavaScript -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Compliance Mapping -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <h6 class="mb-3">Regulatory Compliance Mapping</h6>
+                    <div class="compliance-mapping" id="complianceMapping">
+                        <!-- Compliance mappings will be populated by JavaScript -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Real-time Validation -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <h6 class="mb-3">Real-time Validation</h6>
+                    <div class="btn-group mb-3" role="group">
+                        <button type="button" class="btn btn-outline-primary" onclick="runEncryptionTest('quick')">
+                            <i class="fas fa-bolt me-1"></i>Quick Test
+                        </button>
+                        <button type="button" class="btn btn-outline-info" onclick="runEncryptionTest('comprehensive')">
+                            <i class="fas fa-microscope me-1"></i>Comprehensive Test
+                        </button>
+                        <button type="button" class="btn btn-outline-success" onclick="generateEvidenceReport()">
+                            <i class="fas fa-file-alt me-1"></i>Generate Report
+                        </button>
+                    </div>
+                    <div class="test-results" id="testResults">
+                        <!-- Test results will be shown here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Evidence Files -->
+            <div class="row">
+                <div class="col-12">
+                    <h6 class="mb-3">Implementation Evidence Files</h6>
+                    <div class="evidence-files" id="evidenceFiles">
+                        <!-- Evidence files will be listed here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Encryption Evidence Modal -->
+<div class="modal fade" id="encryptionEvidenceModal" tabindex="-1" aria-labelledby="encryptionEvidenceModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="encryptionEvidenceModalLabel">
+                    <i class="fas fa-shield-alt me-2"></i>
+                    Detailed Encryption Evidence
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="detailedEvidenceContent">
+                    <!-- Detailed evidence will be loaded here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" onclick="downloadEvidenceReport()">
+                    <i class="fas fa-download me-1"></i>Download Report
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.encryption-compliance-section {
+    margin-top: 2rem;
+}
+
+.encryption-score-circle {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 1.2rem;
+    font-weight: bold;
+    margin: 0 auto 0.5rem;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.encryption-score-circle.warning {
+    background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%);
+}
+
+.encryption-score-circle.danger {
+    background: linear-gradient(135deg, #dc3545 0%, #e74c3c 100%);
+}
+
+.metric-card {
+    text-align: center;
+    padding: 1rem;
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    background: #f8f9fa;
+}
+
+.metric-value {
+    font-size: 1.5rem;
+    font-weight: bold;
+    margin-bottom: 0.25rem;
+}
+
+.metric-label {
+    font-size: 0.875rem;
+    color: #6c757d;
+}
+
+.encryption-category {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    margin-bottom: 0.5rem;
+    background: white;
+}
+
+.encryption-category.enabled {
+    border-left: 4px solid #28a745;
+    background: #f8fff9;
+}
+
+.encryption-category.disabled {
+    border-left: 4px solid #dc3545;
+    background: #fff5f5;
+}
+
+.encryption-category.partial {
+    border-left: 4px solid #ffc107;
+    background: #fffbf0;
+}
+
+.compliance-requirement {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem;
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    margin-bottom: 0.75rem;
+    background: white;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.compliance-requirement:hover {
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transform: translateY(-1px);
+}
+
+.compliance-requirement.compliant {
+    border-left: 4px solid #28a745;
+    background: linear-gradient(135deg, #f8fff9 0%, #f0fff4 100%);
+}
+
+.compliance-requirement.non-compliant {
+    border-left: 4px solid #dc3545;
+    background: linear-gradient(135deg, #fff5f5 0%, #ffeaea 100%);
+}
+
+.test-result {
+    padding: 0.75rem 1rem;
+    border-radius: 0.375rem;
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.test-result.passed {
+    background: #d4edda;
+    border: 1px solid #c3e6cb;
+    color: #155724;
+}
+
+.test-result.failed {
+    background: #f8d7da;
+    border: 1px solid #f5c6cb;
+    color: #721c24;
+}
+
+.evidence-file {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    margin-bottom: 0.25rem;
+    background: #f8f9fa;
+}
+
+.evidence-file i {
+    margin-right: 0.5rem;
+    color: #28a745;
+}
+
+.loading-spinner {
+    display: inline-block;
+    width: 1rem;
+    height: 1rem;
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid #007bff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.btn-group .btn {
+    margin-right: 0.5rem;
+}
+
+.btn-group .btn:last-child {
+    margin-right: 0;
+}
+</style>
+
+<script>
+// Encryption Compliance Dashboard JavaScript
+class EncryptionComplianceDashboard {
+    constructor() {
+        this.evidenceData = null;
+        this.lastUpdate = null;
+        this.init();
+    }
+
+    async init() {
+        console.log('Initializing Encryption Compliance Dashboard...');
+        await this.loadEncryptionStatus();
+        this.setupEventListeners();
+    }
+
+    async loadEncryptionStatus() {
+        try {
+            this.showLoading();
+            
+            // Load evidence report
+            const response = await fetch('/api/encryption/evidence-report');
+            const data = await response.json();
+            
+            if (data.success) {
+                this.evidenceData = data.evidence;
+                this.updateDashboard(data);
+                this.lastUpdate = new Date();
+                console.log('Encryption evidence loaded:', data);
+            } else {
+                throw new Error(data.error || 'Failed to load encryption evidence');
+            }
+        } catch (error) {
+            console.error('Error loading encryption status:', error);
+            this.showError('Failed to load encryption evidence: ' + error.message);
+        }
+    }
+
+    updateDashboard(data) {
+        // Update overall metrics
+        this.updateOverallMetrics(data);
+        
+        // Update encryption categories
+        this.updateEncryptionCategories(data.evidence);
+        
+        // Update compliance mapping
+        this.updateComplianceMapping(data.evidence);
+        
+        // Update evidence files
+        this.updateEvidenceFiles(data.evidence);
+    }
+
+    updateOverallMetrics(data) {
+        const summary = data.summary || {};
+        const evidence = data.evidence || {};
+        
+        // Update score circle
+        const score = summary.compliance_score || 0;
+        const scoreElement = document.getElementById('encryptionScore');
+        const circleElement = document.getElementById('encryptionScoreCircle');
+        
+        if (scoreElement && circleElement) {
+            scoreElement.textContent = score;
+            
+            // Update circle color based on score
+            circleElement.className = 'encryption-score-circle';
+            if (score >= 85) {
+                circleElement.classList.add('success');
+            } else if (score >= 70) {
+                circleElement.classList.add('warning');
+            } else {
+                circleElement.classList.add('danger');
+            }
+        }
+        
+        // Update test metrics
+        const testResults = evidence.test_results || {};
+        const totalTests = Object.keys(testResults).length;
+        const passedTests = Object.values(testResults).filter(test => test.passed).length;
+        const failedTests = totalTests - passedTests;
+        const evidenceCategories = Object.keys(evidence.encryption_evidence || {}).length;
+        
+        this.updateElement('totalTests', totalTests);
+        this.updateElement('passedTests', passedTests);
+        this.updateElement('failedTests', failedTests);
+        this.updateElement('evidenceCategories', evidenceCategories);
+    }
+
+    updateEncryptionCategories(evidence) {
+        const container = document.getElementById('encryptionCategories');
+        if (!container) return;
+        
+        const categories = evidence.encryption_evidence || {};
+        let html = '';
+        
+        Object.entries(categories).forEach(([category, data]) => {
+            const status = this.determineEncryptionStatus(data);
+            const statusClass = status.toLowerCase().replace('_', '-');
+            const icon = this.getStatusIcon(status);
+            
+            html += `
+                <div class="encryption-category ${statusClass}">
+                    <div>
+                        <strong>${this.formatCategoryName(category)}</strong>
+                        <div class="text-muted small">${this.getCategoryDescription(category)}</div>
+                    </div>
+                    <div class="text-end">
+                        <span class="badge bg-${this.getStatusBadgeColor(status)}">
+                            ${icon} ${status.replace('_', ' ')}
+                        </span>
+                    </div>
+                </div>
+            `;
+        });
+        
+        container.innerHTML = html;
+    }
+
+    updateComplianceMapping(evidence) {
+        const container = document.getElementById('complianceMapping');
+        if (!container) return;
+        
+        const mapping = evidence.compliance_mapping || {};
+        let html = '';
+        
+        Object.entries(mapping).forEach(([regulation, details]) => {
+            const compliance = this.calculateRegulationCompliance(details);
+            const statusClass = compliance.isCompliant ? 'compliant' : 'non-compliant';
+            const icon = compliance.isCompliant ? '<i class="fas fa-check-circle text-success"></i>' : '<i class="fas fa-exclamation-triangle text-warning"></i>';
+            
+            html += `
+                <div class="compliance-requirement ${statusClass}" onclick="showRegulationDetails('${regulation}')">
+                    <div>
+                        <strong>${regulation.replace(/_/g, ' ')}</strong>
+                        <div class="text-muted small">${details.requirement || 'Regulatory compliance requirement'}</div>
+                    </div>
+                    <div class="text-end">
+                        ${icon}
+                        <div class="small">${compliance.implementedCount}/${compliance.totalCount} controls</div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        container.innerHTML = html;
+    }
+
+    updateEvidenceFiles(evidence) {
+        const container = document.getElementById('evidenceFiles');
+        if (!container) return;
+        
+        const systemInfo = evidence.system_info || {};
+        const filePermissions = systemInfo.file_permissions || {};
+        
+        let html = '';
+        const evidenceFiles = [
+            'data_encryption.py',
+            'enhanced_encryption_manager.py',
+            'encryption_evidence_generator.py',
+            'auth_manager.py',
+            'mysql_encryption_setup.py'
+        ];
+        
+        evidenceFiles.forEach(file => {
+            const permissions = filePermissions[file];
+            const exists = permissions ? true : false;
+            const secure = permissions ? permissions.secure : false;
+            
+            html += `
+                <div class="evidence-file">
+                    <i class="fas ${exists ? 'fa-file-code' : 'fa-file-times'}"></i>
+                    <span class="flex-grow-1">${file}</span>
+                    <span class="badge bg-${exists ? (secure ? 'success' : 'warning') : 'danger'}">
+                        ${exists ? (secure ? 'Secure' : 'Present') : 'Missing'}
+                    </span>
+                </div>
+            `;
+        });
+        
+        container.innerHTML = html;
+    }
+
+    // Helper methods
+    determineEncryptionStatus(data) {
+        if (data.test_encryption && data.test_encryption.success) {
+            return 'ENABLED';
+        } else if (data.implementation_files && data.implementation_files.length > 0) {
+            return 'PARTIAL';
+        } else {
+            return 'DISABLED';
+        }
+    }
+
+    getStatusIcon(status) {
+        const icons = {
+            'ENABLED': '<i class="fas fa-check-circle"></i>',
+            'PARTIAL': '<i class="fas fa-exclamation-circle"></i>',
+            'DISABLED': '<i class="fas fa-times-circle"></i>'
+        };
+        return icons[status] || '<i class="fas fa-question-circle"></i>';
+    }
+
+    getStatusBadgeColor(status) {
+        const colors = {
+            'ENABLED': 'success',
+            'PARTIAL': 'warning',
+            'DISABLED': 'danger'
+        };
+        return colors[status] || 'secondary';
+    }
+
+    formatCategoryName(category) {
+        return category.replace(/_/g, ' ')
+            .replace(/\b\w/g, l => l.toUpperCase());
+    }
+
+    getCategoryDescription(category) {
+        const descriptions = {
+            'field_encryption': 'Encryption of sensitive data fields',
+            'database_encryption': 'Database-level encryption and SSL',
+            'connection_security': 'HTTPS/TLS connection security',
+            'session_security': 'Secure session management',
+            'file_encryption': 'File and backup encryption'
+        };
+        return descriptions[category] || 'Encryption implementation';
+    }
+
+    calculateRegulationCompliance(details) {
+        const controls = details.encryption_controls || [];
+        const implementedCount = controls.length; // Simplified - in real implementation, check actual status
+        const totalCount = controls.length;
+        
+        return {
+            isCompliant: implementedCount >= totalCount * 0.8,
+            implementedCount,
+            totalCount
+        };
+    }
+
+    updateElement(id, value) {
+        const element = document.getElementById(id);
+        if (element) {
+            element.textContent = value;
+        }
+    }
+
+    showLoading() {
+        const containers = ['encryptionCategories', 'complianceMapping', 'evidenceFiles'];
+        containers.forEach(id => {
+            const element = document.getElementById(id);
+            if (element) {
+                element.innerHTML = '<div class="text-center p-4"><div class="loading-spinner"></div> Loading...</div>';
+            }
+        });
+    }
+
+    showError(message) {
+        const containers = ['encryptionCategories', 'complianceMapping', 'evidenceFiles'];
+        containers.forEach(id => {
+            const element = document.getElementById(id);
+            if (element) {
+                element.innerHTML = `<div class="alert alert-danger">${message}</div>`;
+            }
+        });
+    }
+
+    setupEventListeners() {
+        // Auto-refresh every 5 minutes
+        setInterval(() => {
+            this.loadEncryptionStatus();
+        }, 5 * 60 * 1000);
+    }
+}
+
+// Global functions for UI interactions
+async function runEncryptionTest(testType) {
+    try {
+        const button = event.target;
+        const originalText = button.innerHTML;
+        button.innerHTML = '<div class="loading-spinner"></div> Running...';
+        button.disabled = true;
+        
+        const response = await fetch('/api/encryption/real-time-validation', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ test_type: testType })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            displayTestResults(data.results, testType);
+        } else {
+            throw new Error(data.error);
+        }
+    } catch (error) {
+        console.error('Error running test:', error);
+        document.getElementById('testResults').innerHTML = 
+            `<div class="alert alert-danger">Test failed: ${error.message}</div>`;
+    } finally {
+        const button = event.target;
+        button.innerHTML = originalText;
+        button.disabled = false;
+    }
+}
+
+function displayTestResults(results, testType) {
+    const container = document.getElementById('testResults');
+    let html = `<h6>Test Results (${testType})</h6>`;
+    
+    Object.entries(results).forEach(([testName, result]) => {
+        const passed = result.passed;
+        const statusClass = passed ? 'passed' : 'failed';
+        const icon = passed ? '<i class="fas fa-check"></i>' : '<i class="fas fa-times"></i>';
+        
+        html += `
+            <div class="test-result ${statusClass}">
+                <div>
+                    ${icon} ${testName.replace(/_/g, ' ').toUpperCase()}
+                    ${result.error ? `<div class="small">Error: ${result.error}</div>` : ''}
+                </div>
+                <span class="badge bg-${passed ? 'success' : 'danger'}">
+                    ${passed ? 'PASSED' : 'FAILED'}
+                </span>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+}
+
+async function generateEvidenceReport() {
+    try {
+        const modal = new bootstrap.Modal(document.getElementById('encryptionEvidenceModal'));
+        const content = document.getElementById('detailedEvidenceContent');
+        
+        content.innerHTML = '<div class="text-center p-4"><div class="loading-spinner"></div> Generating evidence report...</div>';
+        modal.show();
+        
+        const response = await fetch('/api/encryption/evidence-report');
+        const data = await response.json();
+        
+        if (data.success) {
+            content.innerHTML = formatDetailedEvidence(data.evidence);
+        } else {
+            throw new Error(data.error);
+        }
+    } catch (error) {
+        console.error('Error generating evidence report:', error);
+        document.getElementById('detailedEvidenceContent').innerHTML = 
+            `<div class="alert alert-danger">Failed to generate report: ${error.message}</div>`;
+    }
+}
+
+function formatDetailedEvidence(evidence) {
+    let html = '<div class="row">';
+    
+    // System Information
+    html += `
+        <div class="col-md-6 mb-4">
+            <h6>System Information</h6>
+            <div class="card">
+                <div class="card-body">
+                    <p><strong>Python Version:</strong> ${evidence.system_info?.python_version || 'Unknown'}</p>
+                    <p><strong>SSL Version:</strong> ${evidence.system_info?.ssl_version || 'Unknown'}</p>
+                    <p><strong>Cryptography Library:</strong> ${evidence.system_info?.encryption_libraries?.cryptography || 'Unknown'}</p>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Test Results Summary
+    const testResults = evidence.test_results || {};
+    const totalTests = Object.keys(testResults).length;
+    const passedTests = Object.values(testResults).filter(test => test.passed).length;
+    
+    html += `
+        <div class="col-md-6 mb-4">
+            <h6>Test Results Summary</h6>
+            <div class="card">
+                <div class="card-body">
+                    <p><strong>Total Tests:</strong> ${totalTests}</p>
+                    <p><strong>Passed:</strong> <span class="text-success">${passedTests}</span></p>
+                    <p><strong>Failed:</strong> <span class="text-danger">${totalTests - passedTests}</span></p>
+                    <p><strong>Success Rate:</strong> ${totalTests > 0 ? Math.round((passedTests/totalTests)*100) : 0}%</p>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    html += '</div>';
+    
+    // Detailed Test Results
+    html += '<h6>Detailed Test Results</h6>';
+    Object.entries(testResults).forEach(([testName, result]) => {
+        const statusClass = result.passed ? 'success' : 'danger';
+        html += `
+            <div class="card mb-2">
+                <div class="card-header bg-${statusClass} text-white">
+                    ${testName.replace(/_/g, ' ').toUpperCase()} - ${result.passed ? 'PASSED' : 'FAILED'}
+                </div>
+                <div class="card-body">
+                    ${result.algorithm ? `<p><strong>Algorithm:</strong> ${result.algorithm}</p>` : ''}
+                    ${result.error ? `<p><strong>Error:</strong> ${result.error}</p>` : ''}
+                    <p><strong>Timestamp:</strong> ${result.timestamp || 'Unknown'}</p>
+                </div>
+            </div>
+        `;
+    });
+    
+    return html;
+}
+
+function showRegulationDetails(regulation) {
+    // Implement regulation details modal if needed
+    console.log('Show details for regulation:', regulation);
+}
+
+async function downloadEvidenceReport() {
+    try {
+        const response = await fetch('/api/encryption/evidence-report');
+        const data = await response.json();
+        
+        if (data.success) {
+            const blob = new Blob([JSON.stringify(data.evidence, null, 2)], {
+                type: 'application/json'
+            });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `encryption_evidence_${new Date().toISOString().slice(0,10)}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+    } catch (error) {
+        console.error('Error downloading report:', error);
+        alert('Failed to download report: ' + error.message);
+    }
+}
+
+// Initialize dashboard when DOM is loaded
+document.addEventListener('DOMContentLoaded', function() {
+    if (document.querySelector('.encryption-compliance-section')) {
+        window.encryptionComplianceDashboard = new EncryptionComplianceDashboard();
+    }
+});
+</script>

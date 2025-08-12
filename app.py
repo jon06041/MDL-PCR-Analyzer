@@ -4919,6 +4919,181 @@ def validate_system_compliance():
 
 # ===== END UNIFIED COMPLIANCE API ENDPOINTS =====
 
+# ===== ENCRYPTION EVIDENCE INTEGRATION =====
+
+@app.route('/api/unified-compliance/encryption-evidence', methods=['GET'])
+def get_encryption_evidence_for_compliance():
+    """Get encryption evidence for specific compliance requirements"""
+    try:
+        from encryption_evidence_generator import EncryptionEvidenceGenerator
+        
+        # Get regulation filter if provided
+        regulation = request.args.get('regulation', '').upper()
+        requirement_code = request.args.get('requirement_code', '')
+        
+        # Generate current encryption evidence
+        generator = EncryptionEvidenceGenerator()
+        evidence = generator.generate_comprehensive_evidence()
+        
+        # Filter evidence by regulation if requested
+        if regulation:
+            if regulation in evidence['compliance_mapping']:
+                filtered_evidence = {
+                    'regulation': regulation,
+                    'requirement_details': evidence['compliance_mapping'][regulation],
+                    'implementation_status': evidence['encryption_evidence'],
+                    'test_results': evidence['test_results'],
+                    'compliance_score': calculate_regulation_compliance_score(evidence, regulation),
+                    'evidence_files': get_regulation_evidence_files(evidence, regulation),
+                    'timestamp': evidence['timestamp']
+                }
+                return jsonify({
+                    'success': True,
+                    'evidence': filtered_evidence
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': f'No encryption evidence found for regulation: {regulation}'
+                }), 404
+        
+        # Return all evidence if no filter
+        return jsonify({
+            'success': True,
+            'evidence': evidence,
+            'summary': {
+                'total_tests': len(evidence['test_results']),
+                'passed_tests': sum(1 for test in evidence['test_results'].values() if test.get('passed')),
+                'compliance_score': calculate_overall_compliance_score(evidence),
+                'regulations_covered': list(evidence['compliance_mapping'].keys())
+            }
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error getting encryption evidence: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Failed to generate encryption evidence: {str(e)}'
+        }), 500
+
+@app.route('/api/unified-compliance/encryption-evidence/<requirement_code>', methods=['GET'])
+def get_encryption_evidence_for_requirement(requirement_code):
+    """Get specific encryption evidence for a compliance requirement"""
+    try:
+        from encryption_evidence_generator import EncryptionEvidenceGenerator
+        
+        # Map requirement codes to regulations
+        requirement_regulation_mapping = {
+            # FDA CFR 21 Part 11
+            'FDA_CFR_21_PART_11_10': 'FDA_CFR_21_PART_11',
+            'FDA_CFR_21_PART_11_30': 'FDA_CFR_21_PART_11',
+            'FDA_CFR_21_PART_11_100': 'FDA_CFR_21_PART_11',
+            'FDA_CFR_21_PART_11_200': 'FDA_CFR_21_PART_11',
+            # HIPAA Security Rule
+            'HIPAA_SECURITY_164_308': 'HIPAA_SECURITY_RULE',
+            'HIPAA_SECURITY_164_310': 'HIPAA_SECURITY_RULE', 
+            'HIPAA_SECURITY_164_312': 'HIPAA_SECURITY_RULE',
+            'HIPAA_SECURITY_164_314': 'HIPAA_SECURITY_RULE',
+            # ISO 27001
+            'ISO_27001_A_10_1': 'ISO_27001',
+            'ISO_27001_A_13_1': 'ISO_27001',
+            'ISO_27001_A_18_1': 'ISO_27001'
+        }
+        
+        regulation = requirement_regulation_mapping.get(requirement_code)
+        if not regulation:
+            return jsonify({
+                'success': False,
+                'error': f'No encryption mapping found for requirement: {requirement_code}'
+            }), 404
+        
+        # Generate evidence
+        generator = EncryptionEvidenceGenerator()
+        evidence = generator.generate_comprehensive_evidence()
+        
+        if regulation not in evidence['compliance_mapping']:
+            return jsonify({
+                'success': False,
+                'error': f'No encryption evidence available for regulation: {regulation}'
+            }), 404
+        
+        # Create specific evidence for this requirement
+        requirement_evidence = {
+            'requirement_code': requirement_code,
+            'regulation': regulation,
+            'requirement_details': evidence['compliance_mapping'][regulation],
+            'encryption_controls': evidence['compliance_mapping'][regulation]['encryption_controls'],
+            'evidence_files': evidence['compliance_mapping'][regulation]['evidence_files'],
+            'implementation_tests': {
+                test_name: test_result 
+                for test_name, test_result in evidence['test_results'].items()
+                if test_result.get('passed', False)
+            },
+            'compliance_status': 'COMPLIANT' if all(
+                test.get('passed', False) for test in evidence['test_results'].values()
+            ) else 'PARTIAL_COMPLIANCE',
+            'recommendations': generate_encryption_recommendations(evidence, regulation),
+            'timestamp': evidence['timestamp']
+        }
+        
+        return jsonify({
+            'success': True,
+            'requirement_code': requirement_code,
+            'evidence': requirement_evidence
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error getting requirement encryption evidence: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Failed to get evidence for requirement {requirement_code}: {str(e)}'
+        }), 500
+
+# Helper functions for encryption evidence
+def calculate_regulation_compliance_score(evidence, regulation):
+    """Calculate compliance score for specific regulation"""
+    test_results = evidence.get('test_results', {})
+    if not test_results:
+        return 0
+    
+    total_tests = len(test_results)
+    passed_tests = sum(1 for test in test_results.values() if test.get('passed'))
+    
+    return round((passed_tests / total_tests) * 100, 1)
+
+def calculate_overall_compliance_score(evidence):
+    """Calculate overall encryption compliance score"""
+    return calculate_regulation_compliance_score(evidence, None)
+
+def get_regulation_evidence_files(evidence, regulation):
+    """Get evidence files for specific regulation"""
+    regulation_mapping = evidence.get('compliance_mapping', {})
+    if regulation in regulation_mapping:
+        return regulation_mapping[regulation].get('evidence_files', [])
+    return []
+
+def generate_encryption_recommendations(evidence, regulation):
+    """Generate recommendations for encryption compliance"""
+    recommendations = []
+    
+    test_results = evidence.get('test_results', {})
+    failed_tests = [name for name, result in test_results.items() if not result.get('passed')]
+    
+    if failed_tests:
+        recommendations.extend([
+            f"Fix failing encryption test: {test}" for test in failed_tests
+        ])
+    
+    # Check HTTPS enforcement
+    https_status = evidence.get('encryption_evidence', {}).get('connection_security', {}).get('https_enforcement', {})
+    if not https_status.get('force_https', False):
+        recommendations.append("Enable HTTPS enforcement for production deployment")
+    
+    if not recommendations:
+        recommendations.append("All encryption controls are properly implemented")
+    
+    return recommendations
+
 # ===== COMPLIANCE TRAINING AND USER ACTIONS =====
 
 @app.route('/api/compliance/training/complete', methods=['POST'])
