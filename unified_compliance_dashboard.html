@@ -1179,10 +1179,37 @@
                     const statusText = source.confirmation_status || source.validation_status || 'pending';
                     const dateStr = source.created_at ? new Date(source.created_at).toLocaleDateString() : 'N/A';
                     
+                    // Parse evidence_data JSON to get enhanced descriptions
+                    let description = source.description || source.filename || 'N/A';
+                    try {
+                        if (source.evidence_data && typeof source.evidence_data === 'string') {
+                            const evidenceData = JSON.parse(source.evidence_data);
+                            if (evidenceData.technical_specifications && evidenceData.technical_specifications.description) {
+                                description = evidenceData.technical_specifications.description;
+                            } else if (evidenceData.system_verification && evidenceData.system_verification.verification_summary) {
+                                description = evidenceData.system_verification.verification_summary;
+                            } else if (evidenceData.regulatory_mapping && evidenceData.regulatory_mapping.evidence_statement) {
+                                description = evidenceData.regulatory_mapping.evidence_statement;
+                            }
+                        } else if (source.evidence_data && typeof source.evidence_data === 'object') {
+                            const evidenceData = source.evidence_data;
+                            if (evidenceData.technical_specifications && evidenceData.technical_specifications.description) {
+                                description = evidenceData.technical_specifications.description;
+                            } else if (evidenceData.system_verification && evidenceData.system_verification.verification_summary) {
+                                description = evidenceData.system_verification.verification_summary;
+                            } else if (evidenceData.regulatory_mapping && evidenceData.regulatory_mapping.evidence_statement) {
+                                description = evidenceData.regulatory_mapping.evidence_statement;
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('Failed to parse evidence_data for enhanced description:', e);
+                        // Keep default description
+                    }
+                    
                     evidenceHTML += `
                         <tr>
                             <td><span class="badge bg-primary">${source.evidence_type || 'Analysis Session'}</span></td>
-                            <td class="text-truncate" style="max-width: 300px;">${source.description || source.filename || 'N/A'}</td>
+                            <td class="text-truncate" style="max-width: 300px;">${description}</td>
                             <td><span class="badge ${statusBadge}">${statusText}</span></td>
                             <td>${dateStr}</td>
                         </tr>`;
