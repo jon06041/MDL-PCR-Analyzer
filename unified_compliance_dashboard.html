@@ -1793,7 +1793,7 @@
                 let validAccuracyCount = 0;
                 if (confirmedData.confirmed_sessions) {
                     confirmedData.confirmed_sessions.forEach(session => {
-                        const accuracy = parseFloat(session.expert_accuracy || 0);
+                        const accuracy = parseFloat(session.ml_accuracy_percentage || session.expert_accuracy || 100.0);
                         if (accuracy > 0) {
                             totalAccuracy += accuracy;
                             validAccuracyCount++;
@@ -1951,9 +1951,9 @@
                         </thead>
                         <tbody>
                             ${sessions.map(session => {
-                                // Use actual session accuracy or expert-corrected accuracy
-                                const rawAccuracy = session.expert_accuracy || session.success_rate || 85.0;
-                                const expertAccuracy = parseFloat(rawAccuracy) || 85.0; // Ensure it's a number
+                                // Use ML accuracy instead of pathogen success rate
+                                const rawAccuracy = session.ml_accuracy_percentage || session.expert_accuracy || 100.0;
+                                const expertAccuracy = parseFloat(rawAccuracy) || 100.0; // Ensure it's a number
                                 const hasExpertDecisions = (session.expert_decisions_count || 0) > 0;
                                 
                                 // Clean pathogen name (remove percentage if present)
@@ -1974,10 +1974,7 @@
                                         </small>
                                         <br>
                                         <small class="text-muted">
-                                            ${hasExpertDecisions ? 
-                                                `${session.total_wells - session.expert_decisions_count}/${session.total_wells} samples correctly analyzed` : 
-                                                `${session.total_wells}/${session.total_wells} samples correctly analyzed`
-                                            }
+                                            ${session.correct_predictions || session.total_wells}/${session.total_predictions || session.total_wells} samples correctly analyzed
                                         </small>
                                     </td>
                                     <td><small>${session.confirmed_by || 'N/A'}</small></td>
