@@ -730,11 +730,92 @@ Data flows: `MySQL tables` → `Flask API` → `Chart.js visualization` → `Use
 3. **Classification Hierarchy**: STRONG_POSITIVE > POSITIVE > WEAK_POSITIVE > NEGATIVE
 4. **Threshold Storage**: Use `window.stableChannelThresholds` for persistence
 5. **Database Naming**: All MySQL tables use snake_case with descriptive prefixes
+6. **Compliance Status**: Railway `in_progress` = Frontend `active` for requirement tracking
+7. **ML Accuracy**: 100% for confirmed runs with no expert corrections
 
-## Authentication Setup (Future)
+## 🔐 ENTRA ID AUTHENTICATION IMPLEMENTATION PLAN
+
+### **Microsoft Entra ID (Azure AD) Authentication Architecture**
+
+**CRITICAL: NO DATABASE TABLES REQUIRED FOR USER AUTHENTICATION**
+
+✅ **How Entra Authentication Works:**
+- Entra handles ALL user authentication via OAuth/OIDC
+- App receives user information through verified API tokens
+- NO local password storage or user authentication tables needed
+- User details provided by Microsoft's identity service
+
+✅ **What Your App Receives from Entra:**
+- Username/email address
+- Display name  
+- Role information (if configured in Azure tenant)
+- Group memberships for authorization
+- Authentication status and token validation
+
+✅ **Your App's Responsibilities:**
+- Verify the JWT token from Microsoft
+- Extract user info from the token payload
+- Implement role-based access using Entra groups/roles
+- Store session information (NOT passwords)
+- Map Azure groups to qPCR app permissions
+
+### **Implementation Benefits**
+
+**Much Simpler Than Database Auth:**
+- No password hashing or security concerns
+- No user table synchronization required
+- Leverages existing organizational SSO
+- Users authenticate with familiar Microsoft credentials
+
+**Security Advantages:**
+- Microsoft handles all password security
+- Multi-factor authentication if enabled in tenant
+- Centralized access control through Azure portal
+- Automatic user provisioning/deprovisioning
+
+### **Implementation Requirements**
+
+**Entra Application Registration (Ready):**
 ```python
-# Entra ID integration ready
+# Entra ID integration configuration
 CLIENT_ID = "6345cabe-25c6-4f2d-a81f-dbc6f392f234"
-CLIENT_SECRET = "aaee4e07-3143-4df5-a1f9-7c306a227677"
+CLIENT_SECRET = "aaee4e07-3143-4df5-a1f9-7c306a227677"  
 TENANT_ID = "5d79b88b-9063-46f3-92a6-41f3807a3d60"
+REDIRECT_URI = "http://localhost:5000/auth/callback"
 ```
+
+**Role Mapping Strategy:**
+- Map Azure AD groups to qPCR application roles
+- Use Entra group membership for authorization decisions
+- No local user database tables required
+- Store only session data and user preferences (optional)
+
+**Session Management:**
+- Store minimal session data (user ID, roles, preferences)
+- Use secure session cookies or JWT tokens
+- Session expiration aligned with Entra token lifetime
+
+### **Development Approach**
+
+**Phase 1: Basic Authentication**
+1. Implement OAuth/OIDC flow with Entra
+2. Token validation and user info extraction
+3. Basic role-based access control
+
+**Phase 2: Advanced Authorization**
+1. Map Azure groups to app-specific permissions
+2. Implement fine-grained access controls
+3. Session management and user preferences
+
+**Phase 3: Production Optimization**
+1. Performance optimization for token validation
+2. Caching strategy for user roles/groups
+3. Audit logging for authentication events
+
+### **Critical Implementation Notes**
+
+- **No `users` table required** - authentication handled by Microsoft
+- **Optional `user_sessions` table** - for session tracking only
+- **Optional `user_preferences` table** - for app-specific settings
+- **Focus on authorization logic** rather than authentication infrastructure
+- **Leverage existing Azure tenant configuration** for user/group management
