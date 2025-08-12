@@ -25,6 +25,7 @@ from database_management_api import db_mgmt_bp
 # Temporarily disable enhanced compliance API due to corruption
 # from enhanced_compliance_api import compliance_api
 from ml_run_api import ml_run_api
+from encryption_api import encryption_bp
 
 # Load environment variables immediately at startup
 load_dotenv()
@@ -668,6 +669,9 @@ app.register_blueprint(db_mgmt_bp)
 
 # Register ML run management API blueprint  
 app.register_blueprint(ml_run_api)
+
+# Register encryption API blueprint
+app.register_blueprint(encryption_bp)
 
 print("✅ MySQL database configured and ready")
 print("MySQL database tables initialized")
