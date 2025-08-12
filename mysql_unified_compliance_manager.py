@@ -575,7 +575,7 @@ class MySQLUnifiedComplianceManager:
             conn.close()
 
     def get_requirements(self, category=None, status=None, regulation_number=None):
-        """Get all compliance requirements with optional filtering"""
+        """Get all compliance requirements with optional filtering and requirement-specific evidence counts"""
         conn = self.get_connection()
         cursor = conn.cursor(dictionary=True)
         
@@ -588,10 +588,63 @@ class MySQLUnifiedComplianceManager:
             ''')
             tracking_data = {row['requirement_id']: row for row in cursor.fetchall()}
             
+            # Evidence type mapping for requirement-specific filtering
+            evidence_type_mapping = {
+                # Data encryption/security requirements (minimal session evidence)
+                'CFR_11_10_E': 'encryption_evidence',  # Electronic signatures
+                'CFR_11_50': 'encryption_evidence',    # Signature verification
+                'DATA_ENCRYPTION_TRANSIT': 'encryption_evidence',
+                'DATA_ENCRYPTION_REST': 'encryption_evidence',
+                'HIPAA_164_312_A_2_IV': 'encryption_evidence',
+                'ISO_27001_A_10_1_1': 'encryption_evidence',
+                'ISO_27001_A_10_1_2': 'encryption_evidence',
+                
+                # Software validation requirements (full session evidence) 
+                'CFR_11_10_A': 'run_files',  # Access controls
+                'CFR_11_10_B': 'run_files',  # Data integrity  
+                'CFR_11_10_C': 'run_files',  # System documentation
+                'CFR_11_10_D': 'run_files',  # Document controls
+                'CFR_11_10_F': 'run_files',  # System checks
+                'CFR_11_10_G': 'run_files',  # System validation
+                'CFR_11_10_H': 'run_files',  # System backups
+                'CFR_11_30': 'run_files',    # Signature controls
+                'ISO_15189_5_5_1': 'run_files',  # Quality control
+                'ISO_15189_5_8_2': 'run_files',  # Reporting
+                'ISO_15189_4_14_7': 'run_files', # Data management
+                'CLIA_493_1251': 'run_files',
+                'CLIA_493_1252': 'run_files',
+                'CAP_GEN_43400': 'run_files',
+                
+                # Default for unmapped requirements
+                'default': 'run_files'
+            }
+            
             # Build requirements list
             requirements = []
             for req_id, req_spec in self.compliance_requirements.items():
                 tracking_info = tracking_data.get(req_id, {})
+                
+                # Apply requirement-specific evidence filtering
+                evidence_type = evidence_type_mapping.get(req_id, evidence_type_mapping['default'])
+                
+                if evidence_type == 'encryption_evidence':
+                    # For encryption requirements, check encryption evidence table
+                    cursor.execute('''
+                        SELECT COUNT(*) as count 
+                        FROM compliance_evidence 
+                        WHERE requirement_id LIKE %s 
+                           OR evidence_type IN ('technical_implementation', 'security_implementation',
+                                               'authentication_security', 'digital_signature_ready',
+                                               'documentation_control', 'phi_protection', 'cryptographic_policy')
+                    ''', (f'%{req_id}%',))
+                    encryption_evidence_count = cursor.fetchone()['count']
+                    filtered_evidence_count = encryption_evidence_count
+                elif evidence_type == 'run_files':
+                    # For validation requirements, use full tracking evidence count
+                    filtered_evidence_count = tracking_info.get('evidence_count', 0)
+                else:
+                    # Default behavior
+                    filtered_evidence_count = tracking_info.get('evidence_count', 0)
                 
                 requirement = {
                     'id': req_id,
@@ -601,9 +654,10 @@ class MySQLUnifiedComplianceManager:
                     'evidence_types': req_spec['evidence_types'],
                     'auto_trackable': req_spec.get('auto_trackable', False),
                     'implementation_status': tracking_info.get('compliance_status', 'not_started'),
-                    'evidence_count': tracking_info.get('evidence_count', 0),
+                    'evidence_count': filtered_evidence_count,  # Now requirement-specific!
                     'compliance_percentage': float(tracking_info.get('compliance_percentage', 0)),
-                    'last_updated': tracking_info.get('updated_at')
+                    'last_updated': tracking_info.get('updated_at'),
+                    'evidence_filter_type': evidence_type  # Debug info
                 }
                 
                 # Apply filters if provided
