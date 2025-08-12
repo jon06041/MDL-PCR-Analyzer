@@ -17,6 +17,26 @@
 
 **Why this matters:** SQLite was causing recurring database connectivity issues, missing ML requirements, and frontend failures. The system has been completely migrated to MySQL for reliability and performance.
 
+## 🗄️ MYSQL DEVELOPMENT VIEWER (2025-08-12)
+
+**INTEGRATED MYSQL ADMIN INTERFACE** ✅ AVAILABLE
+
+**Access Points**:
+- **Main Interface**: `http://localhost:5000/mysql-viewer`
+- **API Endpoints**: `/api/mysql-admin/tables`, `/api/mysql-admin/query`, `/api/mysql-admin/describe/<table>`
+
+**Key Features**:
+- Browse all database tables with row counts
+- Execute SELECT queries safely (read-only for security)
+- Inspect table structures and data
+- Real-time database monitoring for development
+
+**CRITICAL SERVER RESTART REQUIREMENT**:
+- **After SQL schema changes**: Always restart Flask server (`python3 app.py`)
+- **After MySQL admin route changes**: Server restart required for SQL syntax fixes
+- **Symptoms**: SQL syntax errors, 500 errors on `/api/mysql-admin/tables`
+- **Solution**: Kill Flask process and restart - changes require fresh MySQL connection pool
+
 ## 🔍 CRITICAL ISSUE ANALYSIS (2025-08-11)
 
 ### **Railway Production Compliance Dashboard - ALL ISSUES FIXED** ✅

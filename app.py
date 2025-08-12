@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory, Response
+from flask import Flask, request, jsonify, send_from_directory, Response, render_template_string
 import json
 import os
 import re
@@ -3925,6 +3925,362 @@ def validate_queue_files():
             'error': str(e)
         }), 500
 
+# ========================= MYSQL ADMIN API ENDPOINTS (Development) =========================
+
+@app.route('/mysql-admin')
+def mysql_admin_interface():
+    """Serve the MySQL admin interface for development"""
+    return send_from_directory('.', 'mysql_admin.html')
+
+@app.route('/mysql-viewer')
+def mysql_viewer():
+    """Integrated MySQL viewer interface"""
+    return render_template_string('''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MySQL Viewer - Development</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { background: #007bff; color: white; padding: 15px; margin-bottom: 20px; }
+        .tables-list { background: #f8f9fa; padding: 15px; margin-bottom: 20px; }
+        .table-item { 
+            display: inline-block; 
+            margin: 5px; 
+            padding: 8px 12px; 
+            background: white; 
+            border: 1px solid #ddd; 
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        .table-item:hover { background: #e9ecef; }
+        .query-section { margin-bottom: 20px; }
+        .query-input { width: 100%; height: 100px; padding: 10px; border: 1px solid #ddd; }
+        .btn { 
+            background: #007bff; 
+            color: white; 
+            padding: 10px 20px; 
+            border: none; 
+            cursor: pointer; 
+            margin: 5px;
+            border-radius: 4px;
+        }
+        .btn:hover { background: #0056b3; }
+        .results-table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            background: white; 
+            margin-top: 15px;
+        }
+        .results-table th, .results-table td { 
+            border: 1px solid #ddd; 
+            padding: 8px; 
+            text-align: left; 
+        }
+        .results-table th { background: #f8f9fa; }
+        .results-table tr:nth-child(even) { background: #f9f9f9; }
+        .error { color: #dc3545; background: #f8d7da; padding: 10px; border-radius: 4px; }
+        .success { color: #155724; background: #d4edda; padding: 10px; border-radius: 4px; }
+        .loading { color: #856404; background: #fff3cd; padding: 10px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🗄️ MySQL Development Viewer</h1>
+            <p>Database: {{ config.database }} @ {{ config.host }}:{{ config.port }}</p>
+            <p><a href="/" style="color: white;">← Back to Main App</a></p>
+        </div>
+        
+        <div class="tables-list">
+            <h3>📋 Database Tables</h3>
+            <div id="tables-container">Loading tables...</div>
+            <button class="btn" onclick="loadTables()">🔄 Refresh Tables</button>
+        </div>
+        
+        <div class="query-section">
+            <h3>🔍 Custom Query</h3>
+            <textarea id="query-input" class="query-input" placeholder="Enter your SQL query here...">SELECT * FROM analysis_sessions LIMIT 5;</textarea>
+            <br>
+            <button class="btn" onclick="executeQuery()">▶️ Execute Query</button>
+            <button class="btn" onclick="clearResults()">🗑️ Clear Results</button>
+        </div>
+        
+        <div id="results-container"></div>
+    </div>
+
+    <script>
+        async function loadTables() {
+            const container = document.getElementById('tables-container');
+            container.innerHTML = '<div class="loading">Loading tables...</div>';
+            
+            try {
+                const response = await fetch('/api/mysql-admin/tables');
+                const data = await response.json();
+                
+                if (data.success) {
+                    container.innerHTML = data.tables.map(table => 
+                        `<span class="table-item" onclick="selectTable('${table.name}')">${table.name} (${table.rows})</span>`
+                    ).join('');
+                } else {
+                    container.innerHTML = `<div class="error">Error: ${data.error}</div>`;
+                }
+            } catch (error) {
+                container.innerHTML = `<div class="error">Failed to load tables: ${error.message}</div>`;
+            }
+        }
+        
+        function selectTable(tableName) {
+            const query = `SELECT * FROM ${tableName} LIMIT 20;`;
+            document.getElementById('query-input').value = query;
+            executeQuery();
+        }
+        
+        async function executeQuery() {
+            const query = document.getElementById('query-input').value.trim();
+            if (!query) {
+                alert('Please enter a query');
+                return;
+            }
+            
+            const container = document.getElementById('results-container');
+            container.innerHTML = '<div class="loading">Executing query...</div>';
+            
+            try {
+                const response = await fetch('/api/mysql-admin/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: query })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    if (data.results && data.results.length > 0) {
+                        const columns = Object.keys(data.results[0]);
+                        let html = `
+                            <div class="success">Query executed successfully. ${data.results.length} rows returned.</div>
+                            <table class="results-table">
+                                <thead>
+                                    <tr>${columns.map(col => `<th>${col}</th>`).join('')}</tr>
+                                </thead>
+                                <tbody>
+                        `;
+                        
+                        data.results.forEach(row => {
+                            html += '<tr>';
+                            columns.forEach(col => {
+                                let value = row[col];
+                                if (value === null) value = '<em>NULL</em>';
+                                else if (typeof value === 'object') value = JSON.stringify(value);
+                                else if (typeof value === 'string' && value.length > 100) value = value.substring(0, 100) + '...';
+                                html += `<td>${value}</td>`;
+                            });
+                            html += '</tr>';
+                        });
+                        
+                        html += '</tbody></table>';
+                        container.innerHTML = html;
+                    } else {
+                        container.innerHTML = '<div class="success">Query executed successfully. No rows returned.</div>';
+                    }
+                } else {
+                    container.innerHTML = `<div class="error">Query Error: ${data.error}</div>`;
+                }
+            } catch (error) {
+                container.innerHTML = `<div class="error">Request failed: ${error.message}</div>`;
+            }
+        }
+        
+        function clearResults() {
+            document.getElementById('results-container').innerHTML = '';
+            document.getElementById('query-input').value = '';
+        }
+        
+        // Load tables on page load
+        loadTables();
+    </script>
+</body>
+</html>
+    ''', config=mysql_config)
+
+@app.route('/api/mysql-admin/status', methods=['GET'])
+def mysql_admin_status():
+    """Check MySQL connection status"""
+    try:
+        import mysql.connector
+        
+        # Test connection using the global mysql_config
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor()
+        
+        # Get database info
+        cursor.execute("SELECT DATABASE() as db_name, VERSION() as version")
+        result = cursor.fetchone()
+        
+        cursor.execute("SELECT COUNT(*) as table_count FROM information_schema.tables WHERE table_schema = DATABASE()")
+        table_count = cursor.fetchone()[0]
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'database': result[0],
+            'version': result[1],
+            'table_count': table_count,
+            'host': mysql_config['host'],
+            'port': mysql_config['port']
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/mysql-admin/tables', methods=['GET'])
+def mysql_admin_get_tables():
+    """Get list of all tables with row counts"""
+    try:
+        import mysql.connector
+        
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Get table information
+        cursor.execute("""
+            SELECT 
+                TABLE_NAME as name,
+                TABLE_ROWS as table_rows,
+                DATA_LENGTH as data_length,
+                CREATE_TIME as created
+            FROM information_schema.TABLES 
+            WHERE TABLE_SCHEMA = DATABASE()
+            ORDER BY TABLE_NAME
+        """)
+        
+        tables = cursor.fetchall()
+        
+        # Convert rows to int (it might be None for some tables)
+        for table in tables:
+            table['rows'] = int(table['table_rows']) if table['table_rows'] is not None else 0
+            table['data_length'] = int(table['data_length']) if table['data_length'] is not None else 0
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'tables': tables
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/mysql-admin/query', methods=['POST'])
+def mysql_admin_execute_query():
+    """Execute a SQL query (READ-ONLY for safety)"""
+    try:
+        data = request.get_json()
+        query = data.get('query', '').strip()
+        
+        if not query:
+            return jsonify({
+                'success': False,
+                'error': 'No query provided'
+            }), 400
+        
+        # Safety check - only allow SELECT, SHOW, DESCRIBE queries for development
+        query_upper = query.upper().strip()
+        allowed_commands = ['SELECT', 'SHOW', 'DESCRIBE', 'EXPLAIN']
+        
+        if not any(query_upper.startswith(cmd) for cmd in allowed_commands):
+            return jsonify({
+                'success': False,
+                'error': 'Only SELECT, SHOW, DESCRIBE, and EXPLAIN queries are allowed for safety'
+            }), 403
+        
+        import mysql.connector
+        
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Execute the query
+        cursor.execute(query)
+        results = cursor.fetchall()
+        
+        # Get column names
+        columns = [desc[0] for desc in cursor.description] if cursor.description else []
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'results': results,
+            'columns': columns,
+            'row_count': len(results)
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/mysql-admin/table-info/<table_name>', methods=['GET'])
+def mysql_admin_get_table_info(table_name):
+    """Get detailed information about a specific table"""
+    try:
+        import mysql.connector
+        
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Get table structure
+        cursor.execute(f"DESCRIBE {table_name}")
+        structure = cursor.fetchall()
+        
+        # Get table stats
+        cursor.execute(f"""
+            SELECT 
+                TABLE_ROWS as row_count,
+                DATA_LENGTH as data_length,
+                INDEX_LENGTH as index_length,
+                CREATE_TIME as created,
+                UPDATE_TIME as updated
+            FROM information_schema.TABLES 
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s
+        """, (table_name,))
+        
+        stats = cursor.fetchone()
+        
+        # Get indexes
+        cursor.execute(f"SHOW INDEX FROM {table_name}")
+        indexes = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'table_name': table_name,
+            'structure': structure,
+            'stats': stats,
+            'indexes': indexes
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 # ========================= ML VALIDATION API ENDPOINTS =========================
 
 @app.route('/api/ml-validation/dashboard-data', methods=['GET'])
@@ -7265,17 +7621,14 @@ if __name__ == '__main__':
     host = os.environ.get('HOST', '0.0.0.0')
     debug = os.environ.get('FLASK_ENV', 'development') == 'development'
     
-    print(f"Starting qPCR Analyzer on {host}:{port}")
-    print(f"Debug mode: {debug}")
+    print("🚀 Starting qPCR S-Curve Analyzer with Database Support...")
+    print(f"🌐 Server will be available at: http://{host}:{port}")
+    print(f"📊 Main dashboard: http://{host}:{port}")
+    print(f"🔍 MySQL viewer: http://{host}:{port}/mysql-viewer")
+    print(f"🛡️ Compliance dashboard: http://{host}:{port}/unified-compliance-dashboard")
+    print(f"🤖 ML validation: http://{host}:{port}/ml-validation-dashboard")
     
-    # Quick test route for debugging dashboard
-    @app.route('/test-dashboard')
-    def test_dashboard():
-        """Serve the simple test dashboard for debugging"""
-        with open('test_dashboard_simple.html', 'r') as f:
-            return f.read()
-    
-    # Start automatic database backup scheduler
+    # Start automatic backup scheduler if available
     try:
         from backup_scheduler import BackupScheduler
         backup_scheduler = BackupScheduler()
