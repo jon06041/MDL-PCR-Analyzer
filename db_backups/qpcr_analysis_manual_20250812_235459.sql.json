@@ -1,11 +1,11 @@
 {
   "backup_type": "manual",
-  "timestamp": "20250804_123605",
+  "timestamp": "20250812_235459",
   "description": "Auto-startup initial backup",
   "database": "qpcr_analysis",
   "host": "localhost",
-  "backup_size": 1511,
+  "backup_size": 1096989,
   "compressed": true,
-  "md5_hash": "fe8e1ecef65faa3822893c2f84adc945",
+  "md5_hash": "00e8d124d7fadfe3589f41aadd40463e",
   "mysql_version": "8.0.42-0ubuntu0.24.04.2"
 }
