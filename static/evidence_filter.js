@@ -203,4 +203,23 @@ window.EvidenceFilter = {
     EVIDENCE_TYPE_DESCRIPTIONS
 };
 
+// Create the specific function the dashboard is looking for
+window.getFilteredEvidenceForRequirement = function(reqCode, allSessions) {
+    // Use the filtering logic to get only relevant sessions
+    const evidenceTypes = REQUIREMENT_EVIDENCE_MAPPING[reqCode] || ['run_files'];
+    
+    // For encryption requirements, return empty array (evidence comes from encryption API)
+    if (evidenceTypes.includes('encryption_evidence') && !evidenceTypes.includes('run_files')) {
+        return [];
+    }
+    
+    // For validation/quality requirements, return all sessions
+    if (evidenceTypes.includes('run_files')) {
+        return allSessions;
+    }
+    
+    // Default: return all sessions
+    return allSessions;
+};
+
 console.log('✅ Evidence Filter System v1.0 loaded successfully');
