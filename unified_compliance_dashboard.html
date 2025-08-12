@@ -1145,6 +1145,67 @@
         }
         
         function loadEvidenceDetails(reqCode) {
+            // Get requirement data with evidence_sources from the stored data
+            const requirement = window.requirementsData?.find(req => req.id === reqCode);
+            const evidenceContainer = document.getElementById('evidenceDetails');
+            if (!evidenceContainer) return;
+            
+            // If we have evidence_sources from the API, use those instead of the old method
+            if (requirement && requirement.evidence_sources && requirement.evidence_sources.length > 0) {
+                console.log('Using new evidence_sources for', reqCode, ':', requirement.evidence_sources.length, 'sources');
+                
+                let evidenceHTML = `
+                    <div class="card">
+                        <div class="card-header">
+                            <h6 class="mb-0"><i class="fas fa-database"></i> Evidence Records (${requirement.evidence_sources.length})</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-sm table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>Type</th>
+                                            <th>Description</th>
+                                            <th>Status</th>
+                                            <th>Date</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>`;
+                
+                requirement.evidence_sources.forEach((source, index) => {
+                    const statusBadge = source.confirmation_status === 'confirmed' ? 
+                        'bg-success' : source.validation_status === 'validated' ? 
+                        'bg-success' : 'bg-warning';
+                    const statusText = source.confirmation_status || source.validation_status || 'pending';
+                    const dateStr = source.created_at ? new Date(source.created_at).toLocaleDateString() : 'N/A';
+                    
+                    evidenceHTML += `
+                        <tr>
+                            <td><span class="badge bg-primary">${source.evidence_type || 'Analysis Session'}</span></td>
+                            <td class="text-truncate" style="max-width: 300px;">${source.description || source.filename || 'N/A'}</td>
+                            <td><span class="badge ${statusBadge}">${statusText}</span></td>
+                            <td>${dateStr}</td>
+                        </tr>`;
+                });
+                
+                evidenceHTML += `
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="alert alert-success mt-3">
+                                <i class="fas fa-check-circle"></i>
+                                <strong>Evidence Source:</strong> Direct API integration - real-time evidence tracking
+                            </div>
+                        </div>
+                    </div>`;
+                
+                evidenceContainer.innerHTML = evidenceHTML;
+                return; // Exit early, don't use the old method
+            }
+            
+            // Fallback to the original method if no evidence_sources
+            console.log('Using fallback evidence method for', reqCode);
+            
             // Check if this requirement has encryption evidence
             const encryptionRequirements = [
                 'FDA_CFR_21_PART_11_10', 'FDA_CFR_21_PART_11_30', 'FDA_CFR_21_PART_11_100', 'FDA_CFR_21_PART_11_200',
