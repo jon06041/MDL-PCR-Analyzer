@@ -3684,6 +3684,11 @@ def queue_page():
     """Serve the dedicated queue management page"""
     return send_from_directory('.', 'queue.html')
 
+@app.route('/test_evidence_display.html')
+def test_evidence_display_page():
+    """Serve the evidence display test page"""
+    return send_from_directory('.', 'test_evidence_display.html')
+
 @app.route('/api/folder-queue/scan', methods=['POST'])
 def scan_folder_for_files():
     """
