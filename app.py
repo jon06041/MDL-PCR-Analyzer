@@ -6131,6 +6131,7 @@ def confirm_analysis_session():
         # Check for pending_confirmations table first (new structure)
         try:
             cursor.execute("SELECT 1 FROM pending_confirmations LIMIT 1")
+            cursor.fetchall()  # Consume the result to prevent "Unread result found" error
             has_pending_confirmations = True
             app.logger.info("✓ Using new session separation structure with pending_confirmations table")
         except mysql.connector.Error:
@@ -6144,10 +6145,10 @@ def confirm_analysis_session():
             if confirmation_id:
                 # First check if confirmation exists
                 cursor.execute("""
-                    SELECT pc.id, pc.session_id, pc.confirmation_status, 
+                    SELECT pc.id, pc.analysis_session_id, pc.confirmation_status, 
                            COALESCE(pc.filename, a.filename) as filename
                     FROM pending_confirmations pc
-                    LEFT JOIN analysis_sessions a ON pc.session_id = a.id
+                    LEFT JOIN analysis_sessions a ON pc.analysis_session_id = a.id
                     WHERE pc.id = %s
                 """, (confirmation_id,))
                 confirmation_data = cursor.fetchone()
@@ -6435,7 +6436,11 @@ def get_confirmed_sessions():
         
         # Check for pending_confirmations table first (new structure)
         try:
-            cursor.execute("SELECT 1 FROM pending_confirmations LIMIT 1")
+            # Use a separate cursor for the table check to avoid result conflicts
+            check_cursor = conn.cursor()
+            check_cursor.execute("SELECT 1 FROM pending_confirmations LIMIT 1")
+            check_cursor.fetchall()  # Consume the result
+            check_cursor.close()  # Close the check cursor
             has_pending_confirmations = True
             app.logger.info("✓ Using new session separation structure for confirmed sessions")
         except mysql.connector.Error:
@@ -6460,7 +6465,7 @@ def get_confirmed_sessions():
                     COALESCE(pc.confirmed_at, a.confirmed_at) as confirmed_at,
                     pc.created_at as confirmation_created_at
                 FROM analysis_sessions a
-                LEFT JOIN pending_confirmations pc ON a.id = pc.session_id
+                LEFT JOIN pending_confirmations pc ON a.id = pc.analysis_session_id
                 WHERE (pc.confirmation_status = 'confirmed' OR 
                        (pc.id IS NULL AND a.confirmation_status = 'confirmed'))
                 ORDER BY COALESCE(pc.confirmed_at, a.confirmed_at) DESC
@@ -7700,13 +7705,15 @@ def debug_expert_decisions():
 
 @app.route('/api/sessions/delete', methods=['POST'])
 def delete_pending_session():
-    """Delete a pending analysis session"""
+    """Delete a pending analysis session or confirmation with session separation support"""
     try:
         data = request.get_json()
         session_id = data.get('session_id')
+        confirmation_id = data.get('confirmation_id')
         
-        if not session_id:
-            return jsonify({'success': False, 'message': 'Missing session_id'}), 400
+        # Accept either session_id or confirmation_id
+        if not session_id and not confirmation_id:
+            return jsonify({'success': False, 'message': 'Missing session_id or confirmation_id'}), 400
         
         # Get database configuration
         mysql_config = {
@@ -7720,49 +7727,97 @@ def delete_pending_session():
         conn = mysql.connector.connect(**mysql_config)
         cursor = conn.cursor()
         
+        # Check for pending_confirmations table (new structure)
         try:
-            # First check if session exists and is pending
-            cursor.execute("""
-                SELECT id, filename, confirmation_status FROM analysis_sessions 
-                WHERE id = %s
-            """, (session_id,))
-            
-            session = cursor.fetchone()
-            
-            if not session:
+            cursor.execute("SELECT 1 FROM pending_confirmations LIMIT 1")
+            cursor.fetchall()  # Consume result
+            has_pending_confirmations = True
+            app.logger.info("✓ Using session separation structure for delete operation")
+        except mysql.connector.Error:
+            has_pending_confirmations = False
+            app.logger.info("✓ Using legacy structure for delete operation")
+        
+        try:
+            if has_pending_confirmations and confirmation_id:
+                # New structure: Delete from pending_confirmations table
+                cursor.execute("""
+                    SELECT pc.id, pc.analysis_session_id, pc.confirmation_status, 
+                           COALESCE(pc.filename, a.filename) as filename
+                    FROM pending_confirmations pc
+                    LEFT JOIN analysis_sessions a ON pc.analysis_session_id = a.id
+                    WHERE pc.id = %s
+                """, (confirmation_id,))
+                
+                confirmation = cursor.fetchone()
+                
+                if not confirmation:
+                    return jsonify({
+                        'success': False, 
+                        'message': f'Confirmation {confirmation_id} not found'
+                    }), 404
+                
+                if confirmation[2] != 'pending':
+                    return jsonify({
+                        'success': False, 
+                        'message': f'Can only delete pending confirmations. Confirmation {confirmation_id} is {confirmation[2]}'
+                    }), 400
+                
+                # Delete the pending confirmation (but keep the underlying analysis session)
+                cursor.execute("DELETE FROM pending_confirmations WHERE id = %s", (confirmation_id,))
+                
+                conn.commit()
+                app.logger.info(f"✓ Deleted pending confirmation {confirmation_id} ({confirmation[3]})")
+                
                 return jsonify({
-                    'success': False, 
-                    'message': f'Session {session_id} not found'
-                }), 404
-            
-            if session[2] != 'pending':
+                    'success': True,
+                    'message': f'Confirmation {confirmation_id} deleted successfully',
+                    'filename': confirmation[3]
+                })
+                
+            else:
+                # Legacy structure or session_id provided: Delete from analysis_sessions
+                target_id = session_id or confirmation_id
+                cursor.execute("""
+                    SELECT id, filename, confirmation_status FROM analysis_sessions 
+                    WHERE id = %s
+                """, (target_id,))
+                
+                session = cursor.fetchone()
+                
+                if not session:
+                    return jsonify({
+                        'success': False, 
+                        'message': f'Session {target_id} not found'
+                    }), 404
+                
+                if session[2] != 'pending':
+                    return jsonify({
+                        'success': False, 
+                        'message': f'Can only delete pending sessions. Session {target_id} is {session[2]}'
+                    }), 400
+                
+                # Delete associated well results first
+                cursor.execute("DELETE FROM well_results WHERE session_id = %s", (target_id,))
+                
+                # Delete the session
+                cursor.execute("DELETE FROM analysis_sessions WHERE id = %s", (target_id,))
+                
+                rows_affected = cursor.rowcount
+                
+                if rows_affected == 0:
+                    return jsonify({
+                        'success': False, 
+                        'message': f'Failed to delete session {target_id}'
+                    }), 500
+                
+                conn.commit()
+                app.logger.info(f"✓ Deleted legacy session {target_id} ({session[1]})")
+                
                 return jsonify({
-                    'success': False, 
-                    'message': f'Can only delete pending sessions. Session {session_id} is {session[2]}'
-                }), 400
-            
-            # Delete associated well results first
-            cursor.execute("DELETE FROM well_results WHERE session_id = %s", (session_id,))
-            
-            # Delete the session
-            cursor.execute("DELETE FROM analysis_sessions WHERE id = %s", (session_id,))
-            
-            rows_affected = cursor.rowcount
-            
-            if rows_affected == 0:
-                return jsonify({
-                    'success': False, 
-                    'message': f'Failed to delete session {session_id}'
-                }), 500
-            
-            conn.commit()
-            
-            app.logger.info(f"Deleted pending session {session_id} ({session[1]})")
-            
-            return jsonify({
-                'success': True,
-                'message': f'Successfully deleted pending session {session_id} ({session[1]})'
-            })
+                    'success': True,
+                    'message': f'Successfully deleted session {target_id} ({session[1]})',
+                    'filename': session[1]
+                })
             
         finally:
             cursor.close()
