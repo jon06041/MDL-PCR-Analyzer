@@ -6,6 +6,7 @@ Provides role-based access control for sensitive endpoints
 from functools import wraps
 from flask import session, jsonify, redirect, url_for, request
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,43 @@ def require_any_permission(*permissions):
                 return jsonify({'error': f'Access denied. This feature requires one of: {", ".join(permissions)}'}), 403
                 
             request.current_user = user_data
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+def production_admin_only(f):
+    """
+    Decorator for routes that should only be accessible to administrators in production
+    In development, may have relaxed permissions for debugging
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        is_production = os.getenv('ENVIRONMENT', 'development').lower() == 'production'
+        
+        if is_production:
+            # In production, require database_management permission (admin only)
+            return require_permission('database_management')(f)(*args, **kwargs)
+        else:
+            # In development, still require some authentication but more permissive
+            return require_permission('view_analysis_results')(f)(*args, **kwargs)
+            
+    return decorated_function
+
+def require_environment(env_name):
+    """
+    Decorator to restrict routes to specific environments (dev/staging/production)
+    """
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            current_env = os.getenv('ENVIRONMENT', 'development').lower()
+            
+            if current_env != env_name.lower():
+                logger.warning(f"Environment access denied to {request.endpoint}: {current_env} != {env_name}")
+                if request.is_json:
+                    return jsonify({'error': f'Feature not available in {current_env} environment'}), 404
+                return jsonify({'error': 'Feature not available in this environment'}), 404
+                
             return f(*args, **kwargs)
         return decorated_function
     return decorator

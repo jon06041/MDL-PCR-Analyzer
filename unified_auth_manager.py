@@ -47,7 +47,7 @@ class UnifiedAuthManager:
             'view_compliance_dashboard',
             'export_data'
         ],
-        'qc_technician': [
+                'qc_technician': [
             'view_analysis_results',
             'upload_files',
             'run_basic_analysis',
@@ -60,9 +60,9 @@ class UnifiedAuthManager:
             'view_ml_statistics',
             'provide_ml_feedback',
             'modify_ml_configuration',      # Can modify ML settings
-            'pause_ml_training'            # Can pause ML training during exploration
+            'pause_ml_training'            # Can pause ML training for exploration
         ],
-        'research_user': [
+                'research_user': [
             'view_analysis_results',
             'upload_files',
             'upload_non_standard_files',  # Can upload files without naming conventions
@@ -77,7 +77,7 @@ class UnifiedAuthManager:
             'provide_ml_feedback',
             'experimental_analysis',      # Access to experimental features
             'modify_ml_configuration',    # Can modify ML settings
-            'pause_ml_training'          # Can pause ML training during exploration
+            'pause_ml_training'           # Can pause ML training for exploration
         ],
         'compliance_officer': [
             'view_analysis_results',
@@ -95,6 +95,7 @@ class UnifiedAuthManager:
             'audit_access'
         ],
         'administrator': [
+            'administrator': [
             # ALL permissions from all other roles
             'view_analysis_results',
             'upload_files',
@@ -112,13 +113,14 @@ class UnifiedAuthManager:
             'provide_ml_feedback',
             'experimental_analysis',      # Research user features
             'modify_ml_configuration',    # ML configuration access
-            'pause_ml_training',          # ML training pause control
+            'pause_ml_training',          # Can pause ML training
             'audit_access',              # Compliance officer features
             # EXCLUSIVE administrative permissions (ADMIN ONLY)
             'manage_users',              # User account management - ADMIN ONLY
             'system_administration',     # System configuration - ADMIN ONLY
             'database_management',       # Database backups/restore - ADMIN ONLY
             'system_reset'              # Emergency reset functionality - ADMIN ONLY
+        ]
         ]
     }
     

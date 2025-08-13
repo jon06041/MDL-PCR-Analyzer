@@ -223,6 +223,34 @@
         .refresh-btn:hover {
             background: #0056b3;
         }
+        
+        /* Training Control Button Styles */
+        .training-control {
+            margin-left: 5px;
+            font-size: 0.85em;
+            padding: 6px 12px;
+            border: 1px solid rgba(255,255,255,0.4);
+            transition: all 0.3s ease;
+        }
+        .training-control:hover {
+            background: rgba(255,255,255,0.25);
+            border-color: rgba(255,255,255,0.6);
+            transform: translateY(-1px);
+        }
+        .training-control:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        #pauseTrainingBtn {
+            background: rgba(255, 193, 7, 0.8);
+            color: #212529;
+        }
+        #resumeTrainingBtn {
+            background: rgba(40, 167, 69, 0.8);
+            color: white;
+        }
+        
         .loading {
             display: inline-block;
             width: 20px;
@@ -265,6 +293,15 @@
                 <a href="/unified-compliance-dashboard" class="nav-btn">Compliance Dashboard</a>
                 <a href="/ml-config" class="nav-btn">ML Configuration</a>
                 <a href="/" class="nav-btn">PCR Analysis</a>
+                
+                <!-- ML Training Control Buttons (QC and Research Users) -->
+                <button id="pauseTrainingBtn" class="nav-btn training-control" onclick="pauseTraining()" style="display: none;">
+                    ⏸️ Pause Training
+                </button>
+                <button id="resumeTrainingBtn" class="nav-btn training-control" onclick="resumeTraining()" style="display: none;">
+                    ▶️ Resume Training
+                </button>
+                
                 <button class="refresh-btn" onclick="refreshDashboard()">
                     <span id="refresh-text">Refresh</span>
                     <span id="refresh-loading" class="loading" style="display: none;"></span>
@@ -521,6 +558,152 @@
                 }
             }, 10000);
         }
+
+        // ============================================================================
+        // ML TRAINING PAUSE/RESUME FUNCTIONALITY
+        // ============================================================================
+        
+        let trainingState = {
+            isPaused: false,
+            canControl: false
+        };
+
+        async function checkTrainingPermissions() {
+            try {
+                const response = await fetch('/api/ml-training/status');
+                if (response.ok) {
+                    const data = await response.json();
+                    trainingState.isPaused = data.is_paused;
+                    trainingState.canControl = true;
+                    updateTrainingButtons();
+                } else if (response.status === 403) {
+                    // User doesn't have permission to control training
+                    trainingState.canControl = false;
+                    hideTrainingButtons();
+                }
+            } catch (error) {
+                console.log('Training control not available for this user');
+                trainingState.canControl = false;
+                hideTrainingButtons();
+            }
+        }
+
+        function updateTrainingButtons() {
+            const pauseBtn = document.getElementById('pauseTrainingBtn');
+            const resumeBtn = document.getElementById('resumeTrainingBtn');
+            
+            if (!trainingState.canControl) {
+                hideTrainingButtons();
+                return;
+            }
+            
+            if (trainingState.isPaused) {
+                pauseBtn.style.display = 'none';
+                resumeBtn.style.display = 'inline-block';
+            } else {
+                pauseBtn.style.display = 'inline-block';
+                resumeBtn.style.display = 'none';
+            }
+        }
+
+        function hideTrainingButtons() {
+            const pauseBtn = document.getElementById('pauseTrainingBtn');
+            const resumeBtn = document.getElementById('resumeTrainingBtn');
+            pauseBtn.style.display = 'none';
+            resumeBtn.style.display = 'none';
+        }
+
+        async function pauseTraining() {
+            const reason = prompt('Optional: Enter reason for pausing ML training:', 'Exploring data - QC review');
+            
+            try {
+                document.getElementById('pauseTrainingBtn').disabled = true;
+                
+                const response = await fetch('/api/ml-training/pause', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ reason: reason || 'Manual pause by user' })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    trainingState.isPaused = true;
+                    updateTrainingButtons();
+                    showSuccess('ML training paused successfully. The system will not create new ML confirmation prompts until resumed.');
+                } else {
+                    showError('Failed to pause ML training: ' + data.error);
+                }
+            } catch (error) {
+                showError('Error pausing ML training: ' + error.message);
+            } finally {
+                document.getElementById('pauseTrainingBtn').disabled = false;
+            }
+        }
+
+        async function resumeTraining() {
+            try {
+                document.getElementById('resumeTrainingBtn').disabled = true;
+                
+                const response = await fetch('/api/ml-training/resume', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    trainingState.isPaused = false;
+                    updateTrainingButtons();
+                    showSuccess('ML training resumed successfully. New ML confirmation prompts will appear for future analyses.');
+                } else {
+                    showError('Failed to resume ML training: ' + data.error);
+                }
+            } catch (error) {
+                showError('Error resuming ML training: ' + error.message);
+            } finally {
+                document.getElementById('resumeTrainingBtn').disabled = false;
+            }
+        }
+
+        function showSuccess(message) {
+            // Create or update success display
+            let successDiv = document.getElementById('success-message');
+            if (!successDiv) {
+                successDiv = document.createElement('div');
+                successDiv.id = 'success-message';
+                successDiv.style.cssText = `
+                    background: #d4edda;
+                    color: #155724;
+                    padding: 15px;
+                    margin: 20px;
+                    border-radius: 4px;
+                    border: 1px solid #c3e6cb;
+                `;
+                document.querySelector('.dashboard-content').insertBefore(successDiv, document.querySelector('.metrics-grid'));
+            }
+            successDiv.textContent = message;
+            
+            // Auto-hide after 8 seconds
+            setTimeout(() => {
+                if (successDiv && successDiv.parentNode) {
+                    successDiv.remove();
+                }
+            }, 8000);
+        }
+
+        // ============================================================================
+        // INITIALIZATION AND CLEANUP
+        // ============================================================================
+
+        // Initialize training controls on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            checkTrainingPermissions();
+        });
 
         // Cleanup on page unload
         window.addEventListener('beforeunload', function() {

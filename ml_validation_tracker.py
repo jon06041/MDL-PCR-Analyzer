@@ -612,6 +612,20 @@ class MLValidationTracker:
     
     def track_analysis_run(self, session_id, file_name, pathogen_codes, total_samples, ml_samples_analyzed, accuracy_percentage=None):
         """Track a complete analysis run for ML validation dashboard"""
+        
+        # Check if ML training is paused for this session
+        try:
+            from ml_training_manager import ml_training_manager
+            if ml_training_manager.is_training_paused(str(session_id)):
+                self.logger.info(f"ML training is paused for session {session_id} - skipping ML run creation")
+                return  # Skip creating ML runs when training is paused
+        except ImportError:
+            # ml_training_manager not available, continue normally
+            pass
+        except Exception as e:
+            self.logger.warning(f"Error checking training pause status: {e}")
+            # Continue normally if check fails
+        
         with self.engine.connect() as conn:
             try:
                 # Create table if it doesn't exist

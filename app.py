@@ -664,6 +664,9 @@ with app.app_context():
 from enhanced_auth_routes import enhanced_auth_bp
 app.register_blueprint(enhanced_auth_bp)
 
+# Import permission decorators for route protection
+from permission_decorators import require_permission, production_admin_only
+
 # Register permission middleware and API endpoints
 from permission_middleware import (
     register_permission_api, Permissions, Roles,
@@ -885,6 +888,7 @@ def unified_compliance_dashboard():
     return send_from_directory('.', 'unified_compliance_dashboard.html')
 
 @app.route('/ml-config')
+@production_admin_only
 def ml_config():
     return send_from_directory('.', 'ml_config.html')
 
@@ -1677,11 +1681,24 @@ def save_combined_session():
         except Exception as ml_update_error:
             print(f"Warning: Could not update ML tracking session_id: {ml_update_error}")
 
+        # Check if ML training is paused for this session
+        training_paused = False
+        training_notice = None
+        try:
+            from ml_training_manager import ml_training_manager
+            training_paused = ml_training_manager.is_training_paused(str(session.id))
+            if training_paused:
+                training_notice = "ML training is currently paused for this session. No ML confirmation prompts will appear until training is resumed."
+        except Exception as e:
+            print(f"Warning: Could not check training pause status: {e}")
+
         return jsonify({
             'success': True,
             'message': f'Combined session saved with {well_count} wells',
             'session_id': session.id,
-            'display_name': display_name
+            'display_name': display_name,
+            'training_paused': training_paused,
+            'training_notice': training_notice
         })
         
     except Exception as e:
@@ -3953,8 +3970,9 @@ def mysql_admin_interface():
     return send_from_directory('.', 'mysql_admin.html')
 
 @app.route('/mysql-viewer')
+@production_admin_only
 def mysql_viewer():
-    """Integrated MySQL viewer interface"""
+    """Integrated MySQL viewer interface - ADMIN ONLY in production"""
     return render_template_string('''
 <!DOCTYPE html>
 <html>
@@ -7672,6 +7690,213 @@ def delete_pending_ml_run():
     except Exception as e:
         app.logger.error(f"Error deleting ML run: {str(e)}")
         return jsonify({'success': False, 'message': str(e)}), 500
+
+# ============================================================================
+# ML TRAINING PAUSE/RESUME ENDPOINTS
+# ============================================================================
+
+@app.route('/api/ml-training/pause', methods=['POST'])
+@require_permission('pause_ml_training')
+def pause_ml_training():
+    """Pause ML training for current session or globally (scope depends on user role)"""
+    try:
+        from ml_training_manager import ml_training_manager
+        
+        data = request.get_json() or {}
+        session_id = session.get('session_id')
+        user_id = session.get('user_id', 'unknown')
+        username = session.get('username', 'unknown')
+        user_role = session.get('role', 'viewer')
+        reason = data.get('reason', 'Manual pause by user')
+        
+        # Determine scope based on user role and request
+        requested_scope = data.get('scope', 'session')
+        
+        # QC Technicians and Administrators can pause globally
+        # Research Users can only pause for their session
+        if requested_scope == 'global':
+            if user_role not in ['qc_technician', 'administrator']:
+                return jsonify({
+                    'success': False,
+                    'error': 'Insufficient permissions for global training pause'
+                }), 403
+            actual_scope = 'global'
+            session_id_for_pause = 'GLOBAL'
+        else:
+            actual_scope = 'session'
+            session_id_for_pause = session_id
+            if not session_id:
+                return jsonify({
+                    'success': False,
+                    'error': 'No active session found for session-specific pause'
+                }), 400
+        
+        success = ml_training_manager.pause_training(
+            user_id=user_id,
+            username=username,
+            session_id=session_id_for_pause,
+            reason=reason,
+            scope=actual_scope
+        )
+        
+        if success:
+            scope_text = "globally" if actual_scope == 'global' else f"for session {session_id}"
+            app.logger.info(f"ML training paused {scope_text} by {username} (role: {user_role})")
+            return jsonify({
+                'success': True,
+                'message': f'ML training paused {scope_text}',
+                'scope': actual_scope,
+                'session_id': session_id_for_pause,
+                'paused_by': username,
+                'reason': reason
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to pause ML training'
+            }), 500
+            
+    except Exception as e:
+        app.logger.error(f"Error pausing ML training: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/ml-training/resume', methods=['POST'])
+@require_permission('pause_ml_training')
+def resume_ml_training():
+    """Resume ML training for current session or globally (scope depends on user role)"""
+    try:
+        from ml_training_manager import ml_training_manager
+        
+        data = request.get_json() or {}
+        session_id = session.get('session_id')
+        user_id = session.get('user_id', 'unknown')
+        username = session.get('username', 'unknown')
+        user_role = session.get('role', 'viewer')
+        
+        # Determine scope based on user role and request
+        requested_scope = data.get('scope', 'session')
+        
+        # QC Technicians and Administrators can resume globally
+        # Research Users can only resume for their session
+        if requested_scope == 'global':
+            if user_role not in ['qc_technician', 'administrator']:
+                return jsonify({
+                    'success': False,
+                    'error': 'Insufficient permissions for global training resume'
+                }), 403
+            actual_scope = 'global'
+            session_id_for_resume = 'GLOBAL'
+        else:
+            actual_scope = 'session'
+            session_id_for_resume = session_id
+            if not session_id:
+                return jsonify({
+                    'success': False,
+                    'error': 'No active session found for session-specific resume'
+                }), 400
+        
+        success = ml_training_manager.resume_training(
+            user_id=user_id,
+            username=username,
+            session_id=session_id_for_resume,
+            scope=actual_scope
+        )
+        
+        if success:
+            scope_text = "globally" if actual_scope == 'global' else f"for session {session_id}"
+            app.logger.info(f"ML training resumed {scope_text} by {username} (role: {user_role})")
+            return jsonify({
+                'success': True,
+                'message': f'ML training resumed {scope_text}',
+                'scope': actual_scope,
+                'session_id': session_id_for_resume,
+                'resumed_by': username
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to resume ML training'
+            }), 500
+            
+    except Exception as e:
+        app.logger.error(f"Error resuming ML training: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/ml-training/status', methods=['GET'])
+@require_permission('pause_ml_training')
+def get_ml_training_status():
+    """Get current ML training status for session and global"""
+    try:
+        from ml_training_manager import ml_training_manager
+        
+        session_id = session.get('session_id')
+        user_role = session.get('role', 'viewer')
+        
+        if not session_id:
+            return jsonify({
+                'success': False,
+                'error': 'No active session found'
+            }), 400
+        
+        # Get session-specific state
+        is_paused = ml_training_manager.is_training_paused(session_id)
+        training_state = ml_training_manager.get_training_state(session_id)
+        
+        # Get global state (for QC and Admin users)
+        global_state = None
+        if user_role in ['qc_technician', 'administrator']:
+            global_state = ml_training_manager.get_global_training_state()
+        
+        # Determine user permissions
+        can_pause_global = user_role in ['qc_technician', 'administrator']
+        can_pause_session = True  # All users with pause_ml_training permission
+        
+        return jsonify({
+            'success': True,
+            'session_id': session_id,
+            'user_role': user_role,
+            'is_paused': is_paused,
+            'training_state': training_state,
+            'global_state': global_state,
+            'permissions': {
+                'can_pause_session': can_pause_session,
+                'can_pause_global': can_pause_global
+            }
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error getting ML training status: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/ml-training/check-pause/<session_id>', methods=['GET'])
+def check_ml_training_pause(session_id):
+    """Check if ML training is paused for specific session (internal use)"""
+    try:
+        from ml_training_manager import ml_training_manager
+        
+        is_paused = ml_training_manager.is_training_paused(session_id)
+        
+        return jsonify({
+            'success': True,
+            'session_id': session_id,
+            'is_paused': is_paused
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error checking ML training pause: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 if __name__ == '__main__':
     # Get port from environment variable or use default

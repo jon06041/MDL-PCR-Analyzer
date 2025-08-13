@@ -532,6 +532,21 @@
                                 </div>
                             </div>
 
+                            <!-- ML Training Control Buttons (QC and Research Users) -->
+                            <div class="training-control-section mb-4" style="text-align: center;">
+                                <div class="btn-group" role="group" aria-label="ML Training Controls">
+                                    <button id="pauseTrainingBtn" class="btn btn-warning training-control-btn" onclick="pauseTraining()" style="display: none;">
+                                        <i class="fas fa-pause"></i> ⏸️ Pause Training
+                                    </button>
+                                    <button id="resumeTrainingBtn" class="btn btn-success training-control-btn" onclick="resumeTraining()" style="display: none;">
+                                        <i class="fas fa-play"></i> ▶️ Resume Training
+                                    </button>
+                                </div>
+                                <div id="trainingStatusMessage" class="mt-2 text-muted" style="display: none;">
+                                    <small></small>
+                                </div>
+                            </div>
+
                             <!-- ML Statistics Cards -->
                             <div class="row mb-4">
                                 <div class="col-md-3">
@@ -2221,6 +2236,39 @@
                                             </div>
                                         </div>
                                     </div>
+                                    
+                                    <!-- Training Control Section -->
+                                    <div class="mt-3 pt-3 border-top">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <small class="text-muted">
+                                                    <i class="fas fa-brain"></i> ML Training Control
+                                                </small>
+                                            </div>
+                                            <div class="btn-group btn-group-sm" role="group">
+                                                <button class="btn btn-outline-success pathogen-training-btn" 
+                                                        data-pathogen="${pathogen}" 
+                                                        data-action="enable"
+                                                        onclick="togglePathogenTraining('${pathogen}', true)"
+                                                        title="Enable ML training for ${pathogen}">
+                                                    <i class="fas fa-play"></i> Enable
+                                                </button>
+                                                <button class="btn btn-outline-warning pathogen-training-btn" 
+                                                        data-pathogen="${pathogen}" 
+                                                        data-action="disable"
+                                                        onclick="togglePathogenTraining('${pathogen}', false)"
+                                                        title="Disable ML training for ${pathogen}">
+                                                    <i class="fas fa-pause"></i> Disable
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div class="mt-2">
+                                            <small id="training-status-${pathogen}" class="text-muted">
+                                                <i class="fas fa-spinner fa-spin"></i> Checking training status...
+                                            </small>
+                                        </div>
+                                    </div>
+                                    
                                     <div class="mt-3">
                                         <small class="text-muted">
                                             <i class="fas fa-clock"></i> Last updated: ${new Date().toLocaleString()}
@@ -2244,6 +2292,280 @@
                         </div>
                     `;
                 });
+                
+            // Initialize training status and controls
+            updateTrainingStatus();
+        }
+
+        // ML Training Control Functions
+        async function pauseTraining() {
+            try {
+                const userRole = getCurrentUserRole();
+                const scope = determineTrainingScope(userRole);
+                
+                const response = await fetch('/api/ml-training/pause', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ scope: scope })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    showAlert('success', `Training paused ${scope === 'global' ? 'system-wide' : 'for your session'}: ${result.message}`);
+                    updateTrainingStatus();
+                } else {
+                    const error = await response.json();
+                    showAlert('danger', `Failed to pause training: ${error.error}`);
+                }
+            } catch (error) {
+                console.error('Error pausing training:', error);
+                showAlert('danger', 'Error pausing training. Please try again.');
+            }
+        }
+
+        async function resumeTraining() {
+            try {
+                const userRole = getCurrentUserRole();
+                const scope = determineTrainingScope(userRole);
+                
+                const response = await fetch('/api/ml-training/resume', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ scope: scope })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    showAlert('success', `Training resumed ${scope === 'global' ? 'system-wide' : 'for your session'}: ${result.message}`);
+                    updateTrainingStatus();
+                } else {
+                    const error = await response.json();
+                    showAlert('danger', `Failed to resume training: ${error.error}`);
+                }
+            } catch (error) {
+                console.error('Error resuming training:', error);
+                showAlert('danger', 'Error resuming training. Please try again.');
+            }
+        }
+
+        async function updateTrainingStatus() {
+            try {
+                const response = await fetch('/api/ml-training/status');
+                if (response.ok) {
+                    const status = await response.json();
+                    const userRole = getCurrentUserRole();
+                    
+                    // Show/hide buttons based on training status and user role
+                    updateTrainingControlUI(status, userRole);
+                    
+                    // Update status message
+                    const statusElement = document.getElementById('trainingStatusMessage');
+                    if (statusElement) {
+                        if (status.is_paused) {
+                            statusElement.innerHTML = `<small><i class="fas fa-pause text-warning"></i> Training paused (${status.scope}): ${status.reason || 'No reason provided'}</small>`;
+                            statusElement.style.display = 'block';
+                        } else {
+                            statusElement.innerHTML = `<small><i class="fas fa-play text-success"></i> Training active</small>`;
+                            statusElement.style.display = 'block';
+                        }
+                    }
+                } else {
+                    console.error('Failed to fetch training status');
+                }
+            } catch (error) {
+                console.error('Error fetching training status:', error);
+            }
+        }
+
+        function updateTrainingControlUI(status, userRole) {
+            const pauseBtn = document.getElementById('pauseTrainingBtn');
+            const resumeBtn = document.getElementById('resumeTrainingBtn');
+            
+            if (!pauseBtn || !resumeBtn) return;
+            
+            // Check if user has training control permissions
+            const hasTrainingControl = ['research_user', 'qc_technician', 'compliance_officer', 'administrator'].includes(userRole);
+            
+            if (!hasTrainingControl) {
+                pauseBtn.style.display = 'none';
+                resumeBtn.style.display = 'none';
+                return;
+            }
+            
+            // Show appropriate button based on current status
+            if (status.is_paused) {
+                pauseBtn.style.display = 'none';
+                resumeBtn.style.display = 'inline-block';
+                
+                // Update button text based on scope capability
+                const scope = determineTrainingScope(userRole);
+                if (scope === 'global') {
+                    resumeBtn.innerHTML = '<i class="fas fa-play"></i> ▶️ Resume Training (System-wide)';
+                } else {
+                    resumeBtn.innerHTML = '<i class="fas fa-play"></i> ▶️ Resume Training (Session)';
+                }
+            } else {
+                pauseBtn.style.display = 'inline-block';
+                resumeBtn.style.display = 'none';
+                
+                // Update button text based on scope capability
+                const scope = determineTrainingScope(userRole);
+                if (scope === 'global') {
+                    pauseBtn.innerHTML = '<i class="fas fa-pause"></i> ⏸️ Pause Training (System-wide)';
+                } else {
+                    pauseBtn.innerHTML = '<i class="fas fa-pause"></i> ⏸️ Pause Training (Session)';
+                }
+            }
+        }
+
+        function getCurrentUserRole() {
+            // This would need to be implemented based on your authentication system
+            // For now, returning a default role - this should be replaced with actual role detection
+            return 'research_user'; // or get from session/JWT/cookie
+        }
+
+        function determineTrainingScope(userRole) {
+            // QC and Admin can pause globally, Research users can only pause their session
+            if (['qc_technician', 'compliance_officer', 'administrator'].includes(userRole)) {
+                return 'global';
+            } else {
+                return 'session';
+            }
+        }
+
+        // Pathogen-specific training control functions
+        async function togglePathogenTraining(pathogenCode, enabled) {
+            try {
+                const userRole = getCurrentUserRole();
+                
+                // Get all fluorophores for this pathogen (typically FAM, HEX, Texas Red, Cy5)
+                const fluorophores = ['FAM', 'HEX', 'Texas Red', 'Cy5'];
+                const statusElement = document.getElementById(`training-status-${pathogenCode}`);
+                
+                if (statusElement) {
+                    statusElement.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${enabled ? 'Enabling' : 'Disabling'} training...`;
+                }
+                
+                // Update training status for each fluorophore
+                const promises = fluorophores.map(fluorophore => 
+                    updatePathogenFluorophoreTraining(pathogenCode, fluorophore, enabled)
+                );
+                
+                const results = await Promise.all(promises);
+                const successCount = results.filter(r => r.success).length;
+                
+                if (successCount === fluorophores.length) {
+                    showAlert('success', `Training ${enabled ? 'enabled' : 'disabled'} for ${pathogenCode} (all channels)`);
+                    updatePathogenTrainingStatus(pathogenCode);
+                } else if (successCount > 0) {
+                    showAlert('warning', `Training ${enabled ? 'enabled' : 'disabled'} for ${pathogenCode} (${successCount}/${fluorophores.length} channels)`);
+                    updatePathogenTrainingStatus(pathogenCode);
+                } else {
+                    showAlert('danger', `Failed to ${enabled ? 'enable' : 'disable'} training for ${pathogenCode}`);
+                    if (statusElement) {
+                        statusElement.innerHTML = `<i class="fas fa-exclamation-triangle text-danger"></i> Update failed`;
+                    }
+                }
+                
+            } catch (error) {
+                console.error('Error toggling pathogen training:', error);
+                showAlert('danger', `Error ${enabled ? 'enabling' : 'disabling'} training for ${pathogenCode}`);
+            }
+        }
+
+        async function updatePathogenFluorophoreTraining(pathogenCode, fluorophore, enabled) {
+            try {
+                const response = await fetch(`/api/ml-config/pathogen/${encodeURIComponent(pathogenCode)}/${encodeURIComponent(fluorophore)}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-User-ID': getCurrentUserRole() || 'dashboard_user'
+                    },
+                    body: JSON.stringify({
+                        enabled: enabled,
+                        notes: `Training ${enabled ? 'enabled' : 'disabled'} from unified compliance dashboard`
+                    })
+                });
+
+                const data = await response.json();
+                return { success: data.success, fluorophore: fluorophore, error: data.error };
+                
+            } catch (error) {
+                console.error(`Error updating ${pathogenCode}/${fluorophore}:`, error);
+                return { success: false, fluorophore: fluorophore, error: error.message };
+            }
+        }
+
+        async function updatePathogenTrainingStatus(pathogenCode) {
+            try {
+                const fluorophores = ['FAM', 'HEX', 'Texas Red', 'Cy5'];
+                const statusElement = document.getElementById(`training-status-${pathogenCode}`);
+                
+                if (!statusElement) return;
+                
+                // Check status for each fluorophore
+                const statusPromises = fluorophores.map(async (fluorophore) => {
+                    try {
+                        const response = await fetch(`/api/ml-config/check-enabled/${encodeURIComponent(pathogenCode)}/${encodeURIComponent(fluorophore)}`);
+                        if (response.ok) {
+                            const data = await response.json();
+                            return { fluorophore, enabled: data.enabled || false };
+                        }
+                        return { fluorophore, enabled: false };
+                    } catch (error) {
+                        return { fluorophore, enabled: false };
+                    }
+                });
+                
+                const statuses = await Promise.all(statusPromises);
+                const enabledCount = statuses.filter(s => s.enabled).length;
+                const totalCount = statuses.length;
+                
+                let statusHtml = '';
+                let statusClass = '';
+                
+                if (enabledCount === totalCount) {
+                    statusHtml = `<i class="fas fa-play text-success"></i> Training enabled (${enabledCount}/${totalCount} channels)`;
+                    statusClass = 'text-success';
+                } else if (enabledCount === 0) {
+                    statusHtml = `<i class="fas fa-pause text-warning"></i> Training disabled (${enabledCount}/${totalCount} channels)`;
+                    statusClass = 'text-warning';
+                } else {
+                    statusHtml = `<i class="fas fa-exclamation-triangle text-info"></i> Training partial (${enabledCount}/${totalCount} channels)`;
+                    statusClass = 'text-info';
+                }
+                
+                statusElement.innerHTML = statusHtml;
+                statusElement.className = `${statusClass}`;
+                
+                // Update button states
+                const enableBtn = document.querySelector(`button[data-pathogen="${pathogenCode}"][data-action="enable"]`);
+                const disableBtn = document.querySelector(`button[data-pathogen="${pathogenCode}"][data-action="disable"]`);
+                
+                if (enableBtn && disableBtn) {
+                    if (enabledCount === totalCount) {
+                        enableBtn.disabled = true;
+                        disableBtn.disabled = false;
+                    } else if (enabledCount === 0) {
+                        enableBtn.disabled = false;
+                        disableBtn.disabled = true;
+                    } else {
+                        enableBtn.disabled = false;
+                        disableBtn.disabled = false;
+                    }
+                }
+                
+            } catch (error) {
+                console.error(`Error checking training status for ${pathogenCode}:`, error);
+                const statusElement = document.getElementById(`training-status-${pathogenCode}`);
+                if (statusElement) {
+                    statusElement.innerHTML = `<i class="fas fa-exclamation-triangle text-danger"></i> Status check failed`;
+                }
+            }
         }
 
         async function confirmRun(runLogId, runId, confirmed) {
