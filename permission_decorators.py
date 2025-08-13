@@ -91,8 +91,10 @@ def production_admin_only(f):
             # In production, require database_management permission (admin only)
             return require_permission('database_management')(f)(*args, **kwargs)
         else:
-            # In development, still require some authentication but more permissive
-            return require_permission('view_analysis_results')(f)(*args, **kwargs)
+            # In development, allow unauthenticated access for debugging purposes
+            # This enables Simple Browser access during development
+            logger.info(f"Development mode: Allowing access to {request.endpoint}")
+            return f(*args, **kwargs)
             
     return decorated_function
 

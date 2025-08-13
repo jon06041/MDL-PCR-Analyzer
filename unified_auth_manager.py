@@ -120,7 +120,6 @@ class UnifiedAuthManager:
             'database_management',       # Database backups/restore - ADMIN ONLY
             'system_reset'              # Emergency reset functionality - ADMIN ONLY
         ]
-        ]
     }
     
     def __init__(self):

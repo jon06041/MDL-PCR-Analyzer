@@ -6110,15 +6110,16 @@ def confirm_ml_run():
 
 @app.route('/api/sessions/confirm', methods=['POST'])
 def confirm_analysis_session():
-    """Confirm or reject an analysis session (rule-based or ML)"""
+    """Confirm or reject an analysis session (rule-based or ML) with session separation support"""
     try:
         data = request.get_json()
         session_id = data.get('session_id')
+        confirmation_id = data.get('confirmation_id', session_id)  # Support both session_id and confirmation_id
         confirmed = data.get('confirmed', True)
         user_id = data.get('confirmed_by', 'user')
         
-        if not session_id:
-            return jsonify({'success': False, 'message': 'Session ID required'}), 400
+        if not session_id and not confirmation_id:
+            return jsonify({'success': False, 'message': 'Session ID or Confirmation ID required'}), 400
         
         # Get database configuration using global helper
         mysql_config = get_mysql_config()
@@ -6127,40 +6128,112 @@ def confirm_analysis_session():
         conn = mysql.connector.connect(**mysql_config)
         cursor = conn.cursor()
         
-        # Check if session exists
-        cursor.execute("SELECT id, filename FROM analysis_sessions WHERE id = %s", (session_id,))
-        session = cursor.fetchone()
+        # Check for pending_confirmations table first (new structure)
+        try:
+            cursor.execute("SELECT 1 FROM pending_confirmations LIMIT 1")
+            has_pending_confirmations = True
+            app.logger.info("✓ Using new session separation structure with pending_confirmations table")
+        except mysql.connector.Error:
+            has_pending_confirmations = False
+            app.logger.info("✓ Using legacy structure with analysis_sessions table only")
         
-        if not session:
-            return jsonify({'success': False, 'message': f'Session {session_id} not found'}), 404
+        session_filename = None
         
-        session_filename = session[1]
-        
-        if confirmed:
-            # Confirm the session
-            cursor.execute("""
-                UPDATE analysis_sessions 
-                SET confirmation_status = 'confirmed',
-                    confirmed_by = %s,
-                    confirmed_at = CURRENT_TIMESTAMP
-                WHERE id = %s
-            """, (user_id, session_id))
-            
-            message = f'Session {session_id} ({session_filename}) successfully confirmed'
-            app.logger.info(message)
+        if has_pending_confirmations:
+            # New structure: Handle confirmation through pending_confirmations table
+            if confirmation_id:
+                # First check if confirmation exists
+                cursor.execute("""
+                    SELECT pc.id, pc.session_id, pc.confirmation_status, 
+                           COALESCE(pc.filename, a.filename) as filename
+                    FROM pending_confirmations pc
+                    LEFT JOIN analysis_sessions a ON pc.session_id = a.id
+                    WHERE pc.id = %s
+                """, (confirmation_id,))
+                confirmation_data = cursor.fetchone()
+                
+                if not confirmation_data:
+                    return jsonify({'success': False, 'message': f'Confirmation {confirmation_id} not found'}), 404
+                
+                session_filename = confirmation_data[3]
+                actual_session_id = confirmation_data[1]
+                
+                if confirmed:
+                    # Confirm the pending confirmation
+                    cursor.execute("""
+                        UPDATE pending_confirmations 
+                        SET confirmation_status = 'confirmed',
+                            confirmed_by = %s,
+                            confirmed_at = CURRENT_TIMESTAMP
+                        WHERE id = %s
+                    """, (user_id, confirmation_id))
+                    
+                    # Also update the underlying analysis session for compatibility
+                    cursor.execute("""
+                        UPDATE analysis_sessions 
+                        SET confirmation_status = 'confirmed',
+                            confirmed_by = %s,
+                            confirmed_at = CURRENT_TIMESTAMP
+                        WHERE id = %s
+                    """, (user_id, actual_session_id))
+                    
+                    message = f'Confirmation {confirmation_id} for session {actual_session_id} ({session_filename}) successfully confirmed'
+                else:
+                    # Reject the pending confirmation
+                    cursor.execute("""
+                        UPDATE pending_confirmations 
+                        SET confirmation_status = 'rejected',
+                            confirmed_by = %s,
+                            confirmed_at = CURRENT_TIMESTAMP
+                        WHERE id = %s
+                    """, (user_id, confirmation_id))
+                    
+                    # Also update the underlying analysis session for compatibility
+                    cursor.execute("""
+                        UPDATE analysis_sessions 
+                        SET confirmation_status = 'rejected',
+                            confirmed_by = %s,
+                            confirmed_at = CURRENT_TIMESTAMP
+                        WHERE id = %s
+                    """, (user_id, actual_session_id))
+                    
+                    message = f'Confirmation {confirmation_id} for session {actual_session_id} ({session_filename}) successfully rejected'
+            else:
+                return jsonify({'success': False, 'message': 'Confirmation ID required for new session separation structure'}), 400
         else:
-            # Reject the session
-            cursor.execute("""
-                UPDATE analysis_sessions 
-                SET confirmation_status = 'rejected',
-                    confirmed_by = %s,
-                    confirmed_at = CURRENT_TIMESTAMP
-                WHERE id = %s
-            """, (user_id, session_id))
+            # Legacy structure: Direct analysis_sessions update
+            cursor.execute("SELECT id, filename FROM analysis_sessions WHERE id = %s", (session_id,))
+            session = cursor.fetchone()
             
-            message = f'Session {session_id} ({session_filename}) successfully rejected'
-            app.logger.info(message)
+            if not session:
+                return jsonify({'success': False, 'message': f'Session {session_id} not found'}), 404
+            
+            session_filename = session[1]
+            
+            if confirmed:
+                # Confirm the session
+                cursor.execute("""
+                    UPDATE analysis_sessions 
+                    SET confirmation_status = 'confirmed',
+                        confirmed_by = %s,
+                        confirmed_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (user_id, session_id))
+                
+                message = f'Session {session_id} ({session_filename}) successfully confirmed'
+            else:
+                # Reject the session
+                cursor.execute("""
+                    UPDATE analysis_sessions 
+                    SET confirmation_status = 'rejected',
+                        confirmed_by = %s,
+                        confirmed_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (user_id, session_id))
+                
+                message = f'Session {session_id} ({session_filename}) successfully rejected'
         
+        app.logger.info(message)
         conn.commit()
         cursor.close()
         conn.close()
@@ -6168,7 +6241,8 @@ def confirm_analysis_session():
         return jsonify({
             'success': True,
             'message': message,
-            'session_id': session_id,
+            'session_id': session_id if session_id else actual_session_id if has_pending_confirmations else None,
+            'confirmation_id': confirmation_id if has_pending_confirmations else None,
             'status': 'confirmed' if confirmed else 'rejected'
         })
         
@@ -6218,26 +6292,44 @@ def get_pending_sessions():
         cursor = conn.cursor(dictionary=True)
         app.logger.info("✓ Database cursor created")
         
-        # Test table exists first
-        app.logger.info("Checking if analysis_sessions table exists")
-        cursor.execute("SHOW TABLES LIKE 'analysis_sessions'")
+        # Test table exists first - check for new pending_confirmations table
+        app.logger.info("Checking if pending_confirmations table exists")
+        cursor.execute("SHOW TABLES LIKE 'pending_confirmations'")
         table_exists = cursor.fetchone()
         if not table_exists:
-            app.logger.error("✗ analysis_sessions table does not exist")
-            cursor.close()
-            conn.close()
-            return jsonify({'success': True, 'pending_sessions': [], 'count': 0})
-
-        app.logger.info("✓ analysis_sessions table exists, executing pending sessions query")
-        # Restore pathogen_breakdown but handle it safely for Railway
-        cursor.execute("""
-            SELECT id, filename, upload_timestamp, total_wells, good_curves, 
-                   success_rate, pathogen_breakdown, confirmation_status, 
-                   confirmed_by, confirmed_at
-            FROM analysis_sessions 
-            WHERE confirmation_status = 'pending'
-            ORDER BY upload_timestamp DESC
-        """)
+            app.logger.error("✗ pending_confirmations table does not exist, falling back to analysis_sessions")
+            # Fallback to old table structure
+            cursor.execute("SHOW TABLES LIKE 'analysis_sessions'")
+            analysis_table_exists = cursor.fetchone()
+            if not analysis_table_exists:
+                app.logger.error("✗ analysis_sessions table also does not exist")
+                cursor.close()
+                conn.close()
+                return jsonify({'success': True, 'pending_sessions': [], 'count': 0})
+            
+            # Use old table structure as fallback
+            cursor.execute("""
+                SELECT id, filename, upload_timestamp, total_wells, good_curves, 
+                       success_rate, pathogen_breakdown, confirmation_status, 
+                       confirmed_by, confirmed_at
+                FROM analysis_sessions 
+                WHERE confirmation_status = 'pending'
+                ORDER BY upload_timestamp DESC
+            """)
+        else:
+            app.logger.info("✓ pending_confirmations table exists, using new session separation structure")
+            # Use new pending_confirmations table with linked analysis_sessions data
+            cursor.execute("""
+                SELECT pc.id, pc.confirmation_session_id, pc.filename, pc.fluorophore, 
+                       pc.pathogen_code, pc.total_wells, pc.good_curves, pc.success_rate, 
+                       pc.pathogen_breakdown, pc.confirmation_status, pc.confirmed_by, 
+                       pc.confirmed_at, pc.created_at, pc.ml_analysis_triggered,
+                       a.id as analysis_id, a.upload_timestamp
+                FROM pending_confirmations pc
+                LEFT JOIN analysis_sessions a ON pc.analysis_session_id = a.id
+                WHERE pc.confirmation_status = 'pending'
+                ORDER BY pc.created_at DESC
+            """)
         app.logger.info("✓ Query executed successfully")
         
         pending_sessions = cursor.fetchall()
@@ -6246,11 +6338,15 @@ def get_pending_sessions():
         # Convert timestamps and handle JSON fields safely for Railway
         for session in pending_sessions:
             try:
-                if session['upload_timestamp']:
+                # Handle timestamps - now from both tables
+                if session.get('upload_timestamp'):
                     session['upload_timestamp'] = session['upload_timestamp'].isoformat()
-                if session['confirmed_at']:
+                if session.get('confirmed_at'):
                     session['confirmed_at'] = session['confirmed_at'].isoformat()
-                # Handle pathogen_breakdown safely - Railway might return it as bytes or different format
+                if session.get('created_at'):
+                    session['created_at'] = session['created_at'].isoformat()
+                
+                # Handle pathogen_breakdown safely - comes from analysis_sessions via LEFT JOIN
                 if session.get('pathogen_breakdown'):
                     if isinstance(session['pathogen_breakdown'], (bytes, bytearray)):
                         session['pathogen_breakdown'] = session['pathogen_breakdown'].decode('utf-8')
@@ -6258,12 +6354,18 @@ def get_pending_sessions():
                         session['pathogen_breakdown'] = str(session['pathogen_breakdown'])
                 else:
                     session['pathogen_breakdown'] = None
+                    
+                # Ensure confirmation_id is properly set
+                if not session.get('confirmation_id'):
+                    session['confirmation_id'] = session.get('id')  # Fallback to session ID
+                    
             except Exception as convert_error:
                 app.logger.error(f"✗ Error converting session data: {convert_error}")
                 # Set problematic fields to safe defaults
                 session['upload_timestamp'] = None
                 session['confirmed_at'] = None
                 session['pathogen_breakdown'] = None
+                session['created_at'] = None
         
         cursor.close()
         conn.close()
@@ -6331,16 +6433,49 @@ def get_confirmed_sessions():
         
         app.logger.info("Testing confirmed sessions table access")
         
-        # Simplified query without complex JOINs for Railway compatibility
-        app.logger.info("Executing confirmed sessions query")
-        cursor.execute("""
-            SELECT id, filename, upload_timestamp, total_wells, good_curves, 
-                   success_rate, pathogen_breakdown, confirmation_status,
-                   confirmed_by, confirmed_at
-            FROM analysis_sessions 
-            WHERE confirmation_status = 'confirmed'
-            ORDER BY confirmed_at DESC
-        """)
+        # Check for pending_confirmations table first (new structure)
+        try:
+            cursor.execute("SELECT 1 FROM pending_confirmations LIMIT 1")
+            has_pending_confirmations = True
+            app.logger.info("✓ Using new session separation structure for confirmed sessions")
+        except mysql.connector.Error:
+            has_pending_confirmations = False
+            app.logger.info("✓ Using legacy structure for confirmed sessions")
+        
+        if has_pending_confirmations:
+            # New structure: Get confirmed sessions from both pending_confirmations and analysis_sessions
+            app.logger.info("Executing confirmed sessions query with session separation")
+            cursor.execute("""
+                SELECT DISTINCT
+                    a.id as session_id,
+                    pc.id as confirmation_id,
+                    COALESCE(pc.filename, a.filename) as filename,
+                    a.upload_timestamp,
+                    a.total_wells,
+                    a.good_curves,
+                    a.success_rate,
+                    a.pathogen_breakdown,
+                    COALESCE(pc.confirmation_status, a.confirmation_status) as confirmation_status,
+                    COALESCE(pc.confirmed_by, a.confirmed_by) as confirmed_by,
+                    COALESCE(pc.confirmed_at, a.confirmed_at) as confirmed_at,
+                    pc.created_at as confirmation_created_at
+                FROM analysis_sessions a
+                LEFT JOIN pending_confirmations pc ON a.id = pc.session_id
+                WHERE (pc.confirmation_status = 'confirmed' OR 
+                       (pc.id IS NULL AND a.confirmation_status = 'confirmed'))
+                ORDER BY COALESCE(pc.confirmed_at, a.confirmed_at) DESC
+            """)
+        else:
+            # Legacy structure: Direct analysis_sessions query
+            app.logger.info("Executing legacy confirmed sessions query")
+            cursor.execute("""
+                SELECT id as session_id, filename, upload_timestamp, total_wells, good_curves, 
+                       success_rate, pathogen_breakdown, confirmation_status,
+                       confirmed_by, confirmed_at
+                FROM analysis_sessions 
+                WHERE confirmation_status = 'confirmed'
+                ORDER BY confirmed_at DESC
+            """)
         app.logger.info("✓ Query executed successfully")
         
         confirmed_sessions = cursor.fetchall()
@@ -6349,10 +6484,14 @@ def get_confirmed_sessions():
         # Convert timestamps and handle JSON fields safely for Railway
         for session in confirmed_sessions:
             try:
-                if session['upload_timestamp']:
+                # Handle timestamps - now from both tables
+                if session.get('upload_timestamp'):
                     session['upload_timestamp'] = session['upload_timestamp'].isoformat()
-                if session['confirmed_at']:
+                if session.get('confirmed_at'):
                     session['confirmed_at'] = session['confirmed_at'].isoformat()
+                if session.get('confirmation_created_at'):
+                    session['confirmation_created_at'] = session['confirmation_created_at'].isoformat()
+                    
                 # Handle pathogen_breakdown safely - Railway might return it as bytes or different format
                 if session.get('pathogen_breakdown'):
                     if isinstance(session['pathogen_breakdown'], (bytes, bytearray)):
@@ -6361,6 +6500,13 @@ def get_confirmed_sessions():
                         session['pathogen_breakdown'] = str(session['pathogen_breakdown'])
                 else:
                     session['pathogen_breakdown'] = None
+                
+                # Ensure both session_id and confirmation_id are available
+                if not session.get('session_id'):
+                    session['session_id'] = session.get('id')  # Fallback for legacy structure
+                if not session.get('confirmation_id') and has_pending_confirmations:
+                    # For new structure, confirmation_id should be available from query
+                    pass
                 
                 # Calculate ML accuracy (different from success_rate)
                 # For confirmed sessions, assume 100% accuracy unless expert corrections exist
@@ -6373,7 +6519,7 @@ def get_confirmed_sessions():
                             SELECT COUNT(*) as expert_count 
                             FROM ml_expert_decisions 
                             WHERE session_id = %s
-                        """, (session['id'],))
+                        """, (session['session_id'],))
                         expert_result = cursor_temp.fetchone()
                         expert_corrections = expert_result['expert_count'] if expert_result else 0
                         cursor_temp.close()
@@ -6395,7 +6541,7 @@ def get_confirmed_sessions():
                         session['expert_decisions_count'] = expert_corrections  # For frontend compatibility
                         
                     except Exception as ml_error:
-                        app.logger.warning(f"Could not calculate ML accuracy for session {session['id']}: {ml_error}")
+                        app.logger.warning(f"Could not calculate ML accuracy for session {session.get('session_id', session.get('id', 'unknown'))}: {ml_error}")
                         # Fallback: assume 100% accuracy for confirmed sessions
                         session['ml_accuracy_percentage'] = 100.0
                         session['correct_predictions'] = total_wells
@@ -7830,7 +7976,7 @@ def resume_ml_training():
 
 @app.route('/api/ml-training/status', methods=['GET'])
 @require_permission('pause_ml_training')
-def get_ml_training_status():
+def get_ml_training_pause_status():
     """Get current ML training status for session and global"""
     try:
         from ml_training_manager import ml_training_manager
