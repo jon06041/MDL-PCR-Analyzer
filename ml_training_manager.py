@@ -34,8 +34,10 @@ class MLTrainingManager:
                     user_id VARCHAR(255) NOT NULL,
                     username VARCHAR(255) NOT NULL,
                     session_id VARCHAR(255) NOT NULL,
+                    pathogen_code VARCHAR(50) NULL,
+                    fluorophore VARCHAR(20) NULL,
                     is_paused BOOLEAN DEFAULT FALSE,
-                    scope ENUM('session', 'global') DEFAULT 'session',
+                    scope ENUM('session', 'global', 'pathogen') DEFAULT 'session',
                     paused_at TIMESTAMP NULL,
                     paused_by VARCHAR(255) NULL,
                     pause_reason TEXT NULL,
@@ -45,7 +47,9 @@ class MLTrainingManager:
                     INDEX idx_user_id (user_id),
                     INDEX idx_scope (scope),
                     INDEX idx_is_paused (is_paused),
-                    UNIQUE KEY unique_session_scope (session_id, scope)
+                    INDEX idx_pathogen_code (pathogen_code),
+                    INDEX idx_fluorophore (fluorophore),
+                    UNIQUE KEY unique_session_scope_pathogen (session_id, scope, pathogen_code, fluorophore)
                 )
             """)
             
@@ -55,7 +59,7 @@ class MLTrainingManager:
         except Exception as e:
             print(f"Error initializing ML training state table: {e}")
     
-    def pause_training(self, user_id: str, username: str, session_id: str, reason: str = None, scope: str = 'session') -> bool:
+    def pause_training(self, user_id: str, username: str, session_id: str, reason: str = None, scope: str = 'session', pathogen_code: str = None, fluorophore: str = None) -> bool:
         """
         Pause ML training for a specific scope
         
@@ -64,7 +68,9 @@ class MLTrainingManager:
             username: Username for audit trail
             session_id: Current session ID
             reason: Optional reason for pausing
-            scope: 'session' (individual) or 'global' (system-wide)
+            scope: 'session' (individual), 'global' (system-wide), or 'pathogen' (specific pathogen-fluorophore)
+            pathogen_code: Required if scope is 'pathogen'
+            fluorophore: Required if scope is 'pathogen'
             
         Returns:
             bool: True if successfully paused, False otherwise
@@ -87,6 +93,22 @@ class MLTrainingManager:
                     scope = 'global',
                     updated_at = NOW()
                 """, (user_id, username, username, reason, username, reason))
+            elif scope == 'pathogen':
+                # Pathogen-specific pause
+                if not pathogen_code:
+                    raise ValueError("pathogen_code is required for pathogen scope")
+                cursor.execute("""
+                    INSERT INTO ml_training_state 
+                    (user_id, username, session_id, pathogen_code, fluorophore, is_paused, paused_at, paused_by, pause_reason, scope)
+                    VALUES (%s, %s, %s, %s, %s, TRUE, NOW(), %s, %s, 'pathogen')
+                    ON DUPLICATE KEY UPDATE
+                    is_paused = TRUE,
+                    paused_at = NOW(),
+                    paused_by = %s,
+                    pause_reason = %s,
+                    scope = 'pathogen',
+                    updated_at = NOW()
+                """, (user_id, username, session_id, pathogen_code, fluorophore, username, reason, username, reason))
             else:
                 # Session-specific pause
                 cursor.execute("""
@@ -105,7 +127,12 @@ class MLTrainingManager:
             cursor.close()
             connection.close()
             
-            scope_text = "globally" if scope == 'global' else f"for session {session_id}"
+            if scope == 'pathogen':
+                scope_text = f"for pathogen {pathogen_code}" + (f" on {fluorophore}" if fluorophore else "")
+            elif scope == 'global':
+                scope_text = "globally"
+            else:
+                scope_text = f"for session {session_id}"
             print(f"ML training paused {scope_text} by user {username}")
             return True
             
@@ -113,7 +140,7 @@ class MLTrainingManager:
             print(f"Error pausing ML training: {e}")
             return False
     
-    def resume_training(self, user_id: str, username: str, session_id: str, scope: str = 'session') -> bool:
+    def resume_training(self, user_id: str, username: str, session_id: str, scope: str = 'session', pathogen_code: str = None, fluorophore: str = None) -> bool:
         """
         Resume ML training for a specific scope
         
@@ -121,7 +148,9 @@ class MLTrainingManager:
             user_id: User identifier
             username: Username for audit trail
             session_id: Current session ID (ignored for global scope)
-            scope: 'session' (individual) or 'global' (system-wide)
+            scope: 'session' (individual), 'global' (system-wide), or 'pathogen' (specific pathogen-fluorophore)
+            pathogen_code: Required if scope is 'pathogen'
+            fluorophore: Required if scope is 'pathogen'
             
         Returns:
             bool: True if successfully resumed, False otherwise
@@ -141,6 +170,19 @@ class MLTrainingManager:
                         updated_at = NOW()
                     WHERE session_id = 'GLOBAL' AND scope = 'global'
                 """)
+            elif scope == 'pathogen':
+                # Pathogen-specific resume
+                if not pathogen_code:
+                    raise ValueError("pathogen_code is required for pathogen scope")
+                cursor.execute("""
+                    UPDATE ml_training_state 
+                    SET is_paused = FALSE,
+                        paused_at = NULL,
+                        paused_by = NULL,
+                        pause_reason = NULL,
+                        updated_at = NOW()
+                    WHERE pathogen_code = %s AND fluorophore = %s AND scope = 'pathogen'
+                """, (pathogen_code, fluorophore))
             else:
                 # Session-specific resume
                 cursor.execute("""
@@ -156,7 +198,12 @@ class MLTrainingManager:
             cursor.close()
             connection.close()
             
-            scope_text = "globally" if scope == 'global' else f"for session {session_id}"
+            if scope == 'pathogen':
+                scope_text = f"for pathogen {pathogen_code}" + (f" on {fluorophore}" if fluorophore else "")
+            elif scope == 'global':
+                scope_text = "globally"
+            else:
+                scope_text = f"for session {session_id}"
             print(f"ML training resumed {scope_text} by user {username}")
             return True
             
@@ -164,22 +211,24 @@ class MLTrainingManager:
             print(f"Error resuming ML training: {e}")
             return False
     
-    def is_training_paused(self, session_id: str) -> bool:
+    def is_training_paused(self, session_id: str, pathogen_code: str = None, fluorophore: str = None) -> bool:
         """
-        Check if ML training is paused for a specific session
-        Checks both global pause and session-specific pause
+        Check if ML training is paused for a specific context
+        Checks global pause, pathogen-specific pause, and session-specific pause
         
         Args:
             session_id: Session ID to check
+            pathogen_code: Optional pathogen code to check for pathogen-specific pause
+            fluorophore: Optional fluorophore to check for pathogen-specific pause
             
         Returns:
-            bool: True if training is paused (either globally or for session), False otherwise
+            bool: True if training is paused (globally, pathogen-specific, or for session), False otherwise
         """
         try:
             connection = mysql.connector.connect(**self.mysql_config)
             cursor = connection.cursor()
             
-            # Check for global pause first
+            # Check for global pause first (highest priority)
             cursor.execute("""
                 SELECT is_paused FROM ml_training_state 
                 WHERE session_id = 'GLOBAL' AND scope = 'global' AND is_paused = TRUE
@@ -192,6 +241,21 @@ class MLTrainingManager:
                 cursor.close()
                 connection.close()
                 return True  # Global pause is active
+            
+            # Check for pathogen-specific pause (if pathogen is specified)
+            if pathogen_code:
+                cursor.execute("""
+                    SELECT is_paused FROM ml_training_state 
+                    WHERE pathogen_code = %s AND fluorophore = %s AND scope = 'pathogen' AND is_paused = TRUE
+                    ORDER BY updated_at DESC 
+                    LIMIT 1
+                """, (pathogen_code, fluorophore))
+                
+                pathogen_result = cursor.fetchone()
+                if pathogen_result and pathogen_result[0]:
+                    cursor.close()
+                    connection.close()
+                    return True  # Pathogen-specific pause is active
             
             # Check for session-specific pause
             cursor.execute("""
