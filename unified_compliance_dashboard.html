@@ -532,21 +532,6 @@
                                 </div>
                             </div>
 
-                            <!-- ML Training Control Buttons (QC and Research Users) -->
-                            <div class="training-control-section mb-4" style="text-align: center;">
-                                <div class="btn-group" role="group" aria-label="ML Training Controls">
-                                    <button id="pauseTrainingBtn" class="btn btn-warning training-control-btn" onclick="pauseTraining()">
-                                        <i class="fas fa-pause"></i> ⏸️ Pause Training
-                                    </button>
-                                    <button id="resumeTrainingBtn" class="btn btn-success training-control-btn" onclick="resumeTraining()" style="display: none;">
-                                        <i class="fas fa-play"></i> ▶️ Resume Training
-                                    </button>
-                                </div>
-                                <div id="trainingStatusMessage" class="mt-2 text-muted" style="display: none;">
-                                    <small></small>
-                                </div>
-                            </div>
-
                             <!-- ML Statistics Cards -->
                             <div class="row mb-4">
                                 <div class="col-md-3">
@@ -2242,7 +2227,7 @@
                                         <div class="d-flex justify-content-between align-items-center">
                                             <div>
                                                 <small class="text-muted">
-                                                    <i class="fas fa-brain"></i> ML Training Control
+                                                    <i class="fas fa-brain text-success"></i> ML Training: <span class="text-success">Active</span>
                                                 </small>
                                             </div>
                                             <div class="btn-group btn-group-sm" role="group">
@@ -2250,7 +2235,8 @@
                                                         data-pathogen="${pathogen}" 
                                                         data-action="enable"
                                                         onclick="togglePathogenTraining('${pathogen}', true)"
-                                                        title="Enable ML training for ${pathogen}">
+                                                        title="Enable ML training for ${pathogen}"
+                                                        style="display: none;">
                                                     <i class="fas fa-play"></i> Enable
                                                 </button>
                                                 <button class="btn btn-outline-warning pathogen-training-btn" 
@@ -2440,131 +2426,81 @@
         // Pathogen-specific training control functions
         async function togglePathogenTraining(pathogenCode, enabled) {
             try {
-                const userRole = getCurrentUserRole();
+                console.log(`Toggling training for ${pathogenCode}: ${enabled ? 'enable' : 'disable'}`);
                 
-                // Get all fluorophores for this pathogen (typically FAM, HEX, Texas Red, Cy5)
-                const fluorophores = ['FAM', 'HEX', 'Texas Red', 'Cy5'];
-                const statusElement = document.getElementById(`training-status-${pathogenCode}`);
-                
-                if (statusElement) {
-                    statusElement.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${enabled ? 'Enabling' : 'Disabling'} training...`;
+                // Get the pathogen card to update buttons
+                const pathogenCard = document.querySelector(`[data-pathogen="${pathogenCode}"]`)?.closest('.card');
+                if (!pathogenCard) {
+                    console.error(`Pathogen card not found for ${pathogenCode}`);
+                    return;
                 }
                 
-                // Update training status for each fluorophore
-                const promises = fluorophores.map(fluorophore => 
-                    updatePathogenFluorophoreTraining(pathogenCode, fluorophore, enabled)
-                );
+                const enableBtn = pathogenCard.querySelector('[data-action="enable"]');
+                const disableBtn = pathogenCard.querySelector('[data-action="disable"]');
+                const statusElement = pathogenCard.querySelector('.text-muted');
                 
-                const results = await Promise.all(promises);
-                const successCount = results.filter(r => r.success).length;
+                // Update status to show processing
+                if (statusElement) {
+                    statusElement.innerHTML = `<i class="fas fa-spinner fa-spin text-primary"></i> ML Training: ${enabled ? 'Enabling' : 'Disabling'}...`;
+                }
                 
-                if (successCount === fluorophores.length) {
-                    showAlert('success', `Training ${enabled ? 'enabled' : 'disabled'} for ${pathogenCode} (all channels)`);
-                    updatePathogenTrainingStatus(pathogenCode);
-                } else if (successCount > 0) {
-                    showAlert('warning', `Training ${enabled ? 'enabled' : 'disabled'} for ${pathogenCode} (${successCount}/${fluorophores.length} channels)`);
-                    updatePathogenTrainingStatus(pathogenCode);
-                } else {
-                    showAlert('danger', `Failed to ${enabled ? 'enable' : 'disable'} training for ${pathogenCode}`);
-                    if (statusElement) {
-                        statusElement.innerHTML = `<i class="fas fa-exclamation-triangle text-danger"></i> Update failed`;
+                // For now, simulate API call to ml-config endpoint
+                // This should call the same endpoint that ml-config.html uses
+                const fluorophores = ['FAM', 'HEX', 'Texas Red', 'Cy5'];
+                let successCount = 0;
+                
+                for (const fluorophore of fluorophores) {
+                    try {
+                        // Simulate the API call that would update ml_pathogen_config table
+                        const response = await fetch(`/api/ml-config/pathogen/${encodeURIComponent(pathogenCode)}/${encodeURIComponent(fluorophore)}`, {
+                            method: 'PUT',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                enabled: enabled,
+                                notes: `Training ${enabled ? 'enabled' : 'disabled'} via unified compliance dashboard`
+                            })
+                        });
+                        
+                        if (response.ok) {
+                            successCount++;
+                        }
+                    } catch (error) {
+                        console.error(`Error updating ${pathogenCode}/${fluorophore}:`, error);
                     }
+                }
+                
+                // Update UI based on results
+                if (successCount > 0) {
+                    if (enabled) {
+                        // Training enabled - show "Disable" button, hide "Enable" button
+                        if (enableBtn) enableBtn.style.display = 'none';
+                        if (disableBtn) disableBtn.style.display = 'inline-block';
+                        if (statusElement) {
+                            statusElement.innerHTML = `<i class="fas fa-brain text-success"></i> ML Training: <span class="text-success">Active</span>`;
+                        }
+                        showAlert('success', `Training enabled for ${pathogenCode} (${successCount}/${fluorophores.length} channels)`);
+                    } else {
+                        // Training disabled - show "Enable" button, hide "Disable" button
+                        if (enableBtn) enableBtn.style.display = 'inline-block';
+                        if (disableBtn) disableBtn.style.display = 'none';
+                        if (statusElement) {
+                            statusElement.innerHTML = `<i class="fas fa-brain text-warning"></i> ML Training: <span class="text-warning">Disabled</span>`;
+                        }
+                        showAlert('warning', `Training disabled for ${pathogenCode} (${successCount}/${fluorophores.length} channels)`);
+                    }
+                } else {
+                    // Failed to update
+                    if (statusElement) {
+                        statusElement.innerHTML = `<i class="fas fa-exclamation-triangle text-danger"></i> ML Training: <span class="text-danger">Update Failed</span>`;
+                    }
+                    showAlert('danger', `Failed to ${enabled ? 'enable' : 'disable'} training for ${pathogenCode}`);
                 }
                 
             } catch (error) {
                 console.error('Error toggling pathogen training:', error);
                 showAlert('danger', `Error ${enabled ? 'enabling' : 'disabling'} training for ${pathogenCode}`);
-            }
-        }
-
-        async function updatePathogenFluorophoreTraining(pathogenCode, fluorophore, enabled) {
-            try {
-                const response = await fetch(`/api/ml-config/pathogen/${encodeURIComponent(pathogenCode)}/${encodeURIComponent(fluorophore)}`, {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-User-ID': getCurrentUserRole() || 'dashboard_user'
-                    },
-                    body: JSON.stringify({
-                        enabled: enabled,
-                        notes: `Training ${enabled ? 'enabled' : 'disabled'} from unified compliance dashboard`
-                    })
-                });
-
-                const data = await response.json();
-                return { success: data.success, fluorophore: fluorophore, error: data.error };
-                
-            } catch (error) {
-                console.error(`Error updating ${pathogenCode}/${fluorophore}:`, error);
-                return { success: false, fluorophore: fluorophore, error: error.message };
-            }
-        }
-
-        async function updatePathogenTrainingStatus(pathogenCode) {
-            try {
-                const fluorophores = ['FAM', 'HEX', 'Texas Red', 'Cy5'];
-                const statusElement = document.getElementById(`training-status-${pathogenCode}`);
-                
-                if (!statusElement) return;
-                
-                // Check status for each fluorophore
-                const statusPromises = fluorophores.map(async (fluorophore) => {
-                    try {
-                        const response = await fetch(`/api/ml-config/check-enabled/${encodeURIComponent(pathogenCode)}/${encodeURIComponent(fluorophore)}`);
-                        if (response.ok) {
-                            const data = await response.json();
-                            return { fluorophore, enabled: data.enabled || false };
-                        }
-                        return { fluorophore, enabled: false };
-                    } catch (error) {
-                        return { fluorophore, enabled: false };
-                    }
-                });
-                
-                const statuses = await Promise.all(statusPromises);
-                const enabledCount = statuses.filter(s => s.enabled).length;
-                const totalCount = statuses.length;
-                
-                let statusHtml = '';
-                let statusClass = '';
-                
-                if (enabledCount === totalCount) {
-                    statusHtml = `<i class="fas fa-play text-success"></i> Training enabled (${enabledCount}/${totalCount} channels)`;
-                    statusClass = 'text-success';
-                } else if (enabledCount === 0) {
-                    statusHtml = `<i class="fas fa-pause text-warning"></i> Training disabled (${enabledCount}/${totalCount} channels)`;
-                    statusClass = 'text-warning';
-                } else {
-                    statusHtml = `<i class="fas fa-exclamation-triangle text-info"></i> Training partial (${enabledCount}/${totalCount} channels)`;
-                    statusClass = 'text-info';
-                }
-                
-                statusElement.innerHTML = statusHtml;
-                statusElement.className = `${statusClass}`;
-                
-                // Update button states
-                const enableBtn = document.querySelector(`button[data-pathogen="${pathogenCode}"][data-action="enable"]`);
-                const disableBtn = document.querySelector(`button[data-pathogen="${pathogenCode}"][data-action="disable"]`);
-                
-                if (enableBtn && disableBtn) {
-                    if (enabledCount === totalCount) {
-                        enableBtn.disabled = true;
-                        disableBtn.disabled = false;
-                    } else if (enabledCount === 0) {
-                        enableBtn.disabled = false;
-                        disableBtn.disabled = true;
-                    } else {
-                        enableBtn.disabled = false;
-                        disableBtn.disabled = false;
-                    }
-                }
-                
-            } catch (error) {
-                console.error(`Error checking training status for ${pathogenCode}:`, error);
-                const statusElement = document.getElementById(`training-status-${pathogenCode}`);
-                if (statusElement) {
-                    statusElement.innerHTML = `<i class="fas fa-exclamation-triangle text-danger"></i> Status check failed`;
-                }
             }
         }
 
