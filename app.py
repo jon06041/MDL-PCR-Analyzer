@@ -664,6 +664,14 @@ with app.app_context():
 from enhanced_auth_routes import enhanced_auth_bp
 app.register_blueprint(enhanced_auth_bp)
 
+# Register permission middleware and API endpoints
+from permission_middleware import (
+    register_permission_api, Permissions, Roles,
+    require_permission, require_authentication, admin_required,
+    qc_technician_required, compliance_officer_required
+)
+register_permission_api(app)
+
 # Register database management blueprint
 app.register_blueprint(db_mgmt_bp)
 
@@ -894,6 +902,7 @@ def serve_config(filename):
     return send_from_directory('config', filename)
 
 @app.route('/analyze', methods=['POST'])
+@require_permission(Permissions.RUN_BASIC_ANALYSIS)
 def analyze_data():
     """Endpoint to analyze qPCR data and save results to database"""
     try:
@@ -2140,6 +2149,7 @@ except ImportError:
     ml_classifier = None
 
 @app.route('/api/ml-analyze-curve', methods=['POST'])
+@require_permission(Permissions.RUN_ML_ANALYSIS)
 def ml_analyze_curve():
     """Get ML analysis and prediction for a curve"""
     if not ML_AVAILABLE or ml_classifier is None:
@@ -2312,6 +2322,7 @@ def ml_analyze_curve():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/ml-submit-feedback', methods=['POST'])
+@require_permission(Permissions.PROVIDE_ML_FEEDBACK)
 def ml_submit_feedback():
     """Submit expert feedback for ML training"""
     if not ML_AVAILABLE or ml_classifier is None:

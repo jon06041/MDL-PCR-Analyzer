@@ -58,18 +58,26 @@ class UnifiedAuthManager:
             'manage_compliance_evidence',
             'export_data',
             'view_ml_statistics',
-            'provide_ml_feedback'
+            'provide_ml_feedback',
+            'modify_ml_configuration',      # Can modify ML settings
+            'pause_ml_training'            # Can pause ML training during exploration
         ],
         'research_user': [
             'view_analysis_results',
             'upload_files',
+            'upload_non_standard_files',  # Can upload files without naming conventions
+            'manual_file_mapping',        # Can manually specify file types and channels
             'run_basic_analysis',
             'run_ml_analysis',
             'modify_thresholds',
             'view_compliance_dashboard',
+            'manage_compliance_evidence',
             'export_data',
             'view_ml_statistics',
-            'provide_ml_feedback'
+            'provide_ml_feedback',
+            'experimental_analysis',      # Access to experimental features
+            'modify_ml_configuration',    # Can modify ML settings
+            'pause_ml_training'          # Can pause ML training during exploration
         ],
         'compliance_officer': [
             'view_analysis_results',
@@ -87,8 +95,11 @@ class UnifiedAuthManager:
             'audit_access'
         ],
         'administrator': [
+            # ALL permissions from all other roles
             'view_analysis_results',
             'upload_files',
+            'upload_non_standard_files',  # Research user features
+            'manual_file_mapping',        # Research user features
             'run_basic_analysis',
             'run_ml_analysis',
             'modify_thresholds',
@@ -99,10 +110,15 @@ class UnifiedAuthManager:
             'export_data',
             'view_ml_statistics',
             'provide_ml_feedback',
-            'audit_access',
-            'manage_users',
-            'system_administration',
-            'database_management'
+            'experimental_analysis',      # Research user features
+            'modify_ml_configuration',    # ML configuration access
+            'pause_ml_training',          # ML training pause control
+            'audit_access',              # Compliance officer features
+            # EXCLUSIVE administrative permissions (ADMIN ONLY)
+            'manage_users',              # User account management - ADMIN ONLY
+            'system_administration',     # System configuration - ADMIN ONLY
+            'database_management',       # Database backups/restore - ADMIN ONLY
+            'system_reset'              # Emergency reset functionality - ADMIN ONLY
         ]
     }
     
