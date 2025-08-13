@@ -1184,21 +1184,39 @@
                     try {
                         if (source.evidence_data && typeof source.evidence_data === 'string') {
                             const evidenceData = JSON.parse(source.evidence_data);
-                            if (evidenceData.technical_specifications && evidenceData.technical_specifications.description) {
+                            // Try multiple fields for enhanced descriptions
+                            if (evidenceData.description && evidenceData.description !== 'N/A') {
+                                description = evidenceData.description;
+                            } else if (evidenceData.technical_specifications && evidenceData.technical_specifications.description) {
                                 description = evidenceData.technical_specifications.description;
                             } else if (evidenceData.system_verification && evidenceData.system_verification.verification_summary) {
                                 description = evidenceData.system_verification.verification_summary;
                             } else if (evidenceData.regulatory_mapping && evidenceData.regulatory_mapping.evidence_statement) {
                                 description = evidenceData.regulatory_mapping.evidence_statement;
+                            } else if (evidenceData.encryption_algorithm) {
+                                // Build description from encryption details
+                                const parts = [];
+                                if (evidenceData.encryption_algorithm) parts.push(`Algorithm: ${evidenceData.encryption_algorithm}`);
+                                if (evidenceData.key_derivation) parts.push(`Key Derivation: ${evidenceData.key_derivation}`);
+                                if (parts.length > 0) description = parts.join(', ');
                             }
                         } else if (source.evidence_data && typeof source.evidence_data === 'object') {
                             const evidenceData = source.evidence_data;
-                            if (evidenceData.technical_specifications && evidenceData.technical_specifications.description) {
+                            // Try multiple fields for enhanced descriptions
+                            if (evidenceData.description && evidenceData.description !== 'N/A') {
+                                description = evidenceData.description;
+                            } else if (evidenceData.technical_specifications && evidenceData.technical_specifications.description) {
                                 description = evidenceData.technical_specifications.description;
                             } else if (evidenceData.system_verification && evidenceData.system_verification.verification_summary) {
                                 description = evidenceData.system_verification.verification_summary;
                             } else if (evidenceData.regulatory_mapping && evidenceData.regulatory_mapping.evidence_statement) {
                                 description = evidenceData.regulatory_mapping.evidence_statement;
+                            } else if (evidenceData.encryption_algorithm) {
+                                // Build description from encryption details
+                                const parts = [];
+                                if (evidenceData.encryption_algorithm) parts.push(`Algorithm: ${evidenceData.encryption_algorithm}`);
+                                if (evidenceData.key_derivation) parts.push(`Key Derivation: ${evidenceData.key_derivation}`);
+                                if (parts.length > 0) description = parts.join(', ');
                             }
                         }
                     } catch (e) {
