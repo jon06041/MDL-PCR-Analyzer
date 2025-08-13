@@ -660,6 +660,10 @@ with app.app_context():
         print(f"❌ Critical: MySQL database initialization failed: {e}")
         raise Exception(f"MySQL database initialization failed: {e}")
 
+# Register enhanced authentication blueprint
+from enhanced_auth_routes import enhanced_auth_bp
+app.register_blueprint(enhanced_auth_bp)
+
 # Register database management blueprint
 app.register_blueprint(db_mgmt_bp)
 
