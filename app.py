@@ -3964,6 +3964,18 @@ def validate_queue_files():
 
 # ========================= MYSQL ADMIN API ENDPOINTS (Development) =========================
 
+@app.route('/api/user/admin-status', methods=['GET'])
+def check_admin_status():
+    """Check if current user has admin privileges"""
+    # For now, in development mode, everyone is admin
+    # In production, this would check Entra ID groups/roles
+    is_development = os.environ.get('FLASK_ENV') == 'development'
+    
+    return jsonify({
+        'is_admin': is_development,  # True in dev, will be role-based in production
+        'environment': 'development' if is_development else 'production'
+    })
+
 @app.route('/mysql-admin')
 def mysql_admin_interface():
     """Serve the MySQL admin interface for development"""
@@ -7704,12 +7716,14 @@ def debug_expert_decisions():
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/sessions/delete', methods=['POST'])
+@production_admin_only
 def delete_pending_session():
-    """Delete a pending analysis session or confirmation with session separation support"""
+    """Delete a pending analysis session or confirmation with session separation support - ADMIN ONLY"""
     try:
         data = request.get_json()
         session_id = data.get('session_id')
         confirmation_id = data.get('confirmation_id')
+        delete_related = data.get('delete_related', False)  # New option for multi-channel handling
         
         # Accept either session_id or confirmation_id
         if not session_id and not confirmation_id:

@@ -2,6 +2,30 @@
 // Ensure global analysis results variable is initialized
 window.currentAnalysisResults = null;
 
+// Global admin status checking
+let adminStatus = null;
+
+// Check if current user has admin privileges
+async function checkAdminStatus() {
+    if (adminStatus !== null) {
+        return adminStatus;
+    }
+    
+    try {
+        const response = await fetch('/api/user/admin-status');
+        if (response.ok) {
+            const result = await response.json();
+            adminStatus = result.is_admin;
+            console.log(`🔐 Admin status: ${adminStatus ? 'ADMIN' : 'USER'} (${result.environment})`);
+            return adminStatus;
+        }
+    } catch (error) {
+        console.warn('⚠️ Could not check admin status, defaulting to non-admin:', error);
+        adminStatus = false;
+    }
+    return adminStatus;
+}
+
 // Global flag to prevent threshold conflicts during chart updates
 window.chartUpdating = false;
 
@@ -8177,7 +8201,7 @@ async function loadAnalysisHistory() {
         const data = await response.json();
         
         if (data.sessions && data.sessions.length > 0) {
-            displayAnalysisHistory(data.sessions);
+            await displayAnalysisHistory(data.sessions);
             // Always validate channel completeness and update UI after loading history
             validateAndUpdateUI(data.sessions);
             // --- Patch: If a session is loaded, ensure chart and selectors are initialized ---
@@ -8234,7 +8258,7 @@ async function loadAnalysisHistoryOnly() {
         const data = await response.json();
         
         if (data.sessions && data.sessions.length > 0) {
-            displayAnalysisHistory(data.sessions);
+            await displayAnalysisHistory(data.sessions);
             // Always validate channel completeness and update UI after loading history
             validateAndUpdateUI(data.sessions);
             
@@ -9291,9 +9315,12 @@ function disableChannelValidationForHistoryView(sessionFilename) {
 }
 
 
-function displayAnalysisHistory(sessions) {
+async function displayAnalysisHistory(sessions) {
     const historyContent = safeGetElement('historyContent', 'displayAnalysisHistory');
     if (!historyContent) return;
+    
+    // Check admin status for showing "Delete from DB" buttons
+    const isAdmin = await checkAdminStatus();
     
     if (!sessions || sessions.length === 0) {
         historyContent.innerHTML = '<p>No analysis history available.</p>';
@@ -9314,11 +9341,6 @@ function displayAnalysisHistory(sessions) {
     const tableHtml = `
         <div class="history-table-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
             <span style="font-weight: bold; color: #2c3e50;">Session History</span>
-            <button onclick="deleteAllSessions()" 
-                    style="background: #e74c3c; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px;"
-                    title="Delete all analysis sessions">
-                Delete All
-            </button>
         </div>
         <table class="history-table">
             <thead>
@@ -9328,7 +9350,6 @@ function displayAnalysisHistory(sessions) {
                     <th>Wells</th>
                     <th>Positive Rate</th>
                     <th>Cycles</th>
-
                     <th>Actions</th>
                 </tr>
             </thead>
@@ -9345,7 +9366,7 @@ function displayAnalysisHistory(sessions) {
                         <td>${calculatePositiveRate(session)}${getHistoryValidationMessage(session)}</td>
                         <td>${extractCycleInfo(session)}</td>
                         <td onclick="event.stopPropagation()">
-                            <button onclick="deleteSessionFromDB('${session.id}', event)" class="btn-small btn-warning">Delete from DB</button>
+                            ${isAdmin ? `<button onclick="deleteSessionFromDB('${session.id}', event)" class="btn-small btn-warning">Delete from DB</button>` : ''}
                             <button onclick="deleteSessionGroup('${session.id}', event)" class="btn-small btn-danger">Delete</button>
                         </td>
                     </tr>
@@ -14411,6 +14432,13 @@ async function deleteSessionFromDB(sessionId, event) {
         event.stopPropagation();
     }
     
+    // Check admin status first
+    const isAdmin = await checkAdminStatus();
+    if (!isAdmin) {
+        alert('🔒 Admin privileges required to delete sessions from database.');
+        return;
+    }
+    
     // Handle combined sessions (they have string IDs like "combined_...")
     if (typeof sessionId === 'string' && sessionId.startsWith('combined_')) {
         console.log('🔍 Combined session detected for deletion:', sessionId);
@@ -14697,51 +14725,6 @@ async function deleteSessionGroup(sessionId, event) {
     } catch (error) {
         // console.error('Error deleting session:', error);
         alert('Failed to delete session. Please try again.');
-    }
-}
-
-// Delete all sessions function
-async function deleteAllSessions() {
-    // console.log('deleteAllSessions called');
-    
-    if (!confirm('Are you sure you want to delete all analysis sessions? This action cannot be undone.')) {
-        // console.log('User cancelled delete all operation');
-        return;
-    }
-    
-    try {
-        // console.log('Making DELETE request to /sessions');
-        
-        // Use the dedicated delete all endpoint
-        const response = await fetch('/sessions', {
-            method: 'DELETE'
-        });
-        
-        // console.log('Delete all response status:', response.status);
-        
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-            // console.error('Delete all failed:', errorData);
-            throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const result = await response.json();
-        // console.log('Delete all sessions result:', result);
-        
-        // Clear local storage
-        localStorage.removeItem('analysisSessions');
-        localStorage.removeItem('combinedSessions');
-        
-        // Clear current analysis
-        currentAnalysisResults = null;
-        
-        // Show success message and reload
-        alert(result.message || 'All sessions deleted successfully.');
-        window.location.reload();
-        
-    } catch (error) {
-        // console.error('Error deleting all sessions:', error);
-        alert('Error deleting sessions: ' + error.message);
     }
 }
 
