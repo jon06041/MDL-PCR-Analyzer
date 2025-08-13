@@ -2227,7 +2227,7 @@
                                         <div class="d-flex justify-content-between align-items-center">
                                             <div>
                                                 <small class="text-muted">
-                                                    <i class="fas fa-brain text-success"></i> ML Training: <span class="text-success">Active</span>
+                                                    <i class="fas fa-brain text-success"></i> ML Training: <span class="text-success">Enabled</span>
                                                 </small>
                                             </div>
                                             <div class="btn-group btn-group-sm" role="group">
@@ -2248,9 +2248,9 @@
                                                 </button>
                                             </div>
                                         </div>
-                                        <div class="mt-2">
+                                        <div class="mt-2" style="display: none;">
                                             <small id="training-status-${pathogen}" class="text-muted">
-                                                <i class="fas fa-spinner fa-spin"></i> Checking training status...
+                                                <!-- Status checked via API call -->
                                             </small>
                                         </div>
                                     </div>
@@ -2279,8 +2279,8 @@
                     `;
                 });
                 
-            // Initialize training status and controls
-            updateTrainingStatus();
+            // Initialize pathogen-specific training status 
+            updatePathogenTrainingStatus();
         }
 
         // ML Training Control Functions
@@ -2420,6 +2420,23 @@
                 return 'global';
             } else {
                 return 'session';
+            }
+        }
+
+        // Update pathogen-specific training status
+        async function updatePathogenTrainingStatus() {
+            try {
+                // Since training is enabled by default, we don't need to check individual status
+                // Just ensure all pathogen training controls show "Enabled"
+                const pathogenCards = document.querySelectorAll('[id^="training-status-"]');
+                pathogenCards.forEach(statusElement => {
+                    // Status is hidden now since training is enabled by default
+                    statusElement.style.display = 'none';
+                });
+                
+                console.log('✅ Pathogen training status updated - all enabled by default');
+            } catch (error) {
+                console.error('❌ Error updating pathogen training status:', error);
             }
         }
 

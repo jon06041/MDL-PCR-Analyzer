@@ -95,7 +95,6 @@ class UnifiedAuthManager:
             'audit_access'
         ],
         'administrator': [
-            'administrator': [
             # ALL permissions from all other roles
             'view_analysis_results',
             'upload_files',
