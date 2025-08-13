@@ -121,6 +121,9 @@ class UnifiedAuthManager:
         self.backdoor_username = os.getenv('BACKDOOR_USERNAME', 'admin')
         self.backdoor_password = os.getenv('BACKDOOR_PASSWORD', 'qpcr_admin_2025')
         
+        # Session timeout configuration (configurable for dev/prod)
+        self.session_timeout_hours = int(os.getenv('SESSION_TIMEOUT_HOURS', '2'))  # Default 2 hours for security
+        
         # Initialize database tables
         self._initialize_auth_tables()
     
@@ -366,7 +369,7 @@ class UnifiedAuthManager:
         """Create a new user session in the database"""
         try:
             session_id = secrets.token_urlsafe(64)
-            expires_at = datetime.datetime.now() + datetime.timedelta(hours=8)  # 8-hour sessions
+            expires_at = datetime.datetime.now() + datetime.timedelta(hours=self.session_timeout_hours)
             
             connection = mysql.connector.connect(**self.mysql_config)
             cursor = connection.cursor()
