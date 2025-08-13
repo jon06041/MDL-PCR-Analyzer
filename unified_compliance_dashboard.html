@@ -1227,7 +1227,7 @@
                     evidenceHTML += `
                         <tr>
                             <td><span class="badge bg-primary">${source.evidence_type || 'Analysis Session'}</span></td>
-                            <td class="text-truncate" style="max-width: 300px;">${description}</td>
+                            <td style="max-width: 500px; word-wrap: break-word; white-space: normal;">${description}</td>
                             <td><span class="badge ${statusBadge}">${statusText}</span></td>
                             <td>${dateStr}</td>
                         </tr>`;
