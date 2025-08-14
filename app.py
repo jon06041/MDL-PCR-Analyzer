@@ -300,29 +300,75 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
         # Get pathogen target for naming purposes
         pathogen_target = get_pathogen_target(test_code, fluorophore)
         
-        # Calculate statistics from results
+        # Calculate statistics from results - EXCLUDE CONTROL WELLS
         individual_results = results.get('individual_results', {})
-        total_wells = len(individual_results)
         
         # Use complete filename as experiment name for individual channels
         experiment_name = filename
-        total_wells = len(individual_results)
         
-        # Count positive wells (POS classification: amplitude > 500 and no anomalies)
-        positive_wells = 0
+        # Control patterns to exclude from statistics
+        control_patterns = ['H1', 'H2', 'H3', 'H4', 'M1', 'M2', 'M3', 'M4', 'L1', 'L2', 'L3', 'L4', 'NTC']
+        
+        # Count only non-control wells for statistics
+        total_non_control_wells = 0
+        positive_non_control_wells = 0
+        
         if isinstance(individual_results, dict):
             for well_data in individual_results.values():
                 if isinstance(well_data, dict):
-                    amplitude = well_data.get('amplitude', 0)
-                    anomalies = well_data.get('anomalies', [])
-                    has_anomalies = False
+                    # Check if this is a control well
+                    sample_name = well_data.get('sample_name', '')
+                    is_control = False
+                    if sample_name:
+                        for control in control_patterns:
+                            if control in sample_name.upper():
+                                is_control = True
+                                break
                     
-                    if anomalies and anomalies != ['None']:
-                        has_anomalies = True
+                    # Only count non-control wells
+                    if not is_control:
+                        total_non_control_wells += 1
+                        
+                        # Count positive wells (POS classification: amplitude > 500 and no anomalies)
+                        amplitude = well_data.get('amplitude', 0)
+                        anomalies = well_data.get('anomalies', [])
+                        has_anomalies = False
+                        
+                        if anomalies and anomalies != ['None']:
+                            has_anomalies = True
+                        
+                        if amplitude > 500 and not has_anomalies:
+                            positive_non_control_wells += 1
+        elif isinstance(individual_results, list):
+            for well_data in individual_results:
+                if isinstance(well_data, dict):
+                    # Check if this is a control well
+                    sample_name = well_data.get('sample_name', '')
+                    is_control = False
+                    if sample_name:
+                        for control in control_patterns:
+                            if control in sample_name.upper():
+                                is_control = True
+                                break
                     
-                    if amplitude > 500 and not has_anomalies:
-                        positive_wells += 1
+                    # Only count non-control wells
+                    if not is_control:
+                        total_non_control_wells += 1
+                        
+                        # Count positive wells (POS classification: amplitude > 500 and no anomalies)
+                        amplitude = well_data.get('amplitude', 0)
+                        anomalies = well_data.get('anomalies', [])
+                        has_anomalies = False
+                        
+                        if anomalies and anomalies != ['None']:
+                            has_anomalies = True
+                        
+                        if amplitude > 500 and not has_anomalies:
+                            positive_non_control_wells += 1
         
+        # Use non-control counts for session statistics
+        total_wells = total_non_control_wells
+        positive_wells = positive_non_control_wells
         success_rate = (positive_wells / total_wells * 100) if total_wells > 0 else 0
         
         # Extract cycle information - handle both dict and list formats
@@ -374,16 +420,46 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             print(f"Backend pathogen mapping: {test_code} + {fluorophore} -> {pathogen_target}")
             app.logger.info(f"Backend pathogen mapping: {test_code} + {fluorophore} -> {pathogen_target}")
             
-            # Calculate positive percentage for this channel
+            # Calculate positive percentage for this channel - EXCLUDE CONTROL WELLS
             pos_count = 0
-            total_count = len(individual_results)
+            sample_count = 0  # Count only non-control wells
             
             if isinstance(individual_results, dict):
                 for well_data in individual_results.values():
-                    if isinstance(well_data, dict) and well_data.get('amplitude', 0) > 500:
-                        pos_count += 1
+                    if isinstance(well_data, dict):
+                        # Check if this is a control well
+                        sample_name = well_data.get('sample_name', '')
+                        is_control = False
+                        if sample_name:
+                            for control in control_patterns:
+                                if control in sample_name.upper():
+                                    is_control = True
+                                    break
+                        
+                        # Only count non-control wells
+                        if not is_control:
+                            sample_count += 1
+                            if well_data.get('amplitude', 0) > 500:
+                                pos_count += 1
+            elif isinstance(individual_results, list):
+                for well_data in individual_results:
+                    if isinstance(well_data, dict):
+                        # Check if this is a control well
+                        sample_name = well_data.get('sample_name', '')
+                        is_control = False
+                        if sample_name:
+                            for control in control_patterns:
+                                if control in sample_name.upper():
+                                    is_control = True
+                                    break
+                        
+                        # Only count non-control wells
+                        if not is_control:
+                            sample_count += 1
+                            if well_data.get('amplitude', 0) > 500:
+                                pos_count += 1
             
-            positive_percentage = (pos_count / total_count * 100) if total_count > 0 else 0
+            positive_percentage = (pos_count / sample_count * 100) if sample_count > 0 else 0
             pathogen_breakdown_display = f"{pathogen_target}: {positive_percentage:.1f}%"
             
             print(f"Individual channel pathogen breakdown: {pathogen_breakdown_display} (fluorophore: {fluorophore}, target: {pathogen_target})")
