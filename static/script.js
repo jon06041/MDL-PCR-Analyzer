@@ -8998,8 +8998,8 @@ function calculatePathogenBreakdownFromSessions(sessions) {
             session.well_results.forEach(well => {
                 // Check if this is a control well - exclude from statistics
                 const sampleName = well.sample_name || '';
-                const isControl = sampleName && ['H1', 'H2', 'H3', 'H4', 'M1', 'M2', 'M3', 'M4', 'L1', 'L2', 'L3', 'L4', 'NTC'].some(control => 
-                    sampleName.toUpperCase().includes(control)
+                const isControl = sampleName && ['H-', 'M-', 'L-', 'NTC-'].some(prefix => 
+                    sampleName.startsWith(prefix)
                 );
                 
                 // Only count non-control wells

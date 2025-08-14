@@ -171,7 +171,7 @@ def track_channel_completion(session, experiment_name, fluorophore, total_wells,
         pathogen_target = get_pathogen_for_fluorophore(test_code, fluorophore)
         
         # Calculate good curves excluding controls (controls should have been filtered already)
-        control_patterns = ['H1', 'H2', 'H3', 'H4', 'M1', 'M2', 'M3', 'M4', 'L1', 'L2', 'L3', 'L4', 'NTC']
+        control_prefixes = ['H-', 'M-', 'L-', 'NTC-']
         
         # Count non-control wells that are positive
         non_control_good_curves = 0
@@ -183,8 +183,9 @@ def track_channel_completion(session, experiment_name, fluorophore, total_wells,
             # Check if well is a control
             is_control = False
             if well.sample_name:
-                for control in control_patterns:
-                    if control in well.sample_name.upper():
+                # Check if sample name starts with any control prefix
+                for prefix in control_prefixes:
+                    if well.sample_name.startswith(prefix):
                         is_control = True
                         break
             
@@ -306,8 +307,8 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
         # Use complete filename as experiment name for individual channels
         experiment_name = filename
         
-        # Control patterns to exclude from statistics
-        control_patterns = ['H1', 'H2', 'H3', 'H4', 'M1', 'M2', 'M3', 'M4', 'L1', 'L2', 'L3', 'L4', 'NTC']
+        # Control patterns to exclude from statistics (samples starting with these prefixes)
+        control_prefixes = ['H-', 'M-', 'L-', 'NTC-']
         
         # Count only non-control wells for statistics
         total_non_control_wells = 0
@@ -320,8 +321,9 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                     sample_name = well_data.get('sample_name', '')
                     is_control = False
                     if sample_name:
-                        for control in control_patterns:
-                            if control in sample_name.upper():
+                        # Check if sample name starts with any control prefix
+                        for prefix in control_prefixes:
+                            if sample_name.startswith(prefix):
                                 is_control = True
                                 break
                     
@@ -346,8 +348,9 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                     sample_name = well_data.get('sample_name', '')
                     is_control = False
                     if sample_name:
-                        for control in control_patterns:
-                            if control in sample_name.upper():
+                        # Check if sample name starts with any control prefix
+                        for prefix in control_prefixes:
+                            if sample_name.startswith(prefix):
                                 is_control = True
                                 break
                     
@@ -448,8 +451,9 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                         sample_name = well_data.get('sample_name', '')
                         is_control = False
                         if sample_name:
-                            for control in control_patterns:
-                                if control in sample_name.upper():
+                            # Check if sample name starts with any control prefix
+                            for prefix in control_prefixes:
+                                if sample_name.startswith(prefix):
                                     is_control = True
                                     break
                         
@@ -1699,7 +1703,14 @@ def save_combined_session():
                 
                 # Check if this is a control well - exclude from statistics if it is
                 sample_name = well_data.get('sample_name', '')
-                is_control = sample_name and any(control in sample_name.upper() for control in ['H1', 'H2', 'H3', 'H4', 'M1', 'M2', 'M3', 'M4', 'L1', 'L2', 'L3', 'L4', 'NTC'])
+                is_control = False
+                if sample_name:
+                    # Check if sample name starts with any control prefix
+                    control_prefixes = ['H-', 'M-', 'L-', 'NTC-']
+                    for prefix in control_prefixes:
+                        if sample_name.startswith(prefix):
+                            is_control = True
+                            break
                 
                 if is_control:
                     control_wells_by_fluorophore[fluorophore] += 1
