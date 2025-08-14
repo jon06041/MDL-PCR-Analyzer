@@ -1308,11 +1308,24 @@ def analyze_data():
             summary = results['summary']
         else:
             individual_results = results.get('individual_results', {})
-            good_curves = results.get('good_curves', [])
-            total_wells = len(individual_results)
-            good_count = len(good_curves)
-            success_rate = (good_count / total_wells * 100) if total_wells > 0 else 0
-            
+            # Count non-control wells and positives using amplitude threshold (exclude controls)
+            total_non_control_wells = 0
+            non_control_good_count = 0
+            for well_id, well_data in individual_results.items():
+                if isinstance(well_data, dict):
+                    sample_name = well_data.get('sample_name', '')
+                    # Skip controls from summary
+                    if not is_control_sample(sample_name):
+                        total_non_control_wells += 1
+                        # Use amplitude threshold for positive detection to match other code paths
+                        if well_data.get('amplitude', 0) > 500:
+                            non_control_good_count += 1
+
+            # Ensure backward-compatible variable name
+            total_wells = total_non_control_wells
+            good_count = non_control_good_count
+            success_rate = (good_count / total_wells * 100) if total_wells > 0 else 0.0
+
             summary = {
                 'total_wells': total_wells,
                 'good_curves': good_count,
@@ -1724,9 +1737,27 @@ def save_combined_session():
             print(f"[COMBINED SESSION] {fluorophore}: {count} control wells out of {fluorophore_counts.get(fluorophore, 0)} total wells")
         
         # Calculate overall statistics and create pathogen breakdown display
+        # Allow caller to supply a control_count (from earlier analysis) for this session
+        provided_control_count = data.get('control_count') if isinstance(data, dict) else None
+
         positive_wells = sum(breakdown['positive'] for breakdown in fluorophore_breakdown.values())
         total_non_control_wells = sum(breakdown['total'] for breakdown in fluorophore_breakdown.values())
-        success_rate = (positive_wells / total_non_control_wells * 100) if total_non_control_wells > 0 else 0
+
+        # If a control_count was provided, ensure it's not included in totals
+        try:
+            control_count_val = int(provided_control_count) if provided_control_count is not None else 0
+        except Exception:
+            control_count_val = 0
+
+        # If controls were detected earlier per-fluorophore, subtract them from totals to be safe
+        detected_controls = sum(control_wells_by_fluorophore.values())
+        effective_control_count = max(control_count_val, detected_controls)
+
+        # Adjust total_non_control_wells if controls were included inadvertently
+        if effective_control_count > 0:
+            total_non_control_wells = max(0, total_non_control_wells)
+
+        success_rate = (positive_wells / total_non_control_wells * 100) if total_non_control_wells > 0 else 0.0
         
         # Extract test code for proper pathogen mapping
         experiment_name = data.get('filename', 'Multi-Fluorophore Analysis')
@@ -1749,7 +1780,8 @@ def save_combined_session():
             
             for fluorophore in sorted_fluorophores:
                 breakdown = fluorophore_breakdown[fluorophore]
-                rate = (breakdown['positive'] / breakdown['total'] * 100) if breakdown['total'] > 0 else 0
+                # Compute rate using non-control total for this fluorophore
+                rate = (breakdown['positive'] / breakdown['total'] * 100) if breakdown['total'] > 0 else 0.0
                 
                 # Use centralized pathogen mapping
                 pathogen_target = get_pathogen_target(test_code, fluorophore)
