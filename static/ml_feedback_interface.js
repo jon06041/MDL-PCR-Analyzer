@@ -7214,6 +7214,44 @@ class MLFeedbackInterface {
             console.error(`❌ TABLE-UPDATE: Error updating table display for ${wellKey}:`, error);
         }
     }
+    
+    /**
+     * Handle ML notification acceptance - triggers ML analysis
+     */
+    handleMLNotificationAccept() {
+        console.log('🤖 ML-NOTIFICATION: User accepted ML analysis');
+        
+        // Hide the notification
+        const notification = document.getElementById('ml-available-notification');
+        if (notification) {
+            notification.remove();
+        }
+        
+        // Trigger ML analysis
+        const mlAnalyzeBtn = document.getElementById('ml-analyze-btn');
+        if (mlAnalyzeBtn && !mlAnalyzeBtn.disabled) {
+            mlAnalyzeBtn.click();
+        } else {
+            console.log('🔍 ML-NOTIFICATION: Falling back to direct ML analysis call');
+            this.analyzeWithML();
+        }
+    }
+    
+    /**
+     * Handle ML notification decline - hide notification and log decision
+     */
+    handleMLNotificationDecline() {
+        console.log('🚫 ML-NOTIFICATION: User declined ML analysis');
+        
+        // Hide the notification
+        const notification = document.getElementById('ml-available-notification');
+        if (notification) {
+            notification.remove();
+        }
+        
+        // Optionally store user preference to not show again for this session
+        sessionStorage.setItem('ml-notification-declined', 'true');
+    }
 }
 
 // Expose the class for testing and manual instantiation

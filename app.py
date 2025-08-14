@@ -31,6 +31,41 @@ from encryption_api import encryption_bp
 # Load environment variables immediately at startup
 load_dotenv()
 
+def is_control_sample(sample_name):
+    """
+    Dynamically detect control samples based on naming patterns.
+    Controls end with: H-runnum, M-runnum, L-runnum, or NTC-runnum
+    where runnum is any sequence of digits.
+    
+    Args:
+        sample_name (str): The sample name to check
+    
+    Returns:
+        bool: True if sample is a control, False if it's a regular sample
+    """
+    if not sample_name:
+        return False
+    
+    # Pattern matches: H-digits, M-digits, L-digits, or NTC-digits at end of string
+    control_pattern = r'(?:[HML]-\d+|NTC-\d+)$'
+    return bool(re.search(control_pattern, sample_name))
+    
+def is_sample_well(sample_name):
+    """
+    Check if a well contains a sample (not a control).
+    Samples are identified as wells that are NOT controls.
+    
+    Args:
+        sample_name (str): The sample name to check
+    
+    Returns:
+        bool: True if this is a sample well, False if control or invalid
+    """
+    if not sample_name:
+        return False
+    
+    return not is_control_sample(sample_name)
+
 def safe_json_dumps(value, default=None):
     """Helper function to safely serialize to JSON, avoiding double-encoding"""
     if value is None:
@@ -171,8 +206,6 @@ def track_channel_completion(session, experiment_name, fluorophore, total_wells,
         pathogen_target = get_pathogen_for_fluorophore(test_code, fluorophore)
         
         # Calculate good curves excluding controls (controls should have been filtered already)
-        control_prefixes = ['H-', 'M-', 'L-', 'NTC-']
-        
         # Count non-control wells that are positive
         non_control_good_curves = 0
         non_control_total_wells = 0
@@ -180,27 +213,21 @@ def track_channel_completion(session, experiment_name, fluorophore, total_wells,
         # Query well results for this session to count non-control wells
         well_results = WellResult.query.filter_by(session_id=session.id).all()
         for well in well_results:
-            # Check if well is a control
-            is_control = False
-            if well.sample_name:
-                # Check if sample name starts with any control prefix
-                for prefix in control_prefixes:
-                    if well.sample_name.startswith(prefix):
-                        is_control = True
-                        break
-            
-            if not is_control:
-                non_control_total_wells += 1
-                # Count as good curve if positive classification
-                if well.curve_classification:
-                    try:
-                        import json
-                        classification_data = json.loads(well.curve_classification) if isinstance(well.curve_classification, str) else well.curve_classification
-                        classification = classification_data.get('class', 'N/A')
-                        if classification in ['POSITIVE', 'STRONG_POSITIVE', 'WEAK_POSITIVE']:
-                            non_control_good_curves += 1
-                    except:
-                        pass
+            # Skip control wells using dynamic detection
+            if is_control_sample(well.sample_name):
+                continue
+                
+            non_control_total_wells += 1
+            # Count as good curve if positive classification
+            if well.curve_classification:
+                try:
+                    import json
+                    classification_data = json.loads(well.curve_classification) if isinstance(well.curve_classification, str) else well.curve_classification
+                    classification = classification_data.get('class', 'N/A')
+                    if classification in ['POSITIVE', 'STRONG_POSITIVE', 'WEAK_POSITIVE']:
+                        non_control_good_curves += 1
+                except:
+                    pass
         
         # Calculate success rate for non-control wells
         non_control_success_rate = (non_control_good_curves / non_control_total_wells) if non_control_total_wells > 0 else 0.0
@@ -307,28 +334,18 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
         # Use complete filename as experiment name for individual channels
         experiment_name = filename
         
-        # Control patterns to exclude from statistics (samples starting with these prefixes)
-        control_prefixes = ['H-', 'M-', 'L-', 'NTC-']
-        
-        # Count only non-control wells for statistics
+        # Count only non-control wells for statistics (using dynamic control detection)
         total_non_control_wells = 0
         positive_non_control_wells = 0
         
         if isinstance(individual_results, dict):
             for well_data in individual_results.values():
                 if isinstance(well_data, dict):
-                    # Check if this is a control well
+                    # Check if this is a control well using dynamic detection
                     sample_name = well_data.get('sample_name', '')
-                    is_control = False
-                    if sample_name:
-                        # Check if sample name starts with any control prefix
-                        for prefix in control_prefixes:
-                            if sample_name.startswith(prefix):
-                                is_control = True
-                                break
                     
                     # Only count non-control wells
-                    if not is_control:
+                    if not is_control_sample(sample_name):
                         total_non_control_wells += 1
                         
                         # Count positive wells (POS classification: amplitude > 500 and no anomalies)
@@ -344,18 +361,11 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
         elif isinstance(individual_results, list):
             for well_data in individual_results:
                 if isinstance(well_data, dict):
-                    # Check if this is a control well
+                    # Check if this is a control well using dynamic detection
                     sample_name = well_data.get('sample_name', '')
-                    is_control = False
-                    if sample_name:
-                        # Check if sample name starts with any control prefix
-                        for prefix in control_prefixes:
-                            if sample_name.startswith(prefix):
-                                is_control = True
-                                break
                     
                     # Only count non-control wells
-                    if not is_control:
+                    if not is_control_sample(sample_name):
                         total_non_control_wells += 1
                         
                         # Count positive wells (POS classification: amplitude > 500 and no anomalies)
@@ -430,35 +440,22 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             if isinstance(individual_results, dict):
                 for well_data in individual_results.values():
                     if isinstance(well_data, dict):
-                        # Check if this is a control well
+                        # Check if this is a control well using dynamic detection
                         sample_name = well_data.get('sample_name', '')
-                        is_control = False
-                        if sample_name:
-                            for control in control_patterns:
-                                if control in sample_name.upper():
-                                    is_control = True
-                                    break
                         
                         # Only count non-control wells
-                        if not is_control:
+                        if not is_control_sample(sample_name):
                             sample_count += 1
                             if well_data.get('amplitude', 0) > 500:
                                 pos_count += 1
             elif isinstance(individual_results, list):
                 for well_data in individual_results:
                     if isinstance(well_data, dict):
-                        # Check if this is a control well
+                        # Check if this is a control well using dynamic detection
                         sample_name = well_data.get('sample_name', '')
-                        is_control = False
-                        if sample_name:
-                            # Check if sample name starts with any control prefix
-                            for prefix in control_prefixes:
-                                if sample_name.startswith(prefix):
-                                    is_control = True
-                                    break
                         
                         # Only count non-control wells
-                        if not is_control:
+                        if not is_control_sample(sample_name):
                             sample_count += 1
                             if well_data.get('amplitude', 0) > 500:
                                 pos_count += 1
@@ -1703,16 +1700,8 @@ def save_combined_session():
                 
                 # Check if this is a control well - exclude from statistics if it is
                 sample_name = well_data.get('sample_name', '')
-                is_control = False
-                if sample_name:
-                    # Check if sample name starts with any control prefix
-                    control_prefixes = ['H-', 'M-', 'L-', 'NTC-']
-                    for prefix in control_prefixes:
-                        if sample_name.startswith(prefix):
-                            is_control = True
-                            break
                 
-                if is_control:
+                if is_control_sample(sample_name):
                     control_wells_by_fluorophore[fluorophore] += 1
                     print(f"[COMBINED CONTROL] {well_key}: sample='{sample_name}', fluorophore='{fluorophore}'")
                     app.logger.info(f"[COMBINED CONTROL] {well_key}: sample='{sample_name}', fluorophore='{fluorophore}'")
