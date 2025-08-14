@@ -1750,46 +1750,103 @@ def delete_all_sessions():
 # --- Update session results ---
 @app.route('/sessions/<int:session_id>/update', methods=['PUT'])
 def update_session_results(session_id):
-    """Update analysis results for a specific session"""
+    """Update analysis results for a specific session with MySQL and create pending confirmation"""
     try:
         data = request.get_json()
+        app.logger.info(f"🔄 Updating session {session_id} with MySQL...")
         
-        session = AnalysisSession.query.get_or_404(session_id)
+        # Get database configuration using global helper
+        mysql_config = get_mysql_config()
         
-        # Update session metadata if provided
-        if 'notes' in data:
-            session.notes = data['notes']
+        import mysql.connector
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor()
         
-        # Update individual well results if provided
-        if 'individual_results' in data:
-            individual_results = data['individual_results']
+        try:
+            # First check if session exists
+            cursor.execute("SELECT id, filename, confirmation_status FROM analysis_sessions WHERE id = %s", (session_id,))
+            session_data = cursor.fetchone()
             
-            for well_key, well_data in individual_results.items():
-                # Find existing well result
-                well_result = WellResult.query.filter_by(
-                    session_id=session_id,
-                    well_id=well_key
-                ).first()
+            if not session_data:
+                return jsonify({'error': f'Session {session_id} not found'}), 404
                 
-                if well_result:
-                    # Update existing well result
+            current_confirmation_status = session_data[2]
+            session_filename = session_data[1]
+            
+            # Update session metadata if provided
+            if 'notes' in data:
+                cursor.execute(
+                    "UPDATE analysis_sessions SET notes = %s WHERE id = %s",
+                    (data['notes'], session_id)
+                )
+            
+            # Update individual well results if provided
+            if 'individual_results' in data:
+                individual_results = data['individual_results']
+                app.logger.info(f"🔄 Updating {len(individual_results)} well results...")
+                
+                for well_key, well_data in individual_results.items():
+                    # Build dynamic update query based on provided fields
+                    update_fields = []
+                    update_values = []
+                    
                     for field, value in well_data.items():
-                        if hasattr(well_result, field):
-                            # Handle JSON fields
-                            if field in ['raw_cycles', 'raw_rfu', 'fitted_curve', 'fit_parameters', 'parameter_errors', 'anomalies']:
-                                if isinstance(value, (dict, list)):
-                                    value = json.dumps(value)
-                            setattr(well_result, field, value)
-        
-        db.session.commit()
-        
-        return jsonify({
-            'success': True,
-            'message': f'Session {session_id} updated successfully'
-        })
+                        # Handle JSON fields
+                        if field in ['raw_cycles', 'raw_rfu', 'fitted_curve', 'fit_parameters', 'parameter_errors', 'anomalies']:
+                            if isinstance(value, (dict, list)):
+                                value = json.dumps(value)
+                        
+                        update_fields.append(f"{field} = %s")
+                        update_values.append(value)
+                    
+                    if update_fields:
+                        update_values.extend([session_id, well_key])
+                        update_query = f"""
+                            UPDATE well_results 
+                            SET {', '.join(update_fields)}
+                            WHERE session_id = %s AND well_id = %s
+                        """
+                        cursor.execute(update_query, update_values)
+            
+            # If session was pending, create/update pending confirmation
+            if current_confirmation_status == 'pending':
+                app.logger.info(f"📋 Creating/updating pending confirmation for session {session_id}...")
+                
+                # Check if pending confirmation already exists
+                cursor.execute(
+                    "SELECT id FROM pending_confirmations WHERE analysis_session_id = %s",
+                    (session_id,)
+                )
+                existing_confirmation = cursor.fetchone()
+                
+                if not existing_confirmation:
+                    # Create new pending confirmation
+                    confirmation_session_id = f"CONF_{session_id}_{int(time.time())}"
+                    cursor.execute("""
+                        INSERT INTO pending_confirmations 
+                        (analysis_session_id, confirmation_session_id, confirmation_status, filename, created_at)
+                        VALUES (%s, %s, 'pending', %s, NOW())
+                    """, (session_id, confirmation_session_id, session_filename))
+                    
+                    app.logger.info(f"✅ Created pending confirmation {confirmation_session_id} for session {session_id}")
+                else:
+                    app.logger.info(f"✅ Pending confirmation already exists for session {session_id}")
+            
+            conn.commit()
+            app.logger.info(f"✅ Session {session_id} updated successfully with MySQL")
+            
+            return jsonify({
+                'success': True,
+                'message': f'Session {session_id} updated successfully',
+                'pending_confirmation_created': current_confirmation_status == 'pending'
+            })
+            
+        finally:
+            cursor.close()
+            conn.close()
         
     except Exception as e:
-        db.session.rollback()
+        app.logger.error(f"❌ Failed to update session {session_id}: {str(e)}")
         return jsonify({'error': f'Failed to update session: {str(e)}'}), 500
 
 # --- Delete a single session and its results ---
@@ -3566,6 +3623,32 @@ def update_system_ml_config(config_key):
             
     except Exception as e:
         app.logger.error(f"Failed to update system ML config: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-config/teaching-status', methods=['GET'])
+def get_ml_teaching_status():
+    """Get ML teaching status configuration"""
+    try:
+        global ml_config_manager
+        
+        if ml_config_manager is None:
+            return jsonify({'error': 'ML configuration manager not initialized'}), 503
+        
+        # Check if teaching is disabled via system config
+        disable_teaching = ml_config_manager.get_system_config('disable_teaching') == 'true'
+        
+        config = {
+            'disable_teaching': disable_teaching,
+            'teaching_enabled': not disable_teaching
+        }
+        
+        return jsonify({
+            'success': True,
+            'config': config
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Failed to get ML teaching status: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/ml-config/reset-training-data', methods=['POST'])
