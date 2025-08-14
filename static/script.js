@@ -5548,10 +5548,30 @@ function filterWellsByFluorophore(selectedFluorophore) {
     allOption.textContent = selectedFluorophore === 'all' ? 'All Wells Overlay' : `All ${selectedFluorophore} Wells`;
     wellSelector.appendChild(allOption);
     
-    // Filter results by fluorophore
+    // Filter results by fluorophore (more permissive for debugging missing fluorophore assignments)
     const filteredResults = Object.entries(analysisResults.individual_results).filter(([wellKey, result]) => {
         if (selectedFluorophore === 'all') return true;
-        return (result.fluorophore || 'Unknown') === selectedFluorophore;
+        
+        const resultFluorophore = result.fluorophore || 'Unknown';
+        
+        // Primary match: exact fluorophore match
+        if (resultFluorophore === selectedFluorophore) {
+            return true;
+        }
+        
+        // Secondary match: include wells with missing fluorophore data if they look like samples
+        // This helps with cases like A20 where fluorophore assignment might be missing
+        if (resultFluorophore === 'Unknown' && selectedFluorophore !== 'Unknown') {
+            // Check if this looks like a sample well (A1, B2, etc.) rather than a control
+            const wellId = result.well_id || wellKey;
+            const samplePattern = /^[A-H]\d+$/i; // Matches A1, B2, H12, etc.
+            if (samplePattern.test(wellId) || samplePattern.test(wellKey)) {
+                console.log(`🔍 WELL-FILTER: Including ${wellKey} (${wellId}) with missing fluorophore in ${selectedFluorophore} filter`);
+                return true;
+            }
+        }
+        
+        return false;
     });
     
     // Sort wells according to the selected mode
