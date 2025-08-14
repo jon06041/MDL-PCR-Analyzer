@@ -564,23 +564,10 @@ class MLFeedbackInterface {
         
         // Reset any ongoing submission state
         this.submissionInProgress = false;
-        // Auto-analyze the curve if ML classification doesn't exist (only if ML is enabled)
-        if (!wellData.ml_classification) {
-            setTimeout(async () => {
-                // Check if ML feedback should be hidden before auto-analysis
-                const shouldHide = await this.shouldHideMLFeedback();
-                if (shouldHide) {
-                    console.log('ML Analysis: Skipping auto-analysis - ML feedback disabled');
-                    return;
-                }
-                
-                if (this.currentWellData && this.currentWellKey) {
-                    this.analyzeCurveWithML();
-                } else {
-                    console.warn('ML Analysis: Well data not ready for auto-analysis, skipping');
-                }
-            }, 300);
-        } else {
+        
+        // DISABLED: Auto-analyze the curve if ML classification doesn't exist
+        // Only display what's already in the results table - no independent predictions
+        if (wellData.ml_classification) {
             // Only display existing classification if ML section is visible
             setTimeout(async () => {
                 const shouldHide = await this.shouldHideMLFeedback();
@@ -588,6 +575,10 @@ class MLFeedbackInterface {
                     this.displayExistingMLClassification(wellData.ml_classification);
                 }
             }, 100);
+        } else {
+            // No ML classification exists - don't trigger automatic analysis
+            // The modal should only show what's already in the results table
+            console.log('ML Feedback: No existing ML classification - showing data from results table only');
         }
         
         // Update visual curve analysis

@@ -59,12 +59,30 @@ class MLValidationTracker:
                     )
                 """))
                 
-                # Determine teaching outcome
+                # Determine teaching outcome using classification grouping
                 teaching_outcome = "correction_needed"
-                if original_prediction == expert_correction:
-                    teaching_outcome = "prediction_confirmed"
+                
+                # Group classifications for accuracy calculation
+                def get_classification_group(classification):
+                    if not classification:
+                        return 'UNKNOWN'
+                    classification = classification.upper()
+                    if classification in ['WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE']:
+                        return 'POSITIVE'
+                    elif classification in ['INDETERMINATE', 'SUSPICIOUS', 'REDO']:
+                        return 'REDO'
+                    elif classification in ['NEGATIVE']:
+                        return 'NEGATIVE'
+                    else:
+                        return 'UNKNOWN'
+                
+                original_group = get_classification_group(original_prediction)
+                expert_group = get_classification_group(expert_correction)
+                
+                if original_group == expert_group:
+                    teaching_outcome = "prediction_confirmed"  # Same group = confirmed for accuracy
                 else:
-                    teaching_outcome = "prediction_corrected"
+                    teaching_outcome = "prediction_corrected"  # Different group = correction
                 
                 # Calculate improvement score based on confidence and correctness
                 improvement_score = 0.0

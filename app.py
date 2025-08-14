@@ -179,6 +179,61 @@ def get_pathogen_target(test_code, fluorophore):
     # Fallback to fluorophore name if no mapping found
     return fluorophore
 
+def get_classification_group(classification):
+    """
+    Group classifications for expert correction accuracy calculation.
+    Changes within the same group don't count as corrections for accuracy purposes,
+    but ML can still learn from them.
+    
+    Args:
+        classification (str): The curve classification
+        
+    Returns:
+        str: The group name ('POSITIVE', 'REDO', 'NEGATIVE')
+    """
+    if not classification:
+        return 'UNKNOWN'
+    
+    classification = classification.upper()
+    
+    # POSITIVE group: WEAK_POSITIVE, POSITIVE, STRONG_POSITIVE
+    if classification in ['WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE']:
+        return 'POSITIVE'
+    
+    # REDO group: INDETERMINATE, SUSPICIOUS, REDO
+    elif classification in ['INDETERMINATE', 'SUSPICIOUS', 'REDO']:
+        return 'REDO'
+    
+    # NEGATIVE group: NEGATIVE (standalone)
+    elif classification in ['NEGATIVE']:
+        return 'NEGATIVE'
+    
+    # Unknown classifications
+    else:
+        return 'UNKNOWN'
+
+def is_expert_correction(original_prediction, expert_correction):
+    """
+    Determine if an expert change counts as a correction for accuracy purposes.
+    Changes within the same classification group (POSITIVE, REDO, NEGATIVE) 
+    are not considered corrections for accuracy calculation.
+    
+    Args:
+        original_prediction (str): Original ML prediction
+        expert_correction (str): Expert's correction
+        
+    Returns:
+        bool: True if this counts as a correction, False if it's within same group
+    """
+    if not original_prediction or not expert_correction:
+        return False
+    
+    original_group = get_classification_group(original_prediction)
+    expert_group = get_classification_group(expert_correction)
+    
+    # Same group = no correction for accuracy purposes
+    return original_group != expert_group
+
 def extract_base_pattern(filename):
     """Extract base pattern from CFX Manager filename, handling trailing dashes"""
     # Match pattern: prefix_numbers_CFXnumbers (allowing additional suffixes)
@@ -2747,7 +2802,15 @@ def ml_submit_feedback():
             cursor.close()
             conn.close()
             
-            print(f"✅ Expert feedback saved to MySQL database: {expert_classification} for {pathogen}")
+            # Log whether this counts as a correction using new grouping logic
+            is_correction = is_expert_correction(original_prediction, expert_classification)
+            correction_status = "CORRECTION" if is_correction else "SAME GROUP (no correction)"
+            original_group = get_classification_group(original_prediction)
+            expert_group = get_classification_group(expert_classification)
+            
+            print(f"✅ Expert feedback saved to MySQL database: {original_prediction} -> {expert_classification} for {pathogen}")
+            print(f"📊 Classification groups: {original_prediction} ({original_group}) -> {expert_classification} ({expert_group})")
+            print(f"🎯 Accuracy impact: {correction_status}")
             
         except Exception as mysql_error:
             print(f"⚠️ Could not save feedback to MySQL database: {mysql_error}")
@@ -4785,7 +4848,21 @@ def get_ml_validation_dashboard_data():
                 SELECT 
                     COUNT(*) as total_expert_decisions,
                     SUM(CASE 
-                        WHEN original_prediction != expert_correction THEN 1 
+                        WHEN original_prediction IS NOT NULL 
+                        AND expert_correction IS NOT NULL
+                        AND (
+                            (UPPER(original_prediction) IN ('WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE') 
+                             AND UPPER(expert_correction) NOT IN ('WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE'))
+                            OR
+                            (UPPER(original_prediction) IN ('INDETERMINATE', 'SUSPICIOUS', 'REDO') 
+                             AND UPPER(expert_correction) NOT IN ('INDETERMINATE', 'SUSPICIOUS', 'REDO'))
+                            OR
+                            (UPPER(original_prediction) = 'NEGATIVE' 
+                             AND UPPER(expert_correction) != 'NEGATIVE')
+                            OR
+                            (UPPER(original_prediction) NOT IN ('WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE', 'INDETERMINATE', 'SUSPICIOUS', 'REDO', 'NEGATIVE')
+                             OR UPPER(expert_correction) NOT IN ('WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE', 'INDETERMINATE', 'SUSPICIOUS', 'REDO', 'NEGATIVE'))
+                        ) THEN 1 
                         ELSE 0 
                     END) as expert_corrections
                 FROM ml_expert_decisions
@@ -8016,7 +8093,24 @@ def debug_expert_decisions():
             SELECT 
                 session_id,
                 COUNT(*) as total_decisions,
-                SUM(CASE WHEN original_prediction != expert_correction THEN 1 ELSE 0 END) as corrections,
+                SUM(CASE 
+                    WHEN original_prediction IS NOT NULL 
+                    AND expert_correction IS NOT NULL
+                    AND (
+                        (UPPER(original_prediction) IN ('WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE') 
+                         AND UPPER(expert_correction) NOT IN ('WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE'))
+                        OR
+                        (UPPER(original_prediction) IN ('INDETERMINATE', 'SUSPICIOUS', 'REDO') 
+                         AND UPPER(expert_correction) NOT IN ('INDETERMINATE', 'SUSPICIOUS', 'REDO'))
+                        OR
+                        (UPPER(original_prediction) = 'NEGATIVE' 
+                         AND UPPER(expert_correction) != 'NEGATIVE')
+                        OR
+                        (UPPER(original_prediction) NOT IN ('WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE', 'INDETERMINATE', 'SUSPICIOUS', 'REDO', 'NEGATIVE')
+                         OR UPPER(expert_correction) NOT IN ('WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE', 'INDETERMINATE', 'SUSPICIOUS', 'REDO', 'NEGATIVE'))
+                    ) THEN 1 
+                    ELSE 0 
+                END) as corrections,
                 SUM(CASE WHEN original_prediction IS NULL THEN 1 ELSE 0 END) as null_predictions,
                 SUM(CASE WHEN expert_correction IS NULL THEN 1 ELSE 0 END) as null_corrections
             FROM ml_expert_decisions
