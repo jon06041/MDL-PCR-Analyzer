@@ -6,6 +6,7 @@ import traceback
 import logging
 import time
 import pymysql
+import mysql.connector
 from logging.handlers import RotatingFileHandler
 import numpy as np
 from datetime import datetime
@@ -13,7 +14,7 @@ from decimal import Decimal
 from urllib.parse import unquote
 from dotenv import load_dotenv
 from qpcr_analyzer import process_csv_data, validate_csv_structure
-from models import db, AnalysisSession, WellResult, ExperimentStatistics
+from models import db, AnalysisSession, WellResult, ExperimentStatistics, ChannelCompletionStatus
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.exc import OperationalError, IntegrityError, DatabaseError
 from threshold_backend import create_threshold_routes
@@ -153,6 +154,100 @@ def extract_base_pattern(filename):
         return re.sub(r'[-\s]+$', '', match.group(1))
     # Fallback to filename without extension, also cleaning trailing dashes
     return re.sub(r'[-\s]+$', '', filename.split('.')[0])
+
+def track_channel_completion(session, experiment_name, fluorophore, total_wells, good_curves, success_rate):
+    """Track completion status for individual channel processing"""
+    try:
+        # Import here to avoid circular imports
+        from models import ChannelCompletionStatus, WellResult
+        
+        # Extract experiment pattern and test code
+        base_pattern = extract_base_pattern(experiment_name)
+        test_code = base_pattern.split('_')[0]
+        if test_code.startswith('Ac'):
+            test_code = test_code[2:]  # Remove "Ac" prefix
+        
+        # Get pathogen target based on fluorophore
+        pathogen_target = get_pathogen_for_fluorophore(test_code, fluorophore)
+        
+        # Calculate good curves excluding controls (controls should have been filtered already)
+        control_patterns = ['H1', 'H2', 'H3', 'H4', 'M1', 'M2', 'M3', 'M4', 'L1', 'L2', 'L3', 'L4', 'NTC']
+        
+        # Count non-control wells that are positive
+        non_control_good_curves = 0
+        non_control_total_wells = 0
+        
+        # Query well results for this session to count non-control wells
+        well_results = WellResult.query.filter_by(session_id=session.id).all()
+        for well in well_results:
+            # Check if well is a control
+            is_control = False
+            if well.sample_name:
+                for control in control_patterns:
+                    if control in well.sample_name.upper():
+                        is_control = True
+                        break
+            
+            if not is_control:
+                non_control_total_wells += 1
+                # Count as good curve if positive classification
+                if well.curve_classification:
+                    try:
+                        import json
+                        classification_data = json.loads(well.curve_classification) if isinstance(well.curve_classification, str) else well.curve_classification
+                        classification = classification_data.get('class', 'N/A')
+                        if classification in ['POSITIVE', 'STRONG_POSITIVE', 'WEAK_POSITIVE']:
+                            non_control_good_curves += 1
+                    except:
+                        pass
+        
+        # Calculate success rate for non-control wells
+        non_control_success_rate = (non_control_good_curves / non_control_total_wells) if non_control_total_wells > 0 else 0.0
+        
+        # Check if channel completion status already exists
+        existing_status = ChannelCompletionStatus.query.filter_by(
+            experiment_pattern=base_pattern,
+            fluorophore=fluorophore
+        ).first()
+        
+        if existing_status:
+            # Update existing record
+            existing_status.status = 'completed'
+            existing_status.session_id = session.id
+            existing_status.completed_at = datetime.utcnow()
+            existing_status.total_wells = non_control_total_wells
+            existing_status.good_curves = non_control_good_curves
+            existing_status.success_rate = non_control_success_rate
+            existing_status.error_message = None
+        else:
+            # Create new channel completion status
+            channel_status = ChannelCompletionStatus(
+                experiment_pattern=base_pattern,
+                fluorophore=fluorophore,
+                test_code=test_code,
+                pathogen_target=pathogen_target,
+                status='completed',
+                session_id=session.id,
+                started_at=datetime.utcnow(),
+                completed_at=datetime.utcnow(),
+                total_wells=non_control_total_wells,
+                good_curves=non_control_good_curves,
+                success_rate=non_control_success_rate,
+                json_data_validated=True,
+                threshold_data_ready=True,
+                control_grid_data_ready=True
+            )
+            db.session.add(channel_status)
+        
+        db.session.commit()
+        
+        print(f"[CHANNEL TRACKING] ✅ Tracked completion for {base_pattern} - {fluorophore}: {non_control_good_curves}/{non_control_total_wells} wells ({non_control_success_rate:.1%})")
+        app.logger.info(f"[CHANNEL TRACKING] ✅ Tracked completion for {base_pattern} - {fluorophore}: {non_control_good_curves}/{non_control_total_wells} wells ({non_control_success_rate:.1%})")
+        
+    except Exception as e:
+        print(f"[CHANNEL TRACKING] ❌ Error tracking channel completion: {e}")
+        app.logger.error(f"[CHANNEL TRACKING] ❌ Error tracking channel completion: {e}")
+        # Don't re-raise the error to avoid breaking the main workflow
 
 def validate_file_pattern_consistency(filenames):
     """Validate that all files share the same base pattern"""
@@ -466,6 +561,13 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             db.session.flush()
             print(f"[DB DEBUG] Final commit done for {well_count} wells.")
             app.logger.info(f"[DB DEBUG] Final commit done for {well_count} wells.")
+            
+            # Add channel completion tracking after successful session save
+            try:
+                track_channel_completion(session, experiment_name, fluorophore, well_count, positive_wells, success_rate)
+            except Exception as track_error:
+                print(f"Warning: Failed to track channel completion: {track_error}")
+                app.logger.warning(f"Warning: Failed to track channel completion: {track_error}")
             
         except Exception as commit_error:
             db.session.rollback()
@@ -1300,57 +1402,99 @@ def analyze_data():
 
 @app.route('/sessions', methods=['GET'])
 def get_sessions():
-    """Get all analysis sessions"""
+    """Get all analysis sessions using MySQL directly"""
     try:
-        sessions = AnalysisSession.query.order_by(AnalysisSession.upload_timestamp.desc()).all()
+        mysql_config = get_mysql_config()
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Get all sessions ordered by upload timestamp descending
+        cursor.execute("""
+            SELECT 
+                id, filename, upload_timestamp, total_wells, good_curves, 
+                success_rate, cycle_count, cycle_min, cycle_max, pathogen_breakdown
+            FROM analysis_sessions 
+            ORDER BY upload_timestamp DESC
+        """)
+        sessions = cursor.fetchall()
+        
         sessions_data = []
         for session in sessions:
-            session_dict = session.to_dict()
-            # Robustly handle both dict and list for well_results
-            individual_results = session.well_results
-            # Convert to dict keyed by well_id if not already
-            if isinstance(individual_results, dict):
-                results_dict = individual_results
-            else:
-                results_dict = {}
-                for well in individual_results:
-                    well_dict = well.to_dict() if hasattr(well, 'to_dict') else well
-                    if isinstance(well_dict, dict) and 'well_id' in well_dict:
-                        # Ensure well_dict has all necessary fields for control grid (same as get_session_details)
-                        well_id = well_dict['well_id']
-                        
-                        # Extract coordinate from well_id if not present
-                        if 'coordinate' not in well_dict or not well_dict['coordinate']:
-                            base_coordinate = well_id.split('_')[0] if '_' in well_id else well_id
-                            well_dict['coordinate'] = base_coordinate
-                        
-                        # Ensure fluorophore is present
-                        if 'fluorophore' not in well_dict or not well_dict['fluorophore']:
-                            if '_' in well_id:
-                                potential_fluorophore = well_id.split('_')[-1]
-                                if potential_fluorophore in ['Cy5', 'FAM', 'HEX', 'Texas Red']:
-                                    well_dict['fluorophore'] = potential_fluorophore
-                        
-                        # Parse JSON fields that might be stored as strings in database
-                        json_fields = ['raw_cycles', 'raw_rfu', 'fitted_curve', 'fit_parameters', 'parameter_errors', 'anomalies']
-                        for field in json_fields:
-                            if field in well_dict and isinstance(well_dict[field], str):
-                                try:
-                                    well_dict[field] = json.loads(well_dict[field])
-                                except (json.JSONDecodeError, TypeError):
-                                    if field in ['anomalies']:
-                                        well_dict[field] = []
-                                    elif field in ['raw_cycles', 'raw_rfu', 'fitted_curve', 'fit_parameters', 'parameter_errors']:
-                                        well_dict[field] = []
-                        
-                        results_dict[well_dict['well_id']] = well_dict
-            session_dict['individual_results'] = results_dict
+            # Get well results for this session
+            cursor.execute("""
+                SELECT 
+                    well_id, sample_name, fluorophore, amplitude, is_good_scurve,
+                    r2_score, steepness, midpoint, baseline, cq_value,
+                    raw_cycles, raw_rfu, fitted_curve, fit_parameters, 
+                    parameter_errors, anomalies, curve_classification,
+                    threshold_value, thresholds, cqj, calcj
+                FROM well_results 
+                WHERE session_id = %s
+            """, (session['id'],))
+            well_results = cursor.fetchall()
+            
+            # Convert well results to dict format
+            individual_results = {}
+            well_results_list = []
+            
+            for well in well_results:
+                well_dict = dict(well)
+                well_id = well_dict['well_id']
+                
+                # Extract coordinate from well_id if not present
+                if '_' in well_id:
+                    base_coordinate = well_id.split('_')[0]
+                else:
+                    base_coordinate = well_id
+                well_dict['coordinate'] = base_coordinate
+                
+                # Parse JSON fields that might be stored as strings
+                json_fields = ['raw_cycles', 'raw_rfu', 'fitted_curve', 'fit_parameters', 'parameter_errors', 'anomalies', 'curve_classification', 'thresholds', 'cqj', 'calcj']
+                for field in json_fields:
+                    if field in well_dict and well_dict[field] is not None:
+                        if isinstance(well_dict[field], str):
+                            try:
+                                well_dict[field] = json.loads(well_dict[field])
+                            except (json.JSONDecodeError, TypeError):
+                                if field in ['anomalies']:
+                                    well_dict[field] = []
+                                elif field in ['raw_cycles', 'raw_rfu', 'fitted_curve', 'fit_parameters', 'parameter_errors']:
+                                    well_dict[field] = []
+                                elif field in ['curve_classification', 'thresholds', 'cqj', 'calcj']:
+                                    well_dict[field] = {}
+                
+                individual_results[well_id] = well_dict
+                well_results_list.append(well_dict)
+            
+            # Build session dict
+            session_dict = {
+                'id': session['id'],
+                'filename': session['filename'],
+                'display_name': session['filename'],  # Add display_name for frontend compatibility
+                'upload_timestamp': session['upload_timestamp'].isoformat() if session['upload_timestamp'] else None,
+                'total_wells': session['total_wells'] or 0,
+                'good_curves': session['good_curves'] or 0,
+                'success_rate': session['success_rate'] or 0.0,
+                'cycle_count': session['cycle_count'] or 0,
+                'cycle_min': session['cycle_min'] or 0,
+                'cycle_max': session['cycle_max'] or 0,
+                'pathogen_breakdown': session['pathogen_breakdown'] or '',
+                'individual_results': individual_results,
+                'well_results': well_results_list  # Add for frontend compatibility
+            }
+            
             sessions_data.append(session_dict)
+        
+        cursor.close()
+        conn.close()
+        
         return jsonify({
             'sessions': sessions_data,
             'total': len(sessions)
         })
+        
     except Exception as e:
+        app.logger.error(f"Error fetching sessions with MySQL: {e}")
         return jsonify({'error': f'Database error: {str(e)}'}), 500
 
 @app.route('/sessions/<int:session_id>', methods=['GET'])
@@ -1477,14 +1621,19 @@ def save_combined_session():
                     fluorophore_breakdown[fluorophore] = {'total': 0, 'positive': 0}
                     control_wells_by_fluorophore[fluorophore] = 0
                 
-                fluorophore_breakdown[fluorophore]['total'] += 1
-                
-                # Debug control wells in combined sessions
+                # Check if this is a control well - exclude from statistics if it is
                 sample_name = well_data.get('sample_name', '')
-                if sample_name and any(control in sample_name.upper() for control in ['H1', 'H2', 'H3', 'H4', 'M1', 'M2', 'M3', 'M4', 'L1', 'L2', 'L3', 'L4', 'NTC']):
+                is_control = sample_name and any(control in sample_name.upper() for control in ['H1', 'H2', 'H3', 'H4', 'M1', 'M2', 'M3', 'M4', 'L1', 'L2', 'L3', 'L4', 'NTC'])
+                
+                if is_control:
                     control_wells_by_fluorophore[fluorophore] += 1
                     print(f"[COMBINED CONTROL] {well_key}: sample='{sample_name}', fluorophore='{fluorophore}'")
                     app.logger.info(f"[COMBINED CONTROL] {well_key}: sample='{sample_name}', fluorophore='{fluorophore}'")
+                    # Skip control wells from statistics calculation
+                    continue
+                
+                # Only count non-control wells in statistics
+                fluorophore_breakdown[fluorophore]['total'] += 1
                 
                 # Check if well is positive (amplitude > 500)
                 amplitude = well_data.get('amplitude', 0)
@@ -1500,7 +1649,8 @@ def save_combined_session():
         
         # Calculate overall statistics and create pathogen breakdown display
         positive_wells = sum(breakdown['positive'] for breakdown in fluorophore_breakdown.values())
-        success_rate = (positive_wells / total_wells * 100) if total_wells > 0 else 0
+        total_non_control_wells = sum(breakdown['total'] for breakdown in fluorophore_breakdown.values())
+        success_rate = (positive_wells / total_non_control_wells * 100) if total_non_control_wells > 0 else 0
         
         # Extract test code for proper pathogen mapping
         experiment_name = data.get('filename', 'Multi-Fluorophore Analysis')
@@ -1575,7 +1725,7 @@ def save_combined_session():
             
             # Update existing session with new data
             session = existing_session
-            session.total_wells = total_wells
+            session.total_wells = total_non_control_wells
             session.good_curves = positive_wells
             session.success_rate = success_rate
             session.cycle_count = cycle_count
@@ -1587,7 +1737,7 @@ def save_combined_session():
             # Create new analysis session
             session = AnalysisSession()
             session.filename = str(display_name)
-            session.total_wells = total_wells
+            session.total_wells = total_non_control_wells
             session.good_curves = positive_wells
             session.success_rate = success_rate
             session.cycle_count = cycle_count
@@ -8195,6 +8345,128 @@ def check_ml_training_pause(session_id):
             'success': False,
             'error': str(e)
         }), 500
+
+# =============================================================================
+# CHANNEL COMPLETION TRACKING API ENDPOINTS
+# =============================================================================
+
+@app.route('/channels/status/<experiment_pattern>', methods=['GET'])
+def get_channel_completion_status(experiment_pattern):
+    """Get completion status for all channels of an experiment"""
+    try:
+        mysql_config = get_mysql_config()
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("""
+            SELECT experiment_pattern, fluorophore, test_code, pathogen_target,
+                   status, session_id, started_at, completed_at,
+                   total_wells, good_curves, success_rate, error_message
+            FROM channel_completion_status 
+            WHERE experiment_pattern = %s
+        """, (experiment_pattern,))
+        
+        channels = cursor.fetchall()
+        
+        # Convert to the format expected by frontend
+        channel_dict = {}
+        for channel in channels:
+            channel_dict[channel['fluorophore']] = {
+                'status': channel['status'],
+                'session_id': channel['session_id'],
+                'total_wells': channel['total_wells'],
+                'good_curves': channel['good_curves'],
+                'success_rate': channel['success_rate'],
+                'error_message': channel['error_message'],
+                'started_at': channel['started_at'].isoformat() if channel['started_at'] else None,
+                'completed_at': channel['completed_at'].isoformat() if channel['completed_at'] else None
+            }
+        
+        conn.close()
+        
+        total_channels = len(channels)
+        completed_channels = len([c for c in channels if c['status'] == 'completed'])
+        failed_channels = len([c for c in channels if c['status'] == 'failed'])
+        is_complete = all(c['status'] == 'completed' for c in channels) and total_channels > 0
+        
+        return jsonify({
+            'channels': channel_dict,
+            'total_channels': total_channels,
+            'completed_channels': completed_channels,
+            'failed_channels': failed_channels,
+            'is_complete': is_complete,
+            'experiment_pattern': experiment_pattern
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error getting channel completion status: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/channels/completion/poll', methods=['POST'])
+def poll_channel_completion():
+    """Poll for completion of required channels for an experiment"""
+    try:
+        data = request.json
+        experiment_pattern = data.get('experiment_pattern')
+        required_fluorophores = data.get('required_fluorophores', [])
+        
+        if not experiment_pattern:
+            return jsonify({'error': 'experiment_pattern required'}), 400
+            
+        mysql_config = get_mysql_config()
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Get status for required fluorophores
+        placeholders = ','.join(['%s'] * len(required_fluorophores))
+        cursor.execute(f"""
+            SELECT fluorophore, status, total_wells, good_curves, success_rate, error_message
+            FROM channel_completion_status 
+            WHERE experiment_pattern = %s AND fluorophore IN ({placeholders})
+        """, [experiment_pattern] + required_fluorophores)
+        
+        channels = cursor.fetchall()
+        conn.close()
+        
+        # Build channel status dict
+        channel_status = {}
+        for channel in channels:
+            channel_status[channel['fluorophore']] = {
+                'status': channel['status'],
+                'total_wells': channel['total_wells'],
+                'good_curves': channel['good_curves'],
+                'success_rate': channel['success_rate'],
+                'error_message': channel['error_message']
+            }
+        
+        # Check if we have all required channels
+        missing_channels = set(required_fluorophores) - set(channel_status.keys())
+        for missing in missing_channels:
+            channel_status[missing] = {
+                'status': 'pending',
+                'total_wells': 0,
+                'good_curves': 0,
+                'success_rate': 0.0,
+                'error_message': None
+            }
+        
+        # Determine overall status
+        all_completed = all(ch['status'] == 'completed' for ch in channel_status.values())
+        any_failed = any(ch['status'] == 'failed' for ch in channel_status.values())
+        ready_for_combination = all_completed and not any_failed
+        
+        return jsonify({
+            'experiment_pattern': experiment_pattern,
+            'channels': channel_status,
+            'all_completed': all_completed,
+            'any_failed': any_failed,
+            'ready_for_combination': ready_for_combination,
+            'required_fluorophores': required_fluorophores
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error polling channel completion: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     # Get port from environment variable or use default

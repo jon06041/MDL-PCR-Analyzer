@@ -8738,6 +8738,26 @@ function groupSessionsByExperiment(sessions) {
     const combinedSessions = [];
     
     Object.entries(experimentGroups).forEach(([experimentPattern, groupSessions]) => {
+        // 🚨 FIX: Check for existing combined session in database first
+        const existingCombinedSession = groupSessions.find(session => {
+            // Look for session that matches the experiment pattern exactly (no fluorophore suffix)
+            // This indicates a real combined session from the database
+            return session.filename === experimentPattern || 
+                   (session.filename.includes(experimentPattern) && 
+                    !session.filename.includes(' - ') && 
+                    !session.filename.includes('_FAM') && 
+                    !session.filename.includes('_HEX') && 
+                    !session.filename.includes('_Cy5') && 
+                    !session.filename.includes('_Texas Red'));
+        });
+        
+        if (existingCombinedSession) {
+            // 🎯 Use the real combined session from database instead of creating virtual one
+            console.log(`✅ Found existing combined session in database: ${existingCombinedSession.filename} (ID: ${existingCombinedSession.id})`);
+            combinedSessions.push(existingCombinedSession);
+            return;
+        }
+        
         // Filter out sessions without detectable fluorophores for multi-fluorophore combinations
         const validSessions = groupSessions.filter(session => {
             const fluorophore = detectFluorophoreFromFilename(session.filename);
