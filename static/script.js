@@ -8,6 +8,39 @@ window.chartUpdating = false;
 // Global flag to prevent multiple simultaneous chart initializations
 window.chartInitializing = false;
 
+// ========================================
+// AUTHENTICATED FETCH UTILITY
+// ========================================
+
+/**
+ * Enhanced fetch wrapper with authentication handling
+ * Automatically includes credentials and handles 401 responses
+ */
+async function authenticatedFetch(url, options = {}) {
+    // Ensure credentials are included for session management
+    const defaultOptions = {
+        credentials: 'same-origin',
+        ...options
+    };
+    
+    try {
+        const response = await fetch(url, defaultOptions);
+        
+        // Handle 401 Authentication Required
+        if (response.status === 401) {
+            console.log(`🔐 Authentication required for ${url} - redirecting to login`);
+            const currentPath = encodeURIComponent(window.location.pathname + window.location.search);
+            window.location.href = `/auth/login?next=${currentPath}`;
+            throw new Error('Authentication required - redirecting to login');
+        }
+        
+        return response;
+    } catch (error) {
+        // Re-throw the error for the caller to handle
+        throw error;
+    }
+}
+
 // Anti-throttling and visibility monitoring
 let isTabInBackground = false;
 let backgroundWarningShown = false;
@@ -49,7 +82,7 @@ document.addEventListener('visibilitychange', function() {
 async function checkBackendHealth() {
     try {
         const startTime = performance.now();
-        const response = await fetch('/health', { 
+        const response = await authenticatedFetch('/health', { 
             method: 'GET',
             headers: { 'X-Health-Check': 'frontend' }
         });
@@ -2903,7 +2936,8 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
                     'X-Timestamp': new Date().toISOString() // Help backend track timing
                 },
                 body: JSON.stringify(payload),
-                signal: controller.signal
+                signal: controller.signal,
+                credentials: 'same-origin' // Ensure session cookies are sent
             });
             
             // Debug: Log successful response
@@ -2948,6 +2982,15 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
                 }
                 
                 console.error(`❌ DEBUG-ERROR - Backend HTTP error for ${fluorophore}: ${msg}`);
+                
+                // Handle 401 Authentication Required - redirect to login
+                if (response.status === 401) {
+                    console.log(`🔐 Authentication required - redirecting to login page`);
+                    const currentPath = encodeURIComponent(window.location.pathname + window.location.search);
+                    window.location.href = `/auth/login?next=${currentPath}`;
+                    return { individual_results: {} };
+                }
+                
                 return { individual_results: {} };
             }
             result = await response.json();
@@ -8193,7 +8236,7 @@ function getLocalAnalysisHistory() {
 async function loadAnalysisHistory() {
     try {
         // Try to load from server first
-        const response = await fetch('/sessions');
+        const response = await authenticatedFetch('/sessions');
         const data = await response.json();
         
         if (data.sessions && data.sessions.length > 0) {
@@ -9902,7 +9945,7 @@ async function deleteSession(sessionId, event) {
     deleteBtn.disabled = true;
     
     try {
-        const response = await fetch(`/sessions/${sessionId}`, { method: 'DELETE' });
+        const response = await authenticatedFetch(`/sessions/${sessionId}`, { method: 'DELETE' });
         
         if (!response.ok) {
             const errorData = await response.json();
@@ -14495,7 +14538,7 @@ async function deleteSessionFromDB(sessionId, event) {
             for (const realSessionId of realSessionIds) {
                 console.log(`🗑️ Deleting individual session ${realSessionId} from database...`);
                 
-                const response = await fetch(`/delete_session/${realSessionId}`, {
+                const response = await authenticatedFetch(`/delete_session/${realSessionId}`, {
                     method: 'DELETE'
                 });
                 
