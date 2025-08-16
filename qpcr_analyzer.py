@@ -1103,23 +1103,6 @@ def calculate_cqj(well_data, threshold):
             return cycles[i]
     return None
 
-def calculate_calcj(cqj, h_cq, m_cq, l_cq, h_val, m_val, l_val):
-    """Calculate Calc-J using log-linear interpolation between H, M, L controls."""
-    # Requires all Cq and value controls to be present
-    if None in (cqj, h_cq, m_cq, l_cq, h_val, m_val, l_val):
-        return None
-    # Log-linear interpolation (standard curve):
-    # log10(conc) = slope * (Cq - intercept)
-    # For now, use two-point slope between H and L
-    try:
-        import math
-        slope = (math.log10(h_val) - math.log10(l_val)) / (l_cq - h_cq)
-        intercept = math.log10(h_val) - slope * h_cq
-        log_conc = slope * cqj + intercept
-        return 10 ** log_conc
-    except Exception:
-        return None
-
 # In batch_analyze_wells or after per-well analysis:
 # For each well, after analysis, add:
 #   well_result['cqj'] = {channel: cqj_value, ...}
