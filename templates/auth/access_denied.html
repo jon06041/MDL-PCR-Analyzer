@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Access Denied - MDL PCR Analyzer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .access-denied-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            width: 100%;
+            max-width: 500px;
+            padding: 3rem 2rem;
+            text-align: center;
+        }
+        
+        .access-denied-icon {
+            font-size: 4rem;
+            color: #ff6b6b;
+            margin-bottom: 1rem;
+        }
+        
+        .access-denied-title {
+            color: #333;
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+        
+        .access-denied-message {
+            color: #666;
+            margin-bottom: 2rem;
+            line-height: 1.6;
+        }
+        
+        .btn-custom {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            padding: 12px 24px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            transition: all 0.3s ease;
+            margin: 0.5rem;
+        }
+        
+        .btn-custom:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        .role-info {
+            background-color: #f8f9fa;
+            border-radius: 10px;
+            padding: 1rem;
+            margin-top: 1.5rem;
+            font-size: 0.85rem;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+    <div class="access-denied-container">
+        <div class="access-denied-icon">
+            <i class="fas fa-exclamation-triangle"></i>
+        </div>
+        
+        <h2 class="access-denied-title">Access Denied</h2>
+        
+        <p class="access-denied-message">
+            You don't have sufficient permissions to access this resource. 
+            Please contact your administrator if you believe this is an error.
+        </p>
+        
+        <div class="action-buttons">
+            <a href="{{ url_for('index') }}" class="btn btn-primary btn-custom">
+                <i class="fas fa-home me-2"></i>Back to Dashboard
+            </a>
+            <a href="{{ url_for('auth.profile') }}" class="btn btn-outline-primary">
+                <i class="fas fa-user me-2"></i>View Profile
+            </a>
+        </div>
+        
+        <div class="role-info">
+            <strong><i class="fas fa-info-circle me-2"></i>Role-Based Access:</strong>
+            <ul class="mb-0 mt-2">
+                <li><strong>Administrator:</strong> Full system access</li>
+                <li><strong>Compliance Officer:</strong> Full compliance access</li>
+                <li><strong>QC Technician/Research User:</strong> Analysis and validation</li>
+                <li><strong>Lab Technician:</strong> Basic operations</li>
+                <li><strong>Viewer:</strong> Read-only access</li>
+            </ul>
+        </div>
+        
+        <div class="text-center mt-3">
+            <small class="text-muted">
+                <i class="fas fa-shield-alt me-1"></i>
+                Security is enforced to protect sensitive laboratory data
+            </small>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

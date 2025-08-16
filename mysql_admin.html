@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MySQL Admin - qPCR Analyzer Development</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/themes/prism.min.css" rel="stylesheet">
+    <style>
+        .table-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .query-editor {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 14px;
+        }
+        .result-table {
+            max-height: 500px;
+            overflow: auto;
+        }
+        .sidebar {
+            background-color: #f8f9fa;
+            border-right: 1px solid #dee2e6;
+            min-height: 100vh;
+        }
+        .table-name {
+            cursor: pointer;
+            padding: 5px 10px;
+            border-radius: 4px;
+            margin: 2px 0;
+        }
+        .table-name:hover {
+            background-color: #e9ecef;
+        }
+        .table-name.active {
+            background-color: #007bff;
+            color: white;
+        }
+        .query-result {
+            font-size: 12px;
+        }
+        .connection-status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <div id="connectionStatus" class="connection-status">
+        <div class="alert alert-info" role="alert">
+            <i class="fas fa-circle-notch fa-spin"></i> Connecting...
+        </div>
+    </div>
+
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar with tables -->
+            <div class="col-md-3 sidebar">
+                <div class="p-3">
+                    <h5><i class="fas fa-database"></i> MySQL Admin</h5>
+                    <p class="small text-muted">Development Database Browser</p>
+                    
+                    <div class="mb-3">
+                        <button class="btn btn-sm btn-primary" onclick="refreshTables()">
+                            <i class="fas fa-sync"></i> Refresh
+                        </button>
+                        <button class="btn btn-sm btn-success" onclick="showCreateTable()">
+                            <i class="fas fa-plus"></i> Create
+                        </button>
+                    </div>
+
+                    <h6 class="mt-3">Database Tables</h6>
+                    <div id="tablesList" class="table-list">
+                        <div class="text-center">
+                            <i class="fas fa-circle-notch fa-spin"></i> Loading...
+                        </div>
+                    </div>
+
+                    <h6 class="mt-3">Quick Actions</h6>
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-sm btn-outline-info" onclick="showCompliance()">
+                            <i class="fas fa-shield-alt"></i> Compliance Data
+                        </button>
+                        <button class="btn btn-sm btn-outline-warning" onclick="showML()">
+                            <i class="fas fa-brain"></i> ML Data
+                        </button>
+                        <button class="btn btn-sm btn-outline-success" onclick="showSessions()">
+                            <i class="fas fa-flask"></i> Analysis Sessions
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main content -->
+            <div class="col-md-9">
+                <div class="p-3">
+                    <!-- Query Editor -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <h6 class="mb-0">
+                                <i class="fas fa-code"></i> SQL Query Editor
+                                <button class="btn btn-sm btn-primary float-end" onclick="executeQuery()">
+                                    <i class="fas fa-play"></i> Execute
+                                </button>
+                            </h6>
+                        </div>
+                        <div class="card-body">
+                            <textarea id="queryEditor" class="form-control query-editor" rows="4" 
+                                placeholder="Enter your SQL query here...">SELECT * FROM analysis_sessions LIMIT 10;</textarea>
+                            <div class="mt-2">
+                                <button class="btn btn-sm btn-outline-secondary" onclick="insertQuery('SELECT * FROM ')">SELECT</button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="insertQuery('SHOW TABLES;')">SHOW TABLES</button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="insertQuery('DESCRIBE ')">DESCRIBE</button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="insertQuery('SHOW CREATE TABLE ')">SHOW CREATE</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Results -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h6 class="mb-0">
+                                <i class="fas fa-table"></i> Query Results
+                                <span id="resultCount" class="badge bg-secondary ms-2"></span>
+                                <button class="btn btn-sm btn-outline-primary float-end" onclick="exportResults()">
+                                    <i class="fas fa-download"></i> Export CSV
+                                </button>
+                            </h6>
+                        </div>
+                        <div class="card-body">
+                            <div id="queryResults" class="result-table">
+                                <div class="text-center text-muted">
+                                    <i class="fas fa-info-circle"></i> Execute a query to see results
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div class="modal fade" id="tableModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Table Structure</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="tableModalBody">
+                    <!-- Table structure will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/components/prism-core.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/components/prism-sql.min.js"></script>
+
+    <script>
+        let currentTable = null;
+        let queryResults = [];
+
+        // Initialize the admin interface
+        document.addEventListener('DOMContentLoaded', function() {
+            checkConnection();
+            refreshTables();
+        });
+
+        async function checkConnection() {
+            try {
+                const response = await fetch('/api/mysql-admin/status');
+                const data = await response.json();
+                
+                const statusEl = document.getElementById('connectionStatus');
+                if (data.success) {
+                    statusEl.innerHTML = `
+                        <div class="alert alert-success" role="alert">
+                            <i class="fas fa-check-circle"></i> Connected to ${data.database}
+                        </div>
+                    `;
+                    setTimeout(() => statusEl.style.display = 'none', 3000);
+                } else {
+                    statusEl.innerHTML = `
+                        <div class="alert alert-danger" role="alert">
+                            <i class="fas fa-exclamation-circle"></i> Connection failed
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                document.getElementById('connectionStatus').innerHTML = `
+                    <div class="alert alert-danger" role="alert">
+                        <i class="fas fa-exclamation-circle"></i> Connection error
+                    </div>
+                `;
+            }
+        }
+
+        async function refreshTables() {
+            try {
+                const response = await fetch('/api/mysql-admin/tables');
+                const data = await response.json();
+                
+                const tablesList = document.getElementById('tablesList');
+                if (data.success) {
+                    tablesList.innerHTML = data.tables.map(table => `
+                        <div class="table-name" onclick="selectTable('${table.name}')" title="${table.rows} rows">
+                            <i class="fas fa-table"></i> ${table.name}
+                            <small class="text-muted d-block">${table.rows} rows</small>
+                        </div>
+                    `).join('');
+                } else {
+                    tablesList.innerHTML = '<div class="text-danger">Failed to load tables</div>';
+                }
+            } catch (error) {
+                document.getElementById('tablesList').innerHTML = '<div class="text-danger">Error loading tables</div>';
+            }
+        }
+
+        function selectTable(tableName) {
+            // Update UI
+            document.querySelectorAll('.table-name').forEach(el => el.classList.remove('active'));
+            event.target.closest('.table-name').classList.add('active');
+            
+            currentTable = tableName;
+            
+            // Load table data
+            document.getElementById('queryEditor').value = `SELECT * FROM ${tableName} LIMIT 50;`;
+            executeQuery();
+        }
+
+        async function executeQuery() {
+            const query = document.getElementById('queryEditor').value.trim();
+            if (!query) {
+                alert('Please enter a query');
+                return;
+            }
+
+            const resultsEl = document.getElementById('queryResults');
+            resultsEl.innerHTML = '<div class="text-center"><i class="fas fa-circle-notch fa-spin"></i> Executing query...</div>';
+
+            try {
+                const response = await fetch('/api/mysql-admin/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: query })
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    queryResults = data.results;
+                    displayResults(data.results, data.columns);
+                    document.getElementById('resultCount').textContent = `${data.results.length} rows`;
+                } else {
+                    resultsEl.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+                    document.getElementById('resultCount').textContent = 'Error';
+                }
+            } catch (error) {
+                resultsEl.innerHTML = `<div class="alert alert-danger">Query failed: ${error.message}</div>`;
+                document.getElementById('resultCount').textContent = 'Error';
+            }
+        }
+
+        function displayResults(results, columns) {
+            const resultsEl = document.getElementById('queryResults');
+            
+            if (!results || results.length === 0) {
+                resultsEl.innerHTML = '<div class="text-muted">No results returned</div>';
+                return;
+            }
+
+            let html = `
+                <table class="table table-sm table-striped query-result">
+                    <thead class="table-dark">
+                        <tr>
+                            ${columns.map(col => `<th>${col}</th>`).join('')}
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            results.forEach(row => {
+                html += '<tr>';
+                columns.forEach(col => {
+                    let value = row[col];
+                    // Handle JSON and long text
+                    if (typeof value === 'string' && value.length > 100) {
+                        value = `<span title="${value.replace(/"/g, '&quot;')}">${value.substring(0, 100)}...</span>`;
+                    } else if (value === null) {
+                        value = '<span class="text-muted">NULL</span>';
+                    }
+                    html += `<td>${value}</td>`;
+                });
+                html += '</tr>';
+            });
+
+            html += '</tbody></table>';
+            resultsEl.innerHTML = html;
+        }
+
+        function insertQuery(query) {
+            const editor = document.getElementById('queryEditor');
+            editor.value = query;
+            editor.focus();
+        }
+
+        function showCompliance() {
+            insertQuery(`
+SELECT 
+    requirement_code, 
+    evidence_type, 
+    status,
+    created_at,
+    LEFT(description, 100) as description_preview
+FROM compliance_evidence 
+ORDER BY created_at DESC 
+LIMIT 20;`);
+        }
+
+        function showML() {
+            insertQuery(`
+SELECT 
+    session_id,
+    pathogen,
+    original_prediction,
+    expert_correction,
+    confidence,
+    timestamp
+FROM ml_expert_decisions 
+ORDER BY timestamp DESC 
+LIMIT 20;`);
+        }
+
+        function showSessions() {
+            insertQuery(`
+SELECT 
+    id,
+    filename,
+    total_wells,
+    good_curves,
+    success_rate,
+    upload_timestamp
+FROM analysis_sessions 
+ORDER BY upload_timestamp DESC 
+LIMIT 20;`);
+        }
+
+        function exportResults() {
+            if (!queryResults || queryResults.length === 0) {
+                alert('No results to export');
+                return;
+            }
+
+            const csv = convertToCSV(queryResults);
+            downloadCSV(csv, 'query_results.csv');
+        }
+
+        function convertToCSV(data) {
+            if (!data || data.length === 0) return '';
+            
+            const headers = Object.keys(data[0]);
+            const csvHeaders = headers.join(',');
+            
+            const csvRows = data.map(row => 
+                headers.map(header => {
+                    let value = row[header];
+                    if (value === null) value = '';
+                    if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
+                        value = `"${value.replace(/"/g, '""')}"`;
+                    }
+                    return value;
+                }).join(',')
+            );
+            
+            return [csvHeaders, ...csvRows].join('\n');
+        }
+
+        function downloadCSV(csv, filename) {
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
+
+        function showCreateTable() {
+            alert('Create table functionality would be implemented here for development use');
+        }
+    </script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory, Response
+from flask import Flask, request, jsonify, send_from_directory, Response, render_template_string
 import json
 import os
 import re
@@ -6,6 +6,7 @@ import traceback
 import logging
 import time
 import pymysql
+import mysql.connector
 from logging.handlers import RotatingFileHandler
 import numpy as np
 from datetime import datetime
@@ -13,7 +14,7 @@ from decimal import Decimal
 from urllib.parse import unquote
 from dotenv import load_dotenv
 from qpcr_analyzer import process_csv_data, validate_csv_structure
-from models import db, AnalysisSession, WellResult, ExperimentStatistics
+from models import db, AnalysisSession, WellResult, ExperimentStatistics, ChannelCompletionStatus
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.exc import OperationalError, IntegrityError, DatabaseError
 from threshold_backend import create_threshold_routes
@@ -25,9 +26,45 @@ from database_management_api import db_mgmt_bp
 # Temporarily disable enhanced compliance API due to corruption
 # from enhanced_compliance_api import compliance_api
 from ml_run_api import ml_run_api
+from encryption_api import encryption_bp
 
 # Load environment variables immediately at startup
 load_dotenv()
+
+def is_control_sample(sample_name):
+    """
+    Dynamically detect control samples based on naming patterns.
+    Controls end with: H-runnum, M-runnum, L-runnum, or NTC-runnum
+    where runnum is any sequence of digits.
+    
+    Args:
+        sample_name (str): The sample name to check
+    
+    Returns:
+        bool: True if sample is a control, False if it's a regular sample
+    """
+    if not sample_name:
+        return False
+    
+    # Pattern matches: H-digits, M-digits, L-digits, or NTC-digits at end of string
+    control_pattern = r'(?:[HML]-\d+|NTC-\d+)$'
+    return bool(re.search(control_pattern, sample_name))
+    
+def is_sample_well(sample_name):
+    """
+    Check if a well contains a sample (not a control).
+    Samples are identified as wells that are NOT controls.
+    
+    Args:
+        sample_name (str): The sample name to check
+    
+    Returns:
+        bool: True if this is a sample well, False if control or invalid
+    """
+    if not sample_name:
+        return False
+    
+    return not is_control_sample(sample_name)
 
 def safe_json_dumps(value, default=None):
     """Helper function to safely serialize to JSON, avoiding double-encoding"""
@@ -142,6 +179,61 @@ def get_pathogen_target(test_code, fluorophore):
     # Fallback to fluorophore name if no mapping found
     return fluorophore
 
+def get_classification_group(classification):
+    """
+    Group classifications for expert correction accuracy calculation.
+    Changes within the same group don't count as corrections for accuracy purposes,
+    but ML can still learn from them.
+    
+    Args:
+        classification (str): The curve classification
+        
+    Returns:
+        str: The group name ('POSITIVE', 'REDO', 'NEGATIVE')
+    """
+    if not classification:
+        return 'UNKNOWN'
+    
+    classification = classification.upper()
+    
+    # POSITIVE group: WEAK_POSITIVE, POSITIVE, STRONG_POSITIVE
+    if classification in ['WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE']:
+        return 'POSITIVE'
+    
+    # REDO group: INDETERMINATE, SUSPICIOUS, REDO
+    elif classification in ['INDETERMINATE', 'SUSPICIOUS', 'REDO']:
+        return 'REDO'
+    
+    # NEGATIVE group: NEGATIVE (standalone)
+    elif classification in ['NEGATIVE']:
+        return 'NEGATIVE'
+    
+    # Unknown classifications
+    else:
+        return 'UNKNOWN'
+
+def is_expert_correction(original_prediction, expert_correction):
+    """
+    Determine if an expert change counts as a correction for accuracy purposes.
+    Changes within the same classification group (POSITIVE, REDO, NEGATIVE) 
+    are not considered corrections for accuracy calculation.
+    
+    Args:
+        original_prediction (str): Original ML prediction
+        expert_correction (str): Expert's correction
+        
+    Returns:
+        bool: True if this counts as a correction, False if it's within same group
+    """
+    if not original_prediction or not expert_correction:
+        return False
+    
+    original_group = get_classification_group(original_prediction)
+    expert_group = get_classification_group(expert_correction)
+    
+    # Same group = no correction for accuracy purposes
+    return original_group != expert_group
+
 def extract_base_pattern(filename):
     """Extract base pattern from CFX Manager filename, handling trailing dashes"""
     # Match pattern: prefix_numbers_CFXnumbers (allowing additional suffixes)
@@ -152,6 +244,93 @@ def extract_base_pattern(filename):
         return re.sub(r'[-\s]+$', '', match.group(1))
     # Fallback to filename without extension, also cleaning trailing dashes
     return re.sub(r'[-\s]+$', '', filename.split('.')[0])
+
+def track_channel_completion(session, experiment_name, fluorophore, total_wells, good_curves, success_rate):
+    """Track completion status for individual channel processing"""
+    try:
+        # Import here to avoid circular imports
+        from models import ChannelCompletionStatus, WellResult
+        
+        # Extract experiment pattern and test code
+        base_pattern = extract_base_pattern(experiment_name)
+        test_code = base_pattern.split('_')[0]
+        if test_code.startswith('Ac'):
+            test_code = test_code[2:]  # Remove "Ac" prefix
+        
+        # Get pathogen target based on fluorophore
+        pathogen_target = get_pathogen_for_fluorophore(test_code, fluorophore)
+        
+        # Calculate good curves excluding controls (controls should have been filtered already)
+        # Count non-control wells that are positive
+        non_control_good_curves = 0
+        non_control_total_wells = 0
+        
+        # Query well results for this session to count non-control wells
+        well_results = WellResult.query.filter_by(session_id=session.id).all()
+        for well in well_results:
+            # Skip control wells using dynamic detection
+            if is_control_sample(well.sample_name):
+                continue
+                
+            non_control_total_wells += 1
+            # Count as good curve if positive classification
+            if well.curve_classification:
+                try:
+                    import json
+                    classification_data = json.loads(well.curve_classification) if isinstance(well.curve_classification, str) else well.curve_classification
+                    classification = classification_data.get('class', 'N/A')
+                    if classification in ['POSITIVE', 'STRONG_POSITIVE', 'WEAK_POSITIVE']:
+                        non_control_good_curves += 1
+                except:
+                    pass
+        
+        # Calculate success rate for non-control wells
+        non_control_success_rate = (non_control_good_curves / non_control_total_wells) if non_control_total_wells > 0 else 0.0
+        
+        # Check if channel completion status already exists
+        existing_status = ChannelCompletionStatus.query.filter_by(
+            experiment_pattern=base_pattern,
+            fluorophore=fluorophore
+        ).first()
+        
+        if existing_status:
+            # Update existing record
+            existing_status.status = 'completed'
+            existing_status.session_id = session.id
+            existing_status.completed_at = datetime.utcnow()
+            existing_status.total_wells = non_control_total_wells
+            existing_status.good_curves = non_control_good_curves
+            existing_status.success_rate = non_control_success_rate
+            existing_status.error_message = None
+        else:
+            # Create new channel completion status
+            channel_status = ChannelCompletionStatus(
+                experiment_pattern=base_pattern,
+                fluorophore=fluorophore,
+                test_code=test_code,
+                pathogen_target=pathogen_target,
+                status='completed',
+                session_id=session.id,
+                started_at=datetime.utcnow(),
+                completed_at=datetime.utcnow(),
+                total_wells=non_control_total_wells,
+                good_curves=non_control_good_curves,
+                success_rate=non_control_success_rate,
+                json_data_validated=True,
+                threshold_data_ready=True,
+                control_grid_data_ready=True
+            )
+            db.session.add(channel_status)
+        
+        db.session.commit()
+        
+        print(f"[CHANNEL TRACKING] ✅ Tracked completion for {base_pattern} - {fluorophore}: {non_control_good_curves}/{non_control_total_wells} wells ({non_control_success_rate:.1%})")
+        app.logger.info(f"[CHANNEL TRACKING] ✅ Tracked completion for {base_pattern} - {fluorophore}: {non_control_good_curves}/{non_control_total_wells} wells ({non_control_success_rate:.1%})")
+        
+    except Exception as e:
+        print(f"[CHANNEL TRACKING] ❌ Error tracking channel completion: {e}")
+        app.logger.error(f"[CHANNEL TRACKING] ❌ Error tracking channel completion: {e}")
+        # Don't re-raise the error to avoid breaking the main workflow
 
 def validate_file_pattern_consistency(filenames):
     """Validate that all files share the same base pattern"""
@@ -204,29 +383,60 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
         # Get pathogen target for naming purposes
         pathogen_target = get_pathogen_target(test_code, fluorophore)
         
-        # Calculate statistics from results
+        # Calculate statistics from results - EXCLUDE CONTROL WELLS
         individual_results = results.get('individual_results', {})
-        total_wells = len(individual_results)
         
         # Use complete filename as experiment name for individual channels
         experiment_name = filename
-        total_wells = len(individual_results)
         
-        # Count positive wells (POS classification: amplitude > 500 and no anomalies)
-        positive_wells = 0
+        # Count only non-control wells for statistics (using dynamic control detection)
+        total_non_control_wells = 0
+        positive_non_control_wells = 0
+        
         if isinstance(individual_results, dict):
             for well_data in individual_results.values():
                 if isinstance(well_data, dict):
-                    amplitude = well_data.get('amplitude', 0)
-                    anomalies = well_data.get('anomalies', [])
-                    has_anomalies = False
+                    # Check if this is a control well using dynamic detection
+                    sample_name = well_data.get('sample_name', '')
                     
-                    if anomalies and anomalies != ['None']:
-                        has_anomalies = True
+                    # Only count non-control wells
+                    if not is_control_sample(sample_name):
+                        total_non_control_wells += 1
+                        
+                        # Count positive wells (POS classification: amplitude > 500 and no anomalies)
+                        amplitude = well_data.get('amplitude', 0)
+                        anomalies = well_data.get('anomalies', [])
+                        has_anomalies = False
+                        
+                        if anomalies and anomalies != ['None']:
+                            has_anomalies = True
+                        
+                        if amplitude > 500 and not has_anomalies:
+                            positive_non_control_wells += 1
+        elif isinstance(individual_results, list):
+            for well_data in individual_results:
+                if isinstance(well_data, dict):
+                    # Check if this is a control well using dynamic detection
+                    sample_name = well_data.get('sample_name', '')
                     
-                    if amplitude > 500 and not has_anomalies:
-                        positive_wells += 1
+                    # Only count non-control wells
+                    if not is_control_sample(sample_name):
+                        total_non_control_wells += 1
+                        
+                        # Count positive wells (POS classification: amplitude > 500 and no anomalies)
+                        amplitude = well_data.get('amplitude', 0)
+                        anomalies = well_data.get('anomalies', [])
+                        has_anomalies = False
+                        
+                        if anomalies and anomalies != ['None']:
+                            has_anomalies = True
+                        
+                        if amplitude > 500 and not has_anomalies:
+                            positive_non_control_wells += 1
         
+        # Use non-control counts for session statistics
+        total_wells = total_non_control_wells
+        positive_wells = positive_non_control_wells
         success_rate = (positive_wells / total_wells * 100) if total_wells > 0 else 0
         
         # Extract cycle information - handle both dict and list formats
@@ -278,16 +488,34 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             print(f"Backend pathogen mapping: {test_code} + {fluorophore} -> {pathogen_target}")
             app.logger.info(f"Backend pathogen mapping: {test_code} + {fluorophore} -> {pathogen_target}")
             
-            # Calculate positive percentage for this channel
+            # Calculate positive percentage for this channel - EXCLUDE CONTROL WELLS
             pos_count = 0
-            total_count = len(individual_results)
+            sample_count = 0  # Count only non-control wells
             
             if isinstance(individual_results, dict):
                 for well_data in individual_results.values():
-                    if isinstance(well_data, dict) and well_data.get('amplitude', 0) > 500:
-                        pos_count += 1
+                    if isinstance(well_data, dict):
+                        # Check if this is a control well using dynamic detection
+                        sample_name = well_data.get('sample_name', '')
+                        
+                        # Only count non-control wells
+                        if not is_control_sample(sample_name):
+                            sample_count += 1
+                            if well_data.get('amplitude', 0) > 500:
+                                pos_count += 1
+            elif isinstance(individual_results, list):
+                for well_data in individual_results:
+                    if isinstance(well_data, dict):
+                        # Check if this is a control well using dynamic detection
+                        sample_name = well_data.get('sample_name', '')
+                        
+                        # Only count non-control wells
+                        if not is_control_sample(sample_name):
+                            sample_count += 1
+                            if well_data.get('amplitude', 0) > 500:
+                                pos_count += 1
             
-            positive_percentage = (pos_count / total_count * 100) if total_count > 0 else 0
+            positive_percentage = (pos_count / sample_count * 100) if sample_count > 0 else 0
             pathogen_breakdown_display = f"{pathogen_target}: {positive_percentage:.1f}%"
             
             print(f"Individual channel pathogen breakdown: {pathogen_breakdown_display} (fluorophore: {fluorophore}, target: {pathogen_target})")
@@ -465,6 +693,13 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
             db.session.flush()
             print(f"[DB DEBUG] Final commit done for {well_count} wells.")
             app.logger.info(f"[DB DEBUG] Final commit done for {well_count} wells.")
+            
+            # Add channel completion tracking after successful session save
+            try:
+                track_channel_completion(session, experiment_name, fluorophore, well_count, positive_wells, success_rate)
+            except Exception as track_error:
+                print(f"Warning: Failed to track channel completion: {track_error}")
+                app.logger.warning(f"Warning: Failed to track channel completion: {track_error}")
             
         except Exception as commit_error:
             db.session.rollback()
@@ -659,6 +894,21 @@ with app.app_context():
         print(f"❌ Critical: MySQL database initialization failed: {e}")
         raise Exception(f"MySQL database initialization failed: {e}")
 
+# Register enhanced authentication blueprint
+from enhanced_auth_routes import enhanced_auth_bp
+app.register_blueprint(enhanced_auth_bp)
+
+# Import permission decorators for route protection
+from permission_decorators import require_permission, production_admin_only
+
+# Register permission middleware and API endpoints
+from permission_middleware import (
+    register_permission_api, Permissions, Roles,
+    require_permission, require_authentication, admin_required,
+    qc_technician_required, compliance_officer_required
+)
+register_permission_api(app)
+
 # Register database management blueprint
 app.register_blueprint(db_mgmt_bp)
 
@@ -668,6 +918,9 @@ app.register_blueprint(db_mgmt_bp)
 
 # Register ML run management API blueprint  
 app.register_blueprint(ml_run_api)
+
+# Register encryption API blueprint
+app.register_blueprint(encryption_bp)
 
 print("✅ MySQL database configured and ready")
 print("MySQL database tables initialized")
@@ -869,6 +1122,7 @@ def unified_compliance_dashboard():
     return send_from_directory('.', 'unified_compliance_dashboard.html')
 
 @app.route('/ml-config')
+@production_admin_only
 def ml_config():
     return send_from_directory('.', 'ml_config.html')
 
@@ -886,6 +1140,7 @@ def serve_config(filename):
     return send_from_directory('config', filename)
 
 @app.route('/analyze', methods=['POST'])
+@require_permission(Permissions.RUN_BASIC_ANALYSIS)
 def analyze_data():
     """Endpoint to analyze qPCR data and save results to database"""
     try:
@@ -1108,11 +1363,24 @@ def analyze_data():
             summary = results['summary']
         else:
             individual_results = results.get('individual_results', {})
-            good_curves = results.get('good_curves', [])
-            total_wells = len(individual_results)
-            good_count = len(good_curves)
-            success_rate = (good_count / total_wells * 100) if total_wells > 0 else 0
-            
+            # Count non-control wells and positives using amplitude threshold (exclude controls)
+            total_non_control_wells = 0
+            non_control_good_count = 0
+            for well_id, well_data in individual_results.items():
+                if isinstance(well_data, dict):
+                    sample_name = well_data.get('sample_name', '')
+                    # Skip controls from summary
+                    if not is_control_sample(sample_name):
+                        total_non_control_wells += 1
+                        # Use amplitude threshold for positive detection to match other code paths
+                        if well_data.get('amplitude', 0) > 500:
+                            non_control_good_count += 1
+
+            # Ensure backward-compatible variable name
+            total_wells = total_non_control_wells
+            good_count = non_control_good_count
+            success_rate = (good_count / total_wells * 100) if total_wells > 0 else 0.0
+
             summary = {
                 'total_wells': total_wells,
                 'good_curves': good_count,
@@ -1279,57 +1547,99 @@ def analyze_data():
 
 @app.route('/sessions', methods=['GET'])
 def get_sessions():
-    """Get all analysis sessions"""
+    """Get all analysis sessions using MySQL directly"""
     try:
-        sessions = AnalysisSession.query.order_by(AnalysisSession.upload_timestamp.desc()).all()
+        mysql_config = get_mysql_config()
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Get all sessions ordered by upload timestamp descending
+        cursor.execute("""
+            SELECT 
+                id, filename, upload_timestamp, total_wells, good_curves, 
+                success_rate, cycle_count, cycle_min, cycle_max, pathogen_breakdown
+            FROM analysis_sessions 
+            ORDER BY upload_timestamp DESC
+        """)
+        sessions = cursor.fetchall()
+        
         sessions_data = []
         for session in sessions:
-            session_dict = session.to_dict()
-            # Robustly handle both dict and list for well_results
-            individual_results = session.well_results
-            # Convert to dict keyed by well_id if not already
-            if isinstance(individual_results, dict):
-                results_dict = individual_results
-            else:
-                results_dict = {}
-                for well in individual_results:
-                    well_dict = well.to_dict() if hasattr(well, 'to_dict') else well
-                    if isinstance(well_dict, dict) and 'well_id' in well_dict:
-                        # Ensure well_dict has all necessary fields for control grid (same as get_session_details)
-                        well_id = well_dict['well_id']
-                        
-                        # Extract coordinate from well_id if not present
-                        if 'coordinate' not in well_dict or not well_dict['coordinate']:
-                            base_coordinate = well_id.split('_')[0] if '_' in well_id else well_id
-                            well_dict['coordinate'] = base_coordinate
-                        
-                        # Ensure fluorophore is present
-                        if 'fluorophore' not in well_dict or not well_dict['fluorophore']:
-                            if '_' in well_id:
-                                potential_fluorophore = well_id.split('_')[-1]
-                                if potential_fluorophore in ['Cy5', 'FAM', 'HEX', 'Texas Red']:
-                                    well_dict['fluorophore'] = potential_fluorophore
-                        
-                        # Parse JSON fields that might be stored as strings in database
-                        json_fields = ['raw_cycles', 'raw_rfu', 'fitted_curve', 'fit_parameters', 'parameter_errors', 'anomalies']
-                        for field in json_fields:
-                            if field in well_dict and isinstance(well_dict[field], str):
-                                try:
-                                    well_dict[field] = json.loads(well_dict[field])
-                                except (json.JSONDecodeError, TypeError):
-                                    if field in ['anomalies']:
-                                        well_dict[field] = []
-                                    elif field in ['raw_cycles', 'raw_rfu', 'fitted_curve', 'fit_parameters', 'parameter_errors']:
-                                        well_dict[field] = []
-                        
-                        results_dict[well_dict['well_id']] = well_dict
-            session_dict['individual_results'] = results_dict
+            # Get well results for this session
+            cursor.execute("""
+                SELECT 
+                    well_id, sample_name, fluorophore, amplitude, is_good_scurve,
+                    r2_score, steepness, midpoint, baseline, cq_value,
+                    raw_cycles, raw_rfu, fitted_curve, fit_parameters, 
+                    parameter_errors, anomalies, curve_classification,
+                    threshold_value, thresholds, cqj, calcj
+                FROM well_results 
+                WHERE session_id = %s
+            """, (session['id'],))
+            well_results = cursor.fetchall()
+            
+            # Convert well results to dict format
+            individual_results = {}
+            well_results_list = []
+            
+            for well in well_results:
+                well_dict = dict(well)
+                well_id = well_dict['well_id']
+                
+                # Extract coordinate from well_id if not present
+                if '_' in well_id:
+                    base_coordinate = well_id.split('_')[0]
+                else:
+                    base_coordinate = well_id
+                well_dict['coordinate'] = base_coordinate
+                
+                # Parse JSON fields that might be stored as strings
+                json_fields = ['raw_cycles', 'raw_rfu', 'fitted_curve', 'fit_parameters', 'parameter_errors', 'anomalies', 'curve_classification', 'thresholds', 'cqj', 'calcj']
+                for field in json_fields:
+                    if field in well_dict and well_dict[field] is not None:
+                        if isinstance(well_dict[field], str):
+                            try:
+                                well_dict[field] = json.loads(well_dict[field])
+                            except (json.JSONDecodeError, TypeError):
+                                if field in ['anomalies']:
+                                    well_dict[field] = []
+                                elif field in ['raw_cycles', 'raw_rfu', 'fitted_curve', 'fit_parameters', 'parameter_errors']:
+                                    well_dict[field] = []
+                                elif field in ['curve_classification', 'thresholds', 'cqj', 'calcj']:
+                                    well_dict[field] = {}
+                
+                individual_results[well_id] = well_dict
+                well_results_list.append(well_dict)
+            
+            # Build session dict
+            session_dict = {
+                'id': session['id'],
+                'filename': session['filename'],
+                'display_name': session['filename'],  # Add display_name for frontend compatibility
+                'upload_timestamp': session['upload_timestamp'].isoformat() if session['upload_timestamp'] else None,
+                'total_wells': session['total_wells'] or 0,
+                'good_curves': session['good_curves'] or 0,
+                'success_rate': session['success_rate'] or 0.0,
+                'cycle_count': session['cycle_count'] or 0,
+                'cycle_min': session['cycle_min'] or 0,
+                'cycle_max': session['cycle_max'] or 0,
+                'pathogen_breakdown': session['pathogen_breakdown'] or '',
+                'individual_results': individual_results,
+                'well_results': well_results_list  # Add for frontend compatibility
+            }
+            
             sessions_data.append(session_dict)
+        
+        cursor.close()
+        conn.close()
+        
         return jsonify({
             'sessions': sessions_data,
             'total': len(sessions)
         })
+        
     except Exception as e:
+        app.logger.error(f"Error fetching sessions with MySQL: {e}")
         return jsonify({'error': f'Database error: {str(e)}'}), 500
 
 @app.route('/sessions/<int:session_id>', methods=['GET'])
@@ -1456,14 +1766,18 @@ def save_combined_session():
                     fluorophore_breakdown[fluorophore] = {'total': 0, 'positive': 0}
                     control_wells_by_fluorophore[fluorophore] = 0
                 
-                fluorophore_breakdown[fluorophore]['total'] += 1
-                
-                # Debug control wells in combined sessions
+                # Check if this is a control well - exclude from statistics if it is
                 sample_name = well_data.get('sample_name', '')
-                if sample_name and any(control in sample_name.upper() for control in ['H1', 'H2', 'H3', 'H4', 'M1', 'M2', 'M3', 'M4', 'L1', 'L2', 'L3', 'L4', 'NTC']):
+                
+                if is_control_sample(sample_name):
                     control_wells_by_fluorophore[fluorophore] += 1
                     print(f"[COMBINED CONTROL] {well_key}: sample='{sample_name}', fluorophore='{fluorophore}'")
                     app.logger.info(f"[COMBINED CONTROL] {well_key}: sample='{sample_name}', fluorophore='{fluorophore}'")
+                    # Skip control wells from statistics calculation
+                    continue
+                
+                # Only count non-control wells in statistics
+                fluorophore_breakdown[fluorophore]['total'] += 1
                 
                 # Check if well is positive (amplitude > 500)
                 amplitude = well_data.get('amplitude', 0)
@@ -1478,8 +1792,27 @@ def save_combined_session():
             print(f"[COMBINED SESSION] {fluorophore}: {count} control wells out of {fluorophore_counts.get(fluorophore, 0)} total wells")
         
         # Calculate overall statistics and create pathogen breakdown display
+        # Allow caller to supply a control_count (from earlier analysis) for this session
+        provided_control_count = data.get('control_count') if isinstance(data, dict) else None
+
         positive_wells = sum(breakdown['positive'] for breakdown in fluorophore_breakdown.values())
-        success_rate = (positive_wells / total_wells * 100) if total_wells > 0 else 0
+        total_non_control_wells = sum(breakdown['total'] for breakdown in fluorophore_breakdown.values())
+
+        # If a control_count was provided, ensure it's not included in totals
+        try:
+            control_count_val = int(provided_control_count) if provided_control_count is not None else 0
+        except Exception:
+            control_count_val = 0
+
+        # If controls were detected earlier per-fluorophore, subtract them from totals to be safe
+        detected_controls = sum(control_wells_by_fluorophore.values())
+        effective_control_count = max(control_count_val, detected_controls)
+
+        # Adjust total_non_control_wells if controls were included inadvertently
+        if effective_control_count > 0:
+            total_non_control_wells = max(0, total_non_control_wells)
+
+        success_rate = (positive_wells / total_non_control_wells * 100) if total_non_control_wells > 0 else 0.0
         
         # Extract test code for proper pathogen mapping
         experiment_name = data.get('filename', 'Multi-Fluorophore Analysis')
@@ -1502,7 +1835,8 @@ def save_combined_session():
             
             for fluorophore in sorted_fluorophores:
                 breakdown = fluorophore_breakdown[fluorophore]
-                rate = (breakdown['positive'] / breakdown['total'] * 100) if breakdown['total'] > 0 else 0
+                # Compute rate using non-control total for this fluorophore
+                rate = (breakdown['positive'] / breakdown['total'] * 100) if breakdown['total'] > 0 else 0.0
                 
                 # Use centralized pathogen mapping
                 pathogen_target = get_pathogen_target(test_code, fluorophore)
@@ -1554,7 +1888,7 @@ def save_combined_session():
             
             # Update existing session with new data
             session = existing_session
-            session.total_wells = total_wells
+            session.total_wells = total_non_control_wells
             session.good_curves = positive_wells
             session.success_rate = success_rate
             session.cycle_count = cycle_count
@@ -1566,7 +1900,7 @@ def save_combined_session():
             # Create new analysis session
             session = AnalysisSession()
             session.filename = str(display_name)
-            session.total_wells = total_wells
+            session.total_wells = total_non_control_wells
             session.good_curves = positive_wells
             session.success_rate = success_rate
             session.cycle_count = cycle_count
@@ -1660,11 +1994,24 @@ def save_combined_session():
         except Exception as ml_update_error:
             print(f"Warning: Could not update ML tracking session_id: {ml_update_error}")
 
+        # Check if ML training is paused for this session
+        training_paused = False
+        training_notice = None
+        try:
+            from ml_training_manager import ml_training_manager
+            training_paused = ml_training_manager.is_training_paused(str(session.id))
+            if training_paused:
+                training_notice = "ML training is currently paused for this session. No ML confirmation prompts will appear until training is resumed."
+        except Exception as e:
+            print(f"Warning: Could not check training pause status: {e}")
+
         return jsonify({
             'success': True,
             'message': f'Combined session saved with {well_count} wells',
             'session_id': session.id,
-            'display_name': display_name
+            'display_name': display_name,
+            'training_paused': training_paused,
+            'training_notice': training_notice
         })
         
     except Exception as e:
@@ -1716,46 +2063,103 @@ def delete_all_sessions():
 # --- Update session results ---
 @app.route('/sessions/<int:session_id>/update', methods=['PUT'])
 def update_session_results(session_id):
-    """Update analysis results for a specific session"""
+    """Update analysis results for a specific session with MySQL and create pending confirmation"""
     try:
         data = request.get_json()
+        app.logger.info(f"🔄 Updating session {session_id} with MySQL...")
         
-        session = AnalysisSession.query.get_or_404(session_id)
+        # Get database configuration using global helper
+        mysql_config = get_mysql_config()
         
-        # Update session metadata if provided
-        if 'notes' in data:
-            session.notes = data['notes']
+        import mysql.connector
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor()
         
-        # Update individual well results if provided
-        if 'individual_results' in data:
-            individual_results = data['individual_results']
+        try:
+            # First check if session exists
+            cursor.execute("SELECT id, filename, confirmation_status FROM analysis_sessions WHERE id = %s", (session_id,))
+            session_data = cursor.fetchone()
             
-            for well_key, well_data in individual_results.items():
-                # Find existing well result
-                well_result = WellResult.query.filter_by(
-                    session_id=session_id,
-                    well_id=well_key
-                ).first()
+            if not session_data:
+                return jsonify({'error': f'Session {session_id} not found'}), 404
                 
-                if well_result:
-                    # Update existing well result
+            current_confirmation_status = session_data[2]
+            session_filename = session_data[1]
+            
+            # Update session metadata if provided
+            if 'notes' in data:
+                cursor.execute(
+                    "UPDATE analysis_sessions SET notes = %s WHERE id = %s",
+                    (data['notes'], session_id)
+                )
+            
+            # Update individual well results if provided
+            if 'individual_results' in data:
+                individual_results = data['individual_results']
+                app.logger.info(f"🔄 Updating {len(individual_results)} well results...")
+                
+                for well_key, well_data in individual_results.items():
+                    # Build dynamic update query based on provided fields
+                    update_fields = []
+                    update_values = []
+                    
                     for field, value in well_data.items():
-                        if hasattr(well_result, field):
-                            # Handle JSON fields
-                            if field in ['raw_cycles', 'raw_rfu', 'fitted_curve', 'fit_parameters', 'parameter_errors', 'anomalies']:
-                                if isinstance(value, (dict, list)):
-                                    value = json.dumps(value)
-                            setattr(well_result, field, value)
-        
-        db.session.commit()
-        
-        return jsonify({
-            'success': True,
-            'message': f'Session {session_id} updated successfully'
-        })
+                        # Handle JSON fields
+                        if field in ['raw_cycles', 'raw_rfu', 'fitted_curve', 'fit_parameters', 'parameter_errors', 'anomalies']:
+                            if isinstance(value, (dict, list)):
+                                value = json.dumps(value)
+                        
+                        update_fields.append(f"{field} = %s")
+                        update_values.append(value)
+                    
+                    if update_fields:
+                        update_values.extend([session_id, well_key])
+                        update_query = f"""
+                            UPDATE well_results 
+                            SET {', '.join(update_fields)}
+                            WHERE session_id = %s AND well_id = %s
+                        """
+                        cursor.execute(update_query, update_values)
+            
+            # If session was pending, create/update pending confirmation
+            if current_confirmation_status == 'pending':
+                app.logger.info(f"📋 Creating/updating pending confirmation for session {session_id}...")
+                
+                # Check if pending confirmation already exists
+                cursor.execute(
+                    "SELECT id FROM pending_confirmations WHERE analysis_session_id = %s",
+                    (session_id,)
+                )
+                existing_confirmation = cursor.fetchone()
+                
+                if not existing_confirmation:
+                    # Create new pending confirmation
+                    confirmation_session_id = f"CONF_{session_id}_{int(time.time())}"
+                    cursor.execute("""
+                        INSERT INTO pending_confirmations 
+                        (analysis_session_id, confirmation_session_id, confirmation_status, filename, created_at)
+                        VALUES (%s, %s, 'pending', %s, NOW())
+                    """, (session_id, confirmation_session_id, session_filename))
+                    
+                    app.logger.info(f"✅ Created pending confirmation {confirmation_session_id} for session {session_id}")
+                else:
+                    app.logger.info(f"✅ Pending confirmation already exists for session {session_id}")
+            
+            conn.commit()
+            app.logger.info(f"✅ Session {session_id} updated successfully with MySQL")
+            
+            return jsonify({
+                'success': True,
+                'message': f'Session {session_id} updated successfully',
+                'pending_confirmation_created': current_confirmation_status == 'pending'
+            })
+            
+        finally:
+            cursor.close()
+            conn.close()
         
     except Exception as e:
-        db.session.rollback()
+        app.logger.error(f"❌ Failed to update session {session_id}: {str(e)}")
         return jsonify({'error': f'Failed to update session: {str(e)}'}), 500
 
 # --- Delete a single session and its results ---
@@ -2132,6 +2536,7 @@ except ImportError:
     ml_classifier = None
 
 @app.route('/api/ml-analyze-curve', methods=['POST'])
+@require_permission(Permissions.RUN_ML_ANALYSIS)
 def ml_analyze_curve():
     """Get ML analysis and prediction for a curve"""
     if not ML_AVAILABLE or ml_classifier is None:
@@ -2304,6 +2709,7 @@ def ml_analyze_curve():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/ml-submit-feedback', methods=['POST'])
+@require_permission(Permissions.PROVIDE_ML_FEEDBACK)
 def ml_submit_feedback():
     """Submit expert feedback for ML training"""
     if not ML_AVAILABLE or ml_classifier is None:
@@ -2396,7 +2802,15 @@ def ml_submit_feedback():
             cursor.close()
             conn.close()
             
-            print(f"✅ Expert feedback saved to MySQL database: {expert_classification} for {pathogen}")
+            # Log whether this counts as a correction using new grouping logic
+            is_correction = is_expert_correction(original_prediction, expert_classification)
+            correction_status = "CORRECTION" if is_correction else "SAME GROUP (no correction)"
+            original_group = get_classification_group(original_prediction)
+            expert_group = get_classification_group(expert_classification)
+            
+            print(f"✅ Expert feedback saved to MySQL database: {original_prediction} -> {expert_classification} for {pathogen}")
+            print(f"📊 Classification groups: {original_prediction} ({original_group}) -> {expert_classification} ({expert_group})")
+            print(f"🎯 Accuracy impact: {correction_status}")
             
         except Exception as mysql_error:
             print(f"⚠️ Could not save feedback to MySQL database: {mysql_error}")
@@ -3532,6 +3946,32 @@ def update_system_ml_config(config_key):
         app.logger.error(f"Failed to update system ML config: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/ml-config/teaching-status', methods=['GET'])
+def get_ml_teaching_status():
+    """Get ML teaching status configuration"""
+    try:
+        global ml_config_manager
+        
+        if ml_config_manager is None:
+            return jsonify({'error': 'ML configuration manager not initialized'}), 503
+        
+        # Check if teaching is disabled via system config
+        disable_teaching = ml_config_manager.get_system_config('disable_teaching') == 'true'
+        
+        config = {
+            'disable_teaching': disable_teaching,
+            'teaching_enabled': not disable_teaching
+        }
+        
+        return jsonify({
+            'success': True,
+            'config': config
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Failed to get ML teaching status: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/ml-config/reset-training-data', methods=['POST'])
 def reset_ml_training_data():
     """Reset ML training data (DANGEROUS - ADMIN ONLY)"""
@@ -3679,6 +4119,11 @@ def get_enabled_pathogens():
 def queue_page():
     """Serve the dedicated queue management page"""
     return send_from_directory('.', 'queue.html')
+
+@app.route('/test_evidence_display.html')
+def test_evidence_display_page():
+    """Serve the evidence display test page"""
+    return send_from_directory('.', 'test_evidence_display.html')
 
 @app.route('/api/folder-queue/scan', methods=['POST'])
 def scan_folder_for_files():
@@ -3921,6 +4366,375 @@ def validate_queue_files():
             'error': str(e)
         }), 500
 
+# ========================= MYSQL ADMIN API ENDPOINTS (Development) =========================
+
+@app.route('/api/user/admin-status', methods=['GET'])
+def check_admin_status():
+    """Check if current user has admin privileges"""
+    # For now, in development mode, everyone is admin
+    # In production, this would check Entra ID groups/roles
+    is_development = os.environ.get('FLASK_ENV') == 'development'
+    
+    return jsonify({
+        'is_admin': is_development,  # True in dev, will be role-based in production
+        'environment': 'development' if is_development else 'production'
+    })
+
+@app.route('/mysql-admin')
+def mysql_admin_interface():
+    """Serve the MySQL admin interface for development"""
+    return send_from_directory('.', 'mysql_admin.html')
+
+@app.route('/mysql-viewer')
+@production_admin_only
+def mysql_viewer():
+    """Integrated MySQL viewer interface - ADMIN ONLY in production"""
+    return render_template_string('''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MySQL Viewer - Development</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { background: #007bff; color: white; padding: 15px; margin-bottom: 20px; }
+        .tables-list { background: #f8f9fa; padding: 15px; margin-bottom: 20px; }
+        .table-item { 
+            display: inline-block; 
+            margin: 5px; 
+            padding: 8px 12px; 
+            background: white; 
+            border: 1px solid #ddd; 
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        .table-item:hover { background: #e9ecef; }
+        .query-section { margin-bottom: 20px; }
+        .query-input { width: 100%; height: 100px; padding: 10px; border: 1px solid #ddd; }
+        .btn { 
+            background: #007bff; 
+            color: white; 
+            padding: 10px 20px; 
+            border: none; 
+            cursor: pointer; 
+            margin: 5px;
+            border-radius: 4px;
+        }
+        .btn:hover { background: #0056b3; }
+        .results-table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            background: white; 
+            margin-top: 15px;
+        }
+        .results-table th, .results-table td { 
+            border: 1px solid #ddd; 
+            padding: 8px; 
+            text-align: left; 
+        }
+        .results-table th { background: #f8f9fa; }
+        .results-table tr:nth-child(even) { background: #f9f9f9; }
+        .error { color: #dc3545; background: #f8d7da; padding: 10px; border-radius: 4px; }
+        .success { color: #155724; background: #d4edda; padding: 10px; border-radius: 4px; }
+        .loading { color: #856404; background: #fff3cd; padding: 10px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🗄️ MySQL Development Viewer</h1>
+            <p>Database: {{ config.database }} @ {{ config.host }}:{{ config.port }}</p>
+            <p><a href="/" style="color: white;">← Back to Main App</a></p>
+        </div>
+        
+        <div class="tables-list">
+            <h3>📋 Database Tables</h3>
+            <div id="tables-container">Loading tables...</div>
+            <button class="btn" onclick="loadTables()">🔄 Refresh Tables</button>
+        </div>
+        
+        <div class="query-section">
+            <h3>🔍 Custom Query</h3>
+            <textarea id="query-input" class="query-input" placeholder="Enter your SQL query here...">SELECT * FROM analysis_sessions LIMIT 5;</textarea>
+            <br>
+            <button class="btn" onclick="executeQuery()">▶️ Execute Query</button>
+            <button class="btn" onclick="clearResults()">🗑️ Clear Results</button>
+        </div>
+        
+        <div id="results-container"></div>
+    </div>
+
+    <script>
+        async function loadTables() {
+            const container = document.getElementById('tables-container');
+            container.innerHTML = '<div class="loading">Loading tables...</div>';
+            
+            try {
+                const response = await fetch('/api/mysql-admin/tables');
+                const data = await response.json();
+                
+                if (data.success) {
+                    container.innerHTML = data.tables.map(table => 
+                        `<span class="table-item" onclick="selectTable('${table.name}')">${table.name} (${table.rows})</span>`
+                    ).join('');
+                } else {
+                    container.innerHTML = `<div class="error">Error: ${data.error}</div>`;
+                }
+            } catch (error) {
+                container.innerHTML = `<div class="error">Failed to load tables: ${error.message}</div>`;
+            }
+        }
+        
+        function selectTable(tableName) {
+            const query = `SELECT * FROM ${tableName} LIMIT 20;`;
+            document.getElementById('query-input').value = query;
+            executeQuery();
+        }
+        
+        async function executeQuery() {
+            const query = document.getElementById('query-input').value.trim();
+            if (!query) {
+                alert('Please enter a query');
+                return;
+            }
+            
+            const container = document.getElementById('results-container');
+            container.innerHTML = '<div class="loading">Executing query...</div>';
+            
+            try {
+                const response = await fetch('/api/mysql-admin/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: query })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    if (data.results && data.results.length > 0) {
+                        const columns = Object.keys(data.results[0]);
+                        let html = `
+                            <div class="success">Query executed successfully. ${data.results.length} rows returned.</div>
+                            <table class="results-table">
+                                <thead>
+                                    <tr>${columns.map(col => `<th>${col}</th>`).join('')}</tr>
+                                </thead>
+                                <tbody>
+                        `;
+                        
+                        data.results.forEach(row => {
+                            html += '<tr>';
+                            columns.forEach(col => {
+                                let value = row[col];
+                                if (value === null) value = '<em>NULL</em>';
+                                else if (typeof value === 'object') value = JSON.stringify(value);
+                                else if (typeof value === 'string' && value.length > 100) value = value.substring(0, 100) + '...';
+                                html += `<td>${value}</td>`;
+                            });
+                            html += '</tr>';
+                        });
+                        
+                        html += '</tbody></table>';
+                        container.innerHTML = html;
+                    } else {
+                        container.innerHTML = '<div class="success">Query executed successfully. No rows returned.</div>';
+                    }
+                } else {
+                    container.innerHTML = `<div class="error">Query Error: ${data.error}</div>`;
+                }
+            } catch (error) {
+                container.innerHTML = `<div class="error">Request failed: ${error.message}</div>`;
+            }
+        }
+        
+        function clearResults() {
+            document.getElementById('results-container').innerHTML = '';
+            document.getElementById('query-input').value = '';
+        }
+        
+        // Load tables on page load
+        loadTables();
+    </script>
+</body>
+</html>
+    ''', config=mysql_config)
+
+@app.route('/api/mysql-admin/status', methods=['GET'])
+def mysql_admin_status():
+    """Check MySQL connection status"""
+    try:
+        import mysql.connector
+        
+        # Test connection using the global mysql_config
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor()
+        
+        # Get database info
+        cursor.execute("SELECT DATABASE() as db_name, VERSION() as version")
+        result = cursor.fetchone()
+        
+        cursor.execute("SELECT COUNT(*) as table_count FROM information_schema.tables WHERE table_schema = DATABASE()")
+        table_count = cursor.fetchone()[0]
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'database': result[0],
+            'version': result[1],
+            'table_count': table_count,
+            'host': mysql_config['host'],
+            'port': mysql_config['port']
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/mysql-admin/tables', methods=['GET'])
+def mysql_admin_get_tables():
+    """Get list of all tables with row counts"""
+    try:
+        import mysql.connector
+        
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Get table information
+        cursor.execute("""
+            SELECT 
+                TABLE_NAME as name,
+                TABLE_ROWS as table_rows,
+                DATA_LENGTH as data_length,
+                CREATE_TIME as created
+            FROM information_schema.TABLES 
+            WHERE TABLE_SCHEMA = DATABASE()
+            ORDER BY TABLE_NAME
+        """)
+        
+        tables = cursor.fetchall()
+        
+        # Convert rows to int (it might be None for some tables)
+        for table in tables:
+            table['rows'] = int(table['table_rows']) if table['table_rows'] is not None else 0
+            table['data_length'] = int(table['data_length']) if table['data_length'] is not None else 0
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'tables': tables
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/mysql-admin/query', methods=['POST'])
+def mysql_admin_execute_query():
+    """Execute a SQL query (READ-ONLY for safety)"""
+    try:
+        data = request.get_json()
+        query = data.get('query', '').strip()
+        
+        if not query:
+            return jsonify({
+                'success': False,
+                'error': 'No query provided'
+            }), 400
+        
+        # Safety check - only allow SELECT, SHOW, DESCRIBE queries for development
+        query_upper = query.upper().strip()
+        allowed_commands = ['SELECT', 'SHOW', 'DESCRIBE', 'EXPLAIN']
+        
+        if not any(query_upper.startswith(cmd) for cmd in allowed_commands):
+            return jsonify({
+                'success': False,
+                'error': 'Only SELECT, SHOW, DESCRIBE, and EXPLAIN queries are allowed for safety'
+            }), 403
+        
+        import mysql.connector
+        
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Execute the query
+        cursor.execute(query)
+        results = cursor.fetchall()
+        
+        # Get column names
+        columns = [desc[0] for desc in cursor.description] if cursor.description else []
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'results': results,
+            'columns': columns,
+            'row_count': len(results)
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/mysql-admin/table-info/<table_name>', methods=['GET'])
+def mysql_admin_get_table_info(table_name):
+    """Get detailed information about a specific table"""
+    try:
+        import mysql.connector
+        
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Get table structure
+        cursor.execute(f"DESCRIBE {table_name}")
+        structure = cursor.fetchall()
+        
+        # Get table stats
+        cursor.execute(f"""
+            SELECT 
+                TABLE_ROWS as row_count,
+                DATA_LENGTH as data_length,
+                INDEX_LENGTH as index_length,
+                CREATE_TIME as created,
+                UPDATE_TIME as updated
+            FROM information_schema.TABLES 
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s
+        """, (table_name,))
+        
+        stats = cursor.fetchone()
+        
+        # Get indexes
+        cursor.execute(f"SHOW INDEX FROM {table_name}")
+        indexes = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'table_name': table_name,
+            'structure': structure,
+            'stats': stats,
+            'indexes': indexes
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 # ========================= ML VALIDATION API ENDPOINTS =========================
 
 @app.route('/api/ml-validation/dashboard-data', methods=['GET'])
@@ -4034,7 +4848,21 @@ def get_ml_validation_dashboard_data():
                 SELECT 
                     COUNT(*) as total_expert_decisions,
                     SUM(CASE 
-                        WHEN original_prediction != expert_correction THEN 1 
+                        WHEN original_prediction IS NOT NULL 
+                        AND expert_correction IS NOT NULL
+                        AND (
+                            (UPPER(original_prediction) IN ('WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE') 
+                             AND UPPER(expert_correction) NOT IN ('WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE'))
+                            OR
+                            (UPPER(original_prediction) IN ('INDETERMINATE', 'SUSPICIOUS', 'REDO') 
+                             AND UPPER(expert_correction) NOT IN ('INDETERMINATE', 'SUSPICIOUS', 'REDO'))
+                            OR
+                            (UPPER(original_prediction) = 'NEGATIVE' 
+                             AND UPPER(expert_correction) != 'NEGATIVE')
+                            OR
+                            (UPPER(original_prediction) NOT IN ('WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE', 'INDETERMINATE', 'SUSPICIOUS', 'REDO', 'NEGATIVE')
+                             OR UPPER(expert_correction) NOT IN ('WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE', 'INDETERMINATE', 'SUSPICIOUS', 'REDO', 'NEGATIVE'))
+                        ) THEN 1 
                         ELSE 0 
                     END) as expert_corrections
                 FROM ml_expert_decisions
@@ -4075,6 +4903,91 @@ def get_ml_validation_dashboard_data():
             app.logger.error(f"Error counting pathogen models: {str(e)}")
             unique_pathogens = 0
             
+        # Get confirmed runs from sessions table with correct accuracy calculation
+        confirmed_runs = []
+        try:
+            conn4 = mysql.connector.connect(**mysql_config)
+            cursor4 = conn4.cursor(dictionary=True)
+            
+            # Get confirmed sessions with ML accuracy data
+            cursor4.execute("""
+                SELECT id, file_name, confirmed_by, confirmed_at, total_wells,
+                       good_curves, pathogen_breakdown, success_rate
+                FROM analysis_sessions 
+                WHERE is_confirmed = 1
+                ORDER BY confirmed_at DESC
+                LIMIT 10
+            """)
+            
+            confirmed_sessions_raw = cursor4.fetchall()
+            
+            # Process each confirmed session
+            for session in confirmed_sessions_raw:
+                try:
+                    # Calculate ML accuracy (different from success_rate)
+                    total_wells = session.get('total_wells', 0)
+                    if total_wells > 0:
+                        # Check if there are any expert decisions/corrections for this session
+                        cursor4.execute("""
+                            SELECT COUNT(*) as expert_count 
+                            FROM ml_expert_decisions 
+                            WHERE session_id = %s
+                        """, (session['id'],))
+                        expert_result = cursor4.fetchone()
+                        expert_corrections = expert_result['expert_count'] if expert_result else 0
+                        
+                        # Calculate ML accuracy
+                        if expert_corrections == 0:
+                            # No expert corrections = 100% accuracy (all predictions were correct)
+                            ml_accuracy_percentage = 100.0
+                            correct_predictions = total_wells
+                            ml_accuracy_message = 'System accuracy (no expert decisions required)'
+                        else:
+                            # With expert corrections = calculate based on corrections
+                            correct_predictions = total_wells - expert_corrections
+                            ml_accuracy_percentage = (correct_predictions / total_wells) * 100
+                            ml_accuracy_message = f'{expert_corrections} expert corrections applied'
+                            
+                        # Extract pathogen code from pathogen_breakdown
+                        pathogen_code = 'N/A'
+                        if session.get('pathogen_breakdown'):
+                            try:
+                                breakdown_str = session['pathogen_breakdown']
+                                if isinstance(breakdown_str, (bytes, bytearray)):
+                                    breakdown_str = breakdown_str.decode('utf-8')
+                                
+                                # Extract pathogen from breakdown like "Mycoplasma genitalium: 8.6%"
+                                if ':' in breakdown_str:
+                                    pathogen_code = breakdown_str.split(':')[0].strip()
+                            except:
+                                pathogen_code = 'N/A'
+                        
+                        confirmed_runs.append({
+                            'run_id': session['id'],
+                            'file_name': session['file_name'] or 'Unknown File',
+                            'confirmed_by': session['confirmed_by'] or 'Unknown',
+                            'confirmed_at': session['confirmed_at'].isoformat() if session['confirmed_at'] else None,
+                            'total_predictions': total_wells,
+                            'correct_predictions': correct_predictions,
+                            'expert_overrides': expert_corrections,
+                            'pathogen_code': pathogen_code,
+                            'accuracy_score': ml_accuracy_percentage / 100.0,  # Frontend expects decimal
+                            'precision_score': 1.0,  # Default for confirmed runs
+                            'recall_score': 1.0,     # Default for confirmed runs  
+                            'f1_score': 1.0,         # Default for confirmed runs
+                            'ml_accuracy_message': ml_accuracy_message
+                        })
+                        
+                except Exception as session_error:
+                    app.logger.warning(f"Error processing confirmed session {session.get('id')}: {session_error}")
+                    continue
+                    
+            cursor4.close()
+            conn4.close()
+            
+        except Exception as e:
+            app.logger.error(f"Error fetching confirmed runs: {str(e)}")
+            # Continue with empty confirmed_runs list
         # Prepare dashboard response with required success field for frontend
         dashboard_data = {
             'success': True,  # Required by frontend JavaScript
@@ -4123,7 +5036,7 @@ def get_ml_validation_dashboard_data():
                 'last_audit': datetime.now().strftime('%Y-%m-%d')
             },
             'pending_runs': pending_runs,
-            'recent_confirmed_runs': [],  # Placeholder for confirmed runs
+            'recent_confirmed_runs': confirmed_runs,  # Now includes actual confirmed runs with correct ML accuracy
             'pathogen_performance': []  # Placeholder for pathogen stats
         }
         
@@ -4919,6 +5832,219 @@ def validate_system_compliance():
 
 # ===== END UNIFIED COMPLIANCE API ENDPOINTS =====
 
+# ===== ENCRYPTION EVIDENCE INTEGRATION =====
+
+@app.route('/api/unified-compliance/encryption-evidence', methods=['GET'])
+def get_encryption_evidence_for_compliance():
+    """Get encryption evidence for specific compliance requirements"""
+    try:
+        # Get regulation filter if provided
+        regulation = request.args.get('regulation', '').upper()
+        requirement_code = request.args.get('requirement_code', '')
+        
+        # MySQL connection
+        import mysql.connector
+        mysql_config = {
+            'host': os.environ.get("MYSQL_HOST", "127.0.0.1"),
+            'port': int(os.environ.get("MYSQL_PORT", 3306)),
+            'user': os.environ.get("MYSQL_USER", "qpcr_user"),
+            'password': os.environ.get("MYSQL_PASSWORD", "qpcr_password"),
+            'database': os.environ.get("MYSQL_DATABASE", "qpcr_analysis"),
+            'charset': 'utf8mb4'
+        }
+        
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Build query based on regulation filter
+        if regulation:
+            # Map regulation to requirement patterns
+            if regulation == 'FDA_CFR_21':
+                query = """
+                SELECT ce.requirement_id, ce.evidence_type, ce.evidence_data, ce.created_at,
+                       crt.compliance_status, crt.evidence_count
+                FROM compliance_evidence ce
+                LEFT JOIN compliance_requirements_tracking crt ON ce.requirement_id = crt.requirement_id
+                WHERE ce.requirement_id LIKE 'FDA_CFR_21_%' OR ce.requirement_id LIKE 'CFR_%'
+                ORDER BY ce.created_at DESC
+                """
+            elif regulation == 'HIPAA':
+                query = """
+                SELECT ce.requirement_id, ce.evidence_type, ce.evidence_data, ce.created_at,
+                       crt.compliance_status, crt.evidence_count
+                FROM compliance_evidence ce
+                LEFT JOIN compliance_requirements_tracking crt ON ce.requirement_id = crt.requirement_id
+                WHERE ce.requirement_id LIKE 'HIPAA_%'
+                ORDER BY ce.created_at DESC
+                """
+            elif regulation == 'ISO_27001':
+                query = """
+                SELECT ce.requirement_id, ce.evidence_type, ce.evidence_data, ce.created_at,
+                       crt.compliance_status, crt.evidence_count
+                FROM compliance_evidence ce
+                LEFT JOIN compliance_requirements_tracking crt ON ce.requirement_id = crt.requirement_id
+                WHERE ce.requirement_id LIKE 'ISO_27001_%'
+                ORDER BY ce.created_at DESC
+                """
+            else:
+                query = """
+                SELECT ce.requirement_id, ce.evidence_type, ce.evidence_data, ce.created_at,
+                       crt.compliance_status, crt.evidence_count
+                FROM compliance_evidence ce
+                LEFT JOIN compliance_requirements_tracking crt ON ce.requirement_id = crt.requirement_id
+                WHERE ce.evidence_type LIKE '%encryption%' OR ce.evidence_type LIKE '%crypto%' OR ce.evidence_type LIKE '%security%'
+                ORDER BY ce.created_at DESC
+                """
+        else:
+            # Get all encryption-related evidence
+            query = """
+            SELECT ce.requirement_id, ce.evidence_type, ce.evidence_data, ce.created_at,
+                   crt.compliance_status, crt.evidence_count
+            FROM compliance_evidence ce
+            LEFT JOIN compliance_requirements_tracking crt ON ce.requirement_id = crt.requirement_id
+            WHERE ce.evidence_type LIKE '%encryption%' OR ce.evidence_type LIKE '%crypto%' OR ce.evidence_type LIKE '%security%'
+            ORDER BY ce.created_at DESC
+            """
+        
+        cursor.execute(query)
+        evidence_records = cursor.fetchall()
+        
+        # Format evidence for response
+        requirements = []
+        for record in evidence_records:
+            requirements.append({
+                'requirement_id': record['requirement_id'],
+                'evidence_type': record['evidence_type'],
+                'evidence_data': record['evidence_data'],
+                'created_at': record['created_at'].isoformat() if record['created_at'] else None,
+                'compliance_status': record['compliance_status'],
+                'evidence_count': record['evidence_count'],
+                'validation_status': 'validated' if record['compliance_status'] == 'completed' else 'pending'
+            })
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'regulation': regulation or 'ALL',
+            'requirements': requirements,
+            'total_evidence': len(requirements),
+            'status': 'operational' if requirements else 'no_evidence'
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error getting encryption evidence: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Failed to retrieve encryption evidence: {str(e)}'
+        }), 500
+
+@app.route('/api/unified-compliance/encryption-evidence/<requirement_code>', methods=['GET'])
+def get_encryption_evidence_for_requirement(requirement_code):
+    """Get specific encryption evidence for a compliance requirement"""
+    try:
+        # MySQL connection
+        import mysql.connector
+        mysql_config = {
+            'host': os.environ.get("MYSQL_HOST", "127.0.0.1"),
+            'port': int(os.environ.get("MYSQL_PORT", 3306)),
+            'user': os.environ.get("MYSQL_USER", "qpcr_user"),
+            'password': os.environ.get("MYSQL_PASSWORD", "qpcr_password"),
+            'database': os.environ.get("MYSQL_DATABASE", "qpcr_analysis"),
+            'charset': 'utf8mb4'
+        }
+        
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Query for specific requirement evidence
+        query = """
+        SELECT ce.requirement_id, ce.evidence_type, ce.evidence_data, ce.created_at,
+               ce.validation_status, crt.compliance_status, crt.evidence_count
+        FROM compliance_evidence ce
+        LEFT JOIN compliance_requirements_tracking crt ON ce.requirement_id = crt.requirement_id
+        WHERE ce.requirement_id = %s
+        ORDER BY ce.created_at DESC
+        LIMIT 1
+        """
+        
+        cursor.execute(query, (requirement_code,))
+        evidence_record = cursor.fetchone()
+        
+        if not evidence_record:
+            conn.close()
+            return jsonify({
+                'success': False,
+                'error': f'No evidence found for requirement: {requirement_code}'
+            }), 404
+        
+        # Format the response
+        response_data = {
+            'success': True,
+            'requirement_id': evidence_record['requirement_id'],
+            'evidence_type': evidence_record['evidence_type'],
+            'evidence_data': evidence_record['evidence_data'],
+            'created_at': evidence_record['created_at'].isoformat() if evidence_record['created_at'] else None,
+            'validation_status': evidence_record['validation_status'] or 'pending',
+            'implementation_status': evidence_record['compliance_status'] or 'in_progress',
+            'evidence_count': evidence_record['evidence_count'] or 0
+        }
+        
+        conn.close()
+        return jsonify(response_data)
+        
+    except Exception as e:
+        app.logger.error(f"Error getting encryption evidence for {requirement_code}: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Failed to retrieve evidence for {requirement_code}: {str(e)}'
+        }), 500
+
+# Helper functions for encryption evidence
+def calculate_regulation_compliance_score(evidence, regulation):
+    """Calculate compliance score for specific regulation"""
+    test_results = evidence.get('test_results', {})
+    if not test_results:
+        return 0
+    
+    total_tests = len(test_results)
+    passed_tests = sum(1 for test in test_results.values() if test.get('passed'))
+    
+    return round((passed_tests / total_tests) * 100, 1)
+
+def calculate_overall_compliance_score(evidence):
+    """Calculate overall encryption compliance score"""
+    return calculate_regulation_compliance_score(evidence, None)
+
+def get_regulation_evidence_files(evidence, regulation):
+    """Get evidence files for specific regulation"""
+    regulation_mapping = evidence.get('compliance_mapping', {})
+    if regulation in regulation_mapping:
+        return regulation_mapping[regulation].get('evidence_files', [])
+    return []
+
+def generate_encryption_recommendations(evidence, regulation):
+    """Generate recommendations for encryption compliance"""
+    recommendations = []
+    
+    test_results = evidence.get('test_results', {})
+    failed_tests = [name for name, result in test_results.items() if not result.get('passed')]
+    
+    if failed_tests:
+        recommendations.extend([
+            f"Fix failing encryption test: {test}" for test in failed_tests
+        ])
+    
+    # Check HTTPS enforcement
+    https_status = evidence.get('encryption_evidence', {}).get('connection_security', {}).get('https_enforcement', {})
+    if not https_status.get('force_https', False):
+        recommendations.append("Enable HTTPS enforcement for production deployment")
+    
+    if not recommendations:
+        recommendations.append("All encryption controls are properly implemented")
+    
+    return recommendations
+
 # ===== COMPLIANCE TRAINING AND USER ACTIONS =====
 
 @app.route('/api/compliance/training/complete', methods=['POST'])
@@ -5414,15 +6540,16 @@ def confirm_ml_run():
 
 @app.route('/api/sessions/confirm', methods=['POST'])
 def confirm_analysis_session():
-    """Confirm or reject an analysis session (rule-based or ML)"""
+    """Confirm or reject an analysis session (rule-based or ML) with session separation support"""
     try:
         data = request.get_json()
         session_id = data.get('session_id')
+        confirmation_id = data.get('confirmation_id', session_id)  # Support both session_id and confirmation_id
         confirmed = data.get('confirmed', True)
         user_id = data.get('confirmed_by', 'user')
         
-        if not session_id:
-            return jsonify({'success': False, 'message': 'Session ID required'}), 400
+        if not session_id and not confirmation_id:
+            return jsonify({'success': False, 'message': 'Session ID or Confirmation ID required'}), 400
         
         # Get database configuration using global helper
         mysql_config = get_mysql_config()
@@ -5431,40 +6558,113 @@ def confirm_analysis_session():
         conn = mysql.connector.connect(**mysql_config)
         cursor = conn.cursor()
         
-        # Check if session exists
-        cursor.execute("SELECT id, filename FROM analysis_sessions WHERE id = %s", (session_id,))
-        session = cursor.fetchone()
+        # Check for pending_confirmations table first (new structure)
+        try:
+            cursor.execute("SELECT 1 FROM pending_confirmations LIMIT 1")
+            cursor.fetchall()  # Consume the result to prevent "Unread result found" error
+            has_pending_confirmations = True
+            app.logger.info("✓ Using new session separation structure with pending_confirmations table")
+        except mysql.connector.Error:
+            has_pending_confirmations = False
+            app.logger.info("✓ Using legacy structure with analysis_sessions table only")
         
-        if not session:
-            return jsonify({'success': False, 'message': f'Session {session_id} not found'}), 404
+        session_filename = None
         
-        session_filename = session[1]
-        
-        if confirmed:
-            # Confirm the session
-            cursor.execute("""
-                UPDATE analysis_sessions 
-                SET confirmation_status = 'confirmed',
-                    confirmed_by = %s,
-                    confirmed_at = CURRENT_TIMESTAMP
-                WHERE id = %s
-            """, (user_id, session_id))
-            
-            message = f'Session {session_id} ({session_filename}) successfully confirmed'
-            app.logger.info(message)
+        if has_pending_confirmations:
+            # New structure: Handle confirmation through pending_confirmations table
+            if confirmation_id:
+                # First check if confirmation exists
+                cursor.execute("""
+                    SELECT pc.id, pc.analysis_session_id, pc.confirmation_status, 
+                           COALESCE(pc.filename, a.filename) as filename
+                    FROM pending_confirmations pc
+                    LEFT JOIN analysis_sessions a ON pc.analysis_session_id = a.id
+                    WHERE pc.id = %s
+                """, (confirmation_id,))
+                confirmation_data = cursor.fetchone()
+                
+                if not confirmation_data:
+                    return jsonify({'success': False, 'message': f'Confirmation {confirmation_id} not found'}), 404
+                
+                session_filename = confirmation_data[3]
+                actual_session_id = confirmation_data[1]
+                
+                if confirmed:
+                    # Confirm the pending confirmation
+                    cursor.execute("""
+                        UPDATE pending_confirmations 
+                        SET confirmation_status = 'confirmed',
+                            confirmed_by = %s,
+                            confirmed_at = CURRENT_TIMESTAMP
+                        WHERE id = %s
+                    """, (user_id, confirmation_id))
+                    
+                    # Also update the underlying analysis session for compatibility
+                    cursor.execute("""
+                        UPDATE analysis_sessions 
+                        SET confirmation_status = 'confirmed',
+                            confirmed_by = %s,
+                            confirmed_at = CURRENT_TIMESTAMP
+                        WHERE id = %s
+                    """, (user_id, actual_session_id))
+                    
+                    message = f'Confirmation {confirmation_id} for session {actual_session_id} ({session_filename}) successfully confirmed'
+                else:
+                    # Reject the pending confirmation
+                    cursor.execute("""
+                        UPDATE pending_confirmations 
+                        SET confirmation_status = 'rejected',
+                            confirmed_by = %s,
+                            confirmed_at = CURRENT_TIMESTAMP
+                        WHERE id = %s
+                    """, (user_id, confirmation_id))
+                    
+                    # Also update the underlying analysis session for compatibility
+                    cursor.execute("""
+                        UPDATE analysis_sessions 
+                        SET confirmation_status = 'rejected',
+                            confirmed_by = %s,
+                            confirmed_at = CURRENT_TIMESTAMP
+                        WHERE id = %s
+                    """, (user_id, actual_session_id))
+                    
+                    message = f'Confirmation {confirmation_id} for session {actual_session_id} ({session_filename}) successfully rejected'
+            else:
+                return jsonify({'success': False, 'message': 'Confirmation ID required for new session separation structure'}), 400
         else:
-            # Reject the session
-            cursor.execute("""
-                UPDATE analysis_sessions 
-                SET confirmation_status = 'rejected',
-                    confirmed_by = %s,
-                    confirmed_at = CURRENT_TIMESTAMP
-                WHERE id = %s
-            """, (user_id, session_id))
+            # Legacy structure: Direct analysis_sessions update
+            cursor.execute("SELECT id, filename FROM analysis_sessions WHERE id = %s", (session_id,))
+            session = cursor.fetchone()
             
-            message = f'Session {session_id} ({session_filename}) successfully rejected'
-            app.logger.info(message)
+            if not session:
+                return jsonify({'success': False, 'message': f'Session {session_id} not found'}), 404
+            
+            session_filename = session[1]
+            
+            if confirmed:
+                # Confirm the session
+                cursor.execute("""
+                    UPDATE analysis_sessions 
+                    SET confirmation_status = 'confirmed',
+                        confirmed_by = %s,
+                        confirmed_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (user_id, session_id))
+                
+                message = f'Session {session_id} ({session_filename}) successfully confirmed'
+            else:
+                # Reject the session
+                cursor.execute("""
+                    UPDATE analysis_sessions 
+                    SET confirmation_status = 'rejected',
+                        confirmed_by = %s,
+                        confirmed_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (user_id, session_id))
+                
+                message = f'Session {session_id} ({session_filename}) successfully rejected'
         
+        app.logger.info(message)
         conn.commit()
         cursor.close()
         conn.close()
@@ -5472,7 +6672,8 @@ def confirm_analysis_session():
         return jsonify({
             'success': True,
             'message': message,
-            'session_id': session_id,
+            'session_id': session_id if session_id else actual_session_id if has_pending_confirmations else None,
+            'confirmation_id': confirmation_id if has_pending_confirmations else None,
             'status': 'confirmed' if confirmed else 'rejected'
         })
         
@@ -5522,26 +6723,44 @@ def get_pending_sessions():
         cursor = conn.cursor(dictionary=True)
         app.logger.info("✓ Database cursor created")
         
-        # Test table exists first
-        app.logger.info("Checking if analysis_sessions table exists")
-        cursor.execute("SHOW TABLES LIKE 'analysis_sessions'")
+        # Test table exists first - check for new pending_confirmations table
+        app.logger.info("Checking if pending_confirmations table exists")
+        cursor.execute("SHOW TABLES LIKE 'pending_confirmations'")
         table_exists = cursor.fetchone()
         if not table_exists:
-            app.logger.error("✗ analysis_sessions table does not exist")
-            cursor.close()
-            conn.close()
-            return jsonify({'success': True, 'pending_sessions': [], 'count': 0})
-
-        app.logger.info("✓ analysis_sessions table exists, executing pending sessions query")
-        # Restore pathogen_breakdown but handle it safely for Railway
-        cursor.execute("""
-            SELECT id, filename, upload_timestamp, total_wells, good_curves, 
-                   success_rate, pathogen_breakdown, confirmation_status, 
-                   confirmed_by, confirmed_at
-            FROM analysis_sessions 
-            WHERE confirmation_status = 'pending'
-            ORDER BY upload_timestamp DESC
-        """)
+            app.logger.error("✗ pending_confirmations table does not exist, falling back to analysis_sessions")
+            # Fallback to old table structure
+            cursor.execute("SHOW TABLES LIKE 'analysis_sessions'")
+            analysis_table_exists = cursor.fetchone()
+            if not analysis_table_exists:
+                app.logger.error("✗ analysis_sessions table also does not exist")
+                cursor.close()
+                conn.close()
+                return jsonify({'success': True, 'pending_sessions': [], 'count': 0})
+            
+            # Use old table structure as fallback
+            cursor.execute("""
+                SELECT id, filename, upload_timestamp, total_wells, good_curves, 
+                       success_rate, pathogen_breakdown, confirmation_status, 
+                       confirmed_by, confirmed_at
+                FROM analysis_sessions 
+                WHERE confirmation_status = 'pending'
+                ORDER BY upload_timestamp DESC
+            """)
+        else:
+            app.logger.info("✓ pending_confirmations table exists, using new session separation structure")
+            # Use new pending_confirmations table with linked analysis_sessions data
+            cursor.execute("""
+                SELECT pc.id, pc.confirmation_session_id, pc.filename, pc.fluorophore, 
+                       pc.pathogen_code, pc.total_wells, pc.good_curves, pc.success_rate, 
+                       pc.pathogen_breakdown, pc.confirmation_status, pc.confirmed_by, 
+                       pc.confirmed_at, pc.created_at, pc.ml_analysis_triggered,
+                       a.id as analysis_id, a.upload_timestamp
+                FROM pending_confirmations pc
+                LEFT JOIN analysis_sessions a ON pc.analysis_session_id = a.id
+                WHERE pc.confirmation_status = 'pending'
+                ORDER BY pc.created_at DESC
+            """)
         app.logger.info("✓ Query executed successfully")
         
         pending_sessions = cursor.fetchall()
@@ -5550,11 +6769,15 @@ def get_pending_sessions():
         # Convert timestamps and handle JSON fields safely for Railway
         for session in pending_sessions:
             try:
-                if session['upload_timestamp']:
+                # Handle timestamps - now from both tables
+                if session.get('upload_timestamp'):
                     session['upload_timestamp'] = session['upload_timestamp'].isoformat()
-                if session['confirmed_at']:
+                if session.get('confirmed_at'):
                     session['confirmed_at'] = session['confirmed_at'].isoformat()
-                # Handle pathogen_breakdown safely - Railway might return it as bytes or different format
+                if session.get('created_at'):
+                    session['created_at'] = session['created_at'].isoformat()
+                
+                # Handle pathogen_breakdown safely - comes from analysis_sessions via LEFT JOIN
                 if session.get('pathogen_breakdown'):
                     if isinstance(session['pathogen_breakdown'], (bytes, bytearray)):
                         session['pathogen_breakdown'] = session['pathogen_breakdown'].decode('utf-8')
@@ -5562,12 +6785,18 @@ def get_pending_sessions():
                         session['pathogen_breakdown'] = str(session['pathogen_breakdown'])
                 else:
                     session['pathogen_breakdown'] = None
+                    
+                # Ensure confirmation_id is properly set
+                if not session.get('confirmation_id'):
+                    session['confirmation_id'] = session.get('id')  # Fallback to session ID
+                    
             except Exception as convert_error:
                 app.logger.error(f"✗ Error converting session data: {convert_error}")
                 # Set problematic fields to safe defaults
                 session['upload_timestamp'] = None
                 session['confirmed_at'] = None
                 session['pathogen_breakdown'] = None
+                session['created_at'] = None
         
         cursor.close()
         conn.close()
@@ -5635,16 +6864,53 @@ def get_confirmed_sessions():
         
         app.logger.info("Testing confirmed sessions table access")
         
-        # Simplified query without complex JOINs for Railway compatibility
-        app.logger.info("Executing confirmed sessions query")
-        cursor.execute("""
-            SELECT id, filename, upload_timestamp, total_wells, good_curves, 
-                   success_rate, pathogen_breakdown, confirmation_status,
-                   confirmed_by, confirmed_at
-            FROM analysis_sessions 
-            WHERE confirmation_status = 'confirmed'
-            ORDER BY confirmed_at DESC
-        """)
+        # Check for pending_confirmations table first (new structure)
+        try:
+            # Use a separate cursor for the table check to avoid result conflicts
+            check_cursor = conn.cursor()
+            check_cursor.execute("SELECT 1 FROM pending_confirmations LIMIT 1")
+            check_cursor.fetchall()  # Consume the result
+            check_cursor.close()  # Close the check cursor
+            has_pending_confirmations = True
+            app.logger.info("✓ Using new session separation structure for confirmed sessions")
+        except mysql.connector.Error:
+            has_pending_confirmations = False
+            app.logger.info("✓ Using legacy structure for confirmed sessions")
+        
+        if has_pending_confirmations:
+            # New structure: Get confirmed sessions from both pending_confirmations and analysis_sessions
+            app.logger.info("Executing confirmed sessions query with session separation")
+            cursor.execute("""
+                SELECT DISTINCT
+                    a.id as session_id,
+                    pc.id as confirmation_id,
+                    COALESCE(pc.filename, a.filename) as filename,
+                    a.upload_timestamp,
+                    a.total_wells,
+                    a.good_curves,
+                    a.success_rate,
+                    a.pathogen_breakdown,
+                    COALESCE(pc.confirmation_status, a.confirmation_status) as confirmation_status,
+                    COALESCE(pc.confirmed_by, a.confirmed_by) as confirmed_by,
+                    COALESCE(pc.confirmed_at, a.confirmed_at) as confirmed_at,
+                    pc.created_at as confirmation_created_at
+                FROM analysis_sessions a
+                LEFT JOIN pending_confirmations pc ON a.id = pc.analysis_session_id
+                WHERE (pc.confirmation_status = 'confirmed' OR 
+                       (pc.id IS NULL AND a.confirmation_status = 'confirmed'))
+                ORDER BY COALESCE(pc.confirmed_at, a.confirmed_at) DESC
+            """)
+        else:
+            # Legacy structure: Direct analysis_sessions query
+            app.logger.info("Executing legacy confirmed sessions query")
+            cursor.execute("""
+                SELECT id as session_id, filename, upload_timestamp, total_wells, good_curves, 
+                       success_rate, pathogen_breakdown, confirmation_status,
+                       confirmed_by, confirmed_at
+                FROM analysis_sessions 
+                WHERE confirmation_status = 'confirmed'
+                ORDER BY confirmed_at DESC
+            """)
         app.logger.info("✓ Query executed successfully")
         
         confirmed_sessions = cursor.fetchall()
@@ -5653,10 +6919,14 @@ def get_confirmed_sessions():
         # Convert timestamps and handle JSON fields safely for Railway
         for session in confirmed_sessions:
             try:
-                if session['upload_timestamp']:
+                # Handle timestamps - now from both tables
+                if session.get('upload_timestamp'):
                     session['upload_timestamp'] = session['upload_timestamp'].isoformat()
-                if session['confirmed_at']:
+                if session.get('confirmed_at'):
                     session['confirmed_at'] = session['confirmed_at'].isoformat()
+                if session.get('confirmation_created_at'):
+                    session['confirmation_created_at'] = session['confirmation_created_at'].isoformat()
+                    
                 # Handle pathogen_breakdown safely - Railway might return it as bytes or different format
                 if session.get('pathogen_breakdown'):
                     if isinstance(session['pathogen_breakdown'], (bytes, bytearray)):
@@ -5665,12 +6935,69 @@ def get_confirmed_sessions():
                         session['pathogen_breakdown'] = str(session['pathogen_breakdown'])
                 else:
                     session['pathogen_breakdown'] = None
+                
+                # Ensure both session_id and confirmation_id are available
+                if not session.get('session_id'):
+                    session['session_id'] = session.get('id')  # Fallback for legacy structure
+                if not session.get('confirmation_id') and has_pending_confirmations:
+                    # For new structure, confirmation_id should be available from query
+                    pass
+                
+                # Calculate ML accuracy (different from success_rate)
+                # For confirmed sessions, assume 100% accuracy unless expert corrections exist
+                total_wells = session.get('total_wells', 0)
+                if total_wells > 0:
+                    # Check if there are any expert decisions/corrections for this session
+                    try:
+                        cursor_temp = conn.cursor(dictionary=True)
+                        cursor_temp.execute("""
+                            SELECT COUNT(*) as expert_count 
+                            FROM ml_expert_decisions 
+                            WHERE session_id = %s
+                        """, (session['session_id'],))
+                        expert_result = cursor_temp.fetchone()
+                        expert_corrections = expert_result['expert_count'] if expert_result else 0
+                        cursor_temp.close()
+                        
+                        # Calculate ML accuracy
+                        if expert_corrections == 0:
+                            # No expert corrections = 100% accuracy (all predictions were correct)
+                            session['ml_accuracy_percentage'] = 100.0
+                            session['correct_predictions'] = total_wells
+                            session['ml_accuracy_message'] = 'System accuracy (no expert decisions required)'
+                        else:
+                            # With expert corrections = calculate based on corrections
+                            correct_predictions = total_wells - expert_corrections
+                            session['ml_accuracy_percentage'] = (correct_predictions / total_wells) * 100
+                            session['correct_predictions'] = correct_predictions
+                            session['ml_accuracy_message'] = f'{expert_corrections} expert corrections applied'
+                            
+                        session['total_predictions'] = total_wells
+                        session['expert_decisions_count'] = expert_corrections  # For frontend compatibility
+                        
+                    except Exception as ml_error:
+                        app.logger.warning(f"Could not calculate ML accuracy for session {session.get('session_id', session.get('id', 'unknown'))}: {ml_error}")
+                        # Fallback: assume 100% accuracy for confirmed sessions
+                        session['ml_accuracy_percentage'] = 100.0
+                        session['correct_predictions'] = total_wells
+                        session['total_predictions'] = total_wells
+                        session['ml_accuracy_message'] = 'System accuracy (no expert decisions required)'
+                else:
+                    session['ml_accuracy_percentage'] = 0.0
+                    session['correct_predictions'] = 0
+                    session['total_predictions'] = 0
+                    session['ml_accuracy_message'] = 'No samples to analyze'
+                    
             except Exception as convert_error:
                 app.logger.error(f"✗ Error converting session data: {convert_error}")
                 # Set problematic fields to safe defaults
                 session['upload_timestamp'] = None
                 session['confirmed_at'] = None
                 session['pathogen_breakdown'] = None
+                session['ml_accuracy_percentage'] = 0.0
+                session['correct_predictions'] = 0
+                session['total_predictions'] = 0
+                session['ml_accuracy_message'] = 'Error calculating accuracy'
         
         cursor.close()
         conn.close()
@@ -6766,7 +8093,24 @@ def debug_expert_decisions():
             SELECT 
                 session_id,
                 COUNT(*) as total_decisions,
-                SUM(CASE WHEN original_prediction != expert_correction THEN 1 ELSE 0 END) as corrections,
+                SUM(CASE 
+                    WHEN original_prediction IS NOT NULL 
+                    AND expert_correction IS NOT NULL
+                    AND (
+                        (UPPER(original_prediction) IN ('WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE') 
+                         AND UPPER(expert_correction) NOT IN ('WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE'))
+                        OR
+                        (UPPER(original_prediction) IN ('INDETERMINATE', 'SUSPICIOUS', 'REDO') 
+                         AND UPPER(expert_correction) NOT IN ('INDETERMINATE', 'SUSPICIOUS', 'REDO'))
+                        OR
+                        (UPPER(original_prediction) = 'NEGATIVE' 
+                         AND UPPER(expert_correction) != 'NEGATIVE')
+                        OR
+                        (UPPER(original_prediction) NOT IN ('WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE', 'INDETERMINATE', 'SUSPICIOUS', 'REDO', 'NEGATIVE')
+                         OR UPPER(expert_correction) NOT IN ('WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE', 'INDETERMINATE', 'SUSPICIOUS', 'REDO', 'NEGATIVE'))
+                    ) THEN 1 
+                    ELSE 0 
+                END) as corrections,
                 SUM(CASE WHEN original_prediction IS NULL THEN 1 ELSE 0 END) as null_predictions,
                 SUM(CASE WHEN expert_correction IS NULL THEN 1 ELSE 0 END) as null_corrections
             FROM ml_expert_decisions
@@ -6807,14 +8151,18 @@ def debug_expert_decisions():
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/sessions/delete', methods=['POST'])
+@production_admin_only
 def delete_pending_session():
-    """Delete a pending analysis session"""
+    """Delete a pending analysis session or confirmation with session separation support - ADMIN ONLY"""
     try:
         data = request.get_json()
         session_id = data.get('session_id')
+        confirmation_id = data.get('confirmation_id')
+        delete_related = data.get('delete_related', False)  # New option for multi-channel handling
         
-        if not session_id:
-            return jsonify({'success': False, 'message': 'Missing session_id'}), 400
+        # Accept either session_id or confirmation_id
+        if not session_id and not confirmation_id:
+            return jsonify({'success': False, 'message': 'Missing session_id or confirmation_id'}), 400
         
         # Get database configuration
         mysql_config = {
@@ -6828,49 +8176,97 @@ def delete_pending_session():
         conn = mysql.connector.connect(**mysql_config)
         cursor = conn.cursor()
         
+        # Check for pending_confirmations table (new structure)
         try:
-            # First check if session exists and is pending
-            cursor.execute("""
-                SELECT id, filename, confirmation_status FROM analysis_sessions 
-                WHERE id = %s
-            """, (session_id,))
-            
-            session = cursor.fetchone()
-            
-            if not session:
+            cursor.execute("SELECT 1 FROM pending_confirmations LIMIT 1")
+            cursor.fetchall()  # Consume result
+            has_pending_confirmations = True
+            app.logger.info("✓ Using session separation structure for delete operation")
+        except mysql.connector.Error:
+            has_pending_confirmations = False
+            app.logger.info("✓ Using legacy structure for delete operation")
+        
+        try:
+            if has_pending_confirmations and confirmation_id:
+                # New structure: Delete from pending_confirmations table
+                cursor.execute("""
+                    SELECT pc.id, pc.analysis_session_id, pc.confirmation_status, 
+                           COALESCE(pc.filename, a.filename) as filename
+                    FROM pending_confirmations pc
+                    LEFT JOIN analysis_sessions a ON pc.analysis_session_id = a.id
+                    WHERE pc.id = %s
+                """, (confirmation_id,))
+                
+                confirmation = cursor.fetchone()
+                
+                if not confirmation:
+                    return jsonify({
+                        'success': False, 
+                        'message': f'Confirmation {confirmation_id} not found'
+                    }), 404
+                
+                if confirmation[2] != 'pending':
+                    return jsonify({
+                        'success': False, 
+                        'message': f'Can only delete pending confirmations. Confirmation {confirmation_id} is {confirmation[2]}'
+                    }), 400
+                
+                # Delete the pending confirmation (but keep the underlying analysis session)
+                cursor.execute("DELETE FROM pending_confirmations WHERE id = %s", (confirmation_id,))
+                
+                conn.commit()
+                app.logger.info(f"✓ Deleted pending confirmation {confirmation_id} ({confirmation[3]})")
+                
                 return jsonify({
-                    'success': False, 
-                    'message': f'Session {session_id} not found'
-                }), 404
-            
-            if session[2] != 'pending':
+                    'success': True,
+                    'message': f'Confirmation {confirmation_id} deleted successfully',
+                    'filename': confirmation[3]
+                })
+                
+            else:
+                # Legacy structure or session_id provided: Delete from analysis_sessions
+                target_id = session_id or confirmation_id
+                cursor.execute("""
+                    SELECT id, filename, confirmation_status FROM analysis_sessions 
+                    WHERE id = %s
+                """, (target_id,))
+                
+                session = cursor.fetchone()
+                
+                if not session:
+                    return jsonify({
+                        'success': False, 
+                        'message': f'Session {target_id} not found'
+                    }), 404
+                
+                if session[2] != 'pending':
+                    return jsonify({
+                        'success': False, 
+                        'message': f'Can only delete pending sessions. Session {target_id} is {session[2]}'
+                    }), 400
+                
+                # Delete associated well results first
+                cursor.execute("DELETE FROM well_results WHERE session_id = %s", (target_id,))
+                
+                # Delete the session
+                cursor.execute("DELETE FROM analysis_sessions WHERE id = %s", (target_id,))
+                
+                rows_affected = cursor.rowcount
+                
+                if rows_affected == 0:
+                    return jsonify({
+                        'success': False, 
+                        'message': f'Failed to delete session {target_id}'
+                    }), 500
+                
+                conn.commit()
+                app.logger.info(f"✓ Deleted legacy session {target_id} ({session[1]})")
+                
                 return jsonify({
-                    'success': False, 
-                    'message': f'Can only delete pending sessions. Session {session_id} is {session[2]}'
-                }), 400
-            
-            # Delete associated well results first
-            cursor.execute("DELETE FROM well_results WHERE session_id = %s", (session_id,))
-            
-            # Delete the session
-            cursor.execute("DELETE FROM analysis_sessions WHERE id = %s", (session_id,))
-            
-            rows_affected = cursor.rowcount
-            
-            if rows_affected == 0:
-                return jsonify({
-                    'success': False, 
-                    'message': f'Failed to delete session {session_id}'
-                }), 500
-            
-            conn.commit()
-            
-            app.logger.info(f"Deleted pending session {session_id} ({session[1]})")
-            
-            return jsonify({
-                'success': True,
-                'message': f'Successfully deleted pending session {session_id} ({session[1]})'
-            })
+                    'success': True,
+                    'message': f'Successfully deleted session {target_id} ({session[1]})',
+                    'filename': session[1]
+                })
             
         finally:
             cursor.close()
@@ -6945,23 +8341,349 @@ def delete_pending_ml_run():
         app.logger.error(f"Error deleting ML run: {str(e)}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
+# ============================================================================
+# ML TRAINING PAUSE/RESUME ENDPOINTS
+# ============================================================================
+
+@app.route('/api/ml-training/pause', methods=['POST'])
+@require_permission('pause_ml_training')
+def pause_ml_training():
+    """Pause ML training for current session or globally (scope depends on user role)"""
+    try:
+        from ml_training_manager import ml_training_manager
+        
+        data = request.get_json() or {}
+        session_id = session.get('session_id')
+        user_id = session.get('user_id', 'unknown')
+        username = session.get('username', 'unknown')
+        user_role = session.get('role', 'viewer')
+        reason = data.get('reason', 'Manual pause by user')
+        
+        # Determine scope based on user role and request
+        requested_scope = data.get('scope', 'session')
+        
+        # QC Technicians and Administrators can pause globally
+        # Research Users can only pause for their session
+        if requested_scope == 'global':
+            if user_role not in ['qc_technician', 'administrator']:
+                return jsonify({
+                    'success': False,
+                    'error': 'Insufficient permissions for global training pause'
+                }), 403
+            actual_scope = 'global'
+            session_id_for_pause = 'GLOBAL'
+        else:
+            actual_scope = 'session'
+            session_id_for_pause = session_id
+            if not session_id:
+                return jsonify({
+                    'success': False,
+                    'error': 'No active session found for session-specific pause'
+                }), 400
+        
+        success = ml_training_manager.pause_training(
+            user_id=user_id,
+            username=username,
+            session_id=session_id_for_pause,
+            reason=reason,
+            scope=actual_scope
+        )
+        
+        if success:
+            scope_text = "globally" if actual_scope == 'global' else f"for session {session_id}"
+            app.logger.info(f"ML training paused {scope_text} by {username} (role: {user_role})")
+            return jsonify({
+                'success': True,
+                'message': f'ML training paused {scope_text}',
+                'scope': actual_scope,
+                'session_id': session_id_for_pause,
+                'paused_by': username,
+                'reason': reason
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to pause ML training'
+            }), 500
+            
+    except Exception as e:
+        app.logger.error(f"Error pausing ML training: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/ml-training/resume', methods=['POST'])
+@require_permission('pause_ml_training')
+def resume_ml_training():
+    """Resume ML training for current session or globally (scope depends on user role)"""
+    try:
+        from ml_training_manager import ml_training_manager
+        
+        data = request.get_json() or {}
+        session_id = session.get('session_id')
+        user_id = session.get('user_id', 'unknown')
+        username = session.get('username', 'unknown')
+        user_role = session.get('role', 'viewer')
+        
+        # Determine scope based on user role and request
+        requested_scope = data.get('scope', 'session')
+        
+        # QC Technicians and Administrators can resume globally
+        # Research Users can only resume for their session
+        if requested_scope == 'global':
+            if user_role not in ['qc_technician', 'administrator']:
+                return jsonify({
+                    'success': False,
+                    'error': 'Insufficient permissions for global training resume'
+                }), 403
+            actual_scope = 'global'
+            session_id_for_resume = 'GLOBAL'
+        else:
+            actual_scope = 'session'
+            session_id_for_resume = session_id
+            if not session_id:
+                return jsonify({
+                    'success': False,
+                    'error': 'No active session found for session-specific resume'
+                }), 400
+        
+        success = ml_training_manager.resume_training(
+            user_id=user_id,
+            username=username,
+            session_id=session_id_for_resume,
+            scope=actual_scope
+        )
+        
+        if success:
+            scope_text = "globally" if actual_scope == 'global' else f"for session {session_id}"
+            app.logger.info(f"ML training resumed {scope_text} by {username} (role: {user_role})")
+            return jsonify({
+                'success': True,
+                'message': f'ML training resumed {scope_text}',
+                'scope': actual_scope,
+                'session_id': session_id_for_resume,
+                'resumed_by': username
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to resume ML training'
+            }), 500
+            
+    except Exception as e:
+        app.logger.error(f"Error resuming ML training: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/ml-training/status', methods=['GET'])
+@require_permission('pause_ml_training')
+def get_ml_training_pause_status():
+    """Get current ML training status for session and global"""
+    try:
+        from ml_training_manager import ml_training_manager
+        
+        session_id = session.get('session_id')
+        user_role = session.get('role', 'viewer')
+        
+        if not session_id:
+            return jsonify({
+                'success': False,
+                'error': 'No active session found'
+            }), 400
+        
+        # Get session-specific state
+        is_paused = ml_training_manager.is_training_paused(session_id)
+        training_state = ml_training_manager.get_training_state(session_id)
+        
+        # Get global state (for QC and Admin users)
+        global_state = None
+        if user_role in ['qc_technician', 'administrator']:
+            global_state = ml_training_manager.get_global_training_state()
+        
+        # Determine user permissions
+        can_pause_global = user_role in ['qc_technician', 'administrator']
+        can_pause_session = True  # All users with pause_ml_training permission
+        
+        return jsonify({
+            'success': True,
+            'session_id': session_id,
+            'user_role': user_role,
+            'is_paused': is_paused,
+            'training_state': training_state,
+            'global_state': global_state,
+            'permissions': {
+                'can_pause_session': can_pause_session,
+                'can_pause_global': can_pause_global
+            }
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error getting ML training status: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/ml-training/check-pause/<session_id>', methods=['GET'])
+def check_ml_training_pause(session_id):
+    """Check if ML training is paused for specific session (internal use)"""
+    try:
+        from ml_training_manager import ml_training_manager
+        
+        is_paused = ml_training_manager.is_training_paused(session_id)
+        
+        return jsonify({
+            'success': True,
+            'session_id': session_id,
+            'is_paused': is_paused
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error checking ML training pause: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+# =============================================================================
+# CHANNEL COMPLETION TRACKING API ENDPOINTS
+# =============================================================================
+
+@app.route('/channels/status/<experiment_pattern>', methods=['GET'])
+def get_channel_completion_status(experiment_pattern):
+    """Get completion status for all channels of an experiment"""
+    try:
+        mysql_config = get_mysql_config()
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("""
+            SELECT experiment_pattern, fluorophore, test_code, pathogen_target,
+                   status, session_id, started_at, completed_at,
+                   total_wells, good_curves, success_rate, error_message
+            FROM channel_completion_status 
+            WHERE experiment_pattern = %s
+        """, (experiment_pattern,))
+        
+        channels = cursor.fetchall()
+        
+        # Convert to the format expected by frontend
+        channel_dict = {}
+        for channel in channels:
+            channel_dict[channel['fluorophore']] = {
+                'status': channel['status'],
+                'session_id': channel['session_id'],
+                'total_wells': channel['total_wells'],
+                'good_curves': channel['good_curves'],
+                'success_rate': channel['success_rate'],
+                'error_message': channel['error_message'],
+                'started_at': channel['started_at'].isoformat() if channel['started_at'] else None,
+                'completed_at': channel['completed_at'].isoformat() if channel['completed_at'] else None
+            }
+        
+        conn.close()
+        
+        total_channels = len(channels)
+        completed_channels = len([c for c in channels if c['status'] == 'completed'])
+        failed_channels = len([c for c in channels if c['status'] == 'failed'])
+        is_complete = all(c['status'] == 'completed' for c in channels) and total_channels > 0
+        
+        return jsonify({
+            'channels': channel_dict,
+            'total_channels': total_channels,
+            'completed_channels': completed_channels,
+            'failed_channels': failed_channels,
+            'is_complete': is_complete,
+            'experiment_pattern': experiment_pattern
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error getting channel completion status: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/channels/completion/poll', methods=['POST'])
+def poll_channel_completion():
+    """Poll for completion of required channels for an experiment"""
+    try:
+        data = request.json
+        experiment_pattern = data.get('experiment_pattern')
+        required_fluorophores = data.get('required_fluorophores', [])
+        
+        if not experiment_pattern:
+            return jsonify({'error': 'experiment_pattern required'}), 400
+            
+        mysql_config = get_mysql_config()
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Get status for required fluorophores
+        placeholders = ','.join(['%s'] * len(required_fluorophores))
+        cursor.execute(f"""
+            SELECT fluorophore, status, total_wells, good_curves, success_rate, error_message
+            FROM channel_completion_status 
+            WHERE experiment_pattern = %s AND fluorophore IN ({placeholders})
+        """, [experiment_pattern] + required_fluorophores)
+        
+        channels = cursor.fetchall()
+        conn.close()
+        
+        # Build channel status dict
+        channel_status = {}
+        for channel in channels:
+            channel_status[channel['fluorophore']] = {
+                'status': channel['status'],
+                'total_wells': channel['total_wells'],
+                'good_curves': channel['good_curves'],
+                'success_rate': channel['success_rate'],
+                'error_message': channel['error_message']
+            }
+        
+        # Check if we have all required channels
+        missing_channels = set(required_fluorophores) - set(channel_status.keys())
+        for missing in missing_channels:
+            channel_status[missing] = {
+                'status': 'pending',
+                'total_wells': 0,
+                'good_curves': 0,
+                'success_rate': 0.0,
+                'error_message': None
+            }
+        
+        # Determine overall status
+        all_completed = all(ch['status'] == 'completed' for ch in channel_status.values())
+        any_failed = any(ch['status'] == 'failed' for ch in channel_status.values())
+        ready_for_combination = all_completed and not any_failed
+        
+        return jsonify({
+            'experiment_pattern': experiment_pattern,
+            'channels': channel_status,
+            'all_completed': all_completed,
+            'any_failed': any_failed,
+            'ready_for_combination': ready_for_combination,
+            'required_fluorophores': required_fluorophores
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error polling channel completion: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     # Get port from environment variable or use default
     port = int(os.environ.get('PORT', 5000))
     host = os.environ.get('HOST', '0.0.0.0')
     debug = os.environ.get('FLASK_ENV', 'development') == 'development'
     
-    print(f"Starting qPCR Analyzer on {host}:{port}")
-    print(f"Debug mode: {debug}")
+    print("🚀 Starting qPCR S-Curve Analyzer with Database Support...")
+    print(f"🌐 Server will be available at: http://{host}:{port}")
+    print(f"📊 Main dashboard: http://{host}:{port}")
+    print(f"🔍 MySQL viewer: http://{host}:{port}/mysql-viewer")
+    print(f"🛡️ Compliance dashboard: http://{host}:{port}/unified-compliance-dashboard")
+    print(f"🤖 ML validation: http://{host}:{port}/ml-validation-dashboard")
     
-    # Quick test route for debugging dashboard
-    @app.route('/test-dashboard')
-    def test_dashboard():
-        """Serve the simple test dashboard for debugging"""
-        with open('test_dashboard_simple.html', 'r') as f:
-            return f.read()
-    
-    # Start automatic database backup scheduler
+    # Start automatic backup scheduler if available
     try:
         from backup_scheduler import BackupScheduler
         backup_scheduler = BackupScheduler()

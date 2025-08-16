@@ -1,0 +1,12 @@
+# Authentication System Dependencies
+# Add these to your requirements.txt or install via pip
+
+# JWT token handling for Entra ID
+PyJWT==2.8.0
+cryptography==41.0.7
+
+# HTTP requests for OAuth flows
+requests==2.31.0
+
+# Additional security utilities  
+secrets  # Built-in Python module

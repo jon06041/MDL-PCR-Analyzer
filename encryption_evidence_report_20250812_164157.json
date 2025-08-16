@@ -1,0 +1,246 @@
+{
+  "timestamp": "2025-08-12T16:41:57.517883",
+  "system_info": {
+    "python_version": "3.12.3 (main, Jun 18 2025, 17:59:45) [GCC 13.3.0]",
+    "encryption_libraries": {
+      "cryptography": "45.0.5",
+      "ssl_support": true,
+      "ssl_version": "OpenSSL 3.0.13 30 Jan 2024"
+    },
+    "ssl_version": "OpenSSL 3.0.13 30 Jan 2024",
+    "environment_variables": {
+      "ENCRYPTION_KEY": {
+        "exists": false
+      },
+      "DATABASE_ENCRYPTION_KEY": {
+        "exists": false
+      },
+      "SESSION_SECRET_KEY": {
+        "exists": false
+      },
+      "JWT_SECRET_KEY": {
+        "exists": false
+      },
+      "MYSQL_SSL_CA": {
+        "exists": false
+      },
+      "MYSQL_SSL_CERT": {
+        "exists": false
+      },
+      "MYSQL_SSL_KEY": {
+        "exists": false
+      }
+    },
+    "file_permissions": {
+      ".env": {
+        "mode": "666",
+        "secure": false
+      },
+      ".env.encryption.template": {
+        "mode": "666",
+        "secure": false
+      },
+      "data_encryption.py": {
+        "mode": "666",
+        "secure": false
+      },
+      "mysql_encryption_setup.py": {
+        "mode": "666",
+        "secure": false
+      },
+      "enhanced_encryption_manager.py": {
+        "mode": "666",
+        "secure": false
+      }
+    }
+  },
+  "encryption_evidence": {
+    "field_encryption": {
+      "implementation_files": [
+        {
+          "file": "data_encryption.py",
+          "size": 10149,
+          "hash": "5d55dd5e1ef3ef1fd0f9eac40b1ae5017d77146422ea092a13bf2f9ae3cb00fe",
+          "contains_fernet": true,
+          "contains_aes": true,
+          "contains_encryption": true,
+          "contains_decryption": true
+        },
+        {
+          "file": "enhanced_encryption_manager.py",
+          "size": 17034,
+          "hash": "5de8a6bfa5aa96ef54ff6090b1d6364eae42c16862b359845e1dc32dacf2d3b1",
+          "contains_fernet": true,
+          "contains_aes": false,
+          "contains_encryption": true,
+          "contains_decryption": true
+        }
+      ],
+      "encryption_methods": [],
+      "test_encryption": {
+        "success": true,
+        "algorithm": "Fernet (AES 128)",
+        "key_length": 44,
+        "encrypted_length": 120,
+        "encryption_working": true
+      },
+      "algorithm_verification": {
+        "fernet_available": true,
+        "aes_available": true,
+        "key_derivation": "PBKDF2HMAC available",
+        "secure_random": "os.urandom available"
+      }
+    },
+    "database_encryption": {
+      "tde_setup": {
+        "file_exists": true,
+        "file_hash": "f1787b35508d321cc0d3ac008a7500c36e09a612862cb82635b10bf1e2c5d20d",
+        "contains_tde": true,
+        "contains_keyring": true,
+        "contains_ssl": true
+      },
+      "connection_encryption": {
+        "ssl_available": true,
+        "ssl_cipher": "TLS_AES_128_GCM_SHA256",
+        "connection_secure": true
+      },
+      "encrypted_tables": [
+        {
+          "table": "compliance_evidence",
+          "encrypted_columns": [
+            "evidence_hash"
+          ]
+        },
+        {
+          "table": "unified_compliance_events",
+          "encrypted_columns": [
+            "compliance_hash"
+          ]
+        },
+        {
+          "table": "users",
+          "encrypted_columns": [
+            "password_hash"
+          ]
+        }
+      ],
+      "ssl_configuration": {}
+    },
+    "connection_security": {
+      "https_enforcement": {
+        "force_https": true,
+        "security_headers": false,
+        "hsts_header": false
+      },
+      "tls_version": {
+        "tls_1_2_available": true,
+        "tls_1_3_available": true,
+        "default_context_created": true,
+        "ssl_version": "OpenSSL 3.0.13 30 Jan 2024"
+      },
+      "certificate_info": {},
+      "security_headers": {}
+    },
+    "session_security": {
+      "session_encryption": {
+        "secret_key_set": true,
+        "session_config": true,
+        "secure_sessions": false
+      },
+      "csrf_protection": {
+        "password_hashing": true,
+        "salt_usage": true,
+        "session_management": true
+      },
+      "secure_cookies": {}
+    },
+    "file_encryption": {
+      "backup_encryption": {
+        "backup_scheduler.py": {
+          "encryption_support": false,
+          "compression": false
+        },
+        "mysql_backup_manager.py": {
+          "encryption_support": false,
+          "compression": true
+        }
+      },
+      "config_encryption": {
+        ".env": {
+          "exists": true,
+          "permissions": "666"
+        },
+        ".env.encryption.template": {
+          "exists": true,
+          "permissions": "666"
+        }
+      },
+      "log_encryption": {}
+    }
+  },
+  "compliance_mapping": {
+    "FDA_CFR_21_Part_11": {
+      "requirement": "Electronic records security",
+      "encryption_controls": [
+        "Database field encryption for sensitive data",
+        "Secure authentication with password hashing",
+        "Audit trail encryption for compliance records",
+        "Backup encryption for data protection"
+      ],
+      "evidence_files": [
+        "data_encryption.py",
+        "enhanced_encryption_manager.py",
+        "auth_manager.py"
+      ]
+    },
+    "HIPAA_Security_Rule": {
+      "requirement": "Administrative, physical, and technical safeguards",
+      "encryption_controls": [
+        "Data at rest encryption (database TDE)",
+        "Data in transit encryption (HTTPS/TLS)",
+        "Access control with encrypted authentication",
+        "Audit logging with encrypted storage"
+      ],
+      "evidence_files": [
+        "mysql_encryption_setup.py",
+        "app.py (HTTPS enforcement)",
+        "auth_manager.py"
+      ]
+    },
+    "ISO_27001": {
+      "requirement": "Information security management",
+      "encryption_controls": [
+        "Cryptographic key management",
+        "Network security with encryption",
+        "System security with encrypted storage",
+        "Access control with secure authentication"
+      ],
+      "evidence_files": [
+        "enhanced_encryption_manager.py",
+        "encryption_evidence_generator.py"
+      ]
+    }
+  },
+  "test_results": {
+    "field_encryption_test": {
+      "passed": true,
+      "original_length": 23,
+      "encrypted_length": 120,
+      "encryption_ratio": 5.217391304347826,
+      "timestamp": "2025-08-12T16:41:57.598927"
+    },
+    "password_hashing_test": {
+      "passed": true,
+      "hash_length": 97,
+      "algorithm": "pbkdf2_hmac",
+      "timestamp": "2025-08-12T16:41:57.816456"
+    },
+    "database_ssl_test": {
+      "passed": true,
+      "ssl_cipher": "TLS_AES_128_GCM_SHA256",
+      "timestamp": "2025-08-12T16:41:57.844136"
+    }
+  },
+  "file_evidence": {},
+  "network_evidence": {}
+}

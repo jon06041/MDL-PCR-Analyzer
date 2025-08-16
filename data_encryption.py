@@ -14,6 +14,25 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+class FieldEncryption:
+    """Simplified field encryption class for evidence testing"""
+    
+    def __init__(self):
+        """Initialize with a default key for testing"""
+        self.key = Fernet.generate_key()
+        self.cipher = Fernet(self.key)
+    
+    def encrypt_field(self, data):
+        """Encrypt a field value"""
+        if isinstance(data, str):
+            data = data.encode()
+        return self.cipher.encrypt(data)
+    
+    def decrypt_field(self, encrypted_data):
+        """Decrypt a field value"""
+        decrypted = self.cipher.decrypt(encrypted_data)
+        return decrypted.decode()
+
 class DataEncryption:
     def __init__(self, password=None):
         """

@@ -53,6 +53,8 @@
             
             <h1> <img src="static/images/MDL_Logo_2022_small.png" alt="Company Logo" style="height: 50px; margin-bottom: 10px;"> PCR Analyzer 🧬</h1>
             <p>Upload your CFX Manager CSV file to analyze amplification curves with flexible cycle counts</p>
+            <!-- User Status Indicator -->
+            <div id="userStatus" style="text-align: right; margin-bottom: 10px; font-size: 14px; color: #666;"></div>
             <div class="features">
                 <span class="feature">✓ Variable Cycle Lengths</span>
                 <span class="feature">✓ Dynamic Curve Fitting</span>
@@ -60,6 +62,7 @@
                 <a href="/unified-compliance-dashboard" style="background: #17a2b8; color: white; border: none; padding: 8px 16px; border-radius: 4px; text-decoration: none; margin-left: 20px; font-weight: bold;">📊 Validation & Compliance Dashboard</a>
                 <a href="/backup-manager" style="background: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 4px; text-decoration: none; margin-left: 10px; font-weight: bold;">🗄️ Database Backups</a>
                 <button class="emergency-reset-btn" onclick="emergencyReset()" style="background: #e74c3c; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 10px; font-weight: bold;">🔄 RESET EVERYTHING</button>
+                <a href="/auth/logout" style="background: #6c757d; color: white; border: none; padding: 8px 16px; border-radius: 4px; text-decoration: none; margin-left: 10px; font-weight: bold;">🚪 Logout</a>
             </div>
         </div>
 
@@ -343,7 +346,7 @@
                 <h2>Analysis History</h2>
                 <div class="history-controls" style="margin-top: 15px; display: flex; gap: 10px;">
                     <button class="control-btn trend-btn" id="trendAnalysisBtn" onclick="viewTrendAnalysis()">View Trends</button>
-                    <button class="control-btn delete-btn" id="deleteAllBtn" onclick="deleteAllSessions()" style="background: #e74c3c; color: white;">🗑️ Delete All</button>
+                    <button class="control-btn delete-all-btn" onclick="deleteAllSessions()" title="Delete all analysis sessions">🗑️ Delete All</button>
                 </div>
             </div>
             
@@ -968,10 +971,50 @@
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/js/bootstrap.bundle.min.js"></script>
     
+    <!-- User Authentication Status Script -->
+    <script>
+        // Check user authentication status on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            checkUserStatus();
+        });
+        
+        async function checkUserStatus() {
+            try {
+                const response = await fetch('/auth/api/current-user');
+                const userStatusDiv = document.getElementById('userStatus');
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.authenticated && data.user) {
+                        const user = data.user;
+                        const sessionExpires = new Date(user.session_expires);
+                        const timeUntilExpiry = Math.floor((sessionExpires - new Date()) / (1000 * 60)); // minutes
+                        
+                        userStatusDiv.innerHTML = `
+                            <span style="color: #28a745;">🟢 Logged in as: <strong>${user.display_name || user.username}</strong></span>
+                            <span style="color: #6c757d; margin-left: 15px;">Role: ${user.role}</span>
+                            <span style="color: #6c757d; margin-left: 15px;">Session expires in: ${timeUntilExpiry} minutes</span>
+                        `;
+                    } else {
+                        userStatusDiv.innerHTML = '<span style="color: #dc3545;">🔴 Not authenticated</span>';
+                    }
+                } else {
+                    // User not authenticated
+                    const userStatusDiv = document.getElementById('userStatus');
+                    userStatusDiv.innerHTML = '<span style="color: #dc3545;">🔴 Not authenticated</span>';
+                }
+            } catch (error) {
+                console.log('Could not check user status:', error);
+                // Don't show error to user, just silently handle
+            }
+        }
+        
+        // Refresh user status every 5 minutes
+        setInterval(checkUserStatus, 5 * 60 * 1000);
+    </script>
+    
 </body>
 </html>
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/js/bootstrap.bundle.min.js"></script>
     
 </body>
 </html>

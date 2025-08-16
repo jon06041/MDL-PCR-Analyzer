@@ -8,6 +8,39 @@ window.chartUpdating = false;
 // Global flag to prevent multiple simultaneous chart initializations
 window.chartInitializing = false;
 
+// ========================================
+// AUTHENTICATED FETCH UTILITY
+// ========================================
+
+/**
+ * Enhanced fetch wrapper with authentication handling
+ * Automatically includes credentials and handles 401 responses
+ */
+async function authenticatedFetch(url, options = {}) {
+    // Ensure credentials are included for session management
+    const defaultOptions = {
+        credentials: 'same-origin',
+        ...options
+    };
+    
+    try {
+        const response = await fetch(url, defaultOptions);
+        
+        // Handle 401 Authentication Required
+        if (response.status === 401) {
+            console.log(`🔐 Authentication required for ${url} - redirecting to login`);
+            const currentPath = encodeURIComponent(window.location.pathname + window.location.search);
+            window.location.href = `/auth/login?next=${currentPath}`;
+            throw new Error('Authentication required - redirecting to login');
+        }
+        
+        return response;
+    } catch (error) {
+        // Re-throw the error for the caller to handle
+        throw error;
+    }
+}
+
 // Anti-throttling and visibility monitoring
 let isTabInBackground = false;
 let backgroundWarningShown = false;
@@ -49,7 +82,7 @@ document.addEventListener('visibilitychange', function() {
 async function checkBackendHealth() {
     try {
         const startTime = performance.now();
-        const response = await fetch('/health', { 
+        const response = await authenticatedFetch('/health', { 
             method: 'GET',
             headers: { 'X-Health-Check': 'frontend' }
         });
@@ -2903,7 +2936,8 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
                     'X-Timestamp': new Date().toISOString() // Help backend track timing
                 },
                 body: JSON.stringify(payload),
-                signal: controller.signal
+                signal: controller.signal,
+                credentials: 'same-origin' // Ensure session cookies are sent
             });
             
             // Debug: Log successful response
@@ -2948,6 +2982,15 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
                 }
                 
                 console.error(`❌ DEBUG-ERROR - Backend HTTP error for ${fluorophore}: ${msg}`);
+                
+                // Handle 401 Authentication Required - redirect to login
+                if (response.status === 401) {
+                    console.log(`🔐 Authentication required - redirecting to login page`);
+                    const currentPath = encodeURIComponent(window.location.pathname + window.location.search);
+                    window.location.href = `/auth/login?next=${currentPath}`;
+                    return { individual_results: {} };
+                }
+                
                 return { individual_results: {} };
             }
             result = await response.json();
@@ -5548,10 +5591,30 @@ function filterWellsByFluorophore(selectedFluorophore) {
     allOption.textContent = selectedFluorophore === 'all' ? 'All Wells Overlay' : `All ${selectedFluorophore} Wells`;
     wellSelector.appendChild(allOption);
     
-    // Filter results by fluorophore
+    // Filter results by fluorophore (more permissive for debugging missing fluorophore assignments)
     const filteredResults = Object.entries(analysisResults.individual_results).filter(([wellKey, result]) => {
         if (selectedFluorophore === 'all') return true;
-        return (result.fluorophore || 'Unknown') === selectedFluorophore;
+        
+        const resultFluorophore = result.fluorophore || 'Unknown';
+        
+        // Primary match: exact fluorophore match
+        if (resultFluorophore === selectedFluorophore) {
+            return true;
+        }
+        
+        // Secondary match: include wells with missing fluorophore data if they look like samples
+        // This helps with cases like A20 where fluorophore assignment might be missing
+        if (resultFluorophore === 'Unknown' && selectedFluorophore !== 'Unknown') {
+            // Check if this looks like a sample well (A1, B2, etc.) rather than a control
+            const wellId = result.well_id || wellKey;
+            const samplePattern = /^[A-H]\d+$/i; // Matches A1, B2, H12, etc.
+            if (samplePattern.test(wellId) || samplePattern.test(wellKey)) {
+                console.log(`🔍 WELL-FILTER: Including ${wellKey} (${wellId}) with missing fluorophore in ${selectedFluorophore} filter`);
+                return true;
+            }
+        }
+        
+        return false;
     });
     
     // Sort wells according to the selected mode
@@ -8173,7 +8236,7 @@ function getLocalAnalysisHistory() {
 async function loadAnalysisHistory() {
     try {
         // Try to load from server first
-        const response = await fetch('/sessions');
+        const response = await authenticatedFetch('/sessions');
         const data = await response.json();
         
         if (data.sessions && data.sessions.length > 0) {
@@ -8738,6 +8801,26 @@ function groupSessionsByExperiment(sessions) {
     const combinedSessions = [];
     
     Object.entries(experimentGroups).forEach(([experimentPattern, groupSessions]) => {
+        // 🚨 FIX: Check for existing combined session in database first
+        const existingCombinedSession = groupSessions.find(session => {
+            // Look for session that matches the experiment pattern exactly (no fluorophore suffix)
+            // This indicates a real combined session from the database
+            return session.filename === experimentPattern || 
+                   (session.filename.includes(experimentPattern) && 
+                    !session.filename.includes(' - ') && 
+                    !session.filename.includes('_FAM') && 
+                    !session.filename.includes('_HEX') && 
+                    !session.filename.includes('_Cy5') && 
+                    !session.filename.includes('_Texas Red'));
+        });
+        
+        if (existingCombinedSession) {
+            // 🎯 Use the real combined session from database instead of creating virtual one
+            console.log(`✅ Found existing combined session in database: ${existingCombinedSession.filename} (ID: ${existingCombinedSession.id})`);
+            combinedSessions.push(existingCombinedSession);
+            return;
+        }
+        
         // Filter out sessions without detectable fluorophores for multi-fluorophore combinations
         const validSessions = groupSessions.filter(session => {
             const fluorophore = detectFluorophoreFromFilename(session.filename);
@@ -8972,13 +9055,23 @@ function calculatePathogenBreakdownFromSessions(sessions) {
         }
         
         let positive = 0;
-        const total = session.well_results ? session.well_results.length : 0;
+        let total = 0; // Count only non-control wells
         
         if (session.well_results) {
             session.well_results.forEach(well => {
-                const amplitude = well.amplitude || 0;
-                if (well.is_good_scurve && amplitude > 500) {
-                    positive++;
+                // Check if this is a control well - exclude from statistics
+                const sampleName = well.sample_name || '';
+                const isControl = sampleName && ['H-', 'M-', 'L-', 'NTC-'].some(prefix => 
+                    sampleName.startsWith(prefix)
+                );
+                
+                // Only count non-control wells
+                if (!isControl) {
+                    total++;
+                    const amplitude = well.amplitude || 0;
+                    if (well.is_good_scurve && amplitude > 500) {
+                        positive++;
+                    }
                 }
             });
         }
@@ -9314,11 +9407,6 @@ function displayAnalysisHistory(sessions) {
     const tableHtml = `
         <div class="history-table-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
             <span style="font-weight: bold; color: #2c3e50;">Session History</span>
-            <button onclick="deleteAllSessions()" 
-                    style="background: #e74c3c; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px;"
-                    title="Delete all analysis sessions">
-                Delete All
-            </button>
         </div>
         <table class="history-table">
             <thead>
@@ -9857,7 +9945,7 @@ async function deleteSession(sessionId, event) {
     deleteBtn.disabled = true;
     
     try {
-        const response = await fetch(`/sessions/${sessionId}`, { method: 'DELETE' });
+        const response = await authenticatedFetch(`/sessions/${sessionId}`, { method: 'DELETE' });
         
         if (!response.ok) {
             const errorData = await response.json();
@@ -14450,7 +14538,7 @@ async function deleteSessionFromDB(sessionId, event) {
             for (const realSessionId of realSessionIds) {
                 console.log(`🗑️ Deleting individual session ${realSessionId} from database...`);
                 
-                const response = await fetch(`/delete_session/${realSessionId}`, {
+                const response = await authenticatedFetch(`/delete_session/${realSessionId}`, {
                     method: 'DELETE'
                 });
                 
