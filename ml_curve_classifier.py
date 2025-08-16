@@ -1354,8 +1354,8 @@ def extract_pathogen_from_well_data(well_data):
     # Priority 5: Extract from experiment pattern (fallback for single-channel experiments)
     test_code = None
     
-    # Check various fields that might contain the test code
-    for field in ['test_code', 'experiment_pattern', 'sample_name', 'extracted_test_code']:
+    # Check various fields that might contain the test code (REMOVED sample_name - contains sample IDs, not pathogen codes)
+    for field in ['test_code', 'experiment_pattern', 'extracted_test_code']:
         if field in well_data and well_data[field]:
             test_code = str(well_data[field]).strip()
             if test_code and test_code != '':
