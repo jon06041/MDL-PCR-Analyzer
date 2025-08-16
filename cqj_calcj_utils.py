@@ -253,8 +253,8 @@ def calculate_calcj_with_controls(well_data, threshold, all_well_results, test_c
     # Get concentration values for this test/channel
     conc_values = CONCENTRATION_CONTROLS.get(test_code, {}).get(channel, {})
     if not conc_values:
-        print(f"[CALCJ-DEBUG] Well {well_id}: No concentration controls found for {test_code}/{channel}, using basic method")
-        return {'calcj_value': calculate_calcj(well_data, threshold), 'method': 'basic'}
+        print(f"[CALCJ-DEBUG] Well {well_id}: No concentration controls found for {test_code}/{channel}, CalcJ unavailable")
+        return {'calcj_value': None, 'method': 'no_controls_available'}
     
     # Find H/M/L control wells
     control_cqj = {}
@@ -377,8 +377,8 @@ def calculate_calcj_with_controls(well_data, threshold, all_well_results, test_c
     
     # Check if we have enough controls for standard curve
     if len(avg_control_cqj) < 2:
-        print(f"[CALCJ-DEBUG] Well {well_id}: Insufficient controls found ({len(avg_control_cqj)}), using basic method")
-        return {'calcj_value': calculate_calcj(well_data, threshold), 'method': 'basic'}
+        print(f"[CALCJ-DEBUG] Well {well_id}: Insufficient controls found ({len(avg_control_cqj)}), CalcJ unavailable")
+        return {'calcj_value': None, 'method': 'insufficient_controls'}
     
     # Get CQJ for current well
     current_cqj = well_data.get('cqj_value')
@@ -417,73 +417,15 @@ def calculate_calcj_with_controls(well_data, threshold, all_well_results, test_c
             print(f"[CALCJ-DEBUG] Standard curve: slope={slope:.4f}, intercept={intercept:.4f}")
             return {'calcj_value': calcj_result, 'method': 'control_based'}
         else:
-            print(f"[CALCJ-DEBUG] Well {well_id}: Missing H/L controls, using basic method")
-            return {'calcj_value': calculate_calcj(well_data, threshold), 'method': 'basic'}
+            print(f"[CALCJ-DEBUG] Well {well_id}: Missing H/L controls, CalcJ unavailable")
+            return {'calcj_value': None, 'method': 'missing_hl_controls'}
             
     except Exception as e:
-        print(f"[CALCJ-DEBUG] Well {well_id}: Error in control-based calculation: {e}, using basic method")
-        return {'calcj_value': calculate_calcj(well_data, threshold), 'method': 'basic'}
+        print(f"[CALCJ-DEBUG] Well {well_id}: Error in control-based calculation: {e}, CalcJ unavailable")
+        return {'calcj_value': None, 'method': 'calculation_error'}
 
-def calculate_calcj(well, threshold):
-    """
-    Example: Calc-J = amplitude / threshold (replace with real formula if needed)
-    """
-    # Try multiple ways to get well identifier: well_id, wellKey, or fallback
-    well_id = well.get('well_id') or well.get('wellKey') or well.get('well_key') or 'UNKNOWN'
-    amplitude = well.get('amplitude')
-    if amplitude is None or not threshold:
-        print(f"[CALCJ-DEBUG] Well {well_id}: Missing amplitude ({amplitude}) or threshold ({threshold})")
-        return None
-    result = amplitude / threshold
-    print(f"[CALCJ-DEBUG] Well {well_id}: CalcJ = {amplitude} / {threshold} = {result}")
-    return result
+# Function removed - deprecated amplitude/threshold calculation  
+# All CalcJ calculations now use control-based method: calculate_calcj_with_controls()
 
-def calculate_cqj_calcj_for_well(well_data, strategy, threshold):
-    """
-    Calculate both CQJ and CalcJ for a well with the given threshold strategy.
-    Returns a dict with cqj_value and calcj_value.
-    """
-    # Try multiple ways to get well identifier: well_id, wellKey, or fallback
-    well_id = well_data.get('well_id') or well_data.get('wellKey') or well_data.get('well_key') or 'UNKNOWN'
-    print(f"[CQJ-CALCJ-DEBUG] Starting calculation for well_id: '{well_id}' with threshold: {threshold}")
-    
-    result = {
-        'cqj_value': None,
-        'calcj_value': None,
-        'threshold_value': threshold,
-        'strategy': strategy
-    }
-    
-    try:
-        # Calculate CQJ
-        cqj_value = calculate_cqj(well_data, threshold)
-        result['cqj_value'] = cqj_value
-        
-        # For CalcJ: Check if CQJ is None (no threshold crossing) - should be N/A
-        if cqj_value is None:
-            result['calcj_value'] = 'N/A'
-            print(f"[CQJ-CALCJ-DEBUG] Well {well_id}: No threshold crossing, CalcJ = N/A")
-        else:
-            # Use basic CalcJ calculation for now (backend doesn't have access to all wells for control-based)
-            # TODO: This should be updated to use control-based calculation when all wells are available
-            calcj_value = calculate_calcj(well_data, threshold)
-            
-            # Check for negative or unreasonable values
-            if calcj_value is not None and (calcj_value < 0 or calcj_value < 1e-10):
-                result['calcj_value'] = 'N/A'
-                print(f"[CQJ-CALCJ-DEBUG] Well {well_id}: Unreasonable CalcJ value ({calcj_value}), setting to N/A")
-            else:
-                result['calcj_value'] = calcj_value
-        
-        # Add strategy-specific CQJ and CalcJ objects for compatibility
-        result['cqj'] = {strategy: result['cqj_value']} if result['cqj_value'] is not None else {strategy: None}
-        result['calcj'] = {strategy: result['calcj_value']} if result['calcj_value'] is not None else {strategy: None}
-        
-        print(f"[CQJ-CALCJ-DEBUG] Final result for {well_id}: CQJ={result['cqj_value']}, CalcJ={result['calcj_value']}")
-        return result
-        
-    except Exception as e:
-        # Try multiple ways to get well identifier for error messages too
-        well_id = well_data.get('well_id') or well_data.get('wellKey') or well_data.get('well_key') or 'UNKNOWN'
-        print(f"[CQJ-CALCJ-ERROR] Error calculating for well {well_id}: {e}")
-        return result
+# Function removed - deprecated amplitude/threshold calculation
+# All CalcJ calculations now use control-based method: calculate_calcj_with_controls()

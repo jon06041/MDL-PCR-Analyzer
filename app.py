@@ -18,7 +18,7 @@ from models import db, AnalysisSession, WellResult, ExperimentStatistics, Channe
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.exc import OperationalError, IntegrityError, DatabaseError
 from threshold_backend import create_threshold_routes
-from cqj_calcj_utils import calculate_cqj_calcj_for_well
+from cqj_calcj_utils import calculate_calcj_with_controls
 from ml_config_manager import MLConfigManager
 from fda_compliance_manager import FDAComplianceManager
 from mysql_unified_compliance_manager import MySQLUnifiedComplianceManager
