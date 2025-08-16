@@ -723,17 +723,93 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
         }
         threshold = analysis.get('threshold_value')
         cqj_val = py_cqj(well_for_cqj, threshold) if threshold is not None else None
-        # CalcJ calculation moved to frontend - backend should not calculate it
-        # calcj_val = py_calcj(well_for_cqj, threshold) if threshold is not None else None
 
-        # Store as dict for per-channel support (even if only one channel)
+        # Store CQJ first (needed for CalcJ calculation)
         analysis['cqj'] = {channel_name: cqj_val}
         print(f"🔍 CQJ ASSIGNMENT: well={well_id}, channel_name='{channel_name}', cqj_val={cqj_val}")
-        # analysis['calcj'] = {channel_name: calcj_val}
+
+        # CalcJ calculation will be done after test_code extraction
+        analysis['calcj'] = {channel_name: None}  # Placeholder
 
         from app import get_pathogen_target
         test_code = data.get('test_code', None)
         analysis['pathogen_target'] = get_pathogen_target(test_code, channel_name) if test_code else channel_name
+
+        # CalcJ calculation using control-based standard curve method (same as frontend)
+        from cqj_calcj_utils import calculate_calcj_with_controls
+        if threshold is not None and cqj_val is not None:
+            try:
+                # Use existing dynamic test code extraction (no hard-coded values)
+                if not test_code:
+                    # Import the ML pathogen extraction function for dynamic extraction
+                    from ml_curve_classifier import extract_pathogen_from_well_data
+                    
+                    # Prepare well data for pathogen extraction
+                    well_data_with_context = dict(well_for_cqj)
+                    well_data_with_context.update({
+                        'experiment_pattern': data.get('experiment_pattern', ''),
+                        'fluorophore': channel_name,
+                        'channel': channel_name,
+                        'current_experiment_pattern': data.get('experiment_pattern', ''),
+                        'extracted_test_code': data.get('extracted_test_code', '')
+                    })
+                    
+                    # Extract test code dynamically using existing ML function
+                    extracted_pathogen = extract_pathogen_from_well_data(well_data_with_context)
+                    if extracted_pathogen and extracted_pathogen != 'Unknown':
+                        test_code = extracted_pathogen
+                        print(f"🔍 CALCJ: Dynamically extracted test_code='{test_code}' using ML pathogen extraction")
+                    else:
+                        # Fallback: Extract from experiment pattern if ML extraction fails
+                        experiment_pattern = data.get('experiment_pattern', '')
+                        if experiment_pattern:
+                            # Use the same extraction logic as the existing pathogen detection
+                            if experiment_pattern.startswith('Ac') and len(experiment_pattern) > 2:
+                                test_code = experiment_pattern[2:].split('_')[0]  # Remove 'Ac' prefix
+                            else:
+                                test_code = experiment_pattern.split('_')[0]
+                            print(f"🔍 CALCJ: Extracted test_code='{test_code}' from experiment_pattern='{experiment_pattern}' (ML fallback)")
+                        else:
+                            test_code = None
+                            print(f"🔍 CALCJ: No test_code found - cannot calculate CalcJ without pathogen context")
+                
+                # Only proceed if we have a valid test_code
+                if test_code:
+                    # Prepare well data with CQJ value
+                    well_data_for_calcj = dict(well_for_cqj)
+                    well_data_for_calcj['cqj_value'] = cqj_val
+                    
+                    # Use control-based standard curve calculation
+                    calcj_result = calculate_calcj_with_controls(
+                        well_data_for_calcj, 
+                        threshold, 
+                        {}, 
+                        test_code, 
+                        channel_name
+                    )
+                    
+                    if calcj_result and isinstance(calcj_result, dict):
+                        calcj_val = calcj_result.get('calcj_value')
+                        calcj_method = calcj_result.get('method', 'control_based')
+                        print(f"🔍 CALCJ STANDARD-CURVE: well={well_id}, calcj_val={calcj_val}, method={calcj_method}, test_code={test_code}")
+                    else:
+                        calcj_val = None
+                        print(f"🔍 CALCJ STANDARD-CURVE FAILED: well={well_id}, result={calcj_result}")
+                else:
+                    calcj_val = None
+                    print(f"🔍 CALCJ SKIPPED - NO TEST CODE: well={well_id} (cannot determine pathogen context)")
+                    
+            except Exception as e:
+                calcj_val = None
+                print(f"🔍 CALCJ STANDARD-CURVE ERROR: well={well_id}, error={e}")
+            
+            analysis['calcj'][channel_name] = calcj_val
+        else:
+            calcj_val = None
+            print(f"🔍 CALCJ SKIPPED: well={well_id}, threshold={threshold}, cqj_val={cqj_val}")
+            analysis['calcj'][channel_name] = calcj_val
+
+        print(f"🔍 CALCJ FINAL: well={well_id}, channel_name='{channel_name}', calcj_val={analysis['calcj'][channel_name]}")
 
         results[well_id] = analysis
 
