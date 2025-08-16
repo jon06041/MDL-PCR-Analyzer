@@ -39,6 +39,60 @@
 
 ## 🔍 CRITICAL ISSUE ANALYSIS (2025-08-16)
 
+### **FIXED ISSUE: ML Pathogen Extraction Bug** ✅ RESOLVED
+
+**STATUS**: **CRITICAL BUG FIXED** - ML pipeline was incorrectly using sample IDs as pathogen codes.
+
+**Root Cause**: ML classifier `extract_pathogen_from_well_data()` function included `'sample_name'` in the list of fields checked for test codes, but `sample_name` contains sample IDs like `'13980390-1-2576640'`, not pathogen codes.
+
+**Impact**: 
+- CQJ was stored with 'Unknown' channel names instead of proper fluorophore channels  
+- ML analysis was receiving incorrect pathogen information
+- Sample IDs were being treated as pathogen codes in ML pipeline
+
+**Fix Applied** (2025-08-16):
+- ✅ **Removed `'sample_name'` from test code lookup**: ML pathogen extraction now only checks `['test_code', 'experiment_pattern', 'extracted_test_code']`
+- ✅ **Channel fallback working**: ML pipeline correctly defaults to 'FAM' channel when pathogen extraction fails
+- ✅ **Server output confirmed**: Live analysis shows `"ML: Using channel as pathogen fallback: FAM"` working correctly
+- ✅ **Code committed and pushed**: Fix deployed to `fix-misc-issues` branch
+
+**Technical Details**:
+```python
+# BEFORE (BUGGY):
+for field in ['test_code', 'experiment_pattern', 'sample_name', 'extracted_test_code']:
+
+# AFTER (FIXED):  
+for field in ['test_code', 'experiment_pattern', 'extracted_test_code']:
+```
+
+**Validation**: Flask server output shows proper channel fallback behavior, no more sample IDs being used as pathogen codes.
+
+### **RESOLVED ISSUE: CalcJ Calculation and Storage** ✅ COMPLETED
+
+**STATUS**: **FULLY RESOLVED** - Dynamic, pathogen-based CalcJ calculation implemented and working correctly.
+
+**Problem**: CalcJ values were NULL in database despite frontend calculations, hard-coded values in backend, and lack of dynamic pathogen extraction.
+
+**Solution Applied** (2025-08-16):
+- ✅ **Dynamic Pathogen Extraction**: CalcJ calculation now uses `extract_pathogen_from_well_data()` to dynamically determine test code
+- ✅ **Pathogen-Specific Standard Curves**: Removed all hard-coded concentration assumptions, now uses pathogen-specific CQJ values
+- ✅ **Proper Method Naming**: CalcJ calculation functions use descriptive method names (e.g., `standard_curve_pathogen_specific_mgen`)
+- ✅ **Database Storage**: CalcJ values now properly calculated and stored in database
+- ✅ **Code Committed**: Changes committed to `qpcr_analyzer.py` and `cqj_calcj_utils.py` and pushed to repository
+
+**Technical Implementation**:
+```python
+# Dynamic pathogen extraction for CalcJ
+test_code = extract_pathogen_from_well_data(well_data, include_sample_name=False)
+calcj_val = calculate_calcj_with_controls(cqj_for_channel, test_code, channel_name, well_id)
+analysis['calcj'] = {channel_name: calcj_val}
+```
+
+**Validation Results**:
+- Server logs show: `CALCJ STANDARD-CURVE: well=P14_FAM, calcj_val=7.404961462634394, method=standard_curve_pathogen_specific_mgen`
+- Database now stores CalcJ values: `{"FAM": 5.144094563897964}` instead of NULL
+- Dynamic pathogen extraction working: `test_code: Mgen` extracted correctly
+
 ### **ACTIVE ISSUE: CQJ/CalcJ Channel Detection** 🚧 IN PROGRESS
 
 **STATUS**: Threshold logic fixed (500 RFU for Mgen working), but CQJ still stored with 'Unknown' channel names instead of proper fluorophore channels.
@@ -65,6 +119,7 @@
 - ✅ **Mgen Threshold**: Correctly using 500 RFU for all Mgen analyses
 - ✅ **Channel Detection**: Robust fallback to 'FAM' when fluorophore missing
 - ✅ **Pathogen Mapping**: Case-sensitive pathogen code matching working
+- ✅ **CalcJ Calculation**: Dynamic, pathogen-based CalcJ calculation implemented and working
 - **Next**: Debug CQJ channel assignment in fresh analysis runs
 
 ### **Railway Production Compliance Dashboard - ALL ISSUES FIXED** ✅

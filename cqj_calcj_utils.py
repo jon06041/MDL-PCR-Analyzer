@@ -407,12 +407,14 @@ def calculate_calcj_with_controls(well_data, threshold, all_well_results, test_c
         if h_cq is not None and l_cq is not None and h_val and l_val:
             # Use the existing calculate_calcj function
             import math
-            slope = (math.log10(h_val) - math.log10(l_val)) / (l_cq - h_cq)
+            # FIXED: Slope should be negative (higher CQJ = lower concentration)
+            slope = (math.log10(h_val) - math.log10(l_val)) / (h_cq - l_cq)
             intercept = math.log10(h_val) - slope * h_cq
             log_conc = slope * current_cqj + intercept
             calcj_result = 10 ** log_conc
             
             print(f"[CALCJ-DEBUG] Well {well_id}: Control-based CalcJ = {calcj_result:.2e} (CQJ: {current_cqj:.2f})")
+            print(f"[CALCJ-DEBUG] Standard curve: slope={slope:.4f}, intercept={intercept:.4f}")
             return {'calcj_value': calcj_result, 'method': 'control_based'}
         else:
             print(f"[CALCJ-DEBUG] Well {well_id}: Missing H/L controls, using basic method")

@@ -612,9 +612,12 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
     good_curves = []
     cycle_info = None
 
-
     # --- Import new CQJ/CalcJ utils ---
     from cqj_calcj_utils import calculate_cqj as py_cqj, calculate_calcj as py_calcj
+
+    # First pass: collect all well results for control detection in CalcJ calculation
+    # We'll build this as we go through the analysis
+    all_well_results_for_calcj = {}
 
     for well_id, data in data_dict.items():
         cycles = data['cycles']
@@ -779,11 +782,22 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                     well_data_for_calcj = dict(well_for_cqj)
                     well_data_for_calcj['cqj_value'] = cqj_val
                     
-                    # Use control-based standard curve calculation
+                    # Add current well to all_well_results_for_calcj with necessary info for control detection
+                    all_well_results_for_calcj[well_id] = {
+                        'sample_name': data.get('sample_name', ''),
+                        'well_id': well_id,
+                        'cqj_value': cqj_val,
+                        'channel': channel_name,
+                        'fluorophore': channel_name,
+                        'test_code': test_code,
+                        'experiment_pattern': data.get('experiment_pattern', '')
+                    }
+                    
+                    # Use control-based standard curve calculation with actual well data
                     calcj_result = calculate_calcj_with_controls(
                         well_data_for_calcj, 
                         threshold, 
-                        {}, 
+                        all_well_results_for_calcj,  # Pass actual well results instead of {}
                         test_code, 
                         channel_name
                     )
