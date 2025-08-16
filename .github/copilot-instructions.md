@@ -39,6 +39,35 @@
 
 ## 🔍 CRITICAL ISSUE ANALYSIS (2025-08-16)
 
+### **COMPLETED: Amplitude/Threshold CalcJ Removal** ✅ COMPLETED
+
+**STATUS**: **AMPLITUDE/THRESHOLD CALCULATIONS COMPLETELY REMOVED** - All CalcJ calculations now use control-based standard curves exclusively.
+
+**Changes Applied** (2025-08-16):
+- ✅ **Removed `calculate_cqj_calcj_for_well()`**: Deprecated amplitude/threshold function eliminated
+- ✅ **Removed `calculate_calcj()`**: Old amplitude/threshold calculation method removed  
+- ✅ **Updated imports**: All files now use only `calculate_calcj_with_controls()`
+- ✅ **Control-only CalcJ**: CalcJ returns None when control wells unavailable
+- ✅ **Clean fallback logic**: No more unreliable amplitude-based estimates
+- ✅ **Proper standard curves**: All CalcJ values use actual H/L control CQJ values
+
+**Technical Implementation**:
+```python
+# OLD (REMOVED): Amplitude/threshold calculation
+calcj_value = amplitude / threshold  # ❌ ELIMINATED
+
+# NEW (ONLY METHOD): Control-based standard curve
+calcj_result = calculate_calcj_with_controls(well_data, threshold, all_wells, test_code, channel)
+# Returns: {'calcj_value': 1.13e+05, 'method': 'control_based'}
+# Or: {'calcj_value': None, 'method': 'insufficient_controls'}
+```
+
+**Impact**:
+- CalcJ values now scientifically accurate using proper concentration relationships
+- No more arbitrary amplitude/threshold ratios creating unrealistic results
+- Control wells are required for CalcJ calculation (proper qPCR practice)
+- Database will show None for CalcJ when controls are missing (correct behavior)
+
 ### **FIXED ISSUE: ML Pathogen Extraction Bug** ✅ RESOLVED
 
 **STATUS**: **CRITICAL BUG FIXED** - ML pipeline was incorrectly using sample IDs as pathogen codes.
