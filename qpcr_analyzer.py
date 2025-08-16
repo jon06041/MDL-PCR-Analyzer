@@ -613,7 +613,7 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
     cycle_info = None
 
     # --- Import new CQJ/CalcJ utils ---
-    from cqj_calcj_utils import calculate_cqj as py_cqj, calculate_calcj as py_calcj
+    from cqj_calcj_utils import calculate_cqj as py_cqj
 
     # First pass: collect all well results for control detection in CalcJ calculation
     # We'll build this as we go through the analysis
