@@ -61,6 +61,9 @@ def get_pathogen_threshold(well_data, L=None, B=None):
     test_code = well_data.get('test_code') if well_data else None
     fluorophore = well_data.get('fluorophore') if well_data else None
     
+    print(f"🔍 get_pathogen_threshold DEBUG: well_data keys: {list(well_data.keys()) if well_data else 'None'}")
+    print(f"🔍 get_pathogen_threshold DEBUG: test_code='{test_code}', fluorophore='{fluorophore}'")
+    
     # Try to get pathogen-specific threshold
     if test_code and fluorophore and test_code in PATHOGEN_FIXED_THRESHOLDS:
         pathogen_thresholds = PATHOGEN_FIXED_THRESHOLDS[test_code]
@@ -331,8 +334,13 @@ def analyze_curve_quality(well_id, data, experiment_name, test_code=None):
         # Extract parameters
         L, k, x0, B = popt
 
-        # --- DYNAMIC PATHOGEN-SPECIFIC THRESHOLD ---
-        threshold_value = get_pathogen_threshold(well_data, L, B)
+        # --- FIXED THRESHOLD FOR TESTING ---
+        FIXED_THRESHOLD = 500.0  # Mgen-specific fixed threshold
+        threshold_value = FIXED_THRESHOLD
+        print(f"🔧 USING FIXED THRESHOLD: {threshold_value} RFU")
+        
+        # ORIGINAL DYNAMIC THRESHOLD (DISABLED FOR TESTING):
+        # threshold_value = get_pathogen_threshold(well_data, L, B)
         
         # OLD CALCULATED THRESHOLD (COMMENTED OUT FOR TESTING):
         # exp_phase_threshold = L / 2 + B
@@ -625,11 +633,11 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                     channel_name = potential_fluorophore
                     print(f"🔍 DEBUG: Extracted channel from well_id: {channel_name}")
                 else:
-                    channel_name = 'Unknown'
-                    print(f"🔍 DEBUG: Invalid potential fluorophore from well_id: {potential_fluorophore}")
+                    channel_name = 'FAM'  # Default to FAM instead of Unknown
+                    print(f"🔍 DEBUG: Invalid potential fluorophore from well_id: {potential_fluorophore}, defaulting to FAM")
             else:
-                channel_name = 'Unknown'  # Don't default to FAM
-                print(f"🔍 DEBUG: No valid fluorophore pattern in well_id: {well_id}")
+                channel_name = 'FAM'  # Default to FAM for single-channel analysis
+                print(f"🔍 DEBUG: No valid fluorophore pattern in well_id: {well_id}, defaulting to FAM")
             data['fluorophore'] = channel_name
         
         print(f"🔍 DEBUG: Final channel_name for {well_id}: {channel_name}")
