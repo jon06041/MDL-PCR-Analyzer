@@ -243,20 +243,27 @@ def check_exponential_growth(rfu, min_max_growth_rate=5.0):
     }
 
 
-def analyze_curve_quality(cycles, rfu, plot=False, 
-                         # Quality filter parameters
-                         min_start_cycle=5,
-                         min_amplitude=100,
-                         min_plateau_rfu=50,
-                         min_snr=3.0,
-                         min_growth_rate=5.0,
-                         threshold_factor=10.0,
-                         well_data=None):
-    """Analyze if a curve matches S-shaped pattern and return quality metrics
-    threshold_factor: multiplier for baseline std to set threshold line (default 10.0)
-    well_data: Dict containing well information (test_code, fluorophore) for pathogen-specific thresholds
+def analyze_curve_quality(well_id, data, experiment_name, test_code=None):
     """
+    Enhanced curve quality analysis with integrated classification and ML integration.
+    Returns comprehensive analysis including quality metrics and curve classification.
+    """
+    print(f"🔍 FUNCTION CALLED: analyze_curve_quality for well {well_id}, experiment {experiment_name}, test_code={test_code}")
     try:
+        # Extract cycles and rfu from data
+        cycles = data['cycles']
+        rfu = data['rfu']
+        
+        # Quality filter parameters - use defaults since they're not passed anymore
+        min_start_cycle = 5
+        min_amplitude = 100
+        min_plateau_rfu = 50
+        min_snr = 3.0
+        min_growth_rate = 5.0
+        threshold_factor = 10.0
+        well_data = data  # Use the data as well_data
+        plot = False  # Default to no plotting
+        
         # Ensure we have enough data points
         if len(cycles) < 5 or len(rfu) < 5:
             return {
@@ -607,6 +614,8 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
 
         # Ensure fluorophore/channel is present for each well
         channel_name = data.get('fluorophore')
+        print(f"🔍 DEBUG Channel Detection - Well: {well_id}, Original fluorophore: {channel_name}, Data keys: {list(data.keys())}")
+        
         if not channel_name:
             # Extract fluorophore from well_id if available (e.g., "A1_HEX" -> "HEX")
             if '_' in well_id and len(well_id.split('_')) >= 2:
@@ -614,11 +623,16 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                 # Validate it's a known fluorophore
                 if potential_fluorophore in ['FAM', 'HEX', 'Texas Red', 'Cy5', 'TexasRed']:
                     channel_name = potential_fluorophore
+                    print(f"🔍 DEBUG: Extracted channel from well_id: {channel_name}")
                 else:
                     channel_name = 'Unknown'
+                    print(f"🔍 DEBUG: Invalid potential fluorophore from well_id: {potential_fluorophore}")
             else:
                 channel_name = 'Unknown'  # Don't default to FAM
+                print(f"🔍 DEBUG: No valid fluorophore pattern in well_id: {well_id}")
             data['fluorophore'] = channel_name
+        
+        print(f"🔍 DEBUG: Final channel_name for {well_id}: {channel_name}")
 
         # Store cycle info from first well - convert to Python types
         if cycle_info is None and len(cycles) > 0:
@@ -629,7 +643,7 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
             }
 
         # Pass quality filter parameters AND well data to analysis for pathogen-specific thresholds
-        analysis = analyze_curve_quality(cycles, rfu, well_data=data, **quality_filter_params)
+        analysis = analyze_curve_quality(well_id, data, "batch_experiment", data.get('test_code'))
 
         # Add anomaly detection
         anomalies = detect_curve_anomalies(cycles, rfu)
@@ -706,6 +720,7 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
 
         # Store as dict for per-channel support (even if only one channel)
         analysis['cqj'] = {channel_name: cqj_val}
+        print(f"🔍 CQJ ASSIGNMENT: well={well_id}, channel_name='{channel_name}', cqj_val={cqj_val}")
         # analysis['calcj'] = {channel_name: calcj_val}
 
         from app import get_pathogen_target
