@@ -615,9 +615,35 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
     # --- Import new CQJ/CalcJ utils ---
     from cqj_calcj_utils import calculate_cqj as py_cqj
 
-    # First pass: collect all well results for control detection in CalcJ calculation
-    # We'll build this as we go through the analysis
+    # Pre-populate all well data for control detection in CalcJ calculation
+    # This ensures control wells are available regardless of processing order
     all_well_results_for_calcj = {}
+    
+    # Pre-populate basic well info (CQJ values will be added during processing)
+    for well_id, data in data_dict.items():
+        # Extract channel name using same logic as main loop
+        channel_name = data.get('fluorophore')
+        if not channel_name:
+            # Extract fluorophore from well_id if available (e.g., "A1_HEX" -> "HEX")
+            if '_' in well_id and len(well_id.split('_')) >= 2:
+                potential_fluorophore = well_id.split('_')[-1]
+                # Validate it's a known fluorophore
+                if potential_fluorophore in ['FAM', 'HEX', 'Texas Red', 'Cy5', 'TexasRed']:
+                    channel_name = potential_fluorophore
+                else:
+                    channel_name = 'FAM'  # Default to FAM instead of Unknown
+            else:
+                channel_name = 'FAM'  # Default to FAM for single-channel analysis
+        
+        all_well_results_for_calcj[well_id] = {
+            'sample_name': data.get('sample_name', ''),
+            'well_id': well_id,
+            'cqj_value': None,  # Will be filled during processing
+            'channel': channel_name,
+            'fluorophore': channel_name,
+            'test_code': data.get('test_code', ''),
+            'experiment_pattern': data.get('experiment_pattern', '')
+        }
 
     for well_id, data in data_dict.items():
         cycles = data['cycles']
@@ -731,6 +757,11 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
         analysis['cqj'] = {channel_name: cqj_val}
         print(f"🔍 CQJ ASSIGNMENT: well={well_id}, channel_name='{channel_name}', cqj_val={cqj_val}")
 
+        # Update the pre-populated well data with actual CQJ value
+        if well_id in all_well_results_for_calcj:
+            all_well_results_for_calcj[well_id]['cqj_value'] = cqj_val
+            print(f"🔍 CQJ UPDATE: Updated {well_id} with CQJ value {cqj_val}")
+
         # CalcJ calculation will be done after test_code extraction
         analysis['calcj'] = {channel_name: None}  # Placeholder
 
@@ -782,16 +813,9 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                     well_data_for_calcj = dict(well_for_cqj)
                     well_data_for_calcj['cqj_value'] = cqj_val
                     
-                    # Add current well to all_well_results_for_calcj with necessary info for control detection
-                    all_well_results_for_calcj[well_id] = {
-                        'sample_name': data.get('sample_name', ''),
-                        'well_id': well_id,
-                        'cqj_value': cqj_val,
-                        'channel': channel_name,
-                        'fluorophore': channel_name,
-                        'test_code': test_code,
-                        'experiment_pattern': data.get('experiment_pattern', '')
-                    }
+                    # Update test_code in pre-populated well data
+                    if well_id in all_well_results_for_calcj:
+                        all_well_results_for_calcj[well_id]['test_code'] = test_code
                     
                     # Use control-based standard curve calculation with actual well data
                     calcj_result = calculate_calcj_with_controls(
@@ -829,6 +853,66 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
 
         if analysis.get('is_good_scurve', False):
             good_curves.append(well_id)
+
+    # SECOND PASS: CalcJ calculation after all CQJ values are computed
+    
+    # Count total controls available now
+    h_controls = 0
+    l_controls = 0
+    m_controls = 0
+    for w_id, w_data in all_well_results_for_calcj.items():
+        if w_data.get('cqj_value') is not None:
+            sample_name = w_data.get('sample_name', '')
+            if 'H-' in sample_name:
+                h_controls += 1
+            elif 'L-' in sample_name:
+                l_controls += 1
+            elif 'M-' in sample_name:
+                m_controls += 1
+    
+    # Only proceed with CalcJ if we have sufficient controls
+    if h_controls >= 2 and l_controls >= 2:
+        
+        for well_id, analysis in results.items():
+            # Skip if this well is a control
+            sample_name = all_well_results_for_calcj.get(well_id, {}).get('sample_name', '')
+            if 'H-' in sample_name or 'L-' in sample_name or 'M-' in sample_name:
+                continue
+                
+            # Skip if no CQJ
+            cqj_data = analysis.get('cqj', {})
+            cqj_val = cqj_data.get('FAM') if cqj_data else None  # Assuming FAM channel for now
+            if cqj_val is None:
+                continue
+                
+            # Get test_code from all_well_results_for_calcj
+            test_code = all_well_results_for_calcj.get(well_id, {}).get('test_code')
+            if not test_code:
+                continue
+                
+            # Recalculate CalcJ with all controls available
+            from cqj_calcj_utils import calculate_calcj_with_controls
+            well_data_for_calcj = {'cqj_value': cqj_val}
+            
+            calcj_result = calculate_calcj_with_controls(
+                well_data_for_calcj, 
+                500,  # threshold - could get from analysis.get('threshold_value') if stored
+                all_well_results_for_calcj,
+                test_code, 
+                'FAM'  # channel - could be made dynamic
+            )
+            
+            if calcj_result and isinstance(calcj_result, dict):
+                calcj_val = calcj_result.get('calcj_value')
+                calcj_method = calcj_result.get('method', 'control_based_second_pass')
+                
+                # Update the results with the new CalcJ value
+                if 'calcj' not in analysis:
+                    analysis['calcj'] = {}
+                analysis['calcj']['FAM'] = calcj_val
+                results[well_id] = analysis
+    else:
+        pass  # Insufficient controls for CalcJ calculation
 
     # <-- The return statement should be here, outside the for-loop!
     return {
