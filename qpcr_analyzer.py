@@ -11,6 +11,78 @@ from curve_classification import classify_curve
 warnings.filterwarnings('ignore')
 
 
+def get_pathogen_threshold(well_data, L=None, B=None):
+    """
+    Get pathogen-specific threshold value for a well based on test code and fluorophore.
+    Falls back to calculated threshold if no pathogen-specific threshold is found.
+    
+    Args:
+        well_data: Dict containing well information (test_code, fluorophore)
+        L: Sigmoid amplitude (for fallback calculation)
+        B: Sigmoid baseline (for fallback calculation)
+    
+    Returns:
+        float: Threshold value in RFU
+    """
+    # Pathogen-specific fixed threshold values (matching threshold_strategies.js)
+    PATHOGEN_FIXED_THRESHOLDS = {
+        "BVAB": { 
+            "FAM": 250, "HEX": 250, "Cy5": 250 
+        },
+        "BVPanelPCR1": {
+            "FAM": 200, "HEX": 250, "Texas Red": 150, "Cy5": 200
+        },
+        "BVPanelPCR2": {
+            "FAM": 350, "HEX": 350, "Texas Red": 200, "Cy5": 350
+        },
+        "BVPanelPCR3": { 
+            "CY5": 100, "Cy5": 100, "FAM": 100, "HEX": 100, "Texas Red": 100
+        },
+        "Calb": { "HEX": 150 },
+        "Cglab": { "FAM": 150 },
+        "CHVIC": { "FAM": 250 },
+        "Ckru": { "FAM": 280 },
+        "Cpara": { "FAM": 200 },
+        "Ctrach": { "FAM": 150 },
+        "Ctrop": { "FAM": 200 },
+        "Efaecalis": { "FAM": 200 },
+        "FLUA": { "FAM": 265 },
+        "FLUB": { "Cy5": 225 },
+        "GBS": { "FAM": 300 },
+        "Lacto": { "FAM": 150 },
+        "Mgen": { "FAM": 500 },
+        "Ngon": { "HEX": 200 },
+        "NOV": { "FAM": 500 },
+        "Saureus": { "FAM": 250 },
+        "Tvag": { "FAM": 250 }
+    }
+    
+    # Get test code and fluorophore from well data
+    test_code = well_data.get('test_code') if well_data else None
+    fluorophore = well_data.get('fluorophore') if well_data else None
+    
+    # Try to get pathogen-specific threshold
+    if test_code and fluorophore and test_code in PATHOGEN_FIXED_THRESHOLDS:
+        pathogen_thresholds = PATHOGEN_FIXED_THRESHOLDS[test_code]
+        if fluorophore in pathogen_thresholds:
+            threshold_value = pathogen_thresholds[fluorophore]
+            print(f"🎯 Using pathogen-specific threshold: {test_code} {fluorophore} = {threshold_value} RFU")
+            return float(threshold_value)
+    
+    # Fallback to calculated threshold using sigmoid parameters
+    if L is not None and B is not None:
+        exp_phase_threshold = L / 2 + B
+        min_thresh = B + 0.10 * L
+        max_thresh = B + 0.90 * L
+        threshold_value = min(max(exp_phase_threshold, min_thresh), max_thresh)
+        print(f"🔄 Using calculated threshold for {test_code or 'unknown'} {fluorophore or 'unknown'}: {threshold_value:.1f} RFU")
+        return float(threshold_value)
+    
+    # Ultimate fallback
+    print(f"⚠️ Using default threshold for {test_code or 'unknown'} {fluorophore or 'unknown'}: 400.0 RFU")
+    return 400.0
+
+
 def sigmoid(x, L, k, x0, B):
     """Sigmoid function for qPCR amplification curves"""
     return L / (1 + np.exp(-k * (x - x0))) + B
@@ -178,9 +250,11 @@ def analyze_curve_quality(cycles, rfu, plot=False,
                          min_plateau_rfu=50,
                          min_snr=3.0,
                          min_growth_rate=5.0,
-                         threshold_factor=10.0):
+                         threshold_factor=10.0,
+                         well_data=None):
     """Analyze if a curve matches S-shaped pattern and return quality metrics
     threshold_factor: multiplier for baseline std to set threshold line (default 10.0)
+    well_data: Dict containing well information (test_code, fluorophore) for pathogen-specific thresholds
     """
     try:
         # Ensure we have enough data points
@@ -250,9 +324,8 @@ def analyze_curve_quality(cycles, rfu, plot=False,
         # Extract parameters
         L, k, x0, B = popt
 
-        # --- FIXED THRESHOLD FOR PRODUCTION (TEMP: Use 400 RFU as fixed threshold) ---
-        # TODO: Get this from user settings or channel-specific configuration
-        threshold_value = 400.0  # Fixed threshold instead of calculated
+        # --- DYNAMIC PATHOGEN-SPECIFIC THRESHOLD ---
+        threshold_value = get_pathogen_threshold(well_data, L, B)
         
         # OLD CALCULATED THRESHOLD (COMMENTED OUT FOR TESTING):
         # exp_phase_threshold = L / 2 + B
@@ -555,8 +628,8 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                 'count': int(len(cycles))
             }
 
-        # Pass quality filter parameters to analysis
-        analysis = analyze_curve_quality(cycles, rfu, **quality_filter_params)
+        # Pass quality filter parameters AND well data to analysis for pathogen-specific thresholds
+        analysis = analyze_curve_quality(cycles, rfu, well_data=data, **quality_filter_params)
 
         # Add anomaly detection
         anomalies = detect_curve_anomalies(cycles, rfu)
