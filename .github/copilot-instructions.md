@@ -37,7 +37,35 @@
 - **Symptoms**: SQL syntax errors, 500 errors on `/api/mysql-admin/tables`
 - **Solution**: Kill Flask process and restart - changes require fresh MySQL connection pool
 
-## 🔍 CRITICAL ISSUE ANALYSIS (2025-08-11)
+## 🔍 CRITICAL ISSUE ANALYSIS (2025-08-16)
+
+### **ACTIVE ISSUE: CQJ/CalcJ Channel Detection** 🚧 IN PROGRESS
+
+**STATUS**: Threshold logic fixed (500 RFU for Mgen working), but CQJ still stored with 'Unknown' channel names instead of proper fluorophore channels.
+
+**Problem**: Despite fixed channel detection logic in `qpcr_analyzer.py` lines 624-640, analysis results still show:
+- `'cqj': {'Unknown': 31.5}` instead of `'cqj': {'FAM': 31.5}`
+- Channel detection defaults to 'FAM' correctly in isolation tests
+- Issue appears in ML analysis pipeline or database storage
+
+**Root Cause Investigation Needed**:
+- ✅ Threshold logic working (Mgen: 500 RFU, Ngon: 200 RFU, Ctrach: 150 RFU)
+- ✅ Channel detection logic appears correct (`channel_name = 'FAM'` fallback)
+- 🚧 CQJ assignment at line 730: `analysis['cqj'] = {channel_name: cqj_val}`
+- 🚧 Possible issue: Old cached results or ML pipeline override
+
+**Debug Status** (2025-08-16):
+- Fixed threshold enforcement at line 338 in `qpcr_analyzer.py`
+- Channel detection defaults to 'FAM' instead of 'Unknown'
+- All pathogen-specific thresholds working correctly
+- **Next**: Debug CQJ channel assignment in fresh analysis runs
+
+**Fixed Issues** (2025-08-16):
+- ✅ **Threshold Logic**: Implemented fixed pathogen-specific thresholds
+- ✅ **Mgen Threshold**: Correctly using 500 RFU for all Mgen analyses
+- ✅ **Channel Detection**: Robust fallback to 'FAM' when fluorophore missing
+- ✅ **Pathogen Mapping**: Case-sensitive pathogen code matching working
+- **Next**: Debug CQJ channel assignment in fresh analysis runs
 
 ### **Railway Production Compliance Dashboard - ALL ISSUES FIXED** ✅
 
