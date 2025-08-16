@@ -250,13 +250,15 @@ def analyze_curve_quality(cycles, rfu, plot=False,
         # Extract parameters
         L, k, x0, B = popt
 
-        # --- Exponential phase targeting for threshold ---
-        # Inflection point (steepest slope) for sigmoid: RFU = L/2 + B
-        exp_phase_threshold = L / 2 + B
-        # Ensure threshold is within 10-90% of max RFU (exponential phase window)
-        min_thresh = B + 0.10 * (L)
-        max_thresh = B + 0.90 * (L)
-        threshold_value = min(max(exp_phase_threshold, min_thresh), max_thresh)
+        # --- FIXED THRESHOLD FOR PRODUCTION (TEMP: Use 400 RFU as fixed threshold) ---
+        # TODO: Get this from user settings or channel-specific configuration
+        threshold_value = 400.0  # Fixed threshold instead of calculated
+        
+        # OLD CALCULATED THRESHOLD (COMMENTED OUT FOR TESTING):
+        # exp_phase_threshold = L / 2 + B
+        # min_thresh = B + 0.10 * (L)
+        # max_thresh = B + 0.90 * (L)
+        # threshold_value = min(max(exp_phase_threshold, min_thresh), max_thresh)
 
         # Calculate additional steepness focusing on post-cycle 8 exponential phase
         post_cycle8_mask = cycles >= 8

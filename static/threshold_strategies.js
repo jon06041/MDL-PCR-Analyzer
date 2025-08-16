@@ -119,7 +119,7 @@ window.PATHOGEN_FIXED_THRESHOLDS = {
   "BVAB": { 
     "FAM": { linear: 250, log: 250 },
     "HEX": { linear: 250, log: 250 },
-    "Cy5": { linear: 200, log: 200 }
+    "Cy5": { linear: 250, log: 250 }
   },
   "BVPanelPCR1": {
     "FAM": { linear: 200, log: 200 },
