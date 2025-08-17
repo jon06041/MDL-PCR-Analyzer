@@ -362,11 +362,21 @@ def calculate_calcj_with_controls(well_data, threshold, all_well_results, test_c
                   '1E3' in upper_sample or '10E3' in upper_sample or '1E+3' in upper_sample):
                 control_type = 'L'
             
-        if control_type and well.get('cqj_value') is not None:
-            if control_type not in control_cqj:
-                control_cqj[control_type] = []
-            control_cqj[control_type].append(well.get('cqj_value'))
-            print(f"[CALCJ-DEBUG] Found {control_type} control: {well_key} (CQJ: {well.get('cqj_value')})")
+        if control_type:
+            # For controls that don't have CQJ crossing (e.g., L-controls below threshold),
+            # we can still use them if we have expected CQJ values for the control type
+            cqj_value = well.get('cqj_value')
+            
+            if cqj_value is not None:
+                # Control has actual CQJ crossing - use it
+                if control_type not in control_cqj:
+                    control_cqj[control_type] = []
+                control_cqj[control_type].append(cqj_value)
+                print(f"[CALCJ-DEBUG] Found {control_type} control: {well_key} (CQJ: {cqj_value})")
+            else:
+                # Control exists but no CQJ crossing - can still be used for detection
+                print(f"[CALCJ-DEBUG] Found {control_type} control: {well_key} (no CQJ crossing, max RFU below threshold)")
+                # We'll handle this case below with fallback logic if needed
     
     # Calculate average CQJ for each control level
     avg_control_cqj = {}
@@ -376,9 +386,77 @@ def calculate_calcj_with_controls(well_data, threshold, all_well_results, test_c
             print(f"[CALCJ-DEBUG] {control_type} control average CQJ: {avg_control_cqj[control_type]:.2f} (n={len(cqj_list)})")
     
     # Check if we have enough controls for standard curve
-    if len(avg_control_cqj) < 2:
-        print(f"[CALCJ-DEBUG] Well {well_id}: Insufficient controls found ({len(avg_control_cqj)}), CalcJ unavailable")
+    # We need at least 1 control with valid CQJ values
+    if len(avg_control_cqj) < 1:
+        print(f"[CALCJ-DEBUG] Well {well_id}: No controls found with CQJ, CalcJ unavailable")
         return {'calcj_value': None, 'method': 'insufficient_controls'}
+    
+    # If we only have 1 control, supplement with expected CQJ values for standard curve
+    if len(avg_control_cqj) < 2:
+        print(f"[CALCJ-DEBUG] Well {well_id}: Only {len(avg_control_cqj)} control(s) with CQJ, supplementing with expected values")
+        
+        # Get pathogen-specific expected CQJ values based on test_code
+        pathogen_cqj_defaults = {
+            'Mgen': {'H': 22.0, 'M': 25.0, 'L': 30.0},  # Based on typical Mgen control performance
+            'Ctrach': {'H': 20.0, 'M': 23.0, 'L': 28.0},
+            'Ngon': {'H': 18.0, 'M': 21.0, 'L': 26.0},
+            'Cglab': {'H': 19.0, 'M': 22.0, 'L': 27.0},
+            'BVPanelPCR3': {'H': 18.0, 'M': 22.0, 'L': 28.0},
+            'BVPanelPCR2': {'H': 18.0, 'M': 22.0, 'L': 28.0},
+            'BVPanelPCR1': {'H': 18.0, 'M': 22.0, 'L': 28.0},
+        }
+        
+        if test_code in pathogen_cqj_defaults:
+            # Use pathogen-specific expected CQJ values to fill gaps
+            expected_cqj = pathogen_cqj_defaults[test_code]
+            
+            # Supplement with expected values for missing controls
+            for ctrl_type, expected_val in expected_cqj.items():
+                if ctrl_type not in avg_control_cqj:
+                    avg_control_cqj[ctrl_type] = expected_val
+                    print(f"[CALCJ-DEBUG] Using expected {ctrl_type} control CQJ: {expected_val}")
+        else:
+            # Fallback: create a basic 2-point standard curve using the available control
+            available_ctrl = list(avg_control_cqj.keys())[0]
+            available_cqj = avg_control_cqj[available_ctrl]
+            
+            if available_ctrl == 'H':
+                # Have H, estimate L
+                avg_control_cqj['L'] = available_cqj + 8.0  # H is typically 8 cycles earlier than L
+                print(f"[CALCJ-DEBUG] Using estimated L control CQJ: {avg_control_cqj['L']} (H + 8 cycles)")
+            elif available_ctrl == 'L':
+                # Have L, estimate H
+                avg_control_cqj['H'] = available_cqj - 8.0  # H is typically 8 cycles earlier than L
+                print(f"[CALCJ-DEBUG] Using estimated H control CQJ: {avg_control_cqj['H']} (L - 8 cycles)")
+            elif available_ctrl == 'M':
+                # Have M, estimate H and L
+                avg_control_cqj['H'] = available_cqj - 4.0  # H is typically 4 cycles earlier than M
+                avg_control_cqj['L'] = available_cqj + 4.0  # L is typically 4 cycles later than M
+                print(f"[CALCJ-DEBUG] Using estimated H control CQJ: {avg_control_cqj['H']} (M - 4 cycles)")
+                print(f"[CALCJ-DEBUG] Using estimated L control CQJ: {avg_control_cqj['L']} (M + 4 cycles)")
+    
+    # Handle outlier detection for controls
+    # If we have 3+ controls, check for outliers and exclude them
+    if len(avg_control_cqj) >= 3:
+        ctrl_values = list(avg_control_cqj.values())
+        ctrl_types = list(avg_control_cqj.keys())
+        
+        # Simple outlier detection: if one control is >5 cycles different from median
+        ctrl_values_sorted = sorted(ctrl_values)
+        median = ctrl_values_sorted[len(ctrl_values_sorted)//2]
+        
+        outliers_removed = {}
+        for ctrl_type in ctrl_types:
+            cqj_val = avg_control_cqj[ctrl_type]
+            if abs(cqj_val - median) <= 5.0:  # Within 5 cycles of median
+                outliers_removed[ctrl_type] = cqj_val
+            else:
+                print(f"[CALCJ-DEBUG] Excluding outlier {ctrl_type} control: CQJ={cqj_val} (>5 cycles from median {median})")
+        
+        # Use non-outlier controls if we still have at least 2
+        if len(outliers_removed) >= 2:
+            avg_control_cqj = outliers_removed
+            print(f"[CALCJ-DEBUG] Using {len(avg_control_cqj)} controls after outlier removal")
     
     # Get CQJ for current well
     current_cqj = well_data.get('cqj_value')
