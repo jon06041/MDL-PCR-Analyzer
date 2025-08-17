@@ -1694,28 +1694,21 @@ async function handleThresholdStrategyChange() {
                 well.cqj_value = null;
             }
             
-            // Calculate CalcJ using H/M/L control-based method or fallback to basic
+            // Calculate CalcJ using H/M/L control-based method ONLY (no fallback to amplitude/threshold)
             if (well.calcj && channel in well.calcj) {
                 well.calcj_value = typeof well.calcj[channel] === 'string' ? parseFloat(well.calcj[channel]) : well.calcj[channel];
             } else if (typeof window.calculateCalcjWithControls === 'function' && testCode && channel) {
-                // Try control-based calculation first
+                // Use ONLY control-based calculation - no fallbacks
                 const numericThreshold = typeof threshold === 'string' ? parseFloat(threshold) : threshold;
                 const calcjResult = window.calculateCalcjWithControls(well, numericThreshold, resultsObj, testCode, channel);
                 well.calcj_value = calcjResult.calcj_value;
                 well.calcj_method = calcjResult.method; // Track which method was used
                 // console.log(`✅ CALCJ-CALC - ${wellKey}: ${well.calcj_value} (method: ${calcjResult.method})`);
-            } else if (typeof window.calculateCalcj === 'function' && well.amplitude) {
-                // Fallback to basic calculation if control-based not available
-                const numericThreshold = typeof threshold === 'string' ? parseFloat(threshold) : threshold;
-                const numericAmplitude = typeof well.amplitude === 'string' ? parseFloat(well.amplitude) : well.amplitude;
-                well.amplitude = numericAmplitude;
-                well.calcj_value = window.calculateCalcj(well, numericThreshold);
-                well.calcj_method = 'basic';
-                // console.log(`✅ CALCJ-CALC - ${wellKey}: ${well.calcj_value} (method: basic)`);
             } else {
+                // No fallback calculation - all runs must have proper controls
                 well.calcj_value = null;
-                well.calcj_method = 'failed';
-                // console.warn(`❌ CALCJ-MISSING - Cannot calculate CalcJ for ${wellKey}`);
+                well.calcj_method = 'no_controls_available';
+                // console.warn(`❌ CALCJ-MISSING - Control-based calculation required for ${wellKey}`);
             }
             
             // console.log(`📊 CQJ/CALCJ - ${wellKey}: CQJ=${well.cqj_value}, CalcJ=${well.calcj_value}, threshold=${threshold}`);

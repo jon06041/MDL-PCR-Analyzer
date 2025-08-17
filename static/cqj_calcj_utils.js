@@ -428,7 +428,7 @@ function recalculateCQJValues() {
             
             // CRITICAL: If CQJ is null/N/A, CalcJ must also be null/N/A
             if (newCqj === null || newCqj === undefined) {
-                calcjResult = { calcj_value: 'N/A', method: 'no_threshold_crossing' };
+                calcjResult = { calcj_value: null, method: 'no_threshold_crossing' };
                 //console.log(`[CALCJ-FIX] Well ${wellKey}: No threshold crossing, CalcJ = N/A`);
             } else {
                 // Check if this is a control well - if so, use FIXED concentration values
@@ -610,14 +610,14 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
     // Check if we have enough controls for standard curve (REQUIRE H and L controls)
     if (!avgControlCqj.H || !avgControlCqj.L) {
         //console.warn(`[CALCJ-DEBUG] Missing required controls - H: ${avgControlCqj.H}, L: ${avgControlCqj.L}`);
-        return { calcj_value: 'N/A', method: 'missing_required_controls' };
+        return { calcj_value: null, method: 'missing_required_controls' };
     }
     
     // Get CQJ for current well
     const currentCqj = well.cqj_value;
     if (currentCqj === null || currentCqj === undefined) {
         //console.warn(`[CALCJ-DEBUG] Current well has no CQJ value`);
-        return { calcj_value: 'N/A', method: 'no_threshold_crossing' };
+        return { calcj_value: null, method: 'no_threshold_crossing' };
     }
     
     // Check for early crossing (crossing significantly before lowest control)
@@ -631,14 +631,14 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
         const earlyThreshold = minControlCqj - Math.max(1.0, controlRange * 0.2);
         
         if (currentCqj < earlyThreshold) {
-            return { calcj_value: 'N/A', method: 'early_crossing' };
+            return { calcj_value: null, method: 'early_crossing' };
         }
         
         // Also check for very late crossing (contamination or poor amplification)
         const lateThreshold = maxControlCqj + Math.max(2.0, controlRange * 0.5);
         
         if (currentCqj > lateThreshold) {
-            return { calcj_value: 'N/A', method: 'late_crossing' };
+            return { calcj_value: null, method: 'late_crossing' };
         }
     }
     
@@ -657,12 +657,12 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
     try {
         // DIVISION BY ZERO PROTECTION: Validate that we have reasonable control data
         if (Math.abs(hCq - lCq) < 0.5) {
-            return { calcj_value: 'N/A', method: 'controls_too_close' };
+            return { calcj_value: null, method: 'controls_too_close' };
         }
         
         // DIVISION BY ZERO PROTECTION: Ensure concentration values are positive
         if (hVal <= 0 || lVal <= 0) {
-            return { calcj_value: 'N/A', method: 'invalid_concentration_values' };
+            return { calcj_value: null, method: 'invalid_concentration_values' };
         }
         
         // Log-linear interpolation using ACTUAL control values from this run
@@ -671,7 +671,7 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
         
         // DIVISION BY ZERO PROTECTION: Check for invalid log values
         if (!isFinite(logH) || !isFinite(logL)) {
-            return { calcj_value: 'N/A', method: 'invalid_log_values' };
+            return { calcj_value: null, method: 'invalid_log_values' };
         }
         
         // Calculate slope: change in log(concentration) per cycle
@@ -679,7 +679,7 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
         // DIVISION BY ZERO PROTECTION: Ensure we're not dividing by zero
         const cqjDifference = hCq - lCq;
         if (Math.abs(cqjDifference) < 1e-10) {
-            return { calcj_value: 'N/A', method: 'zero_cqj_difference' };
+            return { calcj_value: null, method: 'zero_cqj_difference' };
         }
         
         const slope = (logH - logL) / cqjDifference;
@@ -687,7 +687,7 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
         
         // DIVISION BY ZERO PROTECTION: Check for invalid slope/intercept
         if (!isFinite(slope) || !isFinite(intercept)) {
-            return { calcj_value: 'N/A', method: 'invalid_slope_intercept' };
+            return { calcj_value: null, method: 'invalid_slope_intercept' };
         }
         
         // Calculate concentration for current CQJ
@@ -695,29 +695,29 @@ function calculateCalcjWithControls(well, threshold, allWellResults, testCode, c
         
         // DIVISION BY ZERO PROTECTION: Check for invalid log concentration
         if (!isFinite(logConc)) {
-            return { calcj_value: 'N/A', method: 'invalid_log_concentration' };
+            return { calcj_value: null, method: 'invalid_log_concentration' };
         }
         
         const calcjResult = Math.pow(10, logConc);
         
         // Enhanced sanity checks: result should be within reasonable range
         if (!isFinite(calcjResult) || calcjResult < 0 || calcjResult > 1e12 || isNaN(calcjResult)) {
-            return { calcj_value: 'N/A', method: 'unreasonable_result' };
+            return { calcj_value: null, method: 'unreasonable_result' };
         }
         
         // Additional check for extremely small values that might round to 0
         if (calcjResult < 1e-10) {
-            return { calcj_value: 'N/A', method: 'value_too_small' };
+            return { calcj_value: null, method: 'value_too_small' };
         }
         
         // CRITICAL: Check for negative e-notation results (should be N/A)
         if (calcjResult < 1) {
-            return { calcj_value: 'N/A', method: 'negative_exponential' };
+            return { calcj_value: null, method: 'negative_exponential' };
         }
         
         // DIVISION BY ZERO PROTECTION: Final check for zero result
         if (calcjResult === 0) {
-            return { calcj_value: 'N/A', method: 'zero_result' };
+            return { calcj_value: null, method: 'zero_result' };
         }
         
         return { calcj_value: calcjResult, method: 'dynamic_control_based' };
