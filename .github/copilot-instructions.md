@@ -37,7 +37,51 @@
 - **Symptoms**: SQL syntax errors, 500 errors on `/api/mysql-admin/tables`
 - **Solution**: Kill Flask process and restart - changes require fresh MySQL connection pool
 
-## 🔍 CRITICAL ISSUE ANALYSIS (2025-08-16)
+## 🔍 CRITICAL ISSUE ANALYSIS (2025-08-17)
+
+### **ACTIVE ISSUE: Test_code Extraction Still Not Working** 🚧 IN PROGRESS
+
+**STATUS**: **TEST_CODE REMAINS NULL IN DATABASE** - CalcJ calculation fails because test_code is not being extracted and stored during file uploads.
+
+**Problem** (2025-08-17):
+- ❌ **CalcJ NULL in database**: Positive samples show `calcj = null` despite correct frontend calculations
+- ❌ **Missing test_code**: `well_results.test_code = null` prevents pathogen-specific CalcJ calculation  
+- ❌ **Upload flow issue**: test_code extraction code added but not being triggered during actual uploads
+
+**Work Completed** (2025-08-17):
+- ✅ **Added test_code extraction**: Enhanced `save_individual_channel_session()` and `save_combined_session()` in `app.py`
+- ✅ **Debug output working**: Flask logs confirm filename parsing: `AcBVPanelPCR3_2576724_CFX366953` → should extract `BVAB3`
+- ✅ **Database schema ready**: `well_results.test_code` column exists (varchar(50))
+- ✅ **Flask restart confirmed**: Code changes picked up, debug output functional
+
+**Current Status**:
+- Session 272: `test_code = null` in database (before fix)
+- Need fresh file upload to test if extraction works
+- Authentication blocks testing (`/analyze` endpoint requires `RUN_BASIC_ANALYSIS` permission)
+- Data format issue: frontend sends list, backend expects dict (causes 500 error during testing)
+
+**Technical Details**:
+```python
+# Added to save_individual_channel_session() around line 1722
+test_code = extract_test_code_from_filename(session_data.get('filename', ''))
+well_result.test_code = test_code
+
+# Added to save_combined_session() around line 1847  
+test_code = extract_test_code_from_filename(session_data.get('filename', ''))
+well_result.test_code = test_code
+```
+
+**Next Steps for Resolution**:
+1. **Fresh upload test**: Upload new CSV through browser interface after Flask restart
+2. **Database verification**: Query `well_results` for new session, check if `test_code` is set
+3. **Debug upload flow**: Trace complete upload path to find where test_code assignment fails
+4. **Fix authentication**: Enable proper user auth or bypass for testing
+5. **CalcJ validation**: Verify CalcJ calculation works with extracted test_code
+
+**Files Modified**:
+- `app.py`: Enhanced WellResult creation with test_code extraction
+- `test_upload_simulation.py`: Created for API testing (auth blocked)
+- `test_direct_extraction.py`: Created for direct function testing
 
 ### **COMPLETED: Amplitude/Threshold CalcJ Removal** ✅ COMPLETED & VERIFIED
 
