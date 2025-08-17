@@ -398,32 +398,6 @@ def calculate_calcj_cqj_for_well(well_data, threshold_value, all_wells, test_cod
     calcj_result = calculate_calcj_with_controls(well_data, test_code, channel, well_data.get('well_id', 'unknown'))
     
     return cqj_value, calcj_result
-                control_type = 'L'
-                print(f"[CALCJ-DEBUG] Found L control by sample name: {well_key} (sample: {sample_name})")
-            # Also check for other control indicators in sample name
-            elif ('HIGH' in upper_sample or 'POS' in upper_sample or 'H1' in upper_sample or
-                  '1E7' in upper_sample or '10E7' in upper_sample or '1E+7' in upper_sample):
-                control_type = 'H'
-            elif ('MEDIUM' in upper_sample or 'MED' in upper_sample or 'M1' in upper_sample or
-                  '1E5' in upper_sample or '10E5' in upper_sample or '1E+5' in upper_sample):
-                control_type = 'M'
-            elif ('LOW' in upper_sample or 'L1' in upper_sample or
-                  '1E3' in upper_sample or '10E3' in upper_sample or '1E+3' in upper_sample):
-                control_type = 'L'
-            
-        if control_type:
-            # Only use controls that have actual CQJ crossing
-            cqj_value = well.get('cqj_value')
-            
-            if cqj_value is not None:
-                # Control has actual CQJ crossing - use it
-                if control_type not in control_cqj:
-                    control_cqj[control_type] = []
-                control_cqj[control_type].append(cqj_value)
-                print(f"[CALCJ-DEBUG] Found {control_type} control: {well_key} (CQJ: {cqj_value})")
-            else:
-                # Control exists but no CQJ crossing - cannot be used for CalcJ calculation
-                print(f"[CALCJ-DEBUG] Found {control_type} control: {well_key} (no CQJ crossing, max RFU below threshold)")
     
     # Calculate average CQJ for each control level
     avg_control_cqj = {}
