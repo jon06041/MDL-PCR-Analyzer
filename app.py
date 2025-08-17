@@ -674,6 +674,10 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                 # Ensure it's a JSON string for DB
                 well_result.curve_classification = safe_json_dumps(curve_classification, {'class': 'N/A'})
                 
+                # Set test_code extracted from filename
+                well_result.test_code = test_code
+                print(f"[DEBUG] Setting test_code='{test_code}' for well {well_key}")
+                
                 db.session.add(well_result)
                 db.session.flush()  # Force write to DB after each well
                 well_count += 1
@@ -1728,22 +1732,36 @@ def save_combined_session():
             pattern_match = re.search(r'([A-Za-z][A-Za-z0-9]*_\d+_CFX\d+)', filename)
             if pattern_match:
                 base_pattern = pattern_match.group(1)
+                # Extract test code from base pattern
+                test_code = base_pattern.split('_')[0]
+                if test_code.startswith('Ac'):
+                    test_code = test_code[2:]  # Remove "Ac" prefix
+                
                 # Create clean display name with fluorophores
                 fluorophore_list = ', '.join(sorted(fluorophores_list))
                 display_name = f"Multi-Fluorophore Analysis ({fluorophore_list}) {base_pattern}"
                 experiment_name = base_pattern
             else:
                 # Fallback
+                test_code = "Unknown"  # Default for fallback cases
                 display_name = filename
                 experiment_name = filename
         elif 'Multi-Fluorophore_' in filename:
             # For combined sessions, extract the original multi-fluorophore pattern
             experiment_name = filename.replace('Multi-Fluorophore_', '')
             display_name = experiment_name
+            # Extract test code from experiment name
+            test_code = experiment_name.split('_')[0]
+            if test_code.startswith('Ac'):
+                test_code = test_code[2:]  # Remove "Ac" prefix
         else:
             # For individual channels, use the complete filename including channel
             experiment_name = filename
             display_name = filename
+            # Extract test code from filename
+            test_code = filename.split('_')[0]
+            if test_code.startswith('Ac'):
+                test_code = test_code[2:]  # Remove "Ac" prefix
         
         # Calculate correct statistics from individual results for multi-fluorophore analysis
         individual_results = combined_results.get('individual_results', {})
@@ -1970,6 +1988,10 @@ def save_combined_session():
 
                 well_result.cqj = safe_json_dumps(well_data.get('cqj'), {})
                 well_result.calcj = safe_json_dumps(well_data.get('calcj'), {})
+
+                # Set test_code extracted from filename
+                well_result.test_code = test_code
+                print(f"[DEBUG] Setting test_code='{test_code}' for well {well_key} in combined session")
 
                 db.session.add(well_result)
                 well_count += 1
