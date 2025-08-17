@@ -351,6 +351,8 @@ def validate_file_pattern_consistency(filenames):
 
 def save_individual_channel_session(filename, results, fluorophore, summary):
     """Save individual channel session to database for channel tracking with completion status"""
+    print(f"🟢 [CRITICAL DEBUG] save_individual_channel_session() called with filename='{filename}', fluorophore='{fluorophore}'")
+    app.logger.info(f"🟢 [CRITICAL DEBUG] save_individual_channel_session() called with filename='{filename}', fluorophore='{fluorophore}'")
     try:
         from models import AnalysisSession, WellResult
         
@@ -676,7 +678,8 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                 
                 # Set test_code extracted from filename
                 well_result.test_code = test_code
-                print(f"[DEBUG] Setting test_code='{test_code}' for well {well_key}")
+                print(f"🔧 [CRITICAL DEBUG] Setting test_code='{test_code}' for well {well_key} in save_individual_channel_session()")
+                app.logger.info(f"🔧 [CRITICAL DEBUG] Setting test_code='{test_code}' for well {well_key} in save_individual_channel_session()")
                 
                 db.session.add(well_result)
                 db.session.flush()  # Force write to DB after each well
@@ -1717,6 +1720,8 @@ def get_session_details(session_id):
 @app.route('/sessions/save-combined', methods=['POST'])
 def save_combined_session():
     """Save a combined multi-fluorophore analysis session"""
+    print(f"🟢 [CRITICAL DEBUG] save_combined_session() called")
+    app.logger.info(f"🟢 [CRITICAL DEBUG] save_combined_session() called")
     try:
         data = request.get_json()
         
@@ -1991,7 +1996,8 @@ def save_combined_session():
 
                 # Set test_code extracted from filename
                 well_result.test_code = test_code
-                print(f"[DEBUG] Setting test_code='{test_code}' for well {well_key} in combined session")
+                print(f"🔧 [CRITICAL DEBUG] Setting test_code='{test_code}' for well {well_key} in save_combined_session()")
+                app.logger.info(f"🔧 [CRITICAL DEBUG] Setting test_code='{test_code}' for well {well_key} in save_combined_session()")
 
                 db.session.add(well_result)
                 well_count += 1
