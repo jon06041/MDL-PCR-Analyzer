@@ -212,6 +212,7 @@ def determine_control_type_python(well_id, well_data):
 def calculate_calcj_with_controls(well_data, threshold, all_well_results, test_code, channel):
     """
     Calculate CalcJ using H/M/L control-based standard curve.
+    Requires at least 2 control wells with valid CQJ values. No fallback or estimated values are used.
     
     Args:
         well_data: The well data dict with RFU values
@@ -223,6 +224,9 @@ def calculate_calcj_with_controls(well_data, threshold, all_well_results, test_c
     Returns:
         dict with calcj_value and method used
     """
+    import re
+    import math
+    
     # Try multiple ways to get well identifier
     well_id = well_data.get('well_id') or well_data.get('wellKey') or well_data.get('well_key') or 'UNKNOWN'
     
@@ -240,15 +244,14 @@ def calculate_calcj_with_controls(well_data, threshold, all_well_results, test_c
                 'method': f'fixed_{current_well_control_type.lower()}_control_backend_centralized'
             }
         else:
-            # Fallback to standard values if not in config
-            fixed_concentrations = {'H': 1e7, 'M': 1e5, 'L': 1e3}
-            fixed_value = fixed_concentrations.get(current_well_control_type)
-            print(f"[CALCJ-DEBUG] Control well {well_id} ({current_well_control_type}) using FALLBACK value: {fixed_value}")
-            return {
-                'calcj_value': fixed_value, 
-                'method': f'fixed_{current_well_control_type.lower()}_control_backend_fallback'
-            }
+            print(f"[CALCJ-DEBUG] Control well {well_id} ({current_well_control_type}) has no concentration value in config")
+            return {'calcj_value': None, 'method': 'missing_control_config'}
     
+    # Get CQJ value for current well - skip if no threshold crossing
+    current_cqj = well_data.get('cqj_value')
+    if current_cqj is None:
+        print(f"[CALCJ-DEBUG] Well {well_id}: No CQJ value, skipping CalcJ calculation")
+        return {'calcj_value': None, 'method': 'no_cqj_value'}
     
     # Get concentration values for this test/channel
     conc_values = CONCENTRATION_CONTROLS.get(test_code, {}).get(channel, {})
@@ -256,99 +259,145 @@ def calculate_calcj_with_controls(well_data, threshold, all_well_results, test_c
         print(f"[CALCJ-DEBUG] Well {well_id}: No concentration controls found for {test_code}/{channel}, CalcJ unavailable")
         return {'calcj_value': None, 'method': 'no_controls_available'}
     
-    # Find H/M/L control wells
-    control_cqj = {}
+    # Find H/M/L control wells - improved detection with outlier handling
+    control_cqj = {'H': [], 'M': [], 'L': []}
     print(f"[CALCJ-DEBUG] Well {well_id}: Searching for controls in {len(all_well_results)} wells")
     
-    # If no actual control wells found, use standard curve with pathogen-specific CQJ assumptions
-    if len(all_well_results) == 0:
-        print(f"[CALCJ-DEBUG] Well {well_id}: No control wells available, using standard curve with pathogen-specific CQJ assumptions")
-        
-        # Get pathogen-specific CQJ ranges based on typical qPCR behavior
-        # High concentration controls typically cross threshold 8-12 cycles earlier than low concentration
-        # This is based on the 3.3 cycle doubling rule (10-fold concentration difference = ~3.3 cycles)
-        h_conc = conc_values.get('H', 1e8)  # High concentration
-        l_conc = conc_values.get('L', 1e4)  # Low concentration
-        
-        # Calculate cycle difference based on concentration ratio
-        import math
-        if h_conc > 0 and l_conc > 0:
-            log_ratio = math.log10(h_conc / l_conc)
-            cycle_difference = log_ratio * 3.3  # 3.3 cycles per 10-fold concentration difference
-        else:
-            cycle_difference = 10.0  # Conservative fallback
-        
-        # Use pathogen-specific baseline CQJ for high concentration control
-        # Different pathogens have different amplification efficiencies
-        if test_code in ['Mgen', 'Ctrach', 'Ngon']:  # STI pathogens - typically amplify well
-            h_cqj = 22.0  # Earlier crossing for efficient amplification
-        elif test_code in ['BVPanelPCR3', 'BVPanelPCR2', 'BVPanelPCR1']:  # BV panel - mixed efficiency
-            h_cqj = 25.0  # Moderate crossing time
-        elif test_code in ['Lacto', 'LactoNY']:  # Lactobacillus - variable efficiency
-            h_cqj = 27.0  # Later crossing due to variable conditions
-        else:  # Unknown pathogens - conservative estimate
-            h_cqj = 26.0  # Conservative baseline
-        
-        l_cqj = h_cqj + cycle_difference  # Low concentration crosses later
-        
-        print(f"[CALCJ-DEBUG] Well {well_id}: Using pathogen-specific CQJ assumptions for {test_code}: H={h_cqj}, L={l_cqj} (diff={cycle_difference:.1f})")
-        
-        # Calculate standard curve: slope and intercept for log(concentration) vs CQJ
-        log_h = math.log10(h_conc)
-        log_l = math.log10(l_conc)
-        
-        cqj_difference = h_cqj - l_cqj
-        if abs(cqj_difference) < 1e-10:
-            print(f"[CALCJ-DEBUG] Well {well_id}: Invalid CQJ difference for standard curve")
-            return {'calcj_value': None, 'method': 'invalid_standard_curve'}
-        
-        slope = (log_h - log_l) / cqj_difference
-        intercept = log_h - slope * h_cqj
-        
-        # Get current CQJ from well_data
-        current_cqj = well_data.get('cqj_value')
-        if current_cqj is None:
-            print(f"[CALCJ-DEBUG] Well {well_id}: No CQJ value available for CalcJ calculation")
-            return {'calcj_value': None, 'method': 'no_cqj_value'}
-        
-        # Calculate concentration using standard curve
-        log_conc = slope * current_cqj + intercept
-        calcj_value = 10 ** log_conc
-        
-        print(f"[CALCJ-DEBUG] Well {well_id}: Standard curve CalcJ = {calcj_value:.2e} (CQJ={current_cqj}, slope={slope:.3f})")
-        return {'calcj_value': calcj_value, 'method': f'standard_curve_pathogen_specific_{test_code.lower()}'}
-    
-    # Debug: List first few wells to see the data structure
-    debug_count = 0
+    # Scan all wells for controls matching this test code
     for well_key, well in all_well_results.items():
-        if debug_count < 3:  # Show first 3 wells for debugging
-            sample_name = well.get('sample_name', '') if well else ''
-            print(f"[CALCJ-DEBUG] Sample well {well_key}: sample_name='{sample_name}'")
-            debug_count += 1
-        
         if not well_key or not well:
             continue
             
-        # Check if this is a control well with comprehensive pattern matching
-        control_type = None
-        upper_key = well_key.upper()
-        
-        # First, use the dedicated control detection function
+        # Use the same strict control detection logic
         control_type = determine_control_type_python(well_key, well)
         
-        # Check sample_name for control patterns (H-, M-, L-)
-        if not control_type and well.get('sample_name'):
-            sample_name = well.get('sample_name', '')
-            upper_sample = sample_name.upper()
-            
-            # Look for H-, M-, L- patterns in sample name (most reliable for BVPanel tests)
-            if 'H-' in sample_name:
-                control_type = 'H'
-                print(f"[CALCJ-DEBUG] Found H control by sample name: {well_key} (sample: {sample_name})")
-            elif 'M-' in sample_name:
-                control_type = 'M'
-                print(f"[CALCJ-DEBUG] Found M control by sample name: {well_key} (sample: {sample_name})")
-            elif 'L-' in sample_name:
+        # Only include controls that have valid CQJ values
+        if control_type and control_type in ['H', 'M', 'L'] and well.get('cqj_value') is not None:
+            control_cqj[control_type].append(well.get('cqj_value'))
+            print(f"[CALCJ-DEBUG] Found {control_type} control: {well_key} (CQJ: {well.get('cqj_value')})")
+    
+    # Calculate average CQJ for each control level with outlier detection
+    avg_control_cqj = {}
+    for control_type, cqj_list in control_cqj.items():
+        if cqj_list:
+            if len(cqj_list) == 1:
+                # Only one control, use it
+                avg_control_cqj[control_type] = cqj_list[0]
+                print(f"[CALCJ-DEBUG] Single {control_type} control: {cqj_list[0]}")
+            else:
+                # Multiple controls - remove outliers (>5 cycles from median)
+                sorted_cqj = sorted(cqj_list)
+                median = sorted_cqj[len(sorted_cqj) // 2]
+                filtered_cqj = [cqj for cqj in cqj_list if abs(cqj - median) <= 5.0]
+                
+                if len(filtered_cqj) < len(cqj_list):
+                    print(f"[CALCJ-DEBUG] Removed {len(cqj_list) - len(filtered_cqj)} outliers from {control_type} controls")
+                
+                if filtered_cqj:
+                    avg_control_cqj[control_type] = sum(filtered_cqj) / len(filtered_cqj)
+                    print(f"[CALCJ-DEBUG] {control_type} control average CQJ: {avg_control_cqj[control_type]:.2f} (n={len(filtered_cqj)})")
+    
+    # We need at least 1 control with valid CQJ values
+    if len(avg_control_cqj) < 1:
+        print(f"[CALCJ-DEBUG] Well {well_id}: No controls found with CQJ, CalcJ unavailable")
+        return {'calcj_value': None, 'method': 'insufficient_controls'}
+    
+    print(f"[CALCJ-DEBUG] Well {well_id}: Found {len(avg_control_cqj)} control(s) with valid CQJ values")
+    
+    # Create standard curve using best available control combination
+    # Prioritize H and L for maximum curve spread
+    if 'H' in avg_control_cqj and 'L' in avg_control_cqj:
+        h_cqj = avg_control_cqj['H']
+        l_cqj = avg_control_cqj['L'] 
+        h_val = conc_values.get('H', 1e7)
+        l_val = conc_values.get('L', 1e3)
+        method = f'standard_curve_pathogen_specific_{test_code.lower()}'
+    elif 'H' in avg_control_cqj and 'M' in avg_control_cqj:
+        h_cqj = avg_control_cqj['H']
+        l_cqj = avg_control_cqj['M']
+        h_val = conc_values.get('H', 1e7)
+        l_val = conc_values.get('M', 1e5)
+        method = f'standard_curve_h_m_{test_code.lower()}'
+    elif 'M' in avg_control_cqj and 'L' in avg_control_cqj:
+        h_cqj = avg_control_cqj['M']
+        l_cqj = avg_control_cqj['L']
+        h_val = conc_values.get('M', 1e5)
+        l_val = conc_values.get('L', 1e3)
+        method = f'standard_curve_m_l_{test_code.lower()}'
+    else:
+        print(f"[CALCJ-DEBUG] Well {well_id}: Unable to create standard curve")
+        return {'calcj_value': None, 'method': 'insufficient_control_combination'}
+    
+    # Calculate CalcJ using log-linear standard curve
+    try:
+        # Validate that we have reasonable control data
+        if abs(h_cqj - l_cqj) < 0.5:
+            print(f"[CALCJ-DEBUG] Well {well_id}: Controls too close together (H:{h_cqj}, L:{l_cqj})")
+            return {'calcj_value': None, 'method': 'controls_too_close'}
+        
+        if h_val <= 0 or l_val <= 0:
+            print(f"[CALCJ-DEBUG] Well {well_id}: Invalid concentration values")
+            return {'calcj_value': None, 'method': 'invalid_concentration_values'}
+        
+        # Log-linear interpolation using control values
+        log_h = math.log10(h_val)
+        log_l = math.log10(l_val)
+        
+        # Calculate slope and intercept of standard curve
+        slope = (log_h - log_l) / (h_cqj - l_cqj)
+        intercept = log_h - slope * h_cqj
+        
+        # Calculate concentration for current CQJ
+        log_conc = slope * current_cqj + intercept
+        calcj_value = math.pow(10, log_conc)
+        
+        # Sanity checks: result should be within reasonable range
+        if not math.isfinite(calcj_value) or calcj_value < 0 or calcj_value > 1e12:
+            print(f"[CALCJ-DEBUG] Well {well_id}: CalcJ result out of range: {calcj_value}")
+            return {'calcj_value': None, 'method': 'unreasonable_result'}
+        
+        print(f"[CALCJ-DEBUG] Well {well_id}: Control-based CalcJ = {calcj_value:.2e} (CQJ: {current_cqj})")
+        print(f"[CALCJ-DEBUG] Standard curve: slope={slope:.4f}, intercept={intercept:.4f}")
+        
+        return {'calcj_value': calcj_value, 'method': method}
+        
+    except Exception as e:
+        print(f"[CALCJ-DEBUG] Well {well_id}: Error calculating CalcJ: {e}")
+        return {'calcj_value': None, 'method': 'calculation_error'}
+
+
+def calculate_calcj_cqj_for_well(well_data, threshold_value, all_wells, test_code, channel):
+    """
+    Calculate both CQJ and CalcJ for a single well. 
+    
+    Args:
+        well_data: Dict with RFU data and analysis results
+        threshold_value: The RFU threshold value to use
+        all_wells: Dict of all wells (for finding controls)
+        test_code: The test/pathogen code
+        channel: The fluorescence channel (e.g., 'FAM', 'HEX')
+    
+    Returns:
+        Tuple of (cqj_value, calcj_result_dict)
+    """
+    from cqj_python import calculate_cqj as py_cqj
+    
+    # Calculate CQJ value first
+    well_for_cqj = {
+        'rfus': well_data.get('rfu_data', well_data.get('rfus', [])),
+        'temperatures': well_data.get('temperatures', [])
+    }
+    
+    cqj_value = py_cqj(well_for_cqj, threshold_value)
+    
+    # Store CQJ in well_data for CalcJ calculation
+    if 'cqj_value' not in well_data:
+        well_data['cqj_value'] = cqj_value
+    
+    # Calculate CalcJ using controls
+    calcj_result = calculate_calcj_with_controls(well_data, test_code, channel, well_data.get('well_id', 'unknown'))
+    
+    return cqj_value, calcj_result
                 control_type = 'L'
                 print(f"[CALCJ-DEBUG] Found L control by sample name: {well_key} (sample: {sample_name})")
             # Also check for other control indicators in sample name
@@ -363,8 +412,7 @@ def calculate_calcj_with_controls(well_data, threshold, all_well_results, test_c
                 control_type = 'L'
             
         if control_type:
-            # For controls that don't have CQJ crossing (e.g., L-controls below threshold),
-            # we can still use them if we have expected CQJ values for the control type
+            # Only use controls that have actual CQJ crossing
             cqj_value = well.get('cqj_value')
             
             if cqj_value is not None:
@@ -374,9 +422,8 @@ def calculate_calcj_with_controls(well_data, threshold, all_well_results, test_c
                 control_cqj[control_type].append(cqj_value)
                 print(f"[CALCJ-DEBUG] Found {control_type} control: {well_key} (CQJ: {cqj_value})")
             else:
-                # Control exists but no CQJ crossing - can still be used for detection
+                # Control exists but no CQJ crossing - cannot be used for CalcJ calculation
                 print(f"[CALCJ-DEBUG] Found {control_type} control: {well_key} (no CQJ crossing, max RFU below threshold)")
-                # We'll handle this case below with fallback logic if needed
     
     # Calculate average CQJ for each control level
     avg_control_cqj = {}
@@ -391,49 +438,10 @@ def calculate_calcj_with_controls(well_data, threshold, all_well_results, test_c
         print(f"[CALCJ-DEBUG] Well {well_id}: No controls found with CQJ, CalcJ unavailable")
         return {'calcj_value': None, 'method': 'insufficient_controls'}
     
-    # If we only have 1 control, supplement with expected CQJ values for standard curve
+    # Check if we have sufficient controls for CalcJ calculation
     if len(avg_control_cqj) < 2:
-        print(f"[CALCJ-DEBUG] Well {well_id}: Only {len(avg_control_cqj)} control(s) with CQJ, supplementing with expected values")
-        
-        # Get pathogen-specific expected CQJ values based on test_code
-        pathogen_cqj_defaults = {
-            'Mgen': {'H': 22.0, 'M': 25.0, 'L': 30.0},  # Based on typical Mgen control performance
-            'Ctrach': {'H': 20.0, 'M': 23.0, 'L': 28.0},
-            'Ngon': {'H': 18.0, 'M': 21.0, 'L': 26.0},
-            'Cglab': {'H': 19.0, 'M': 22.0, 'L': 27.0},
-            'BVPanelPCR3': {'H': 18.0, 'M': 22.0, 'L': 28.0},
-            'BVPanelPCR2': {'H': 18.0, 'M': 22.0, 'L': 28.0},
-            'BVPanelPCR1': {'H': 18.0, 'M': 22.0, 'L': 28.0},
-        }
-        
-        if test_code in pathogen_cqj_defaults:
-            # Use pathogen-specific expected CQJ values to fill gaps
-            expected_cqj = pathogen_cqj_defaults[test_code]
-            
-            # Supplement with expected values for missing controls
-            for ctrl_type, expected_val in expected_cqj.items():
-                if ctrl_type not in avg_control_cqj:
-                    avg_control_cqj[ctrl_type] = expected_val
-                    print(f"[CALCJ-DEBUG] Using expected {ctrl_type} control CQJ: {expected_val}")
-        else:
-            # Fallback: create a basic 2-point standard curve using the available control
-            available_ctrl = list(avg_control_cqj.keys())[0]
-            available_cqj = avg_control_cqj[available_ctrl]
-            
-            if available_ctrl == 'H':
-                # Have H, estimate L
-                avg_control_cqj['L'] = available_cqj + 8.0  # H is typically 8 cycles earlier than L
-                print(f"[CALCJ-DEBUG] Using estimated L control CQJ: {avg_control_cqj['L']} (H + 8 cycles)")
-            elif available_ctrl == 'L':
-                # Have L, estimate H
-                avg_control_cqj['H'] = available_cqj - 8.0  # H is typically 8 cycles earlier than L
-                print(f"[CALCJ-DEBUG] Using estimated H control CQJ: {avg_control_cqj['H']} (L - 8 cycles)")
-            elif available_ctrl == 'M':
-                # Have M, estimate H and L
-                avg_control_cqj['H'] = available_cqj - 4.0  # H is typically 4 cycles earlier than M
-                avg_control_cqj['L'] = available_cqj + 4.0  # L is typically 4 cycles later than M
-                print(f"[CALCJ-DEBUG] Using estimated H control CQJ: {avg_control_cqj['H']} (M - 4 cycles)")
-                print(f"[CALCJ-DEBUG] Using estimated L control CQJ: {avg_control_cqj['L']} (M + 4 cycles)")
+        print(f"[CALCJ-DEBUG] Well {well_id}: Only {len(avg_control_cqj)} control(s) with CQJ, need at least 2 for CalcJ")
+        return {'calcj_value': None, 'method': 'insufficient_controls'}
     
     # Handle outlier detection for controls
     # If we have 3+ controls, check for outliers and exclude them
