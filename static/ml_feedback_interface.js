@@ -346,12 +346,33 @@ class MLFeedbackInterface {
 
     showMLSection() {
         console.log('ML Feedback Interface: Ensuring ML section is visible');
+        
+        // Ensure the parent ML feedback section is visible
         const mlSection = document.getElementById('ml-feedback-section');
         if (mlSection) {
+            // Force visibility with multiple methods
             mlSection.style.display = 'block';
-            //console.log('ML Feedback Interface: ML section made visible');
+            mlSection.style.visibility = 'visible';
+            mlSection.style.opacity = '1';
+            mlSection.removeAttribute('hidden');
+            
+            // Debug current styles
+            const computedStyle = window.getComputedStyle(mlSection);
+            console.log('🔍 ML Section Debug: Made ML feedback section visible');
+            console.log('🔍 ML Section Debug: Element display:', mlSection.style.display);
+            console.log('🔍 ML Section Debug: Computed display:', computedStyle.display);
+            console.log('🔍 ML Section Debug: Computed visibility:', computedStyle.visibility);
         } else {
-            //console.log('ML Feedback Interface: ML section not found');
+            console.warn('🔍 ML Section Debug: ML feedback section not found');
+        }
+        
+        // Ensure the ML section container is visible
+        const mlContainer = document.querySelector('.ml-feedback-container');
+        if (mlContainer) {
+            mlContainer.style.display = 'block';
+            mlContainer.style.visibility = 'visible';
+            mlContainer.style.opacity = '1';
+            console.log('🔍 ML Container Debug: Made ML container visible');
         }
         
         // Also show individual ML components when section becomes visible
@@ -951,10 +972,21 @@ class MLFeedbackInterface {
         // Show the visual analysis section
         const visualDisplay = document.getElementById('visual-curve-display');
         if (visualDisplay) {
+            // Force visibility with multiple methods
             visualDisplay.style.display = 'block';
+            visualDisplay.style.visibility = 'visible';
+            visualDisplay.style.opacity = '1';
+            visualDisplay.removeAttribute('hidden');
+            
+            // Debug current styles
+            const computedStyle = window.getComputedStyle(visualDisplay);
             console.log('🔍 Visual Display Debug: Made visual analysis section visible');
+            console.log('🔍 Visual Display Debug: Element display style:', visualDisplay.style.display);
+            console.log('🔍 Visual Display Debug: Computed display:', computedStyle.display);
+            console.log('🔍 Visual Display Debug: Computed visibility:', computedStyle.visibility);
+            console.log('🔍 Visual Display Debug: Element class:', visualDisplay.className);
         } else {
-            //console.warn('🔍 Visual Display Debug: Visual display element not found');
+            console.warn('🔍 Visual Display Debug: Visual display element not found');
         }
         
         // If we have basic metrics but no curve data, show what we can analyze
@@ -7246,6 +7278,109 @@ class MLFeedbackInterface {
         
         // Optionally store user preference to not show again for this session
         sessionStorage.setItem('ml-notification-declined', 'true');
+    }
+
+    /**
+     * Handle batch analysis skip - mark as completed and show feedback interface
+     * This method provides the missing link between skip functionality and feedback UI
+     */
+    skipBatchAnalysis() {
+        console.log('🛑 ML-ANALYSIS: User skipped batch analysis - skipBatchAnalysis() called');
+        
+        // Use existing skip mechanism
+        window.mlAutoAnalysisUserChoice = 'skipped';
+        console.log('🏷️ ML-ANALYSIS: Set mlAutoAnalysisUserChoice to "skipped"');
+        
+        // Hide the notification/progress modal
+        const notification = document.getElementById('ml-available-notification');
+        if (notification) {
+            notification.remove();
+            console.log('🗑️ ML-ANALYSIS: Removed ml-available-notification');
+        } else {
+            console.log('⚠️ ML-ANALYSIS: ml-available-notification not found');
+        }
+        
+        // Hide any progress modals
+        const progressModal = document.querySelector('.ml-progress-modal');
+        if (progressModal) {
+            progressModal.remove();
+            console.log('🗑️ ML-ANALYSIS: Removed ml-progress-modal');
+        } else {
+            console.log('⚠️ ML-ANALYSIS: ml-progress-modal not found');
+        }
+        
+        // Show feedback interface - this is the missing piece that existing skip methods don't do
+        console.log('🎨 ML-ANALYSIS: About to call showMLFeedbackInterface()');
+        this.showMLFeedbackInterface();
+        
+        console.log('✅ ML-ANALYSIS: Skip completed, feedback interface shown');
+    }
+
+    /**
+     * Show ML feedback interface after analysis (or skip)
+     */
+    showMLFeedbackInterface() {
+        console.log('🎨 ML-FEEDBACK: Starting to show interface after skip');
+        
+        // Show the ML prediction display area
+        const mlPredictionDisplay = document.getElementById('ml-prediction-display');
+        if (mlPredictionDisplay) {
+            mlPredictionDisplay.style.display = 'block';
+            console.log('✅ ML-FEEDBACK: Showed ml-prediction-display');
+        } else {
+            console.error('❌ ML-FEEDBACK: Could not find ml-prediction-display element');
+        }
+
+        // Hide the analyze button
+        const mlAnalyzeBtn = document.getElementById('ml-analyze-btn');
+        if (mlAnalyzeBtn) {
+            mlAnalyzeBtn.style.display = 'none';
+            console.log('✅ ML-FEEDBACK: Hid ml-analyze-btn');
+        } else {
+            console.error('❌ ML-FEEDBACK: Could not find ml-analyze-btn element');
+        }
+
+        // Show the feedback button
+        const mlFeedbackBtn = document.getElementById('ml-feedback-btn');
+        if (mlFeedbackBtn) {
+            mlFeedbackBtn.style.display = 'inline-block';
+            mlFeedbackBtn.style.opacity = '1';
+            console.log('✅ ML-FEEDBACK: Showed ml-feedback-btn');
+        } else {
+            console.error('❌ ML-FEEDBACK: Could not find ml-feedback-btn element');
+        }
+
+        // Update prediction display with "skipped" status
+        const mlPredictionClass = document.getElementById('ml-prediction-class');
+        const mlPredictionConfidence = document.getElementById('ml-prediction-confidence');
+        const mlPredictionMethod = document.getElementById('ml-prediction-method');
+        
+        if (mlPredictionClass) {
+            mlPredictionClass.textContent = 'Analysis Skipped';
+            mlPredictionClass.className = 'classification-badge skipped';
+            // Add inline styles for skipped badge
+            mlPredictionClass.style.background = '#e0e0e0';
+            mlPredictionClass.style.color = '#666';
+            mlPredictionClass.style.padding = '4px 12px';
+            mlPredictionClass.style.borderRadius = '12px';
+            mlPredictionClass.style.fontSize = '0.85em';
+            mlPredictionClass.style.fontWeight = 'bold';
+            console.log('✅ ML-FEEDBACK: Updated ml-prediction-class to "Analysis Skipped"');
+        } else {
+            console.error('❌ ML-FEEDBACK: Could not find ml-prediction-class element');
+        }
+        
+        if (mlPredictionConfidence) {
+            mlPredictionConfidence.textContent = '';
+            console.log('✅ ML-FEEDBACK: Cleared ml-prediction-confidence');
+        }
+        
+        if (mlPredictionMethod) {
+            mlPredictionMethod.textContent = 'User Skipped Analysis';
+            console.log('✅ ML-FEEDBACK: Updated ml-prediction-method');
+        }
+
+        console.log('🎨 ML-FEEDBACK: Interface shown after skip - completed');
     }
 }
 
