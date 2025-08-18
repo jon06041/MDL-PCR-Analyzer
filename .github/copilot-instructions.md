@@ -39,34 +39,70 @@
 
 ## 🔍 CRITICAL ISSUE ANALYSIS (2025-08-18)
 
-### **PARTIALLY FIXED: CalcJ Pipeline Channel Detection Issue** 🚧 IDENTIFIED & FIXED
+### **UNRESOLVED: CalcJ Pipeline Still Returns Null** 🚧 NOT SOLVED
 
-**STATUS**: **CALCJ PIPELINE CHANNEL MISMATCH FIXED** - Fixed hard-coded 'FAM' channel assumption in second-pass CalcJ calculation.
+**STATUS**: **CALCJ STILL NULL IN DATABASE** - Despite identifying and fixing hard-coded channel issue, CalcJ calculation still fails in live pipeline.
 
-**Problem Identified** (2025-08-18):
-- ❌ **Hard-coded channel name**: `qpcr_analyzer.py` line 881 assumed 'FAM' channel: `cqj_val = cqj_data.get('FAM')`
-- ❌ **Channel mismatch**: When analysis used different fluorophore (HEX, Texas Red, Cy5), CalcJ couldn't find CQJ value
-- ❌ **CalcJ returns null**: Pipeline failed despite working CalcJ calculation function
+**Problem Remains** (2025-08-18):
+- ❌ **CalcJ still null**: Live uploads still show `calcj = {"FAM": null}` for positive samples with valid CQJ
+- ❌ **Pipeline disconnect**: Function works in isolation but fails in actual upload workflow
+- ❌ **Root cause unknown**: Channel fix didn't resolve the core issue
 
-**Fix Applied** (2025-08-18):
-- ✅ **Dynamic channel detection**: Changed to `actual_channel = analysis.get('fluorophore', 'FAM')` then `cqj_val = cqj_data.get(actual_channel)`
-- ✅ **Pipeline simulation tested**: `debug_calcj_pipeline.py` confirms fix works (CalcJ = 200.05 for CQJ = 31.67)
-- ✅ **Function verification**: `debug_calcj_direct.py` proves CalcJ calculation function works correctly
+**Investigation Done** (2025-08-18):
+- ✅ **Fixed hard-coded channel**: `qpcr_analyzer.py` line 881 now uses dynamic channel detection
+- ✅ **Function verification**: `debug_calcj_direct.py` proves CalcJ calculation works (returns 199.48 for CQJ=31.67)
+- ✅ **Pipeline simulation**: `debug_calcj_pipeline.py` works correctly (returns CalcJ=200.05)
+- ✅ **Channel detection**: Control detection and standard curve calculation working properly
 
-**Files Modified**:
+**Files Modified But Issue Persists**:
 - `qpcr_analyzer.py`: Fixed line 881 channel detection in second-pass CalcJ calculation
 - `app.py`: Previously fixed CFX filename parsing with regex pattern
 
-**Current Status**: Fix implemented but requires live testing with actual file upload to verify pipeline integration.
+**Current Status**: Channel fix implemented but CalcJ still returns null in actual pipeline - deeper investigation needed.
 
-### **ACTIVE ISSUE: Test_code Extraction Still Not Working** 🚧 IN PROGRESS
+### **UNRESOLVED: ML Feedback Submission Issues** 🚧 NOT SOLVED
 
-**STATUS**: **TEST_CODE REMAINS NULL IN DATABASE** - CalcJ calculation fails because test_code is not being extracted and stored during file uploads.
+**STATUS**: **ML FEEDBACK MODAL AND SUBMISSION BROKEN** - Users cannot submit feedback on ML predictions.
 
-**Problem** (2025-08-17):
-- ❌ **CalcJ NULL in database**: Positive samples show `calcj = null` despite correct frontend calculations  
-- ❌ **Missing test_code**: `well_results.test_code = null` prevents pathogen-specific CalcJ calculation  
-- ❌ **Upload flow issue**: test_code extraction code added but not being triggered during actual uploads
+**Problems Remaining** (2025-08-18):
+- ❌ **Feedback modal broken**: ML feedback submission interface not working properly
+- ❌ **Backend submission errors**: Feedback submission endpoint returning errors
+- ❌ **Database schema issues**: Potential column mismatches in ML feedback tables
+- ❌ **No user feedback loop**: ML model cannot learn from expert corrections
+
+**Investigation Needed**:
+- Debug ML feedback modal JavaScript functionality
+- Test feedback submission API endpoints
+- Verify database schema for `ml_expert_decisions` table
+- Check frontend-backend data format compatibility
+
+**Impact**: ML model cannot improve without expert feedback, limiting learning capabilities.
+
+### **PARTIALLY RESOLVED: Test_code Extraction Implementation** ✅ CODE ADDED, TESTING NEEDED
+
+**STATUS**: **TEST_CODE EXTRACTION CODE IMPLEMENTED** - Code added to extract and store test_code, but verification needed.
+
+**Progress Made** (2025-08-17):
+- ✅ **Added test_code extraction**: Enhanced `save_individual_channel_session()` and `save_combined_session()` in `app.py`
+- ✅ **CFX filename parsing**: Fixed with regex pattern to handle dual spacing formats
+- ✅ **Database schema ready**: `well_results.test_code` column exists (varchar(50))
+- ✅ **Flask restart confirmed**: Code changes picked up, debug output functional
+
+**Technical Implementation**:
+```python
+# Added to save_individual_channel_session() around line 1722
+test_code = extract_test_code_from_filename(session_data.get('filename', ''))
+well_result.test_code = test_code
+
+# Added to save_combined_session() around line 1847  
+test_code = extract_test_code_from_filename(session_data.get('filename', ''))
+well_result.test_code = test_code
+```
+
+**Still Needs Verification**:
+- ❌ **Live upload testing**: Need fresh file upload to verify test_code extraction works
+- ❌ **Database confirmation**: Check if test_code is actually being stored
+- ❌ **End-to-end validation**: Verify complete workflow from upload to CalcJ calculation
 
 **Work Completed** (2025-08-17):
 - ✅ **Added test_code extraction**: Enhanced `save_individual_channel_session()` and `save_combined_session()` in `app.py`
