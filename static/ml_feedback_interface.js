@@ -306,6 +306,7 @@ class MLFeedbackInterface {
                             <small>Expert review available after 50+ training samples</small>
                         </div>
                         <div class="progress-bar">
+            mlFeedbackBtn.disabled = false;
                             <div class="progress-fill" id="training-progress-fill"></div>
                         </div>
                     </div>
@@ -2130,7 +2131,7 @@ class MLFeedbackInterface {
         const pathogenContext = document.getElementById('pathogen-context');
         const feedbackBtn = document.getElementById('ml-feedback-btn');
 
-        if (predictionDisplay && classElement && confidenceElement && methodElement) {
+    if (predictionDisplay && classElement && confidenceElement && methodElement) {
             predictionDisplay.style.display = 'block';
             
             classElement.textContent = mlClassification.classification.replace('_', ' ');
@@ -2155,6 +2156,7 @@ class MLFeedbackInterface {
             
             if (feedbackBtn) {
                 feedbackBtn.style.display = 'inline-block';
+                feedbackBtn.style.opacity = '1';
             }
         }
     }

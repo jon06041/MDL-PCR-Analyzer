@@ -9587,7 +9587,7 @@ async function loadSessionDetails(sessionId) {
             }
         }
         
-        // 🆕 Use the new database loading function for individual sessions
+    // 🆕 Use the new database loading function for individual sessions
         const sessionData = await window.loadSessionFromDatabase(sessionId);
         if (!sessionData) {
             throw new Error('Failed to load session from database');
@@ -9829,7 +9829,11 @@ transformedResults.individual_results[wellKey] = {
             autoSelectedFluorophore = sessionFluorophores[0];
         }
         
-        // Set analysis results for proper display (permanent for history loading)
+    // Before displaying, reset ML notification state so banners/buttons appear for loaded sessions
+    window.mlNotificationChecked = false;
+    window.mlAutoAnalysisUserChoice = null;
+
+    // Set analysis results for proper display (permanent for history loading)
         setAnalysisResults(transformedResults, 'history-session-load');
         
         // 🔍 DISABLED: ML enhancement for session data
@@ -9867,7 +9871,7 @@ transformedResults.individual_results[wellKey] = {
         // This ensures control grids appear for both single-channel and multi-channel tests
         // console.log('🔍 UNIVERSAL DISPLAY - Triggering control validation for individual session');
         
-        // Display using multi-fluorophore layout (handles both single and multi-channel)
+    // Display using multi-fluorophore layout (handles both single and multi-channel)
         displayMultiFluorophoreResults(transformedResults);
         
         // Clear the preselected fluorophore after use
