@@ -5175,9 +5175,42 @@ async function saveCombinedSessionToDatabase(results, experimentPattern) {
             return;
         }
         
+        // Transform results to include CalcJ data in backend-expected format
+        const transformedResults = { ...results };
+        if (transformedResults.individual_results) {
+            Object.keys(transformedResults.individual_results).forEach(wellKey => {
+                const well = transformedResults.individual_results[wellKey];
+                
+                // Add CalcJ in backend-expected format - combine all fluorophore values
+                const calcjData = {};
+                const cqjData = {};
+                
+                fluorophores.forEach(fluor => {
+                    // Check if well has calcj_value for this fluorophore
+                    if (well.calcj_value !== undefined && well.calcj_value !== null) {
+                        calcjData[fluor] = well.calcj_value;
+                    }
+                    
+                    // Check if well has cqj_value for this fluorophore  
+                    if (well.cqj_value !== undefined && well.cqj_value !== null) {
+                        cqjData[fluor] = well.cqj_value;
+                    }
+                });
+                
+                if (Object.keys(calcjData).length > 0) {
+                    well.calcj = calcjData;
+                }
+                if (Object.keys(cqjData).length > 0) {
+                    well.cqj = cqjData;
+                }
+                
+                console.log(`💾 [SAVE-TRANSFORM-MULTI] ${wellKey}: calcj=${JSON.stringify(well.calcj)}, cqj=${JSON.stringify(well.cqj)}`);
+            });
+        }
+        
         const sessionData = {
             filename: `Multi-Fluorophore_${experimentPattern}`,
-            combined_results: results,
+            combined_results: transformedResults,
             fluorophores: fluorophores
         };
         
@@ -8100,6 +8133,26 @@ function saveAnalysisToHistory(filename, results) {
 
 async function saveSingleFluorophoreSession(filename, results, fluorophore) {
     try {
+        // Transform results to include CalcJ data in backend-expected format
+        const transformedResults = { ...results };
+        if (transformedResults.individual_results) {
+            Object.keys(transformedResults.individual_results).forEach(wellKey => {
+                const well = transformedResults.individual_results[wellKey];
+                
+                // Add CalcJ in backend-expected format: {"FAM": calcj_value}
+                if (well.calcj_value !== undefined && well.calcj_value !== null) {
+                    well.calcj = { [fluorophore]: well.calcj_value };
+                }
+                
+                // Add CQJ in backend-expected format: {"FAM": cqj_value}  
+                if (well.cqj_value !== undefined && well.cqj_value !== null) {
+                    well.cqj = { [fluorophore]: well.cqj_value };
+                }
+                
+                console.log(`💾 [SAVE-TRANSFORM] ${wellKey}: calcj_value=${well.calcj_value} → calcj=${JSON.stringify(well.calcj)}`);
+            });
+        }
+        
         const response = await fetch('/sessions/save-combined', {
             method: 'POST',
             headers: {
@@ -8107,7 +8160,7 @@ async function saveSingleFluorophoreSession(filename, results, fluorophore) {
             },
             body: JSON.stringify({
                 filename: filename,
-                combined_results: results,
+                combined_results: transformedResults,
                 fluorophores: [fluorophore]
             })
         });
@@ -14583,7 +14636,7 @@ async function deleteSessionFromDB(sessionId, event) {
     // First check if this might be part of a multi-channel experiment
     try {
         console.log('🔍 Checking for multi-channel experiment before deletion...');
-        const checkResponse = await fetch('/api/sessions');
+        const checkResponse = await fetch('/sessions');
         if (checkResponse.ok) {
             const sessions = await checkResponse.json();
             
