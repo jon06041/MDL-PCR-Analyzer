@@ -378,9 +378,8 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
         
         # Extract experiment pattern and test code for completion tracking
         base_pattern = extract_base_pattern(filename)
-        test_code = base_pattern.split('_')[0]
-        if test_code.startswith('Ac'):
-            test_code = test_code[2:]  # Remove "Ac" prefix
+        test_code = extract_test_code_from_filename(filename)
+        print(f"🔧 [TEST_CODE DEBUG] Using extract_test_code_from_filename('{filename}') = '{test_code}'")
         
         print(f"DEBUG: Individual channel session - filename: {filename}, fluorophore: {fluorophore}")
         print(f"DEBUG: Completion tracking - base_pattern: {base_pattern}, test_code: {test_code}")
@@ -1773,10 +1772,9 @@ def save_combined_session():
             pattern_match = re.search(r'([A-Za-z][A-Za-z0-9]*_\d+_CFX\d+)', filename)
             if pattern_match:
                 base_pattern = pattern_match.group(1)
-                # Extract test code from base pattern
-                test_code = base_pattern.split('_')[0]
-                if test_code.startswith('Ac'):
-                    test_code = test_code[2:]  # Remove "Ac" prefix
+                # Extract test code using dedicated function
+                test_code = extract_test_code_from_filename(filename)
+                print(f"🔧 [TEST_CODE DEBUG] Combined session using extract_test_code_from_filename('{filename}') = '{test_code}'")
                 
                 # Create clean display name with fluorophores
                 fluorophore_list = ', '.join(sorted(fluorophores_list))
@@ -1791,18 +1789,16 @@ def save_combined_session():
             # For combined sessions, extract the original multi-fluorophore pattern
             experiment_name = filename.replace('Multi-Fluorophore_', '')
             display_name = experiment_name
-            # Extract test code from experiment name
-            test_code = experiment_name.split('_')[0]
-            if test_code.startswith('Ac'):
-                test_code = test_code[2:]  # Remove "Ac" prefix
+            # Extract test code using dedicated function
+            test_code = extract_test_code_from_filename(filename)
+            print(f"🔧 [TEST_CODE DEBUG] Multi-fluorophore case using extract_test_code_from_filename('{filename}') = '{test_code}'")
         else:
             # For individual channels, use the complete filename including channel
             experiment_name = filename
             display_name = filename
-            # Extract test code from filename
-            test_code = filename.split('_')[0]
-            if test_code.startswith('Ac'):
-                test_code = test_code[2:]  # Remove "Ac" prefix
+            # Extract test code using dedicated function
+            test_code = extract_test_code_from_filename(filename)
+            print(f"🔧 [TEST_CODE DEBUG] Individual channel case using extract_test_code_from_filename('{filename}') = '{test_code}'")
         
         # Calculate correct statistics from individual results for multi-fluorophore analysis
         individual_results = combined_results.get('individual_results', {})
