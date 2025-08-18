@@ -881,7 +881,9 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                 
             # Skip if no CQJ
             cqj_data = analysis.get('cqj', {})
-            cqj_val = cqj_data.get('FAM') if cqj_data else None  # Assuming FAM channel for now
+            # Get actual channel name instead of assuming FAM
+            actual_channel = analysis.get('fluorophore', 'FAM')
+            cqj_val = cqj_data.get(actual_channel) if cqj_data else None
             if cqj_val is None:
                 continue
                 
@@ -894,22 +896,26 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
             from cqj_calcj_utils import calculate_calcj_with_controls
             well_data_for_calcj = {'cqj_value': cqj_val}
             
+            # Get actual threshold and channel from analysis
+            threshold = analysis.get('threshold_value', 500)  # Use actual threshold
+            channel_name = analysis.get('fluorophore', 'FAM')  # Use actual channel
+            
             calcj_result = calculate_calcj_with_controls(
                 well_data_for_calcj, 
-                500,  # threshold - could get from analysis.get('threshold_value') if stored
+                threshold,  # Use actual threshold
                 all_well_results_for_calcj,
                 test_code, 
-                'FAM'  # channel - could be made dynamic
+                channel_name  # Use actual channel
             )
             
             if calcj_result and isinstance(calcj_result, dict):
                 calcj_val = calcj_result.get('calcj_value')
                 calcj_method = calcj_result.get('method', 'control_based_second_pass')
                 
-                # Update the results with the new CalcJ value
+                # Update the results with the new CalcJ value using actual channel
                 if 'calcj' not in analysis:
                     analysis['calcj'] = {}
-                analysis['calcj']['FAM'] = calcj_val
+                analysis['calcj'][channel_name] = calcj_val  # Use actual channel
                 results[well_id] = analysis
     else:
         pass  # Insufficient controls for CalcJ calculation

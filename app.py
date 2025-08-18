@@ -169,6 +169,26 @@ def get_pathogen_mapping():
         # Add more mappings as needed from pathogen_library.js
     }
 
+def extract_test_code_from_filename(filename):
+    """Extract test_code from experiment filename"""
+    if not filename:
+        return None
+        
+    # Remove CFX filename suffixes using regex to handle both single and double spaces
+    # Pattern matches: ' -  ' or ' - ' followed by 'Quantification Amplification Results_[FLUOROPHORE].csv'
+    import re
+    cfx_pattern = r' -\s+Quantification Amplification Results_(FAM|HEX|Texas Red|Cy5)\.csv$'
+    base_pattern = re.sub(cfx_pattern, '', filename)
+    
+    # Extract test code (first part before underscore)
+    test_code = base_pattern.split('_')[0]
+    
+    # Remove "Ac" prefix if present
+    if test_code.startswith('Ac'):
+        test_code = test_code[2:]
+        
+    return test_code
+
 def get_pathogen_target(test_code, fluorophore):
     """Get pathogen target for a given test code and fluorophore"""
     pathogen_mapping = get_pathogen_mapping()
@@ -1197,6 +1217,22 @@ def analyze_data():
             data = request_data
             samples_data = None
             print(f"[ANALYZE] Using legacy format - data length: {len(data)}")
+        
+        # CRITICAL FIX: Extract test_code from filename and add to each well's data
+        # This ensures CalcJ calculation has access to pathogen-specific logic
+        test_code = extract_test_code_from_filename(filename)
+        print(f"[ANALYZE] Extracted test_code='{test_code}' from filename='{filename}'")
+        
+        if test_code and isinstance(data, dict):
+            # Add test_code to each well's data for pathogen-specific analysis
+            wells_updated = 0
+            for well_id, well_data in data.items():
+                if isinstance(well_data, dict):
+                    well_data['test_code'] = test_code
+                    wells_updated += 1
+            print(f"[ANALYZE] Added test_code='{test_code}' to {wells_updated} wells for CalcJ calculation")
+        else:
+            print(f"[ANALYZE] No test_code extracted or invalid data format - CalcJ may be skipped")
         
         print(f"[ANALYZE] Starting validation...")
         # Validate data structure

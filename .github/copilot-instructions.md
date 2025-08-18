@@ -37,14 +37,34 @@
 - **Symptoms**: SQL syntax errors, 500 errors on `/api/mysql-admin/tables`
 - **Solution**: Kill Flask process and restart - changes require fresh MySQL connection pool
 
-## 🔍 CRITICAL ISSUE ANALYSIS (2025-08-17)
+## 🔍 CRITICAL ISSUE ANALYSIS (2025-08-18)
+
+### **PARTIALLY FIXED: CalcJ Pipeline Channel Detection Issue** 🚧 IDENTIFIED & FIXED
+
+**STATUS**: **CALCJ PIPELINE CHANNEL MISMATCH FIXED** - Fixed hard-coded 'FAM' channel assumption in second-pass CalcJ calculation.
+
+**Problem Identified** (2025-08-18):
+- ❌ **Hard-coded channel name**: `qpcr_analyzer.py` line 881 assumed 'FAM' channel: `cqj_val = cqj_data.get('FAM')`
+- ❌ **Channel mismatch**: When analysis used different fluorophore (HEX, Texas Red, Cy5), CalcJ couldn't find CQJ value
+- ❌ **CalcJ returns null**: Pipeline failed despite working CalcJ calculation function
+
+**Fix Applied** (2025-08-18):
+- ✅ **Dynamic channel detection**: Changed to `actual_channel = analysis.get('fluorophore', 'FAM')` then `cqj_val = cqj_data.get(actual_channel)`
+- ✅ **Pipeline simulation tested**: `debug_calcj_pipeline.py` confirms fix works (CalcJ = 200.05 for CQJ = 31.67)
+- ✅ **Function verification**: `debug_calcj_direct.py` proves CalcJ calculation function works correctly
+
+**Files Modified**:
+- `qpcr_analyzer.py`: Fixed line 881 channel detection in second-pass CalcJ calculation
+- `app.py`: Previously fixed CFX filename parsing with regex pattern
+
+**Current Status**: Fix implemented but requires live testing with actual file upload to verify pipeline integration.
 
 ### **ACTIVE ISSUE: Test_code Extraction Still Not Working** 🚧 IN PROGRESS
 
 **STATUS**: **TEST_CODE REMAINS NULL IN DATABASE** - CalcJ calculation fails because test_code is not being extracted and stored during file uploads.
 
 **Problem** (2025-08-17):
-- ❌ **CalcJ NULL in database**: Positive samples show `calcj = null` despite correct frontend calculations
+- ❌ **CalcJ NULL in database**: Positive samples show `calcj = null` despite correct frontend calculations  
 - ❌ **Missing test_code**: `well_results.test_code = null` prevents pathogen-specific CalcJ calculation  
 - ❌ **Upload flow issue**: test_code extraction code added but not being triggered during actual uploads
 
