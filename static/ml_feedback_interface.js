@@ -4755,11 +4755,24 @@ class MLFeedbackInterface {
                         model.pathogen === currentTestCode
                     );
                     
+                    // PRIORITY: Always show a banner. If pathogen exists but has insufficient data, show a training-needed banner.
                     if (pathogenModel && pathogenModel.training_samples >= 10) {
                         // Show pathogen-specific ML notification
                         this.showMLAvailableNotification({
                             type: 'pathogen-specific',
                             pathogen: pathogenModel.pathogen || pathogenModel.pathogen_code,
+                            samples: pathogenModel.training_samples,
+                            stats: result.stats,
+                            onAccept: () => this.handleMLNotificationAccept(),
+                            onDecline: () => this.handleMLNotificationDecline()
+                        });
+                        return true;
+                    } else if (pathogenModel && pathogenModel.training_samples < 10) {
+                        // Insufficient pathogen-specific training: prompt user to train
+                        console.log(`📚 ML Notification: Pathogen ${currentTestCode} has limited training data (${pathogenModel.training_samples}), showing training-needed banner`);
+                        this.showMLAvailableNotification({
+                            type: 'new-pathogen',
+                            pathogen: pathogenModel.pathogen || currentTestCode || 'Unknown',
                             samples: pathogenModel.training_samples,
                             stats: result.stats,
                             onAccept: () => this.handleMLNotificationAccept(),
@@ -4778,8 +4791,17 @@ class MLFeedbackInterface {
                         });
                         return true;
                     } else {
-                        console.log(`📊 ML Notification: Insufficient training data (${totalTrainingCount} total samples), not showing banner`);
-                        return false;
+                        // No specific model and low global training: still show a lightweight banner to guide training
+                        console.log(`📊 ML Notification: Low training data (${totalTrainingCount} total). Showing training-needed banner for ${currentTestCode || 'Unknown'}`);
+                        this.showMLAvailableNotification({
+                            type: 'new-pathogen',
+                            pathogen: currentTestCode || 'Unknown',
+                            samples: totalTrainingCount,
+                            stats: result.stats,
+                            onAccept: () => this.handleMLNotificationAccept(),
+                            onDecline: () => this.handleMLNotificationDecline()
+                        });
+                        return true;
                     }
                 }
             }
