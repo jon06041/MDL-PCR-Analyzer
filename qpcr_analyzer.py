@@ -14,7 +14,7 @@ warnings.filterwarnings('ignore')
 def get_pathogen_threshold(well_data, L=None, B=None):
     """
     Get pathogen-specific threshold value for a well based on test code and fluorophore.
-    Falls back to calculated threshold if no pathogen-specific threshold is found.
+    Strictly returns pathogen-specific fixed threshold when defined; no fallbacks.
     
     Args:
         well_data: Dict containing well information (test_code, fluorophore)
@@ -22,7 +22,7 @@ def get_pathogen_threshold(well_data, L=None, B=None):
         B: Sigmoid baseline (for fallback calculation)
     
     Returns:
-        float: Threshold value in RFU
+        float | None: Threshold value in RFU, or None if not defined for this test/channel
     """
     # Pathogen-specific fixed threshold values (matching threshold_strategies.js)
     PATHOGEN_FIXED_THRESHOLDS = {
@@ -72,18 +72,9 @@ def get_pathogen_threshold(well_data, L=None, B=None):
             print(f"🎯 Using pathogen-specific threshold: {test_code} {fluorophore} = {threshold_value} RFU")
             return float(threshold_value)
     
-    # Fallback to calculated threshold using sigmoid parameters
-    if L is not None and B is not None:
-        exp_phase_threshold = L / 2 + B
-        min_thresh = B + 0.10 * L
-        max_thresh = B + 0.90 * L
-        threshold_value = min(max(exp_phase_threshold, min_thresh), max_thresh)
-        print(f"🔄 Using calculated threshold for {test_code or 'unknown'} {fluorophore or 'unknown'}: {threshold_value:.1f} RFU")
-        return float(threshold_value)
-    
-    # Ultimate fallback
-    print(f"⚠️ Using default threshold for {test_code or 'unknown'} {fluorophore or 'unknown'}: 400.0 RFU")
-    return 400.0
+    # No fallback: absent mapping means threshold is undefined for this combo
+    print(f"⚠️ No fixed threshold defined for test_code={test_code or 'unknown'}, fluorophore={fluorophore or 'unknown'} — returning None")
+    return None
 
 
 def sigmoid(x, L, k, x0, B):
@@ -334,19 +325,9 @@ def analyze_curve_quality(well_id, data, experiment_name, test_code=None):
         # Extract parameters
         L, k, x0, B = popt
 
-        # --- FIXED THRESHOLD FOR TESTING ---
-        FIXED_THRESHOLD = 500.0  # Mgen-specific fixed threshold
-        threshold_value = FIXED_THRESHOLD
-        print(f"🔧 USING FIXED THRESHOLD: {threshold_value} RFU")
-        
-        # ORIGINAL DYNAMIC THRESHOLD (DISABLED FOR TESTING):
-        # threshold_value = get_pathogen_threshold(well_data, L, B)
-        
-        # OLD CALCULATED THRESHOLD (COMMENTED OUT FOR TESTING):
-        # exp_phase_threshold = L / 2 + B
-        # min_thresh = B + 0.10 * (L)
-        # max_thresh = B + 0.90 * (L)
-        # threshold_value = min(max(exp_phase_threshold, min_thresh), max_thresh)
+    # Determine threshold from pathogen-specific config (mirrors frontend strategies)
+    threshold_value = get_pathogen_threshold(well_data, L, B)
+    print(f"🔧 Threshold selected: {threshold_value} RFU (test_code={well_data.get('test_code')}, fluorophore={well_data.get('fluorophore')})")
 
         # Calculate additional steepness focusing on post-cycle 8 exponential phase
         post_cycle8_mask = cycles >= 8
@@ -855,70 +836,94 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
             good_curves.append(well_id)
 
     # SECOND PASS: CalcJ calculation after all CQJ values are computed
-    
-    # Count total controls available now
-    h_controls = 0
-    l_controls = 0
-    m_controls = 0
-    for w_id, w_data in all_well_results_for_calcj.items():
-        if w_data.get('cqj_value') is not None:
-            sample_name = w_data.get('sample_name', '')
-            if 'H-' in sample_name:
-                h_controls += 1
-            elif 'L-' in sample_name:
-                l_controls += 1
-            elif 'M-' in sample_name:
-                m_controls += 1
-    
-    # Only proceed with CalcJ if we have sufficient controls
-    if h_controls >= 2 and l_controls >= 2:
-        
-        for well_id, analysis in results.items():
-            # Skip if this well is a control
-            sample_name = all_well_results_for_calcj.get(well_id, {}).get('sample_name', '')
-            if 'H-' in sample_name or 'L-' in sample_name or 'M-' in sample_name:
-                continue
-                
-            # Skip if no CQJ
-            cqj_data = analysis.get('cqj', {})
-            # Get actual channel name instead of assuming FAM
-            actual_channel = analysis.get('fluorophore', 'FAM')
-            cqj_val = cqj_data.get(actual_channel) if cqj_data else None
-            if cqj_val is None:
-                continue
-                
-            # Get test_code from all_well_results_for_calcj
-            test_code = all_well_results_for_calcj.get(well_id, {}).get('test_code')
-            if not test_code:
-                continue
-                
-            # Recalculate CalcJ with all controls available
-            from cqj_calcj_utils import calculate_calcj_with_controls
-            well_data_for_calcj = {'cqj_value': cqj_val}
-            
-            # Get actual threshold and channel from analysis
-            threshold = analysis.get('threshold_value', 500)  # Use actual threshold
-            channel_name = analysis.get('fluorophore', 'FAM')  # Use actual channel
-            
-            calcj_result = calculate_calcj_with_controls(
-                well_data_for_calcj, 
-                threshold,  # Use actual threshold
-                all_well_results_for_calcj,
-                test_code, 
-                channel_name  # Use actual channel
-            )
-            
-            if calcj_result and isinstance(calcj_result, dict):
-                calcj_val = calcj_result.get('calcj_value')
-                calcj_method = calcj_result.get('method', 'control_based_second_pass')
-                
-                # Update the results with the new CalcJ value using actual channel
+    # Relax gating: attempt CalcJ and let the utility handle insufficient controls
+    for well_id, analysis in results.items():
+        # Skip if this well is a control (CalcJ for controls is handled as fixed in utils if invoked)
+        sample_name = all_well_results_for_calcj.get(well_id, {}).get('sample_name', '')
+        is_control = any(tag in sample_name for tag in ['H-', 'L-', 'M-', 'NTC'])
+
+        # Determine channel from pre-populated metadata, falling back to data-assigned channel
+        meta = all_well_results_for_calcj.get(well_id, {})
+        channel_name = meta.get('channel') or meta.get('fluorophore') or 'FAM'
+
+        # Skip if no CQJ for this well/channel
+        cqj_data = analysis.get('cqj', {})
+        cqj_val = cqj_data.get(channel_name) if isinstance(cqj_data, dict) else None
+        if cqj_val is None:
+            continue
+
+        # Get test_code from pre-populated metadata
+        test_code = meta.get('test_code')
+        if not test_code:
+            continue
+
+        # Recalculate CalcJ with all controls available; include context for control detection
+        from cqj_calcj_utils import calculate_calcj_with_controls
+        threshold = analysis.get('threshold_value', 500)
+        well_data_for_calcj = {
+            'cqj_value': cqj_val,
+            'well_id': well_id,
+            'sample_name': sample_name,
+            'fluorophore': channel_name
+        }
+
+        calcj_result = calculate_calcj_with_controls(
+            well_data_for_calcj,
+            threshold,
+            all_well_results_for_calcj,
+            test_code,
+            channel_name
+        )
+
+        if calcj_result and isinstance(calcj_result, dict):
+            calcj_val = calcj_result.get('calcj_value')
+            # Update the results with the new CalcJ value using the actual channel
+            if 'calcj' not in analysis:
+                analysis['calcj'] = {}
+            analysis['calcj'][channel_name] = calcj_val
+            results[well_id] = analysis
+
+        # Enforce display rules for this well post-calculation attempt
+        try:
+            cls = analysis.get('curve_classification', {})
+            classification_label = cls.get('classification') if isinstance(cls, dict) else str(cls)
+            # Negative samples should show N/A for CalcJ
+            if classification_label and str(classification_label).upper() == 'NEGATIVE':
                 if 'calcj' not in analysis:
                     analysis['calcj'] = {}
-                analysis['calcj'][channel_name] = calcj_val  # Use actual channel
-                results[well_id] = analysis
-    else:
-        pass  # Insufficient controls for CalcJ calculation
+                analysis['calcj'][channel_name] = 'N/A'
+            # If CQJ exists but CalcJ absent, set N/A
+            cqj_map = analysis.get('cqj', {}) or {}
+            cqj_for_channel = cqj_map.get(channel_name)
+            calcj_map = analysis.get('calcj', {}) or {}
+            calcj_for_channel = calcj_map.get(channel_name)
+            if (cqj_for_channel is not None) and (calcj_for_channel is None):
+                if 'calcj' not in analysis:
+                    analysis['calcj'] = {}
+                analysis['calcj'][channel_name] = 'N/A'
+        except Exception:
+            pass
+
+    # Final enforcement of display rules across all wells (in case CalcJ wasn't attempted)
+    for well_id, analysis in results.items():
+        try:
+            ch = analysis.get('fluorophore') or next(iter((analysis.get('cqj') or {}).keys()), 'FAM')
+            cls = analysis.get('curve_classification', {})
+            classification_label = cls.get('classification') if isinstance(cls, dict) else str(cls)
+            if classification_label and str(classification_label).upper() == 'NEGATIVE':
+                if 'calcj' not in analysis:
+                    analysis['calcj'] = {}
+                analysis['calcj'][ch] = 'N/A'
+            cqj_map = analysis.get('cqj', {}) or {}
+            cqj_for_channel = cqj_map.get(ch)
+            calcj_map = analysis.get('calcj', {}) or {}
+            calcj_for_channel = calcj_map.get(ch)
+            if (cqj_for_channel is not None) and (calcj_for_channel is None):
+                if 'calcj' not in analysis:
+                    analysis['calcj'] = {}
+                analysis['calcj'][ch] = 'N/A'
+        except Exception:
+            continue
 
     # <-- The return statement should be here, outside the for-loop!
     return {
