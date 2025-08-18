@@ -4354,6 +4354,10 @@ async function performAnalysis() {
     // console.log('🔒 [ANALYSIS START] Starting fresh analysis');
     // console.log('🧪 ANALYSIS DEBUG - performAnalysis function called!');
     
+    // Reset ML notification/banner state for a fresh analysis run
+    window.mlNotificationChecked = false;
+    window.mlAutoAnalysisUserChoice = null;
+
     // Debug: Check current data state
     // console.log('🧪 ANALYSIS DEBUG - Current state:', {
         // amplificationFilesCount: Object.keys(amplificationFiles).length,

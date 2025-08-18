@@ -148,72 +148,6 @@ class FolderQueueManager {
     }
     
     /**
-     * Load saved folder from localStorage
-     */
-    loadSavedFolder() {
-        try {
-            const saved = localStorage.getItem('monitoredFolder');
-            if (saved) {
-                const folderInfo = JSON.parse(saved);
-                document.getElementById('current-folder-display').textContent = folderInfo.name;
-                document.getElementById('current-folder-display').className = 'text-success';
-                
-                // Note: We can't restore the actual folder handle, but we show the name
-                this.showNotification('Previous folder remembered. Click Browse to reselect for monitoring.', 'info');
-            }
-        } catch (error) {
-            console.warn('Could not load saved folder:', error);
-        }
-    }
-    
-    /**
-     * Update the folder display in the UI
-     */
-    updateFolderDisplay() {
-        const display = document.getElementById('current-folder-display');
-        if (this.monitoredFolder) {
-            display.textContent = this.monitoredFolder.name;
-            display.className = 'text-success';
-        } else {
-            display.textContent = 'No folder selected';
-            display.className = 'text-muted';
-        }
-    }
-    
-    /**
-     * Refresh the file queue by scanning the monitored folder
-     */
-    async refreshQueue() {
-        if (this.isRefreshing) return;
-        
-        this.isRefreshing = true;
-        const refreshIcon = document.getElementById('refresh-icon');
-        refreshIcon?.classList.add('fa-spin');
-        
-        try {
-            if (!this.monitoredFolder) {
-                this.updateQueueDisplay();
-                return;
-            }
-            
-            // Scan folder for qPCR files
-            await this.scanFolderForFiles();
-            
-            // Update the queue display
-            this.updateQueueDisplay();
-            
-            console.log('Queue refreshed:', this.fileQueue.size, 'experiments found');
-            
-        } catch (error) {
-            console.error('Error refreshing queue:', error);
-            this.showNotification('Error scanning folder. Please check permissions.', 'error');
-        } finally {
-            this.isRefreshing = false;
-            refreshIcon?.classList.remove('fa-spin');
-        }
-    }
-    
-    /**
      * Scan the monitored folder for qPCR files
      */
     async scanFolderForFiles() {
@@ -332,10 +266,10 @@ class FolderQueueManager {
     detectFluorophores(files) {
         const fluorophores = [];
         const patterns = {
-            'Cy5': /cy5|red/i,
-            'FAM': /fam|green/i,
-            'HEX': /hex|yellow/i,
-            'TexasRed': /texas.*red|rox/i
+            'Cy5': /(?:_|\b)Cy5(?:_|\b)|red/i,
+            'FAM': /(?:_|\b)FAM(?:_|\b)|green/i,
+            'HEX': /(?:_|\b)HEX(?:_|\b)|yellow/i,
+            'Texas Red': /texas\s*red|rox/i
         };
         
         for (const file of files) {
@@ -363,10 +297,9 @@ class FolderQueueManager {
                 <div class="text-center text-muted py-4">
                     <i class="fas fa-inbox fa-3x mb-3"></i>
                     <h6>No qPCR file pairs detected</h6>
-                    <p class="mb-2">Looking for matching amplification and summary files...</p>
+                    <p class="mb-2">Looking for files that match CFX naming: "Experiment_ID_CFX123456 - Quantification Amplification Results_<channel>.csv" and "Experiment_ID_CFX123456 - Quantification Summary_0.csv"</p>
                     <small>
-                        Expected pattern: <code>experiment_runId_instrument.csv</code><br>
-                        Summary files should contain "summary" in the filename
+                        Only valid CFX files are queued. Invalid or mismatched filenames are ignored.
                     </small>
                 </div>
             `;

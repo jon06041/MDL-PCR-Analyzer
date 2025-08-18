@@ -306,13 +306,15 @@ def analyze_curve_quality(well_id, data, experiment_name, test_code=None):
         )
 
         # Fit sigmoid with bounds
-        popt, pcov = curve_fit(sigmoid,
-                               cycles,
-                               rfu,
-                               p0=[L_guess, k_guess, x0_guess, B_guess],
-                               bounds=bounds,
-                               maxfev=5000,
-                               method='trf')
+        popt, pcov = curve_fit(
+            sigmoid,
+            cycles,
+            rfu,
+            p0=[L_guess, k_guess, x0_guess, B_guess],
+            bounds=bounds,
+            maxfev=5000,
+            method='trf'
+        )
 
         # Calculate fit quality
         fit_rfu = sigmoid(cycles, *popt)
@@ -325,9 +327,9 @@ def analyze_curve_quality(well_id, data, experiment_name, test_code=None):
         # Extract parameters
         L, k, x0, B = popt
 
-    # Determine threshold from pathogen-specific config (mirrors frontend strategies)
-    threshold_value = get_pathogen_threshold(well_data, L, B)
-    print(f"🔧 Threshold selected: {threshold_value} RFU (test_code={well_data.get('test_code')}, fluorophore={well_data.get('fluorophore')})")
+        # Determine threshold from pathogen-specific config (mirrors frontend strategies)
+        threshold_value = get_pathogen_threshold(well_data, L, B)
+        print(f"🔧 Threshold selected: {threshold_value} RFU (test_code={well_data.get('test_code')}, fluorophore={well_data.get('fluorophore')})")
 
         # Calculate additional steepness focusing on post-cycle 8 exponential phase
         post_cycle8_mask = cycles >= 8
@@ -458,8 +460,8 @@ def analyze_curve_quality(well_id, data, experiment_name, test_code=None):
             'residuals': [float(x) for x in residuals],
             'post_cycle8_steepness': float(post_cycle8_steepness),
 
-            # Add threshold_value to criteria for frontend use
-            'threshold_value': float(threshold_value)
+            # Add threshold_value to criteria for frontend use (None when undefined)
+            'threshold_value': (float(threshold_value) if threshold_value is not None else None)
         }
 
         if plot:
@@ -473,8 +475,9 @@ def analyze_curve_quality(well_id, data, experiment_name, test_code=None):
                      'r-',
                      label='Sigmoid Fit (R²={:.3f})'.format(r2),
                      linewidth=2)
-            # Add threshold line
-            plt.axhline(y=threshold_value, color='orange', linestyle='--', label=f'Threshold ({threshold_value:.1f})')
+            # Add threshold line if defined
+            if threshold_value is not None:
+                plt.axhline(y=threshold_value, color='orange', linestyle='--', label=f'Threshold ({threshold_value:.1f})')
             plt.xlabel('Cycle')
             plt.ylabel('RFU')
             plt.legend()
