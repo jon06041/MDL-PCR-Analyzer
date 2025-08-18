@@ -695,6 +695,20 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                 # Ensure it's a JSON string for DB
                 well_result.curve_classification = safe_json_dumps(curve_classification, {'class': 'N/A'})
                 
+                # --- Save CQ-J and Calc-J fields if present ---
+                # Store per-channel CQJ/CalcJ dicts (e.g., {'FAM': 31.6}, {'FAM': 2.0e2})
+                try:
+                    well_result.cqj = safe_json_dumps(well_data.get('cqj'), {})
+                except Exception as e:
+                    print(f"[DB WARN] Failed to save CQJ for {well_key}: {e}")
+                    well_result.cqj = safe_json_dumps({}, {})
+
+                try:
+                    well_result.calcj = safe_json_dumps(well_data.get('calcj'), {})
+                except Exception as e:
+                    print(f"[DB WARN] Failed to save CalcJ for {well_key}: {e}")
+                    well_result.calcj = safe_json_dumps({}, {})
+
                 # Set test_code extracted from filename
                 well_result.test_code = test_code
                 print(f"🔧 [CRITICAL DEBUG] Setting test_code='{test_code}' for well {well_key} in save_individual_channel_session()")
