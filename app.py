@@ -6646,65 +6646,154 @@ def confirm_analysis_session():
         
         if has_pending_confirmations:
             # New structure: Handle confirmation through pending_confirmations table
+            # If only a session_id was provided, try to map it to a confirmation_id
+            if (not data.get('confirmation_id')) and session_id:
+                cursor.execute(
+                    "SELECT id FROM pending_confirmations WHERE analysis_session_id = %s ORDER BY id DESC LIMIT 1",
+                    (session_id,)
+                )
+                row = cursor.fetchone()
+                if row:
+                    confirmation_id = row[0]
+                    app.logger.info(f"Mapped session_id {session_id} -> confirmation_id {confirmation_id}")
+
             if confirmation_id:
-                # First check if confirmation exists
-                cursor.execute("""
-                    SELECT pc.id, pc.analysis_session_id, pc.confirmation_status, 
+                # First check if confirmation exists by ID
+                cursor.execute(
+                    """
+                    SELECT pc.id, pc.analysis_session_id, pc.confirmation_status,
                            COALESCE(pc.filename, a.filename) as filename
                     FROM pending_confirmations pc
                     LEFT JOIN analysis_sessions a ON pc.analysis_session_id = a.id
                     WHERE pc.id = %s
-                """, (confirmation_id,))
+                    """,
+                    (confirmation_id,)
+                )
                 confirmation_data = cursor.fetchone()
-                
+
+                # If not found by confirmation_id but we do have a session_id, try finding by session_id
+                if not confirmation_data and session_id:
+                    cursor.execute(
+                        """
+                        SELECT pc.id, pc.analysis_session_id, pc.confirmation_status,
+                               COALESCE(pc.filename, a.filename) as filename
+                        FROM pending_confirmations pc
+                        LEFT JOIN analysis_sessions a ON pc.analysis_session_id = a.id
+                        WHERE pc.analysis_session_id = %s
+                        ORDER BY pc.id DESC LIMIT 1
+                        """,
+                        (session_id,)
+                    )
+                    confirmation_data = cursor.fetchone()
+                    if confirmation_data:
+                        confirmation_id = confirmation_data[0]
+                        app.logger.info(f"Resolved confirmation by session_id {session_id} -> confirmation_id {confirmation_id}")
+
                 if not confirmation_data:
-                    return jsonify({'success': False, 'message': f'Confirmation {confirmation_id} not found'}), 404
-                
-                session_filename = confirmation_data[3]
-                actual_session_id = confirmation_data[1]
-                
-                if confirmed:
-                    # Confirm the pending confirmation
-                    cursor.execute("""
-                        UPDATE pending_confirmations 
-                        SET confirmation_status = 'confirmed',
-                            confirmed_by = %s,
-                            confirmed_at = CURRENT_TIMESTAMP
-                        WHERE id = %s
-                    """, (user_id, confirmation_id))
-                    
-                    # Also update the underlying analysis session for compatibility
-                    cursor.execute("""
-                        UPDATE analysis_sessions 
-                        SET confirmation_status = 'confirmed',
-                            confirmed_by = %s,
-                            confirmed_at = CURRENT_TIMESTAMP
-                        WHERE id = %s
-                    """, (user_id, actual_session_id))
-                    
-                    message = f'Confirmation {confirmation_id} for session {actual_session_id} ({session_filename}) successfully confirmed'
+                    # As a compatibility fallback, confirm the analysis_session directly if it exists
+                    if session_id:
+                        cursor.execute("SELECT id, filename FROM analysis_sessions WHERE id = %s", (session_id,))
+                        session = cursor.fetchone()
+                        if session:
+                            session_filename = session[1]
+                            if confirmed:
+                                cursor.execute(
+                                    """
+                                    UPDATE analysis_sessions
+                                    SET confirmation_status = 'confirmed',
+                                        confirmed_by = %s,
+                                        confirmed_at = CURRENT_TIMESTAMP
+                                    WHERE id = %s
+                                    """,
+                                    (user_id, session_id),
+                                )
+                                message = f"Session {session_id} ({session_filename}) successfully confirmed (compat mode)"
+                            else:
+                                cursor.execute(
+                                    """
+                                    UPDATE analysis_sessions
+                                    SET confirmation_status = 'rejected',
+                                        confirmed_by = %s,
+                                        confirmed_at = CURRENT_TIMESTAMP
+                                    WHERE id = %s
+                                    """,
+                                    (user_id, session_id),
+                                )
+                                message = f"Session {session_id} ({session_filename}) successfully rejected (compat mode)"
+                            app.logger.warning(
+                                f"pending_confirmations row not found; applied legacy confirmation to analysis_sessions for session {session_id}"
+                            )
+                            # Continue to commit and return
+                        else:
+                            return (
+                                jsonify({'success': False, 'message': f'Session {session_id} not found'}),
+                                404,
+                            )
+                    else:
+                        return (
+                            jsonify({'success': False, 'message': f'Confirmation {confirmation_id} not found'}),
+                            404,
+                        )
                 else:
-                    # Reject the pending confirmation
-                    cursor.execute("""
-                        UPDATE pending_confirmations 
-                        SET confirmation_status = 'rejected',
-                            confirmed_by = %s,
-                            confirmed_at = CURRENT_TIMESTAMP
-                        WHERE id = %s
-                    """, (user_id, confirmation_id))
-                    
-                    # Also update the underlying analysis session for compatibility
-                    cursor.execute("""
-                        UPDATE analysis_sessions 
-                        SET confirmation_status = 'rejected',
-                            confirmed_by = %s,
-                            confirmed_at = CURRENT_TIMESTAMP
-                        WHERE id = %s
-                    """, (user_id, actual_session_id))
-                    
-                    message = f'Confirmation {confirmation_id} for session {actual_session_id} ({session_filename}) successfully rejected'
-            else:
-                return jsonify({'success': False, 'message': 'Confirmation ID required for new session separation structure'}), 400
+                    session_filename = confirmation_data[3]
+                    actual_session_id = confirmation_data[1]
+
+                    if confirmed:
+                        # Confirm the pending confirmation
+                        cursor.execute(
+                            """
+                            UPDATE pending_confirmations
+                            SET confirmation_status = 'confirmed',
+                                confirmed_by = %s,
+                                confirmed_at = CURRENT_TIMESTAMP
+                            WHERE id = %s
+                            """,
+                            (user_id, confirmation_id),
+                        )
+
+                        # Also update the underlying analysis session for compatibility
+                        cursor.execute(
+                            """
+                            UPDATE analysis_sessions
+                            SET confirmation_status = 'confirmed',
+                                confirmed_by = %s,
+                                confirmed_at = CURRENT_TIMESTAMP
+                            WHERE id = %s
+                            """,
+                            (user_id, actual_session_id),
+                        )
+
+                        message = (
+                            f'Confirmation {confirmation_id} for session {actual_session_id} ({session_filename}) successfully confirmed'
+                        )
+                    else:
+                        # Reject the pending confirmation
+                        cursor.execute(
+                            """
+                            UPDATE pending_confirmations
+                            SET confirmation_status = 'rejected',
+                                confirmed_by = %s,
+                                confirmed_at = CURRENT_TIMESTAMP
+                            WHERE id = %s
+                            """,
+                            (user_id, confirmation_id),
+                        )
+
+                        # Also update the underlying analysis session for compatibility
+                        cursor.execute(
+                            """
+                            UPDATE analysis_sessions
+                            SET confirmation_status = 'rejected',
+                                confirmed_by = %s,
+                                confirmed_at = CURRENT_TIMESTAMP
+                            WHERE id = %s
+                            """,
+                            (user_id, actual_session_id),
+                        )
+
+                        message = (
+                            f'Confirmation {confirmation_id} for session {actual_session_id} ({session_filename}) successfully rejected'
+                        )
         else:
             # Legacy structure: Direct analysis_sessions update
             cursor.execute("SELECT id, filename FROM analysis_sessions WHERE id = %s", (session_id,))
