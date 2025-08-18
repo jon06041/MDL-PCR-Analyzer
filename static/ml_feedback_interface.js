@@ -390,6 +390,14 @@ class MLFeedbackInterface {
             mlAnalyzeBtn.textContent = '🔍 Analyze with ML';
             //console.log('ML Feedback Interface: ML analyze button made visible and enabled');
         }
+
+        // Also re-apply Analyze button disabled state if pathogen ML is off
+        setTimeout(async () => {
+            try {
+                // This reuses shouldHideMLFeedback to trigger internal ml-enabled probe and button state
+                await this.shouldHideMLFeedback();
+            } catch (e) { /* no-op */ }
+        }, 0);
     }
 
     hideMLSection() {
@@ -585,6 +593,25 @@ class MLFeedbackInterface {
             feedbackBtn.style.opacity = '1';
         }
         if (feedbackForm) feedbackForm.style.display = 'none';
+
+        // Respect training pause: if paused, hide the whole section; otherwise keep feedback visible
+        try {
+            let sessionId = window.currentSessionId || wellData.session_id;
+            if (sessionId) {
+                fetch(`/api/ml-training/check-pause/${encodeURIComponent(sessionId)}`)
+                    .then(r => r.ok ? r.json() : null)
+                    .then(data => {
+                        if (data && data.success === true && data.is_paused === true) {
+                            // Hide entire ML section when paused
+                            this.hideMLSection();
+                        } else {
+                            // Ensure section is shown when not paused
+                            this.showMLSection();
+                        }
+                    })
+                    .catch(() => {/* non-fatal */});
+            }
+        } catch (e) { /* no-op */ }
         
         // CRITICAL FIX: Reset all button states when switching wells
         this.resetButtonStates();
@@ -659,68 +686,72 @@ class MLFeedbackInterface {
 
     async shouldHideMLFeedback() {
         /**
-         * Determine if ML feedback should be hidden based on:
-         * Pathogen-specific ML enabled setting for current test
-         * Hide when ML is disabled for this specific pathogen/test
+         * Only hide the entire ML section when the test/session is paused.
+         * Do NOT hide the section when ML is disabled for the pathogen —
+         * instead, we’ll disable the Analyze button but keep feedback visible.
          */
         try {
-            // Get current pathogen information
-            const pathogenInfo = this.extractChannelSpecificPathogen();
-            if (!pathogenInfo.pathogen || pathogenInfo.pathogen === 'Unknown') {
-                console.log('ML Config Check: No pathogen detected, showing ML feedback');
-                return false; // Show ML feedback if we can't determine pathogen
+            // 1) Check if training is paused for this session
+            let sessionId = window.currentSessionId;
+            if (!sessionId && this.currentWellData && this.currentWellData.session_id) {
+                sessionId = this.currentWellData.session_id;
             }
-
-            // Get pathogen-specific ML configuration
-            const pathogenResponse = await fetch(`/api/ml-config/pathogen/${encodeURIComponent(pathogenInfo.pathogen)}`);
-            if (!pathogenResponse.ok) {
-                // During database connectivity issues, hide ML elements to prevent broken state
-                console.log('ML Config Check: Failed to get pathogen config (database connectivity issue), hiding ML feedback');
-                return true; // Hide ML feedback if we can't get pathogen config
-            }
-            const pathogenConfigResponse = await pathogenResponse.json();
-            
-            // Find config for current fluorophore or general config
-            let pathogenMLEnabled = true; // Default to enabled
-            if (pathogenConfigResponse.success && pathogenConfigResponse.configs?.length > 0) {
-                const configs = pathogenConfigResponse.configs;
-                
-                // Look for specific fluorophore config first
-                let config = configs.find(c => c.fluorophore === pathogenInfo.fluorophore);
-                // Fall back to general config (null fluorophore)
-                if (!config) {
-                    config = configs.find(c => !c.fluorophore);
-                }
-                
-                if (config) {
-                    pathogenMLEnabled = config.ml_enabled;
+            if (sessionId) {
+                try {
+                    const pauseResp = await fetch(`/api/ml-training/check-pause/${encodeURIComponent(sessionId)}`);
+                    if (pauseResp.ok) {
+                        const pauseData = await pauseResp.json();
+                        if (pauseData && pauseData.success === true && pauseData.is_paused === true) {
+                            console.log('ML Pause Check: Session is paused — hiding ML section');
+                            return true; // Hide UI when paused
+                        }
+                    }
+                } catch (e) {
+                    // Network/endpoint issues shouldn’t hide the section; proceed
+                    console.warn('ML Pause Check: Unable to verify pause status, proceeding to show UI');
                 }
             }
 
-            // Hide ML feedback when ML is disabled for this pathogen
-            const shouldHide = !pathogenMLEnabled;
+            // 2) Probe pathogen ML-enabled to control only the Analyze button state
+            try {
+                const pathogenInfo = this.extractChannelSpecificPathogen();
+                if (pathogenInfo && pathogenInfo.pathogen && pathogenInfo.pathogen !== 'Unknown') {
+                    const pathogenResponse = await fetch(`/api/ml-config/pathogen/${encodeURIComponent(pathogenInfo.pathogen)}`);
+                    if (pathogenResponse.ok) {
+                        const pathogenConfigResponse = await pathogenResponse.json();
+                        let pathogenMLEnabled = true; // default
+                        if (pathogenConfigResponse.success && Array.isArray(pathogenConfigResponse.configs)) {
+                            const configs = pathogenConfigResponse.configs;
+                            let config = configs.find(c => c.fluorophore === pathogenInfo.fluorophore) || configs.find(c => !c.fluorophore);
+                            if (config) pathogenMLEnabled = !!config.ml_enabled;
+                        }
+                        // Apply Analyze button state without hiding the section
+                        const analyzeBtn = document.getElementById('ml-analyze-btn');
+                        if (analyzeBtn) {
+                            if (!pathogenMLEnabled) {
+                                analyzeBtn.disabled = true;
+                                analyzeBtn.title = 'ML disabled for this pathogen — feedback still available';
+                                analyzeBtn.style.opacity = '0.5';
+                            } else {
+                                analyzeBtn.disabled = false;
+                                analyzeBtn.title = '';
+                                analyzeBtn.style.opacity = '1';
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                // Non-fatal; keep section visible and buttons in default state
+                console.warn('ML Config Check: Error while checking ml-enabled; leaving UI visible');
+            }
 
-            /*
-            console.log('ML Config Check:', {
-                pathogen: pathogenInfo.pathogen,
-                fluorophore: pathogenInfo.fluorophore,
-                pathogenMLEnabled,
-                shouldHide
-            });
-            */
-            
-            return shouldHide;
-            
+            // Default: do not hide the section
+            return false;
+
         } catch (error) {
-            console.error('ML Config Check: Error checking ML feedback visibility:', error);
-            
-            // During database connectivity issues, hide ML elements to prevent broken functionality
-            if (error.message && (error.message.includes('Failed to fetch') || error.message.includes('Network Error'))) {
-                console.log('ML Config Check: Database connectivity issue detected, hiding ML feedback');
-                return true; // Hide ML feedback during connectivity issues
-            }
-            
-            return false; // Show ML feedback for other types of errors
+            console.error('ML Config Check: Error deciding ML section visibility:', error);
+            // Don’t hide the UI on generic errors; keep it available for rule-based + feedback
+            return false;
         }
     }
 
