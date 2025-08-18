@@ -653,7 +653,7 @@ class MLFeedbackInterface {
 
             if (predictionDisplay) predictionDisplay.style.display = 'block';
 
-            const ruleClass = (wellData.curve_classification || 'UNKNOWN').toString();
+            const ruleClass = this.normalizeClassification(wellData.curve_classification || 'UNKNOWN');
             if (classElement) {
                 classElement.textContent = ruleClass.replace('_', ' ');
                 classElement.className = `classification-badge ${this.getClassificationBadgeClass(ruleClass)}`;
@@ -1016,6 +1016,30 @@ class MLFeedbackInterface {
         radioButtons.forEach(radio => radio.checked = false);
         
         //console.log('🔄 ML Feedback: Reset all button states');
+    }
+
+    // Normalize various classification value shapes to a readable string (avoid [object Object])
+    normalizeClassification(value) {
+        try {
+            if (value == null) return 'UNKNOWN';
+            // If it’s already a string
+            if (typeof value === 'string') return value;
+            // If backend sent an object with a classification field
+            if (typeof value === 'object') {
+                if (value.classification && typeof value.classification === 'string') {
+                    return value.classification;
+                }
+                // Common alternate keys
+                if (value.label && typeof value.label === 'string') return value.label;
+                if (value.result && typeof value.result === 'string') return value.result;
+                // As a last resort, stringify basic primitives safely
+                return JSON.stringify(value);
+            }
+            // Fallback to string conversion for numbers/booleans
+            return String(value);
+        } catch (e) {
+            return 'UNKNOWN';
+        }
     }
 
     // Update the display with visual analysis
@@ -2178,21 +2202,29 @@ class MLFeedbackInterface {
             return;
         }
         
-        // Even if classification or confidence is missing, try to show what we have
-        if (!mlClassification.classification) {
-            console.warn('ML Feedback Interface: Missing classification field, using fallback');
-            mlClassification.classification = 'UNKNOWN';
+        // Normalize incoming data (string or object) to a unified structure
+        if (typeof mlClassification === 'string') {
+            mlClassification = { classification: mlClassification, method: 'Rule-Based', confidence: 1.0 };
         }
-        
-        if (mlClassification.confidence === undefined || mlClassification.confidence === null) {
-            console.warn('ML Feedback Interface: Missing confidence field, using fallback');
-            mlClassification.confidence = 0.0;
+
+        // Extract a safe, human-readable classification
+        const normalizedClass = this.normalizeClassification(
+            mlClassification.classification ?? mlClassification
+        ) || 'UNKNOWN';
+
+        // Ensure we have a numeric confidence
+        let normalizedConfidence = 0.0;
+        if (typeof mlClassification.confidence === 'number') {
+            normalizedConfidence = mlClassification.confidence;
+        } else if (typeof mlClassification.confidence === 'string') {
+            const parsed = parseFloat(mlClassification.confidence);
+            normalizedConfidence = isNaN(parsed) ? 0.0 : parsed;
         }
         
         console.log('🔄 DISPLAY-ML: Displaying ML classification:', {
-            classification: mlClassification.classification,
+            classification: normalizedClass,
             method: mlClassification.method,
-            confidence: mlClassification.confidence,
+            confidence: normalizedConfidence,
             isExpertFeedback: mlClassification.method === 'expert_feedback' || 
                              mlClassification.method === 'Expert Review' ||
                              mlClassification.expert_review_method === 'ml_feedback_interface'
@@ -2200,8 +2232,8 @@ class MLFeedbackInterface {
         
         // CRITICAL: Store the original ML prediction for comparison later
         if (this.currentWellData && !this.currentWellData.original_ml_prediction) {
-            this.currentWellData.original_ml_prediction = mlClassification.classification;
-            console.log('📊 Stored original ML prediction:', mlClassification.classification);
+            this.currentWellData.original_ml_prediction = normalizedClass;
+            console.log('📊 Stored original ML prediction:', normalizedClass);
         }
         
         const predictionDisplay = document.getElementById('ml-prediction-display');
@@ -2215,8 +2247,8 @@ class MLFeedbackInterface {
     if (predictionDisplay && classElement && confidenceElement && methodElement) {
             predictionDisplay.style.display = 'block';
             
-            classElement.textContent = mlClassification.classification.replace('_', ' ');
-            classElement.className = `classification-badge ${this.getClassificationBadgeClass(mlClassification.classification)}`;
+            classElement.textContent = normalizedClass.replace('_', ' ');
+            classElement.className = `classification-badge ${this.getClassificationBadgeClass(normalizedClass)}`;
             
             // CRITICAL FIX: Handle expert feedback classifications differently
             // Check for both backend formats: 'expert_feedback' and 'Expert Review'
@@ -2226,7 +2258,7 @@ class MLFeedbackInterface {
                 confidenceElement.textContent = '(Expert Decision)';
                 methodElement.textContent = 'Expert Review';
             } else {
-                confidenceElement.textContent = `(${(mlClassification.confidence * 100).toFixed(1)}% confidence)`;
+                confidenceElement.textContent = `(${(normalizedConfidence * 100).toFixed(1)}% confidence)`;
                 methodElement.textContent = mlClassification.method || 'ML';
             }
             
