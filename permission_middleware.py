@@ -8,11 +8,16 @@ from functools import wraps
 from flask import session, request, jsonify, redirect, url_for, g
 from unified_auth_manager import UnifiedAuthManager
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
 # Initialize auth manager
 auth_manager = UnifiedAuthManager()
+
+def is_development_mode():
+    """Check if the application is running in development mode"""
+    return os.environ.get('FLASK_ENV', 'development') == 'development'
 
 def get_current_user_permissions():
     """Get permissions for the current user session"""

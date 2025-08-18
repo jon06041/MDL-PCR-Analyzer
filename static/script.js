@@ -2984,6 +2984,17 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
                     return { individual_results: {} };
                 }
                 
+                // Handle 403 Permission Denied - show proper error message
+                if (response.status === 403) {
+                    let permissionMsg = 'You do not have permission to run qPCR analysis.';
+                    if (errorDetails && errorDetails.required_permission) {
+                        permissionMsg = `Permission required: ${errorDetails.required_permission}. Please contact your administrator to grant access.`;
+                    }
+                    console.log(`🚫 Permission denied - showing error message`);
+                    alert(`Authentication Error: ${permissionMsg}`);
+                    return { individual_results: {} };
+                }
+                
                 return { individual_results: {} };
             }
             result = await response.json();
