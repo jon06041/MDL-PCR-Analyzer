@@ -2128,7 +2128,11 @@ class MLFeedbackInterface {
     }
 
     async analyzeCurveWithML() {
-        console.log('ML Analysis: Starting analysis...');
+        console.log('ML Analysis: Starting manual individual analysis...');
+        
+        // CRITICAL FIX: Individual manual analysis should ALWAYS be allowed
+        // User has the right to request feedback regardless of batch skip state
+        console.log('🔓 Manual ML Analysis: Bypassing any previous skip choices - user manually requested analysis');
         
         const analyzeBtn = document.getElementById('ml-analyze-btn');
         let originalButtonState = null;

@@ -71,6 +71,7 @@ class WellResult(db.Model):
     # Add CQ-J and Calc-J as JSON fields for per-channel results
     cqj = db.Column(db.Text)  # JSON string: {"FAM": 23.1, "HEX": 27.5, ...}
     calcj = db.Column(db.Text)  # JSON string: {"FAM": 1.2e5, "HEX": 9.8e3, ...}
+    test_code = db.Column(db.String(50))  # Pathogen test code (e.g., 'Mgen', 'Ctrach', 'Ngon')
 
     def to_dict(self):
         # Get fluorophore from dedicated column first
