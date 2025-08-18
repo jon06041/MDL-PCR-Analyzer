@@ -4985,7 +4985,7 @@ def get_ml_validation_dashboard_data():
             
             # Get confirmed sessions with ML accuracy data
             cursor4.execute("""
-                SELECT id, file_name, confirmed_by, confirmed_at, total_wells,
+                SELECT id, filename AS file_name, confirmed_by, confirmed_at, total_wells,
                        good_curves, pathogen_breakdown, success_rate
                 FROM analysis_sessions 
                 WHERE is_confirmed = 1
@@ -7082,6 +7082,13 @@ def get_confirmed_sessions():
         # Convert timestamps and handle JSON fields safely for Railway
         for session in confirmed_sessions:
             try:
+                # Ensure legacy-compatible keys for frontend (unified dashboard expects `id` and `filename`)
+                if session.get('session_id') is not None and session.get('id') is None:
+                    session['id'] = session['session_id']
+                # In new structure, we already select COALESCE(... ) as filename; legacy path also selects filename
+                # Add optional file_name alias for any consumers expecting that key
+                if session.get('filename') is not None and session.get('file_name') is None:
+                    session['file_name'] = session['filename']
                 # Handle timestamps - now from both tables
                 if session.get('upload_timestamp'):
                     session['upload_timestamp'] = session['upload_timestamp'].isoformat()
