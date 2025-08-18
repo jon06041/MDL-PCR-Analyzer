@@ -577,8 +577,13 @@ class MLFeedbackInterface {
         const feedbackBtn = document.getElementById('ml-feedback-btn');
         const feedbackForm = document.getElementById('ml-feedback-form');
         
-        if (predictionDisplay) predictionDisplay.style.display = 'none';
-        if (feedbackBtn) feedbackBtn.style.display = 'none';
+        // Default: show prediction area and feedback for rule-based context even before ML
+        if (predictionDisplay) predictionDisplay.style.display = 'block';
+        if (feedbackBtn) {
+            feedbackBtn.style.display = 'inline-block';
+            feedbackBtn.disabled = false;
+            feedbackBtn.style.opacity = '1';
+        }
         if (feedbackForm) feedbackForm.style.display = 'none';
         
         // CRITICAL FIX: Reset all button states when switching wells
@@ -587,8 +592,7 @@ class MLFeedbackInterface {
         // Reset any ongoing submission state
         this.submissionInProgress = false;
         
-        // DISABLED: Auto-analyze the curve if ML classification doesn't exist
-        // Only display what's already in the results table - no independent predictions
+        // If an ML classification exists, display it
         if (wellData.ml_classification) {
             // Only display existing classification if ML section is visible
             setTimeout(async () => {
@@ -598,13 +602,59 @@ class MLFeedbackInterface {
                 }
             }, 100);
         } else {
-            // No ML classification exists - don't trigger automatic analysis
-            // The modal should only show what's already in the results table
-            console.log('ML Feedback: No existing ML classification - showing data from results table only');
+            // No ML classification exists - show rule-based placeholder prediction and enable feedback
+            this.displayRuleBasedPrediction(wellData);
         }
         
         // Update visual curve analysis
         this.updateVisualCurveDisplay(wellData);
+    }
+
+    /**
+     * Show a placeholder prediction based on rule-based classification so
+     * users can still provide feedback without running ML.
+     */
+    displayRuleBasedPrediction(wellData) {
+        try {
+            const predictionDisplay = document.getElementById('ml-prediction-display');
+            const classElement = document.getElementById('ml-prediction-class');
+            const confidenceElement = document.getElementById('ml-prediction-confidence');
+            const methodElement = document.getElementById('ml-prediction-method');
+            const pathogenElement = document.getElementById('detected-pathogen');
+            const pathogenContext = document.getElementById('pathogen-context');
+            const feedbackBtn = document.getElementById('ml-feedback-btn');
+
+            if (predictionDisplay) predictionDisplay.style.display = 'block';
+
+            const ruleClass = (wellData.curve_classification || 'UNKNOWN').toString();
+            if (classElement) {
+                classElement.textContent = ruleClass.replace('_', ' ');
+                classElement.className = `classification-badge ${this.getClassificationBadgeClass(ruleClass)}`;
+            }
+            if (confidenceElement) {
+                confidenceElement.textContent = '(Rule-Based)';
+            }
+            if (methodElement) {
+                methodElement.textContent = 'Rule-Based';
+            }
+
+            // Add pathogen context if available
+            try {
+                const ctx = this.extractChannelSpecificPathogen();
+                if (ctx && ctx.pathogen && pathogenElement && pathogenContext) {
+                    pathogenElement.textContent = ctx.pathogen;
+                    pathogenContext.style.display = 'block';
+                }
+            } catch (e) { /* no-op */ }
+
+            if (feedbackBtn) {
+                feedbackBtn.style.display = 'inline-block';
+                feedbackBtn.disabled = false;
+                feedbackBtn.style.opacity = '1';
+            }
+        } catch (e) {
+            console.warn('ML Feedback: Failed to display rule-based prediction placeholder', e);
+        }
     }
 
     async shouldHideMLFeedback() {
