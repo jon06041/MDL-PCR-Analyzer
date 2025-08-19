@@ -1762,7 +1762,15 @@
                                         </thead>
                                         <tbody>
                                             ${allSessions.map(session => {
-                                                const pathogenInfo = (session.pathogen_breakdown || 'Unknown').split(':')[0].trim();
+                                                // Derive a user-friendly pathogen label for sessions
+                                                let pathogenInfo = (session.pathogen_breakdown || '').split(':')[0].trim();
+                                                let pathogenBadgeClass = 'bg-info';
+                                                let pathogenTitle = '';
+                                                if (!pathogenInfo || pathogenInfo.toLowerCase() === 'unknown' || pathogenInfo === '-') {
+                                                    pathogenInfo = 'N/A';
+                                                    pathogenBadgeClass = 'bg-secondary';
+                                                    pathogenTitle = 'No pathogen metadata for this session (not applicable or missing)';
+                                                }
                                                 const uploadDate = session.upload_timestamp ? new Date(session.upload_timestamp).toLocaleString() : 'N/A';
                                                 const wells = session.total_wells || 0;
                                                 const status = session.confirmation_status || 'Unknown';
@@ -1777,7 +1785,7 @@
                                                             </small>
                                                         </td>
                                                         <td><small>${uploadDate}</small></td>
-                                                        <td><span class="badge bg-info">${pathogenInfo}</span></td>
+                                                        <td><span class="badge ${pathogenBadgeClass}" ${pathogenTitle ? `title="${pathogenTitle}"` : ''}>${pathogenInfo}</span></td>
                                                         <td><small>${wells}</small></td>
                                                         <td><span class="badge ${statusBadge}">${status}</span></td>
                                                     </tr>
@@ -2342,7 +2350,13 @@
                                 <div class="run-details">
                                     <p class="mb-1"><strong>File:</strong> ${session.filename || 'Unknown File'}</p>
                                     <p class="mb-1"><strong>Pathogen Info:</strong> 
-                                        <span class="badge bg-info">${(session.pathogen_breakdown || 'Unknown').split(':')[0]}</span>
+                                        ${(() => {
+                                            const raw = (session.pathogen_breakdown || '').split(':')[0].trim();
+                                            if (!raw || raw.toLowerCase() === 'unknown' || raw === '-') {
+                                                return '<span class="badge bg-secondary" title="No pathogen metadata (not applicable or missing)">N/A</span>';
+                                            }
+                                            return `<span class=\"badge bg-info\">${raw}</span>`;
+                                        })()}
                                     </p>
                                     <p class="mb-1"><strong>Created:</strong> ${session.upload_timestamp ? new Date(session.upload_timestamp).toLocaleString() : 'N/A'}</p>
                                     <small class="text-muted"><strong>Status:</strong> ${session.confirmation_status}</small>
