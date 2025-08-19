@@ -57,6 +57,36 @@ Impact:
 Next:
 - If any legitimate pathogen/channel is unmapped, add it to the fixed threshold map; do not reintroduce fallbacks.
 
+### Confirmed Runs Deletion Protections (2025-08-19) ✅ IMPLEMENTED
+
+Status: Confirmed ML/analysis runs are now protected from accidental deletion. Only admins can remove confirmed records via explicit endpoints.
+
+Changes:
+- General session deletion hardening
+    - DELETE `/sessions/<id>` now blocks confirmed sessions (uses confirmation_status or is_confirmed); returns 403 with guidance.
+    - DELETE `/delete_experiment/<pattern>` skips confirmed sessions and returns `sessions_skipped_confirmed` in the response.
+    - DELETE `/sessions/<id>/force-delete` is now admin-only (production) via `@production_admin_only`.
+- Admin-only confirmed session deletion
+    - POST `/api/sessions/delete-confirmed` (admin-only): deletes a confirmed analysis session and its wells after verification.
+- ML run deletion hardening
+    - `ml_run_manager.delete_run(run_id, include_confirmed=False)` deletes only pending/log entries by default; confirmed runs removed only if explicitly allowed.
+    - New admin endpoints in ML run API:
+        - POST `/api/ml-runs/delete-pending` (admin-only): delete pending/log entries.
+        - POST `/api/ml-runs/delete-confirmed` (admin-only): delete confirmed runs explicitly.
+
+Why:
+- Prevent data loss: confirmed runs must be immutable except by admin action.
+- Aligns with workflow integrity and audit expectations.
+
+Impact:
+- Non-admin deletion requests against confirmed sessions will fail with 403.
+- Experiment deletions won’t remove confirmed sessions; response lists skipped IDs.
+- Admins have clear, separate endpoints for confirmed deletions.
+
+Notes:
+- Server restart required to load new/updated routes.
+- Frontend may need to call the new admin endpoints when deleting confirmed items.
+
 
 ### **UNRESOLVED: CalcJ Pipeline Still Returns Null** 🚧 NOT SOLVED
 
