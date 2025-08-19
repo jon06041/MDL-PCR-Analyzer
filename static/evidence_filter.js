@@ -276,7 +276,7 @@ function getEvidenceDescription(reqCode, evidenceCount) {
 /**
  * Get relevant evidence count for requirement (used in dashboard displays)
  */
-function getRelevantEvidenceCount(reqCode, confirmedSessions, pendingSessions, encryptionData, evidenceSources = []) {
+function getRelevantEvidenceCount(reqCode, confirmedSessions, pendingSessions, encryptionData, evidenceSources = [], auditLogs = null) {
     const filtered = filterEvidenceForRequirement(reqCode, confirmedSessions, pendingSessions, encryptionData);
     const allowedEvidenceTypes = getAllowedEvidenceTypes(reqCode);
 
@@ -297,6 +297,11 @@ function getRelevantEvidenceCount(reqCode, confirmedSessions, pendingSessions, e
 
     // Count encryption evidence as individual records when available
     count += countEncryptionRecords(filtered.encryptionData);
+
+    // Count audit log entries when available and allowed
+    if (allowedEvidenceTypes.includes('audit_logs')) {
+        count += countAuditLogRecords(auditLogs);
+    }
 
     // Count pre-materialized evidence sources from the API with deduplication, after category filtering
     if (Array.isArray(evidenceSources) && evidenceSources.length) {
@@ -356,6 +361,20 @@ function countEncryptionRecords(encryptionData) {
 }
 
 /**
+ * Count audit log entries from the ML audit log API payload
+ */
+function countAuditLogRecords(auditLogData) {
+    try {
+        if (!auditLogData) return 0;
+        if (auditLogData.success === false) return 0;
+        if (Array.isArray(auditLogData)) return auditLogData.length;
+        if (Array.isArray(auditLogData.log_entries)) return auditLogData.log_entries.length;
+        // Generic fallback
+        return 0;
+    } catch { return 0; }
+}
+
+/**
  * Get evidence type badge for UI display
  */
 function getEvidenceTypeBadge(reqCode) {
@@ -381,6 +400,7 @@ window.EvidenceFilter = {
     getEvidenceDescription,
     getRelevantEvidenceCount,
     countEncryptionRecords,
+    countAuditLogRecords,
     getEvidenceTypeBadge,
     // expose helpers for dashboard-wide metrics
     computeDedupedEvidenceSourcesCount,
