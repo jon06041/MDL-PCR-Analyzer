@@ -9456,12 +9456,20 @@ function displayAnalysisHistory(sessions) {
     
     // Group sessions by experiment pattern and create multi-fluorophore sessions
     const groupedSessions = groupSessionsByExperiment(sessions);
+
+    // 🔒 UI-only soft delete: filter out any hidden session IDs from localStorage
+    const hiddenIds = new Set(
+        (() => {
+            try { return JSON.parse(localStorage.getItem('hiddenSessionIds_v1') || '[]'); } catch (e) { return []; }
+        })().map(String)
+    );
+    const visibleGroupedSessions = groupedSessions.filter(s => !hiddenIds.has(String(s.id)));
     
     // Store grouped sessions globally for reference
-    window.currentCombinedSessions = groupedSessions;
+    window.currentCombinedSessions = visibleGroupedSessions;
     
     // Sort grouped sessions by upload timestamp (newest first)
-    const sortedSessions = [...groupedSessions].sort((a, b) => 
+    const sortedSessions = [...visibleGroupedSessions].sort((a, b) => 
         new Date(b.upload_timestamp) - new Date(a.upload_timestamp)
     );
     
@@ -14736,7 +14744,11 @@ async function deleteSessionFromDB(sessionId, event) {
                 errorText = `HTTP ${response.status}: ${response.statusText}`;
             }
             console.error('❌ Database deletion failed:', errorText);
-            alert('❌ Failed to delete from database: ' + errorText);
+            if (response.status === 403) {
+                alert('⛔ This session is confirmed and protected. Only an admin can delete confirmed sessions from the database. Use the admin endpoint to remove confirmed records.');
+            } else {
+                alert('❌ Failed to delete from database: ' + errorText);
+            }
         }
     } catch (error) {
         console.error('❌ Error deleting from database:', error);
@@ -14746,6 +14758,24 @@ async function deleteSessionFromDB(sessionId, event) {
             deleteBtn.disabled = false;
             deleteBtn.textContent = 'Delete from DB';
         }
+    }
+}
+
+// --- UI-ONLY SOFT DELETE HELPERS ---
+function getHiddenSessionIds() {
+    try { return JSON.parse(localStorage.getItem('hiddenSessionIds_v1') || '[]'); } catch (e) { return []; }
+}
+
+function setHiddenSessionIds(ids) {
+    try { localStorage.setItem('hiddenSessionIds_v1', JSON.stringify(ids)); } catch (e) {}
+}
+
+function softHideSessionId(id) {
+    const ids = getHiddenSessionIds();
+    const idStr = String(id);
+    if (!ids.includes(idStr)) {
+        ids.push(idStr);
+        setHiddenSessionIds(ids);
     }
 }
 
@@ -14761,9 +14791,8 @@ async function deleteSessionGroup(sessionId, event) {
     
     // If not found in combined sessions, it might be an individual session ID (numeric)
     if (!session && !isNaN(sessionId)) {
-        // console.log('Processing as individual database session ID:', sessionId);
-        // Handle direct database session ID
-        if (!confirm('Are you sure you want to delete this analysis session?')) {
+        // Handle direct database session ID (UI-only removal)
+        if (!confirm('Remove this session from the history list? The data will remain in the database.')) {
             return;
         }
         
@@ -14771,32 +14800,12 @@ async function deleteSessionGroup(sessionId, event) {
         if (deleteBtn) deleteBtn.disabled = true;
         
         try {
-            // console.log('Making DELETE request to /sessions/' + sessionId);
-            const response = await fetch(`/sessions/${sessionId}`, {
-                method: 'DELETE'
-            });
-            
-            // console.log('Delete response status:', response.status);
-            
-            if (response.ok) {
-                const result = await response.json().catch(() => ({ message: 'Session deleted' }));
-                // console.log('Delete successful:', result);
-                alert('Session deleted successfully');
-                loadAnalysisHistory();
-            } else {
-                let errorText = '';
-                try {
-                    const errorData = await response.json();
-                    errorText = errorData.error || 'Unknown error';
-                } catch (e) {
-                    errorText = `HTTP ${response.status}: ${response.statusText}`;
-                }
-                // console.error('Delete failed:', errorText);
-                alert('Failed to delete session: ' + errorText);
-            }
+            // UI-only soft hide
+            softHideSessionId(sessionId);
+            alert('Removed from history. The session remains in the database.');
+            loadAnalysisHistoryOnly();
         } catch (error) {
-            // console.error('Error deleting session:', error);
-            alert('Failed to delete session: ' + error.message);
+            alert('Failed to update history: ' + error.message);
         } finally {
             if (deleteBtn) deleteBtn.disabled = false;
         }
@@ -14811,9 +14820,10 @@ async function deleteSessionGroup(sessionId, event) {
     
     let confirmMessage;
     if (session.is_combined) {
-        confirmMessage = `Are you sure you want to delete this multi-fluorophore analysis? This will delete ${session.session_ids.length} individual sessions.`;
+        confirmMessage = `Remove this multi-fluorophore analysis from the history list? (${session.session_ids.length} sessions)
+\nNote: This is a UI-only removal. Data remains in the database.`;
     } else {
-        confirmMessage = 'Are you sure you want to delete this analysis session?';
+        confirmMessage = 'Remove this analysis session from the history list? Data remains in the database.';
     }
     
     if (!confirm(confirmMessage)) {
@@ -14822,34 +14832,17 @@ async function deleteSessionGroup(sessionId, event) {
     
     try {
         if (session.is_combined) {
-            // Delete all individual sessions that make up the combined session
-            const deletePromises = session.session_ids.map(id => 
-                fetch(`/sessions/${id}`, { method: 'DELETE' })
-            );
-            
-            const responses = await Promise.all(deletePromises);
-            const allSuccessful = responses.every(response => response.ok);
-            
-            if (allSuccessful) {
-                loadAnalysisHistory();
-            } else {
-                alert('Some sessions could not be deleted. Please try again.');
-            }
+            // UI-only hide combined and its members for this view
+            softHideSessionId(session.id);
+            session.session_ids.forEach(id => softHideSessionId(id));
+            loadAnalysisHistoryOnly();
         } else {
-            // Delete single session
-            const response = await fetch(`/sessions/${sessionId}`, {
-                method: 'DELETE'
-            });
-            
-            if (response.ok) {
-                loadAnalysisHistory();
-            } else {
-                alert('Failed to delete session. Please try again.');
-            }
+            // UI-only hide single
+            softHideSessionId(sessionId);
+            loadAnalysisHistoryOnly();
         }
     } catch (error) {
-        // console.error('Error deleting session:', error);
-        alert('Failed to delete session. Please try again.');
+        alert('Failed to update history. Please try again.');
     }
 }
 

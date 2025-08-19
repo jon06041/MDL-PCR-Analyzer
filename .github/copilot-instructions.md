@@ -57,6 +57,30 @@ Impact:
 Next:
 - If any legitimate pathogen/channel is unmapped, add it to the fixed threshold map; do not reintroduce fallbacks.
 
+### Frontend History Deletion Behavior (2025-08-19) ✅ IMPLEMENTED
+
+Status: The History “Delete” button now performs a UI-only removal (soft delete). Confirmed database records remain intact until explicitly removed by admin via dedicated endpoints. The History section stays visible and simply refreshes.
+
+Changes:
+- UI-only deletion
+    - `deleteSessionGroup(sessionId, event)` updated to soft-hide sessions from the History list without touching the DB.
+    - Hidden IDs persisted in `localStorage` under key `hiddenSessionIds_v1`.
+    - `displayAnalysisHistory()` filters out hidden IDs on render.
+    - Combined sessions: hides the combined ID and its member session IDs for the current view.
+- DB deletion UX safeguard
+    - `deleteSessionFromDB(sessionId, event)` now shows a clear protection message on 403 for confirmed sessions: admin-only removal.
+- UX expectations
+    - History section is not removed or hidden when deleting; it remains visible and re-renders.
+    - “Delete” cleans up the UI; “Delete from DB” is reserved for actual DB operations (confirmed records require admin endpoints).
+
+Why:
+- Aligns with data integrity policy: confirmed ML/analysis runs are protected by default; routine UI cleanup must not remove confirmed DB records.
+- Matches user workflow: declutter History without risking data loss.
+
+Developer notes:
+- To restore a hidden session in dev, clear `hiddenSessionIds_v1` from localStorage (or implement a restore control later).
+- No server restart required; refresh the page to load updated static JS.
+
 ### Confirmed Runs Deletion Protections (2025-08-19) ✅ IMPLEMENTED
 
 Status: Confirmed ML/analysis runs are now protected from accidental deletion. Only admins can remove confirmed records via explicit endpoints.
