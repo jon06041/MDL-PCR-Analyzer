@@ -9510,6 +9510,9 @@ function displayAnalysisHistory(sessions) {
     
     // Store grouped sessions globally for reference
     window.currentCombinedSessions = visibleGroupedSessions;
+    // Back-compat: also expose under analysisHistory so other callers can find them
+    // (Some legacy code still reads window.analysisHistory when resolving combined sessions)
+    window.analysisHistory = visibleGroupedSessions;
     
     // Sort grouped sessions by upload timestamp (newest first)
     const sortedSessions = [...visibleGroupedSessions].sort((a, b) => 
@@ -14620,8 +14623,27 @@ async function deleteSessionFromDB(sessionId, event) {
         console.log('🔍 Combined session detected for deletion:', sessionId);
         
         // Find the combined session in the history to get the real session IDs
-        const historyData = window.analysisHistory || [];
-        const combinedSession = historyData.find(session => session.id === sessionId);
+        // Prefer the grouped cache built by displayAnalysisHistory
+        const grouped = window.currentCombinedSessions || [];
+        let combinedSession = grouped.find(session => session.id === sessionId);
+        
+        // Fallback to legacy cache if not found
+        if (!combinedSession) {
+            const historyData = window.analysisHistory || [];
+            combinedSession = historyData.find(session => session.id === sessionId);
+        }
+        
+        // Final fallback: rebuild history-only view once to repopulate caches
+        if (!combinedSession && typeof loadAnalysisHistoryOnly === 'function') {
+            try {
+                console.log('♻️ Rebuilding history cache to resolve combined session');
+                await loadAnalysisHistoryOnly();
+                const rebuilt = (window.currentCombinedSessions || []).find(s => s.id === sessionId);
+                if (rebuilt) combinedSession = rebuilt;
+            } catch (e) {
+                console.warn('⚠️ Failed to rebuild history cache:', e);
+            }
+        }
         
         if (!combinedSession || !combinedSession.session_ids) {
             alert('❌ Could not find session IDs for combined session. Please try deleting individual sessions instead.');
