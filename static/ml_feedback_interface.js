@@ -5302,12 +5302,29 @@ class MLFeedbackInterface {
                         <small style="display:block;margin-top:4px;">Analyze edge cases to assist training</small>
                     </div>
                 ` : '';
+                // If stats include pathogen_models, try to find per-pathogen sample count for accurate messaging
+                let displaySamples = samples;
+                if (options.stats && options.stats.pathogen_models && pathogen) {
+                    const pm = options.stats.pathogen_models.find(m => m.pathogen === pathogen || m.pathogen_code === pathogen);
+                    if (pm && typeof pm.training_samples === 'number') {
+                        displaySamples = pm.training_samples;
+                    }
+                }
+                // Prevent odd displays like 21/20 by clamping to a minimum of 0 and showing max target separately
+                displaySamples = Math.max(0, displaySamples);
+                
+                // Choose copy based on training sufficiency
+                const hasMinTraining = displaySamples >= 20;
+                const trainingLine = hasMinTraining
+                    ? `📚 ML model trained for this pathogen (${displaySamples} samples)`
+                    : `📚 ML model needs training for this pathogen (${displaySamples}/20 samples)`;
+
                 notificationContent = `
                     <div class="ml-notification-content">
                         <div class="ml-notification-icon">🧬</div>
                         <div class="ml-notification-text">
                             <strong>New Pathogen Detected: ${pathogen}</strong><br>
-                            📚 ML model needs training for this pathogen (${samples}/20 total samples)<br>
+                            ${trainingLine}<br>
                             <small>💡 Use the ML feedback interface to classify curves and train the model</small>
                             ${newPathogenImprovement}
                         </div>

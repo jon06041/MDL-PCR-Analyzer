@@ -544,7 +544,8 @@
         // Check if we came from the queue page
         const urlParams = new URLSearchParams(window.location.search);
         if (urlParams.get('fromQueue') === 'true') {
-            const queueData = sessionStorage.getItem('queueAnalysisData') || localStorage.getItem('pendingAnalysis');
+            // Read only from sessionStorage to avoid large localStorage payloads
+            const queueData = sessionStorage.getItem('queueAnalysisData');
             if (queueData) {
                 try {
                     const data = JSON.parse(queueData);

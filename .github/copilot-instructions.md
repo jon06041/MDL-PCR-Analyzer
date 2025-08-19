@@ -1772,3 +1772,24 @@ Purpose: Summarize how our CQJ/CalcJ quant differs from vendor tools and how to 
 - Accuracy guidance
     - Per-run accuracy: ours is robust when valid controls exist (captures run drift).
     - Dynamic range: vendor multi-point curves may yield a more stable slope if our run has only two control points. Best practice is hybrid — fixed slope per pathogen from multi-run calibration, intercept re-centered per run.
+
+    ## Queue Folder Persistence (2025-08-19)
+
+    Goal: Avoid re-selecting the queue folder on every visit by persisting directory access where the browser allows it.
+
+    Behavior:
+    - If the browser supports File System Access API (Chrome/Edge) and structured cloning of handles, store the selected `FileSystemDirectoryHandle` in IndexedDB and attempt auto-restore on page load.
+    - On load: query permission (`queryPermission({mode:'read'})`); if needed, request permission. If granted, restore the monitored folder and begin scanning without user action.
+    - If the handle can’t be restored (revoked permission, different machine/profile, unsupported browser), show the remembered name/path from localStorage and prompt a single click on “Browse Folder”.
+
+    Implementation notes:
+    - IndexedDB: DB `queueStorage`, store `handles`, key `monitoredDir` → value: directory handle.
+    - Call `navigator.storage.persist()` best-effort to reduce eviction risk.
+    - WebKit `webkitdirectory` fallback cannot be persisted; the user must reselect (browser security).
+
+    UX:
+    - Keep a lightweight record of the folder name/path in localStorage for display.
+    - Provide a subtle inline prompt to reselect when auto-restore isn’t possible.
+
+    Security constraints:
+    - Browsers do not allow arbitrary disk path access without user gesture. Handle persistence only works where FS Access API + permissions are supported and previously granted.

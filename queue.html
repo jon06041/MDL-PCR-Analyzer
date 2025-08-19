@@ -437,6 +437,7 @@
                 this.currentPage = 1;
                 this.itemsPerPage = 20;
                 this.isRefreshing = false;
+                this.idb = null; // IndexedDB connection for persisting FS handles
                 
                 this.initialize();
             }
@@ -446,6 +447,8 @@
                 
                 // Load saved folder from localStorage
                 this.loadSavedFolder();
+                // Try to auto-restore folder handle from IndexedDB (Chrome/Edge)
+                this.tryRestoreHandleFromIndexedDB().catch(e => console.warn('Auto-restore handle failed:', e));
                 
                 // Start auto-refresh
                 this.startAutoRefresh();
@@ -589,6 +592,8 @@
                         }
                         
                         await this.setMonitoredFolderFromHandle(dirHandle, fullPath);
+                        // Persist handle in IndexedDB (best effort)
+                        await this.saveHandleToIndexedDB(dirHandle).catch(e => console.warn('Saving handle failed:', e));
                         this.refreshQueue();
                         return;
                     }
@@ -1009,6 +1014,79 @@
                 }
                 console.log('Monitored folder set via handle:', dirHandle.name, 'Full path:', fullPath);
             }
+
+            // ---------- IndexedDB helpers for persisting directory handles ----------
+            async openIndexedDB() {
+                if (this.idb) return this.idb;
+                return new Promise((resolve, reject) => {
+                    const request = window.indexedDB ? indexedDB.open('queueStorage', 1) : null;
+                    if (!request) return reject(new Error('IndexedDB not supported'));
+                    request.onupgradeneeded = (event) => {
+                        const db = event.target.result;
+                        if (!db.objectStoreNames.contains('handles')) {
+                            db.createObjectStore('handles');
+                        }
+                    };
+                    request.onsuccess = (event) => {
+                        this.idb = event.target.result;
+                        resolve(this.idb);
+                    };
+                    request.onerror = () => reject(request.error || new Error('IndexedDB open failed'));
+                });
+            }
+
+            async saveHandleToIndexedDB(handle) {
+                try {
+                    if (!('showDirectoryPicker' in window) || !window.indexedDB) return; // only in FS API browsers
+                    const db = await this.openIndexedDB();
+                    const tx = db.transaction('handles', 'readwrite');
+                    const store = tx.objectStore('handles');
+                    store.put(handle, 'monitoredDir');
+                    return new Promise((resolve, reject) => {
+                        tx.oncomplete = () => resolve(true);
+                        tx.onerror = () => reject(tx.error || new Error('IndexedDB tx failed'));
+                    });
+                } catch (e) {
+                    console.warn('saveHandleToIndexedDB error:', e);
+                }
+            }
+
+            async tryRestoreHandleFromIndexedDB() {
+                try {
+                    if (!('showDirectoryPicker' in window) || !window.indexedDB) return false;
+                    // Request persistent storage (best effort)
+                    try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch(_) {}
+                    const db = await this.openIndexedDB();
+                    const tx = db.transaction('handles', 'readonly');
+                    const store = tx.objectStore('handles');
+                    const handle = await new Promise((resolve, reject) => {
+                        const req = store.get('monitoredDir');
+                        req.onsuccess = () => resolve(req.result || null);
+                        req.onerror = () => reject(req.error || new Error('IndexedDB get failed'));
+                    });
+                    if (!handle) return false;
+                    // Confirm permissions
+                    let state = 'prompt';
+                    try {
+                        if (handle.queryPermission) state = await handle.queryPermission({ mode: 'read' });
+                    } catch(_) {}
+                    if (state !== 'granted') {
+                        try {
+                            const perm = await handle.requestPermission ? await handle.requestPermission({ mode: 'read' }) : 'denied';
+                            if (perm !== 'granted') return false;
+                        } catch(_) { return false; }
+                    }
+                    // Set monitored folder from restored handle
+                    await this.setMonitoredFolderFromHandle(handle);
+                    // Trigger initial scan
+                    await this.refreshQueue();
+                    this.showNotification('Auto-restored monitored folder from previous session', 'success');
+                    return true;
+                } catch (e) {
+                    console.warn('tryRestoreHandleFromIndexedDB error:', e);
+                    return false;
+                }
+            }
             
             showFolderInputFallback() {
                 const input = document.createElement('input');
@@ -1239,6 +1317,17 @@
                         
                         // Convert the filtered objects back to Map
                         this.fileQueue = new Map(Object.entries(filteredQueueData));
+
+                        // Recompute channels if missing/empty using saved amplification file names
+                        for (const [id, entry] of this.fileQueue) {
+                            if (!entry.channels || !Array.isArray(entry.channels) || entry.channels.length === 0) {
+                                const ampFiles = Array.isArray(entry.amplificationFiles) ? entry.amplificationFiles : [];
+                                const channels = this.detectChannels(ampFiles);
+                                entry.channels = channels && channels.length ? channels : ['Unknown'];
+                                this.fileQueue.set(id, entry);
+                            }
+                        }
+
                         console.log(`Restored ${this.fileQueue.size} experiments from saved queue (${excludedCount} excluded)`);
                         this.updateQueueDisplay();
                         this.updateStatistics();
@@ -1475,6 +1564,8 @@
                     /plate_view/i,
                     /plateview/i,
                     /_plate_view/i,       // Enhanced: catch files like "..._Plate_View"
+                    /plate_layout/i,      // Additional: catch plate layout files
+                    /plate_map/i,         // Additional: catch plate map files
                     /standard_curve/i,
                     /standardcurve/i,
                     /_standard_curve/i,   // Enhanced: catch files like "..._Standard_Curve"
@@ -1495,6 +1586,13 @@
 
                 for (const file of files) {
                     const fileName = file.name || file.webkitRelativePath?.split('/').pop() || file.relativePath || '';
+                    // Normalize filename to handle extra/irregular spaces
+                    const normalizedName = fileName
+                        .replace(/\u00A0/g, ' ')      // non-breaking space → space
+                        .replace(/\s+/g, ' ')          // collapse multiple spaces
+                        .replace(/\s*_\s*/g, '_')     // remove spaces around underscores
+                        .replace(/\s*-\s*/g, ' - ')   // normalize hyphen spacing
+                        .trim();
                     
                     // Skip non-CSV files
                     if (!fileName.toLowerCase().endsWith('.csv')) {
@@ -1504,9 +1602,19 @@
                     console.log(`📁 Processing CSV file: ${fileName}`);
                     
                     // FIRST: Skip files that are explicitly NOT amplification files (before any other processing)
-                    const matchedPatterns = excludedPatterns.filter(pattern => pattern.test(fileName));
+                    const matchedPatterns = excludedPatterns.filter(pattern => pattern.test(fileName) || pattern.test(normalizedName));
                     if (matchedPatterns.length > 0) {
                         console.log(`🚫 EXCLUDED FILE: ${fileName} - Matched patterns:`, matchedPatterns.map(p => p.toString()));
+                        otherCsvCount++;
+                        continue;
+                    }
+
+                    // HARD FILTER: Only allow the two valid CFX export types
+                    // Allow channel token with spaces (e.g., "Texas Red") after Results_
+                    const isValidAmp = /quantification\s+amplification\s+results[\s_-]*[A-Za-z0-9]+(?:\s+[A-Za-z0-9]+)*\.csv$/i.test(normalizedName);
+                    const isValidSummary = /quantification\s+summary[\s_-]*0\.csv$/i.test(normalizedName);
+                    if (!(isValidAmp || isValidSummary)) {
+                        // Not a base run file we accept
                         otherCsvCount++;
                         continue;
                     }
@@ -1528,49 +1636,49 @@
                         });
                     }
                     
-                    // Check if it's a summary file (multiple patterns)
-                    let summaryMatch = fileName.match(summaryPattern);
+                    // Check if it's a summary file (strict)
+                    let summaryMatch = normalizedName.match(summaryPattern);
                     if (!summaryMatch) {
-                        summaryMatch = fileName.match(alternativeSummaryPattern);
-                    }
-                    // Also recognize classic CFX export "Results.csv" as a summary file
-                    const resultsCsvPattern = /^(.+?)[-_|\s]*(\d+)[-_|\s]*([A-Z0-9]+)\s*-\s*Results\.csv$/i;
-                    if (!summaryMatch && /Results\.csv$/i.test(fileName) && !/Amplification/i.test(fileName)) {
-                        // Try to extract base parts from the results filename
-                        const resultsMatch = fileName.match(resultsCsvPattern);
-                        if (resultsMatch && resultsMatch.length >= 4) {
-                            summaryMatch = resultsMatch;
-                        }
+                        summaryMatch = normalizedName.match(alternativeSummaryPattern);
                     }
 
-                    if (summaryMatch || fileName.toLowerCase().includes('summary') || (/Results\.csv$/i.test(fileName) && !/Amplification/i.test(fileName))) {
+                    if (summaryMatch || normalizedName.toLowerCase().includes('summary')) {
                         // Enforce strict base pattern for summary host experiment id
                         summaryCount++;
                         console.log(`Identified as summary file: ${fileName}`);
                         
                         // Try to extract experiment ID, fallback to filename-based ID
                         let experimentId;
-                        if (summaryMatch && summaryMatch.length >= 4) {
+                        // Strong preference: base before hyphen (handles double spaces and variants)
+                        const leftOfHyphen = normalizedName.split(' - ')[0].trim();
+                        if (strictBaseRegex.test(leftOfHyphen)) {
+                            experimentId = leftOfHyphen;
+                        }
+                        if (!experimentId && summaryMatch && summaryMatch.length >= 4) {
                             const [, testName, runId, instrument] = summaryMatch;
                             const candidateId = `${testName.trim()}_${runId}_${instrument}`;
                             if (strictBaseRegex.test(candidateId)) {
                                 experimentId = candidateId;
                             } else {
                                 console.log(`🚫 Summary base ID failed strict regex: ${candidateId}`);
-                                otherCsvCount++;
-                                continue;
+                                // continue to fallback below
                             }
-                        } else {
+                        } else if (!experimentId) {
                             // Fallback: create ID from filename parts before common keywords
                             const basePattern = /^(.+?)(?:[-_\s]*(?:summary|quantification|amplification|results?))/i;
-                            const baseMatch = fileName.match(basePattern);
+                            const baseMatch = normalizedName.match(basePattern);
                             const candidateId = baseMatch ? baseMatch[1].trim().replace(/\s+/g, '_') : fileName.replace(/\.csv$/i, '').replace(/summary/i, '').trim();
                             if (strictBaseRegex.test(candidateId)) {
                                 experimentId = candidateId;
                             } else {
                                 console.log(`🚫 Summary fallback base ID failed strict regex: ${candidateId}`);
-                                otherCsvCount++;
-                                continue;
+                                // Final attempt: left side of hyphen
+                                if (strictBaseRegex.test(leftOfHyphen)) {
+                                    experimentId = leftOfHyphen;
+                                } else {
+                                    otherCsvCount++;
+                                    continue;
+                                }
                             }
                         }
                         
@@ -1584,10 +1692,16 @@
                     }
                     
                     // Check if it's an amplification file (try multiple patterns)
-                    let ampMatch = fileName.match(amplificationPattern);
+                    let ampMatch = normalizedName.match(amplificationPattern);
                     let experimentId;
                     
-                    if (ampMatch && ampMatch.length >= 4) {
+                    // Strong preference: base before hyphen for amplification as well
+                    const leftOfHyphenAmp = normalizedName.split(' - ')[0].trim();
+                    if (strictBaseRegex.test(leftOfHyphenAmp)) {
+                        experimentId = leftOfHyphenAmp;
+                    }
+
+                    if (!experimentId && ampMatch && ampMatch.length >= 4) {
                         amplificationCount++;
                         const [, testName, runId, instrument] = ampMatch;
                         const candidateId = `${testName.trim()}_${runId}_${instrument}`;
@@ -1599,19 +1713,24 @@
                             continue;
                         }
                         console.log(`✅ Identified as amplification file (pattern match): ${fileName} -> ${experimentId}`);
-                    } else if (fileName.match(broadAmplificationPattern)) {
+                    } else if (!experimentId && normalizedName.match(broadAmplificationPattern)) {
                         // Files reaching here have already passed exclusion check
                         amplificationCount++;
                         // For broader pattern, create experiment ID from filename
                         const basePattern = /^(.+?)(?:[-_\s]*(?:quantification|amplification|results?))/i;
-                        const baseMatch = fileName.match(basePattern);
-                        const candidateId = baseMatch ? baseMatch[1].trim().replace(/\s+/g, '_') : fileName.replace(/\.csv$/i, '').trim();
+                        const baseMatch = normalizedName.match(basePattern);
+                        const candidateId = baseMatch ? baseMatch[1].trim().replace(/\s+/g, '_') : normalizedName.replace(/\.csv$/i, '').trim();
                         if (strictBaseRegex.test(candidateId)) {
                             experimentId = candidateId;
                         } else {
                             console.log(`🚫 Broad amplification fallback base ID failed strict regex: ${candidateId}`);
-                            otherCsvCount++;
-                            continue;
+                            // Final attempt: use left side of hyphen if valid
+                            if (strictBaseRegex.test(leftOfHyphenAmp)) {
+                                experimentId = leftOfHyphenAmp;
+                            } else {
+                                otherCsvCount++;
+                                continue;
+                            }
                         }
                         console.log(`📋 Identified as amplification file (broad pattern): ${fileName} -> ${experimentId}`);
                     } else {
@@ -1814,25 +1933,62 @@
             
             detectChannels(files) {
                 const channels = [];
-                const patterns = {
-                    'Cy5': /cy5|red/i,
-                    'FAM': /fam|green/i,
-                    'HEX': /hex|yellow/i,
-                    'TexasRed': /texas.*red|rox/i
+                const add = (label) => { if (!channels.includes(label)) channels.push(label); };
+
+                // Normalize to a token set for robust detection across naming variants
+                const toTokens = (s) => {
+                    const base = (s || '')
+                        .replace(/\u00A0/g, ' ')   // NBSP → space
+                        .replace(/\.[^.]*$/,'')    // drop extension
+                        .toLowerCase()
+                        .replace(/[^a-z0-9]+/g, ' ') // non-alnum → space
+                        .trim();
+                    const tokens = base.split(/\s+/).filter(Boolean);
+                    const tokenSet = new Set(tokens);
+                    return { base, tokens, tokenSet };
                 };
-                
+
                 for (const file of files) {
-                    for (const [name, pattern] of Object.entries(patterns)) {
-                        if (pattern.test(file.name) && !channels.includes(name)) {
-                            channels.push(name);
-                        }
-                    }
+                    const raw = file && file.name ? file.name : '';
+                    const { base, tokens, tokenSet } = toTokens(raw);
+
+                    // Build combined string without spaces for contiguous patterns
+                    const compact = base.replace(/\s+/g, '');
+
+                    // FAM
+                    if (tokenSet.has('fam') || tokenSet.has('green')) add('FAM');
+                    // HEX
+                    if (tokenSet.has('hex') || tokenSet.has('yellow')) add('HEX');
+                    // Texas Red (handle 'texas red', 'texasred', and 'rox' synonym)
+                    if ((tokenSet.has('texas') && tokenSet.has('red')) || compact.includes('texasred') || tokenSet.has('rox')) add('Texas Red');
+                    // Cy5
+                    if (tokenSet.has('cy5')) add('Cy5');
                 }
-                
+
                 return channels.length > 0 ? channels : ['Unknown'];
             }
             
             updateQueueDisplay() {
+                // Ensure channels and status are up-to-date before filtering/rendering
+                for (const [id, entry] of this.fileQueue) {
+                    // Recompute channels if missing/empty or contains only 'Unknown'
+                    const needChannels = !entry.channels || !Array.isArray(entry.channels) || entry.channels.length === 0 || (entry.channels.length === 1 && entry.channels[0] === 'Unknown');
+                    if (needChannels) {
+                        const ampFiles = Array.isArray(entry.amplificationFiles) ? entry.amplificationFiles : [];
+                        const channels = this.detectChannels(ampFiles);
+                        entry.channels = channels && channels.length ? channels : ['Unknown'];
+                        this.fileQueue.set(id, entry);
+                    }
+
+                    // Auto-correct status: if we have at least one amplification and a summary file, mark as ready unless already analyzed/queued
+                    const hasAmp = Array.isArray(entry.amplificationFiles) && entry.amplificationFiles.length > 0;
+                    const hasSummary = !!entry.summaryFile;
+                    if (hasAmp && hasSummary && !['analyzed', 'queued-for-reanalysis'].includes(entry.status)) {
+                        entry.status = 'ready';
+                        this.fileQueue.set(id, entry);
+                    }
+                }
+
                 this.filteredQueue = new Map(this.fileQueue);
                 this.filterQueue();
             }
@@ -1912,7 +2068,8 @@
             
             createQueueRowHTML(entry) {
                 const timeStr = new Date(entry.timestamp).toLocaleString();
-                const channelsBadges = entry.channels.map(f => 
+                const channelList = (entry.channels && entry.channels.length) ? entry.channels : ['Unknown'];
+                const channelsBadges = channelList.map(f => 
                     `<span class="badge badge-primary mr-1">${f}</span>`
                 ).join('');
                 
@@ -2017,19 +2174,40 @@
                     // Convert Map to plain object for JSON serialization
                     const queueObj = {};
                     for (const [key, value] of this.fileQueue) {
-                        // Data is already in the correct format with content included
+                        // Persist ONLY lightweight metadata to localStorage to avoid quota issues
+                        // Do NOT store large file contents in localStorage
+                        const ampMeta = Array.isArray(value.amplificationFiles)
+                            ? value.amplificationFiles.map(f => ({
+                                name: f.name,
+                                size: f.size,
+                                lastModified: f.lastModified,
+                                type: f.type
+                              }))
+                            : [];
+                        const summaryMeta = value.summaryFile ? {
+                            name: value.summaryFile.name,
+                            size: value.summaryFile.size,
+                            lastModified: value.summaryFile.lastModified,
+                            type: value.summaryFile.type
+                        } : null;
+
                         queueObj[key] = {
                             experimentId: value.experimentId,
-                            amplificationFiles: value.amplificationFiles, // Already has content
-                            summaryFile: value.summaryFile, // Already has content
+                            amplificationFiles: ampMeta, // metadata only
+                            summaryFile: summaryMeta,     // metadata only
                             timestamp: value.timestamp,
                             channels: value.channels,
                             status: value.status
                         };
                     }
                     
-                    localStorage.setItem('fileQueue', JSON.stringify(queueObj));
-                    console.log(`Saved ${Object.keys(queueObj).length} experiments to localStorage with file content`);
+                    try {
+                        localStorage.setItem('fileQueue', JSON.stringify(queueObj));
+                        console.log(`Saved ${Object.keys(queueObj).length} experiments to localStorage (metadata only)`);
+                    } catch (storageErr) {
+                        console.warn('LocalStorage quota reached while saving queue metadata:', storageErr);
+                        this.showNotification('Storage is full. Only minimal queue metadata could be saved.', 'warning');
+                    }
                 } catch (error) {
                     console.warn('Could not save queue data:', error);
                 }
@@ -2057,8 +2235,21 @@
                     
                     const hasSummaryContent = entry.summaryFile && entry.summaryFile.content;
                     
-                    if (!hasAmplificationContent) {
-                        throw new Error('Amplification file content not available. Please re-scan the folder.');
+                    // If content is missing (e.g., after a restore), attempt to reload it from the original File references
+                    if (!hasAmplificationContent || (!hasSummaryContent && entry.summaryFile)) {
+                        console.warn('Missing file content; attempting to reload from File objects...');
+                        const reloaded = await this.reloadEntryFileContents(entry);
+                        if (!reloaded) {
+                            // Prompt to reselect folder, then rescan and retry
+                            this.showNotification('We need to re-open the folder to load file contents. Please reselect the folder.', 'warning');
+                            await this.browseFolder();
+                            await this.refreshQueue();
+                            // Try to re-fetch the entry
+                            const refreshed = this.fileQueue.get(experimentId);
+                            if (!refreshed || !refreshed.amplificationFiles || !refreshed.amplificationFiles[0] || !refreshed.amplificationFiles[0].content) {
+                                throw new Error('Amplification file content not available. Please re-scan the folder.');
+                            }
+                        }
                     }
                     
                     console.log(`Analysis data ready for ${experimentId}:`, {
@@ -2078,9 +2269,14 @@
                         timestamp: entry.timestamp
                     };
                     
-                    // Store in both sessionStorage and localStorage for reliability
-                    sessionStorage.setItem('queueAnalysisData', JSON.stringify(analysisData));
-                    localStorage.setItem('pendingAnalysis', JSON.stringify(analysisData));
+                    // Store analysis payload ONLY in sessionStorage to avoid localStorage quota issues
+                    try {
+                        sessionStorage.setItem('queueAnalysisData', JSON.stringify(analysisData));
+                    } catch (ssErr) {
+                        console.error('Failed to write analysis data to sessionStorage:', ssErr);
+                        this.showNotification('Could not stage analysis data (session storage full). Please close other tabs or reduce selection.', 'error');
+                        throw ssErr;
+                    }
                     
                     // Mark this experiment as analyzed
                     entry.status = 'analyzed';
@@ -2104,6 +2300,41 @@
                         button.innerHTML = '<i class="fas fa-play"></i> Analyze';
                     }
                 }
+            }
+
+            // Attempt to reload file contents from File handles preserved in memory (when available)
+            async reloadEntryFileContents(entry) {
+                let success = false;
+                const loadFile = async (f) => {
+                    if (!f || f.content) return !!f && !!f.content;
+                    try {
+                        // If f is a plain metadata object (after restore), we can't read content here
+                        // because the original File object is not persisted. Return false in that case.
+                        if (!(f instanceof File)) {
+                            return false;
+                        }
+                        const content = await this.readFileContent(f);
+                        f.content = content;
+                        return true;
+                    } catch (e) {
+                        console.warn('Failed to reload file content:', f && f.name, e);
+                        return false;
+                    }
+                };
+
+                // Try amplification files
+                if (Array.isArray(entry.amplificationFiles)) {
+                    for (let i = 0; i < entry.amplificationFiles.length; i++) {
+                        const ok = await loadFile(entry.amplificationFiles[i]);
+                        success = success || ok;
+                    }
+                }
+                // Try summary
+                if (entry.summaryFile) {
+                    const ok = await loadFile(entry.summaryFile);
+                    success = success || ok;
+                }
+                return success;
             }
             
             async readFileContent(file) {
