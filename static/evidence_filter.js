@@ -8,7 +8,8 @@
 const REQUIREMENT_EVIDENCE_MAPPING = {
     // Software Validation Requirements (use run files/validation tests)
     'FDA_CFR_21_11_10_A': ['run_files', 'validation_tests'],
-    'FDA_CFR_21_11_10_B': ['run_files', 'validation_tests'], 
+    // 11.10(b): Data integrity & file validity (treat as encryption + audit controls)
+    'FDA_CFR_21_11_10_B': ['encryption_evidence', 'audit_logs'], 
     'ISO_13485_4_1_6': ['run_files', 'software_validation'],
     'ISO_14971_4_4': ['run_files', 'risk_management'],
     
@@ -26,6 +27,18 @@ const REQUIREMENT_EVIDENCE_MAPPING = {
     // Access Control (use encryption + audit logs)
     'HIPAA_164_312_A_1': ['encryption_evidence', 'audit_logs'],
     'ISO_27001_A_9_1_1': ['encryption_evidence', 'audit_logs'],
+    
+    // 21 CFR Part 11 (aliases without FDA_ prefix)
+    // A: System validation evidence (runs/validation tests)
+    'CFR_11_10_A': ['run_files', 'validation_tests'],
+    // B: Data integrity & file validity (encryption + audit logs)
+    'CFR_11_10_B': ['encryption_evidence', 'audit_logs'],
+    // C: Record protection (documentation + some run evidence)
+    'CFR_11_10_C': ['documentation', 'run_files'],
+    // D: Audit trail (audit logs)
+    'CFR_11_10_D': ['audit_logs'],
+    // E: Controls for system access/security (encryption)
+    'CFR_11_10_E': ['encryption_evidence'],
     
     // Default for unmapped requirements
     'default': ['run_files']
@@ -106,7 +119,8 @@ function getRequirementType(reqCode) {
  */
 function isValidationRequirement(reqCode) {
     const validationRequirements = [
-        'FDA_CFR_21_11_10_A', 'FDA_CFR_21_11_10_B', 
+    // 11.10(a) validation; (b) is handled under encryption/access controls
+    'FDA_CFR_21_11_10_A', 'CFR_11_10_A',
         'ISO_13485_4_1_6', 'ISO_14971_4_4'
     ];
     return validationRequirements.includes(reqCode);
@@ -117,8 +131,10 @@ function isValidationRequirement(reqCode) {
  */
 function isEncryptionRequirement(reqCode) {
     const encryptionRequirements = [
-        'FDA_CFR_21_11_10_E', 'FDA_CFR_21_11_50',
-        'HIPAA_164_312_A_2_IV', 'ISO_27001_A_10_1_1', 'ISO_27001_A_10_1_2'
+    'FDA_CFR_21_11_10_B', 'FDA_CFR_21_11_10_E', 'FDA_CFR_21_11_50',
+    'HIPAA_164_312_A_2_IV', 'ISO_27001_A_10_1_1', 'ISO_27001_A_10_1_2',
+    // CFR 11 aliases
+    'CFR_11_10_B', 'CFR_11_10_E'
     ];
     return encryptionRequirements.includes(reqCode);
 }
@@ -158,19 +174,67 @@ function getEvidenceDescription(reqCode, evidenceCount) {
 /**
  * Get relevant evidence count for requirement (used in dashboard displays)
  */
-function getRelevantEvidenceCount(reqCode, confirmedSessions, pendingSessions, encryptionData) {
+function getRelevantEvidenceCount(reqCode, confirmedSessions, pendingSessions, encryptionData, evidenceSources = []) {
     const filtered = filterEvidenceForRequirement(reqCode, confirmedSessions, pendingSessions, encryptionData);
-    
+
     let count = 0;
+    // Session-based evidence
     count += filtered.confirmedSessions.length;
     count += filtered.pendingSessions.length;
-    
-    // Encryption evidence counts as 1 comprehensive item if present and relevant
-    if (filtered.encryptionData && filtered.encryptionData.success) {
-        count += 1;
+
+    // Count encryption evidence as individual records when available
+    count += countEncryptionRecords(filtered.encryptionData);
+
+    // Count pre-materialized evidence sources coming from the API (e.g., encryption items)
+    if (Array.isArray(evidenceSources)) {
+        count += evidenceSources.length;
     }
-    
+
     return count;
+}
+
+/**
+ * Count individual encryption evidence records from the encryption API payload
+ */
+function countEncryptionRecords(encryptionData) {
+    if (!encryptionData || encryptionData.success === false) return 0;
+
+    let evidence = null;
+    try {
+        if (encryptionData.evidence_data) {
+            evidence = typeof encryptionData.evidence_data === 'string'
+                ? JSON.parse(encryptionData.evidence_data)
+                : encryptionData.evidence_data;
+        } else if (encryptionData.evidence) {
+            evidence = encryptionData.evidence;
+        } else {
+            evidence = encryptionData;
+        }
+    } catch (e) {
+        // If parsing fails, treat as a single record if it was a successful response
+        return 1;
+    }
+
+    let cnt = 0;
+
+    // New enhanced format: arrays of compliance evidence entries
+    if (evidence && Array.isArray(evidence.compliance_evidence)) {
+        cnt += evidence.compliance_evidence.length;
+    }
+
+    // Old format: implementation_tests is an object of named tests
+    if (evidence && evidence.implementation_tests && typeof evidence.implementation_tests === 'object') {
+        cnt += Object.keys(evidence.implementation_tests).length;
+    }
+
+    // Simple analysis evidence or minimal payload – count as one record if it has recognizable fields
+    if (cnt === 0) {
+        if (evidence && (evidence.filename || evidence.encryption_algorithm || evidence.description)) {
+            cnt += 1;
+        }
+    }
+
+    return cnt;
 }
 
 /**
@@ -198,6 +262,7 @@ window.EvidenceFilter = {
     getRequirementType,
     getEvidenceDescription,
     getRelevantEvidenceCount,
+    countEncryptionRecords,
     getEvidenceTypeBadge,
     REQUIREMENT_EVIDENCE_MAPPING,
     EVIDENCE_TYPE_DESCRIPTIONS

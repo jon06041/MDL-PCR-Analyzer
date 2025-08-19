@@ -180,6 +180,29 @@ Impact:
 Next (optional):
 - On expert decision save, set is_correction at insert time using the same grouping rule to avoid later backfills.
 
+### Frontend Evidence De‑duplication Breakdown (2025-08-19) ✅ IMPLEMENTED
+
+Status: Evidence modal now explains raw vs unique evidence counts and lists grouped duplicate integrity checks by day.
+
+Changes:
+- Evidence modal (unified_compliance_dashboard.html → loadEvidenceDetails) now:
+    - Computes raw vs grouped counts for Data Integrity/File Validation evidence (per‑day grouping).
+    - Shows a summary above the table: “Raw evidence sources: X • Unique after grouping: Y”.
+    - Displays “N duplicates from repeated Data Integrity/File Validation checks” with a toggle to “Show details”.
+    - Details list each date and the number of checks merged (e.g., 2025‑08‑18: 6 checks).
+    - The table continues to show the grouped (unique) entries; grouped rows indicate “(N checks)”.
+
+Why:
+- Resolve confusion when outside badges show 17 while raw inputs total ~30; provide transparent de‑duplication rationale.
+- Keep badge/modal counts aligned to unique evidence while making raw activity visible on demand.
+
+Impact:
+- No backend changes; fully front‑end and dynamic from requirement.evidence_sources.
+- No server restart required; refresh the page to load updated static JS/HTML.
+
+Notes:
+- Badges remain based on grouped counts; optional future enhancement is a tooltip next to “Evidence Found (N)” showing raw vs unique.
+
 
 ### **UNRESOLVED: CalcJ Pipeline Still Returns Null** 🚧 NOT SOLVED
 
