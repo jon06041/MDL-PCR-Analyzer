@@ -735,7 +735,7 @@
             toggleAutoRefresh(); // Initial setup
         }
 
-        async function refreshDashboard() {
+    async function refreshDashboard() {
             try {
                 // Load compliance data from unified compliance manager
                 const [dashboardResponse, requirementsResponse] = await Promise.all([
@@ -750,15 +750,22 @@
                 window.dashboardData = dashboardData;
                 window.requirementsData = requirementsResponse_data.requirements || [];
                 
-                // Group requirements by implementation status for compatibility
-                complianceData = {};
-                window.requirementsData.forEach(req => {
-                    const status = req.implementation_status || 'unknown';
-                    if (!complianceData[status]) {
-                        complianceData[status] = [];
-                    }
-                    complianceData[status].push(req);
-                });
+                // Map backend implementation_status to dashboard groups
+                // Groups: active, partial, ready_to_implement, planned
+                function mapToGroup(req) {
+                    const status = (req.implementation_status || '').toLowerCase();
+                    if (status === 'validated' || status === 'completed') return 'active';
+                    if (status === 'in_progress') return 'partial';
+                    if (status === 'not_started') return req.auto_trackable ? 'ready_to_implement' : 'planned';
+                    return 'planned';
+                }
+
+                // Group detailed requirements into dashboard groups so evidence fields remain available
+                complianceData = { active: [], partial: [], ready_to_implement: [], planned: [] };
+                for (const req of window.requirementsData) {
+                    const group = mapToGroup(req);
+                    complianceData[group].push(req);
+                }
                 
                 // Store evidence data from requirements
                 evidenceData = {};
@@ -802,14 +809,8 @@
             const currentlyTracking = dashboardData.currently_tracking || 0;
             const totalEvidence = dashboardData.total_events || 0;
             
-            // Calculate implementation status counts from actual requirements
-            const inProgress = requirementsData.filter(req => 
-                req.implementation_status === 'in_progress'
-            ).length;
-            
-            const notStarted = requirementsData.filter(req => 
-                req.implementation_status === 'not_started'
-            ).length;
+            // Calculate display groups using complianceData
+            const readyToImplementCount = (complianceData.ready_to_implement || []).length;
             
             // Overall compliance percentage from dashboard data
             const overallCompliancePercent = total > 0 ? 
@@ -818,7 +819,7 @@
             // Update the display
             document.getElementById('totalRequirements').textContent = total;
             document.getElementById('activeTracking').textContent = currentlyTracking;
-            document.getElementById('readyToImplement').textContent = notStarted; // Show not_started as ready to implement
+            document.getElementById('readyToImplement').textContent = readyToImplementCount; // Ready to implement group
             document.getElementById('evidenceCollected').textContent = totalEvidence;
             document.getElementById('overallScore').textContent = overallCompliancePercent + '%';
         }
@@ -943,8 +944,8 @@
             const evidenceContainer = document.getElementById('evidenceTracking');
             
             evidenceContainer.innerHTML = Object.values(complianceData).flat().map(req => {
-                // Get evidence directly from requirement data
-                const evidenceCount = req.evidence_count || 0;
+                // Prefer live evidence_sources length when available
+                const evidenceCount = Array.isArray(req.evidence_sources) ? req.evidence_sources.length : (req.evidence_count || 0);
                 const hasEvidence = evidenceCount > 0;
                 
                 return `
@@ -969,12 +970,13 @@
                                         </div>
                                     </div>
                                     
-                                    <div class="mt-2">
-                                        <strong>Evidence Types:</strong><br>
-                                        ${(req.evidence_types || []).map(type => {
-                                            return `<span class="badge bg-info me-1 mb-1">${type}</span>`;
-                                        }).join('')}
-                                    </div>
+                                    ${(req.evidence_types || []).length ? `
+                                        <div class="mt-2">
+                                            ${(req.evidence_types || []).map(type => {
+                                                return `<span class="badge bg-info me-1 mb-1">${type}</span>`;
+                                            }).join('')}
+                                        </div>
+                                    ` : ''}
                                     
                                     ${req.last_updated ? `
                                         <div class="mt-2">
@@ -1051,7 +1053,7 @@
         function getEvidenceBadges(reqCode) {
             // Find the requirement by ID and get evidence count
             const req = window.requirementsData.find(r => r.id === reqCode);
-            const evidenceCount = req ? req.evidence_count || 0 : 0;
+            const evidenceCount = req ? (Array.isArray(req.evidence_sources) ? req.evidence_sources.length : (req.evidence_count || 0)) : 0;
             const hasEvidence = evidenceCount > 0;
             
             return `
@@ -1796,6 +1798,12 @@
         }
 
         function showAlert(message, type) {
+            // Allow swapped argument order: showAlert('success', 'Saved!')
+            const validTypes = ['primary','secondary','success','danger','warning','info','light','dark'];
+            if (validTypes.includes(message) && (!type || !validTypes.includes(type))) {
+                const swapped = message; message = type || 'Action completed'; type = swapped;
+            }
+
             const alertDiv = document.createElement('div');
             alertDiv.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
             alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';

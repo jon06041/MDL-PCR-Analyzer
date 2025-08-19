@@ -60,6 +60,11 @@ def get_pathogen_threshold(well_data, L=None, B=None):
     # Get test code and fluorophore from well data
     test_code = well_data.get('test_code') if well_data else None
     fluorophore = well_data.get('fluorophore') if well_data else None
+    # Normalize common channel aliases
+    if fluorophore == 'TexasRed':
+        fluorophore = 'Texas Red'
+    if fluorophore == 'CY5':
+        fluorophore = 'Cy5'
     
     print(f"🔍 get_pathogen_threshold DEBUG: well_data keys: {list(well_data.keys()) if well_data else 'None'}")
     print(f"🔍 get_pathogen_threshold DEBUG: test_code='{test_code}', fluorophore='{fluorophore}'")
@@ -71,9 +76,9 @@ def get_pathogen_threshold(well_data, L=None, B=None):
             threshold_value = pathogen_thresholds[fluorophore]
             print(f"🎯 Using pathogen-specific threshold: {test_code} {fluorophore} = {threshold_value} RFU")
             return float(threshold_value)
-    
-    # No fallback: absent mapping means threshold is undefined for this combo
-    print(f"⚠️ No fixed threshold defined for test_code={test_code or 'unknown'}, fluorophore={fluorophore or 'unknown'} — returning None")
+
+    # Strict mode: no fallback. If mapping is missing, return None and let caller decide.
+    print(f"⚠️ No pathogen/channel threshold mapping for test_code={test_code or 'unknown'}, fluorophore={fluorophore or 'unknown'} — returning None (strict)")
     return None
 
 
@@ -862,7 +867,11 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
 
         # Recalculate CalcJ with all controls available; include context for control detection
         from cqj_calcj_utils import calculate_calcj_with_controls
-        threshold = analysis.get('threshold_value', 500)
+        # Strict: do not inject default threshold; require mapped threshold
+        threshold = analysis.get('threshold_value')
+        if threshold is None:
+            # Skip CalcJ if no threshold was determined for this well/channel
+            continue
         well_data_for_calcj = {
             'cqj_value': cqj_val,
             'well_id': well_id,

@@ -1235,17 +1235,23 @@ def analyze_data():
         # This ensures CalcJ calculation has access to pathogen-specific logic
         test_code = extract_test_code_from_filename(filename)
         print(f"[ANALYZE] Extracted test_code='{test_code}' from filename='{filename}'")
-        
-        if test_code and isinstance(data, dict):
-            # Add test_code to each well's data for pathogen-specific analysis
-            wells_updated = 0
+
+        # Also inject the fluorophore from headers into each well BEFORE analysis so backend uses correct channel
+        # Without this, channel defaults to FAM during analysis and CQJ/CalcJ get keyed under the wrong channel
+        wells_updated = 0
+        if isinstance(data, dict):
             for well_id, well_data in data.items():
-                if isinstance(well_data, dict):
+                if not isinstance(well_data, dict):
+                    continue
+                # Pathogen context for thresholds/CalcJ
+                if test_code:
                     well_data['test_code'] = test_code
-                    wells_updated += 1
-            print(f"[ANALYZE] Added test_code='{test_code}' to {wells_updated} wells for CalcJ calculation")
-        else:
-            print(f"[ANALYZE] No test_code extracted or invalid data format - CalcJ may be skipped")
+                # Ensure correct channel is present for backend analysis
+                if fluorophore and fluorophore != 'Unknown':
+                    # Normalize Texas Red alias
+                    well_data['fluorophore'] = 'Texas Red' if fluorophore == 'TexasRed' else fluorophore
+                wells_updated += 1
+        print(f"[ANALYZE] Added per-well context to {wells_updated} wells (test_code + fluorophore='{fluorophore}')")
         
         print(f"[ANALYZE] Starting validation...")
         # Validate data structure

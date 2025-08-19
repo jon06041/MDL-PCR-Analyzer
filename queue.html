@@ -1489,6 +1489,9 @@
                     /run_information/i    // Additional: catch run information files
                 ];
 
+                // STRICT base filename regex: Ac[Word]_digits_CFXdigits (no view suffixes)
+                const strictBaseRegex = /^Ac[\w]+_\d+_CFX\d+$/i;
+
                 for (const file of files) {
                     const fileName = file.name || file.webkitRelativePath?.split('/').pop() || file.relativePath || '';
                     
@@ -1531,6 +1534,7 @@
                     }
                     
                     if (summaryMatch || fileName.toLowerCase().includes('summary')) {
+                        // Enforce strict base pattern for summary host experiment id
                         summaryCount++;
                         console.log(`Identified as summary file: ${fileName}`);
                         
@@ -1538,12 +1542,26 @@
                         let experimentId;
                         if (summaryMatch && summaryMatch.length >= 4) {
                             const [, testName, runId, instrument] = summaryMatch;
-                            experimentId = `${testName.trim()}_${runId}_${instrument}`;
+                            const candidateId = `${testName.trim()}_${runId}_${instrument}`;
+                            if (strictBaseRegex.test(candidateId)) {
+                                experimentId = candidateId;
+                            } else {
+                                console.log(`🚫 Summary base ID failed strict regex: ${candidateId}`);
+                                otherCsvCount++;
+                                continue;
+                            }
                         } else {
                             // Fallback: create ID from filename parts before common keywords
                             const basePattern = /^(.+?)(?:[-_\s]*(?:summary|quantification|amplification|results?))/i;
                             const baseMatch = fileName.match(basePattern);
-                            experimentId = baseMatch ? baseMatch[1].trim().replace(/\s+/g, '_') : fileName.replace(/\.csv$/i, '').replace(/summary/i, '').trim();
+                            const candidateId = baseMatch ? baseMatch[1].trim().replace(/\s+/g, '_') : fileName.replace(/\.csv$/i, '').replace(/summary/i, '').trim();
+                            if (strictBaseRegex.test(candidateId)) {
+                                experimentId = candidateId;
+                            } else {
+                                console.log(`🚫 Summary fallback base ID failed strict regex: ${candidateId}`);
+                                otherCsvCount++;
+                                continue;
+                            }
                         }
                         
                         console.log(`Summary file experiment ID: ${experimentId}`);
@@ -1562,7 +1580,14 @@
                     if (ampMatch && ampMatch.length >= 4) {
                         amplificationCount++;
                         const [, testName, runId, instrument] = ampMatch;
-                        experimentId = `${testName.trim()}_${runId}_${instrument}`;
+                        const candidateId = `${testName.trim()}_${runId}_${instrument}`;
+                        if (strictBaseRegex.test(candidateId)) {
+                            experimentId = candidateId;
+                        } else {
+                            console.log(`🚫 Amplification base ID failed strict regex: ${candidateId}`);
+                            otherCsvCount++;
+                            continue;
+                        }
                         console.log(`✅ Identified as amplification file (pattern match): ${fileName} -> ${experimentId}`);
                     } else if (fileName.match(broadAmplificationPattern)) {
                         // Files reaching here have already passed exclusion check
@@ -1570,7 +1595,14 @@
                         // For broader pattern, create experiment ID from filename
                         const basePattern = /^(.+?)(?:[-_\s]*(?:quantification|amplification|results?))/i;
                         const baseMatch = fileName.match(basePattern);
-                        experimentId = baseMatch ? baseMatch[1].trim().replace(/\s+/g, '_') : fileName.replace(/\.csv$/i, '').trim();
+                        const candidateId = baseMatch ? baseMatch[1].trim().replace(/\s+/g, '_') : fileName.replace(/\.csv$/i, '').trim();
+                        if (strictBaseRegex.test(candidateId)) {
+                            experimentId = candidateId;
+                        } else {
+                            console.log(`🚫 Broad amplification fallback base ID failed strict regex: ${candidateId}`);
+                            otherCsvCount++;
+                            continue;
+                        }
                         console.log(`📋 Identified as amplification file (broad pattern): ${fileName} -> ${experimentId}`);
                     } else {
                         // This file doesn't match any amplification patterns
@@ -1590,7 +1622,7 @@
                         if (!amplificationFiles.has(experimentId)) {
                             amplificationFiles.set(experimentId, []);
                         }
-                        
+
                         const fileList = amplificationFiles.get(experimentId);
                         
                         // Handle duplicates - keep the newest file
@@ -1607,7 +1639,7 @@
                             fileList.push(file);
                         }
                         
-                        // Limit to 4 amplification files per experiment
+                        // Limit to max 4 amplification files per experiment (avoid per-channel duplicates)
                         if (fileList.length > 4) {
                             fileList.sort((a, b) => b.lastModified - a.lastModified);
                             fileList.splice(4);

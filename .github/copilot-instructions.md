@@ -39,6 +39,25 @@
 
 ## 🔍 CRITICAL ISSUE ANALYSIS (2025-08-18)
 
+### Backend Thresholds Strict Mode (2025-08-18) ✅ IMPLEMENTED
+
+Status: Backend thresholds now use only fixed pathogen/channel mappings. All fallbacks removed to prevent silent drift.
+
+Changes:
+- qpcr_analyzer.py:get_pathogen_threshold() — removed channel-default and dynamic (L,B) fallbacks; returns None if unmapped (strict, fail-closed).
+- qpcr_analyzer.py second-pass CalcJ — removed hidden default `500` threshold; skips CalcJ when `threshold_value` is None.
+
+Why:
+- Avoid unintended behavior differences vs frontend and prevent regressions. Use assigned fixed thresholds only; no guessing.
+
+Impact:
+- When a pathogen/channel threshold is missing, CQJ/CalcJ won’t be computed for that channel. Frontend behavior remains unchanged.
+- Aligns backend with configured fixed thresholds (e.g., Mgen/FAM=500, Ngon/HEX=200, Ctrach/FAM=150).
+
+Next:
+- If any legitimate pathogen/channel is unmapped, add it to the fixed threshold map; do not reintroduce fallbacks.
+
+
 ### **UNRESOLVED: CalcJ Pipeline Still Returns Null** 🚧 NOT SOLVED
 
 **STATUS**: **CALCJ STILL NULL IN DATABASE** - Despite identifying and fixing hard-coded channel issue, CalcJ calculation still fails in live pipeline.
@@ -1584,3 +1603,26 @@ This is a **Flask-based qPCR analysis system** with machine learning capabilitie
 
 ### Core Components
 - **Flask API** (`app.py`)
+
+## Quantification method vs vendor (standard curve) — quick reference (2025-08-18)
+
+Purpose: Summarize how our CQJ/CalcJ quant differs from vendor tools and how to convert when needed.
+
+- Our approach
+    - Run-specific, control-based standard curve per pathogen/channel using the run’s own H/L controls. If controls are insufficient, return None instead of guessing.
+    - Pathogen-tuned fixed RFU thresholds for CQJ (e.g., Mgen=500, Ngon=200, Ctrach=150) computed before classification; classification consumes CQJ, not vendor CSV Cq.
+    - Strict data hygiene: never import CSV Cq for negatives; only accept 10–40 for confirmed positives.
+    - Dynamic pathogen & channel detection (no hard-coded channels), via filename/session-derived `test_code` and fluorophore.
+
+- Typical vendor approach
+    - Multi-point log-linear regression Cq = m·log10(Q) + b built from kit standards; sometimes reused across runs; vendor auto-thresholding/baseline.
+
+- Conversion between curves (same Cq definition)
+    - Given Cq and our curve (m_o, b_o): Q_ours = 10^((Cq − b_o)/m_o)
+    - Given vendor curve (m_v, b_v) and vendor quantity Q_v:
+        - Cq = m_v·log10(Q_v) + b_v, then Q_ours = 10^((Cq − b_o)/m_o)
+    - If Cq definitions differ (threshold/baseline), learn affine alignment on paired samples: Cq_ours ≈ α·Cq_vendor + δ, then apply formulas above.
+
+- Accuracy guidance
+    - Per-run accuracy: ours is robust when valid controls exist (captures run drift).
+    - Dynamic range: vendor multi-point curves may yield a more stable slope if our run has only two control points. Best practice is hybrid — fixed slope per pathogen from multi-run calibration, intercept re-centered per run.
