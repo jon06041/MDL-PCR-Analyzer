@@ -1137,11 +1137,15 @@ def index():
 
 @app.route('/ml-validation-dashboard')
 def ml_validation_dashboard():
-    return send_from_directory('.', 'ml_validation_enhanced_dashboard.html')
+    # Legacy ML dashboard is archived; redirect to unified dashboard
+    from flask import redirect, url_for
+    return redirect(url_for('unified_compliance_dashboard'))
 
 @app.route('/ml-validation-enhanced')
 def ml_validation_enhanced():
-    return send_from_directory('.', 'ml_validation_enhanced_dashboard.html')
+    # Legacy enhanced ML dashboard is archived; redirect to unified dashboard
+    from flask import redirect, url_for
+    return redirect(url_for('unified_compliance_dashboard'))
 
 @app.route('/fda-compliance-dashboard')
 def fda_compliance_dashboard():
@@ -2999,12 +3003,24 @@ def ml_submit_feedback():
             # Get original prediction for comparison
             original_prediction = enhanced_metrics.get('original_prediction', 'Unknown')
             
-            # Insert feedback into ml_expert_decisions table
+            # Insert feedback into ml_expert_decisions table with is_correction computed
             insert_sql = '''
                 INSERT INTO ml_expert_decisions 
                 (session_id, well_id, pathogen, original_prediction, expert_correction, 
-                 confidence, rfu_data, cycles, features_used, feedback_context)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 confidence, rfu_data, cycles, features_used, feedback_context, is_correction)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
+                    CASE 
+                        WHEN %s IS NULL OR %s IS NULL THEN NULL
+                        WHEN (
+                            UPPER(%s) IN ('WEAK_POSITIVE','POSITIVE','STRONG_POSITIVE') AND UPPER(%s) IN ('WEAK_POSITIVE','POSITIVE','STRONG_POSITIVE')
+                        ) OR (
+                            UPPER(%s) IN ('INDETERMINATE','SUSPICIOUS','REDO') AND UPPER(%s) IN ('INDETERMINATE','SUSPICIOUS','REDO')
+                        ) OR (
+                            UPPER(%s) = 'NEGATIVE' AND UPPER(%s) = 'NEGATIVE'
+                        ) THEN 0
+                        ELSE 1
+                    END
+                )
             '''
             
             cursor.execute(insert_sql, (
@@ -3017,7 +3033,12 @@ def ml_submit_feedback():
                 json.dumps(rfu_data),
                 json.dumps(cycles),
                 json.dumps(enhanced_metrics),
-                f"Expert feedback via ML interface - {pathogen}"
+                f"Expert feedback via ML interface - {pathogen}",
+                # Parameters used by CASE for is_correction
+                original_prediction, expert_classification,
+                original_prediction, expert_classification,
+                original_prediction, expert_classification,
+                original_prediction, expert_classification
             ))
             
             conn.commit()
@@ -5090,32 +5111,28 @@ def get_ml_validation_dashboard_data():
                 confirmed_count = result[0] or 0
                 total_accuracy = float(result[1] or 0.0)
             
-            # Calculate expert decision-based accuracy
-            # Formula: (Total Samples - Expert Corrections) / Total Samples × 100
+            # Calculate expert decision-based accuracy using is_correction when available,
+            # falling back to grouping CASE when is_correction is NULL or column absent.
             cursor2.execute("""
                 SELECT 
                     COUNT(*) as total_expert_decisions,
-                    SUM(CASE 
-                        WHEN original_prediction IS NOT NULL 
-                        AND expert_correction IS NOT NULL
-                        AND (
-                            (UPPER(original_prediction) IN ('WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE') 
-                             AND UPPER(expert_correction) NOT IN ('WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE'))
-                            OR
-                            (UPPER(original_prediction) IN ('INDETERMINATE', 'SUSPICIOUS', 'REDO') 
-                             AND UPPER(expert_correction) NOT IN ('INDETERMINATE', 'SUSPICIOUS', 'REDO'))
-                            OR
-                            (UPPER(original_prediction) = 'NEGATIVE' 
-                             AND UPPER(expert_correction) != 'NEGATIVE')
-                            OR
-                            (UPPER(original_prediction) NOT IN ('WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE', 'INDETERMINATE', 'SUSPICIOUS', 'REDO', 'NEGATIVE')
-                             OR UPPER(expert_correction) NOT IN ('WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE', 'INDETERMINATE', 'SUSPICIOUS', 'REDO', 'NEGATIVE'))
-                        ) THEN 1 
-                        ELSE 0 
-                    END) as expert_corrections
+                    SUM(
+                        CASE 
+                            WHEN is_correction IS NOT NULL THEN is_correction
+                            ELSE (
+                                CASE 
+                                    WHEN original_prediction IS NOT NULL AND expert_correction IS NOT NULL AND (
+                                        (UPPER(original_prediction) IN ('WEAK_POSITIVE','POSITIVE','STRONG_POSITIVE') AND UPPER(expert_correction) NOT IN ('WEAK_POSITIVE','POSITIVE','STRONG_POSITIVE'))
+                                        OR (UPPER(original_prediction) IN ('INDETERMINATE','SUSPICIOUS','REDO') AND UPPER(expert_correction) NOT IN ('INDETERMINATE','SUSPICIOUS','REDO'))
+                                        OR (UPPER(original_prediction) = 'NEGATIVE' AND UPPER(expert_correction) <> 'NEGATIVE')
+                                        OR (UPPER(original_prediction) NOT IN ('WEAK_POSITIVE','POSITIVE','STRONG_POSITIVE','INDETERMINATE','SUSPICIOUS','REDO','NEGATIVE') OR UPPER(expert_correction) NOT IN ('WEAK_POSITIVE','POSITIVE','STRONG_POSITIVE','INDETERMINATE','SUSPICIOUS','REDO','NEGATIVE'))
+                                    ) THEN 1 ELSE 0 END
+                            )
+                        END
+                    ) as expert_corrections
                 FROM ml_expert_decisions
                 WHERE original_prediction IS NOT NULL 
-                AND expert_correction IS NOT NULL
+                  AND expert_correction IS NOT NULL
             """)
             expert_result = cursor2.fetchone()
             
@@ -5177,12 +5194,26 @@ def get_ml_validation_dashboard_data():
                     if total_wells > 0:
                         # Check if there are any expert decisions/corrections for this session
                         cursor4.execute("""
-                            SELECT COUNT(*) as expert_count 
+                            SELECT 
+                                COALESCE(SUM(
+                                    CASE 
+                                        WHEN is_correction IS NOT NULL THEN is_correction
+                                        ELSE (
+                                            CASE 
+                                                WHEN original_prediction IS NOT NULL AND expert_correction IS NOT NULL AND (
+                                                    (UPPER(original_prediction) IN ('WEAK_POSITIVE','POSITIVE','STRONG_POSITIVE') AND UPPER(expert_correction) NOT IN ('WEAK_POSITIVE','POSITIVE','STRONG_POSITIVE'))
+                                                    OR (UPPER(original_prediction) IN ('INDETERMINATE','SUSPICIOUS','REDO') AND UPPER(expert_correction) NOT IN ('INDETERMINATE','SUSPICIOUS','REDO'))
+                                                    OR (UPPER(original_prediction) = 'NEGATIVE' AND UPPER(expert_correction) <> 'NEGATIVE')
+                                                    OR (UPPER(original_prediction) NOT IN ('WEAK_POSITIVE','POSITIVE','STRONG_POSITIVE','INDETERMINATE','SUSPICIOUS','REDO','NEGATIVE') OR UPPER(expert_correction) NOT IN ('WEAK_POSITIVE','POSITIVE','STRONG_POSITIVE','INDETERMINATE','SUSPICIOUS','REDO','NEGATIVE'))
+                                                ) THEN 1 ELSE 0 END
+                                        )
+                                    END
+                                ), 0) as expert_count
                             FROM ml_expert_decisions 
                             WHERE session_id = %s
                         """, (session['id'],))
                         expert_result = cursor4.fetchone()
-                        expert_corrections = expert_result['expert_count'] if expert_result else 0
+                        expert_corrections = expert_result['expert_count'] if expert_result and 'expert_count' in expert_result else 0
                         
                         # Calculate ML accuracy
                         if expert_corrections == 0:
@@ -7295,12 +7326,26 @@ def get_confirmed_sessions():
                     try:
                         cursor_temp = conn.cursor(dictionary=True)
                         cursor_temp.execute("""
-                            SELECT COUNT(*) as expert_count 
+                            SELECT 
+                                COALESCE(SUM(
+                                    CASE 
+                                        WHEN is_correction IS NOT NULL THEN is_correction
+                                        ELSE (
+                                            CASE 
+                                                WHEN original_prediction IS NOT NULL AND expert_correction IS NOT NULL AND (
+                                                    (UPPER(original_prediction) IN ('WEAK_POSITIVE','POSITIVE','STRONG_POSITIVE') AND UPPER(expert_correction) NOT IN ('WEAK_POSITIVE','POSITIVE','STRONG_POSITIVE'))
+                                                    OR (UPPER(original_prediction) IN ('INDETERMINATE','SUSPICIOUS','REDO') AND UPPER(expert_correction) NOT IN ('INDETERMINATE','SUSPICIOUS','REDO'))
+                                                    OR (UPPER(original_prediction) = 'NEGATIVE' AND UPPER(expert_correction) <> 'NEGATIVE')
+                                                    OR (UPPER(original_prediction) NOT IN ('WEAK_POSITIVE','POSITIVE','STRONG_POSITIVE','INDETERMINATE','SUSPICIOUS','REDO','NEGATIVE') OR UPPER(expert_correction) NOT IN ('WEAK_POSITIVE','POSITIVE','STRONG_POSITIVE','INDETERMINATE','SUSPICIOUS','REDO','NEGATIVE'))
+                                                ) THEN 1 ELSE 0 END
+                                        )
+                                    END
+                                ), 0) as expert_count
                             FROM ml_expert_decisions 
                             WHERE session_id = %s
                         """, (session['session_id'],))
                         expert_result = cursor_temp.fetchone()
-                        expert_corrections = expert_result['expert_count'] if expert_result else 0
+                        expert_corrections = expert_result['expert_count'] if expert_result and 'expert_count' in expert_result else 0
                         cursor_temp.close()
                         
                         # Calculate ML accuracy

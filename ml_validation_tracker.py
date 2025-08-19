@@ -91,13 +91,24 @@ class MLValidationTracker:
                 else:
                     improvement_score = max(0.0, 1.0 - (confidence if confidence else 0.5))
                 
-                # Insert expert decision
+                # Insert expert decision, computing is_correction from grouping
                 conn.execute(text("""
                     INSERT INTO ml_expert_decisions 
                     (well_id, pathogen, original_prediction, expert_correction, confidence, 
-                     features_used, teaching_outcome, user_id, improvement_score)
+                     features_used, teaching_outcome, user_id, improvement_score, is_correction)
                     VALUES (:well_id, :pathogen, :original_prediction, :expert_correction, 
-                            :confidence, :features_used, :teaching_outcome, :user_id, :improvement_score)
+                            :confidence, :features_used, :teaching_outcome, :user_id, :improvement_score,
+                            CASE 
+                                WHEN :original_prediction IS NULL OR :expert_correction IS NULL THEN NULL
+                                WHEN (
+                                    UPPER(:original_prediction) IN ('WEAK_POSITIVE','POSITIVE','STRONG_POSITIVE') AND UPPER(:expert_correction) IN ('WEAK_POSITIVE','POSITIVE','STRONG_POSITIVE')
+                                ) OR (
+                                    UPPER(:original_prediction) IN ('INDETERMINATE','SUSPICIOUS','REDO') AND UPPER(:expert_correction) IN ('INDETERMINATE','SUSPICIOUS','REDO')
+                                ) OR (
+                                    UPPER(:original_prediction) = 'NEGATIVE' AND UPPER(:expert_correction) = 'NEGATIVE'
+                                ) THEN 0
+                                ELSE 1
+                            END)
                 """), {
                     'well_id': well_id,
                     'pathogen': pathogen,
