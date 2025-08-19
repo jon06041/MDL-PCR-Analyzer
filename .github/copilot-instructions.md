@@ -159,6 +159,27 @@ Changes:
 Why:
 - Missing saved models aren’t an error in dev/first-run scenarios. Info-level logs keep signal-to-noise high.
 
+### Expert Corrections Same-Group Flag (2025-08-19) ✅ IMPLEMENTED
+
+Status: Expert decision records now have an explicit is_correction flag aligned with the “same-group ≠ correction” rule.
+
+Changes:
+- Schema: Added ml_expert_decisions.is_correction TINYINT(1) NULL.
+- Backfill: Set is_correction via grouping rule:
+    - Map to groups: {POS: WEAK_POSITIVE|POSITIVE|STRONG_POSITIVE, UNCERTAIN: INDETERMINATE|SUSPICIOUS|REDO, NEG: NEGATIVE, OTHER: else}.
+    - is_correction = 0 when original and expert groups match; 1 otherwise; NULL if either side missing.
+- Dashboard accuracy: Prefer is_correction when present; fallback to prior CASE logic when absent.
+
+Why:
+- Users can acknowledge/review edge cases without penalizing accuracy (same group means confirmation/learning, not a correction).
+
+Impact:
+- Accuracy metrics reflect true corrections only; review acknowledgements don’t reduce accuracy.
+- No change to ML training/prediction logic; flag is analytics-only unless explicitly wired later.
+
+Next (optional):
+- On expert decision save, set is_correction at insert time using the same grouping rule to avoid later backfills.
+
 
 ### **UNRESOLVED: CalcJ Pipeline Still Returns Null** 🚧 NOT SOLVED
 
