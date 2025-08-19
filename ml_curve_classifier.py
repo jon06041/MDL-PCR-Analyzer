@@ -14,6 +14,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
 import joblib
 import os
+import logging
 
 class MLCurveClassifier:
     def __init__(self):
@@ -1229,7 +1230,8 @@ class MLCurveClassifier:
             self.model_trained = True
             return True
         except FileNotFoundError:
-            print("No saved model found")
+            logger = logging.getLogger(__name__)
+            logger.info("No saved general ML model found (ml_curve_classifier.pkl)")
             return False
     
     def load_pathogen_models(self):
@@ -1238,10 +1240,12 @@ class MLCurveClassifier:
             pathogen_data = joblib.load('ml_pathogen_models.pkl')
             self.pathogen_models = pathogen_data['pathogen_models']
             self.pathogen_scalers = pathogen_data['pathogen_scalers']
-            print(f"Loaded {len(self.pathogen_models)} pathogen-specific models")
+            logger = logging.getLogger(__name__)
+            logger.info(f"Loaded {len(self.pathogen_models)} pathogen-specific models from ml_pathogen_models.pkl")
             return True
         except FileNotFoundError:
-            print("No saved pathogen models found")
+            logger = logging.getLogger(__name__)
+            logger.info("No saved pathogen models found (ml_pathogen_models.pkl)")
             return False
     
     def get_model_stats(self):

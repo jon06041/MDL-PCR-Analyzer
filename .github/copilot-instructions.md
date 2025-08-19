@@ -111,6 +111,54 @@ Notes:
 - Server restart required to load new/updated routes.
 - Frontend may need to call the new admin endpoints when deleting confirmed items.
 
+### Automatic MySQL Backup Scheduler (2025-08-19) ✅ IMPLEMENTED
+
+Status: Production-friendly background backups are now started at server boot using the MySQL-only scheduler.
+
+Changes:
+- `backup_scheduler.py` (MySQL): Added `run_in_background(interval_hours=24)` that:
+    - Creates a best-effort startup backup immediately.
+    - Starts a daemon thread to perform periodic backups with `mysqldump` on a fixed interval (default 24h, min 1h).
+    - Logs errors without crashing the app; keeps looping.
+- `app.py` already calls `BackupScheduler().run_in_background()` at startup; warning eliminated.
+
+Notes:
+- Requires `mysqldump` available in PATH and valid MySQL env vars (`MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`).
+- Backups are written to `/tmp/qpcr_backup_YYYYmmdd_HHMMSS.sql`.
+- For custom intervals, pass an env var and wire it if needed (e.g., 6h). Current default stays at 24h.
+
+### Automatic MySQL Backup Scheduler Hardening (2025-08-19) ✅ UPDATED
+
+Status: Startup and periodic backups now force TCP and give clearer error logs; avoids Unix socket permission issues during `mysqldump`.
+
+Changes:
+- `backup_scheduler.py`:
+    - Force TCP for `mysqldump` by mapping `localhost` → `127.0.0.1` and adding `--protocol=TCP`.
+    - Use `subprocess.run` with stdout redirected to the backup file and capture `stderr` for precise failure messages.
+    - Keep best‑effort startup backup and daemon thread loop (min interval 1h) as before.
+- Expected logs:
+    - Success: `✅ MySQL backup created: /tmp/qpcr_backup_*.sql`
+    - Failure: `❌ mysqldump failed (code N): <detailed TCP error>`
+
+Environment notes:
+- Ensure `MYSQL_HOST` is a reachable TCP host (prefer `127.0.0.1` or your container service name) and `MYSQL_PORT` set (default 3306).
+- The CLI password warning from `mysqldump` is expected in dev; safe to ignore here.
+- After schema/route changes, restart Flask to reinitialize the scheduler and MySQL connections.
+
+### ML Pathogen Models Message (2025-08-19) ✅ IMPROVED LOGGING
+
+Status: Reduced noisy startup warnings when no saved ML models exist.
+
+Changes:
+- `ml_curve_classifier.py`:
+    - Replaced prints for missing saved models with info-level logging:
+        - General model: “No saved general ML model found (ml_curve_classifier.pkl)”.
+        - Pathogen models: “No saved pathogen models found (ml_pathogen_models.pkl)”.
+    - On successful load, logs how many pathogen-specific models were loaded.
+
+Why:
+- Missing saved models aren’t an error in dev/first-run scenarios. Info-level logs keep signal-to-noise high.
+
 
 ### **UNRESOLVED: CalcJ Pipeline Still Returns Null** 🚧 NOT SOLVED
 
