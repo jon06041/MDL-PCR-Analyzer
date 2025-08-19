@@ -188,15 +188,18 @@ class FolderQueueManager {
         const amplificationFiles = new Map(); // experimentId -> [files]
         const summaryFiles = new Map(); // experimentId -> file
         
-        // Pattern matching for qPCR files
-        const amplificationPattern = /(.+)_(\d+)_([A-Z0-9]+)\.csv$/i;
-        const summaryPattern = /(.+)_(\d+)_([A-Z0-9]+).*summary.*\.csv$/i;
+    // Pattern matching for qPCR files
+    // Recognize "... - Quantification Amplification Results_<channel>.csv" strictly for amplification
+    const amplificationPattern = /^(.+?)_(\d+)_([A-Z0-9]+)\s*-\s*(?:Quantification\s+)?Amplification\s+Results_[A-Za-z0-9]+\.csv$/i;
+    // Recognize summary via explicit "Quantification Summary_0.csv" or generic Results.csv
+    const summaryPattern = /^(.+?)_(\d+)_([A-Z0-9]+)\s*-\s*(?:Quantification\s+)?Summary_\d+\.csv$/i;
+    const resultsSummaryPattern = /^(.+?)_(\d+)_([A-Z0-9]+)\s*-\s*Results\.csv$/i;
         
         for (const file of files) {
             const fileName = file.name || file.webkitRelativePath?.split('/').pop() || '';
             
             // Check if it's a summary file
-            const summaryMatch = fileName.match(summaryPattern);
+            let summaryMatch = fileName.match(summaryPattern) || fileName.match(resultsSummaryPattern);
             if (summaryMatch) {
                 const [, testName, runId, instrument] = summaryMatch;
                 const experimentId = `${testName}_${runId}_${instrument}`;
@@ -850,13 +853,14 @@ class FolderQueueManager {
     
     extractExperimentPattern(filename) {
         // Extract experiment pattern from filename
-        // This should match your existing pattern extraction logic
+        // CFX files we support:
+        //  - "<Experiment>_<RunId>_<Device> - Quantification Amplification Results_<CHANNEL>.csv"
+        //  - "<Experiment>_<RunId>_<Device> - Quantification Summary_0.csv"
         const patterns = [
-            // Pattern: ExperimentName_ID_Device - Amplification Results_Channel.csv
-            /^(.+_\d+_[^-]+)\s+-\s+(?:Quantification\s+)?Amplification\s+Results_([A-Z0-9]+)\.csv$/i,
-            // Pattern: ExperimentName_ID_Device - Results.csv  
-            /^(.+_\d+_[^-]+)\s+-\s+Results\.csv$/i,
-            // Add more patterns as needed
+            // Amplification with channel
+            /^(.+_\d+_[^-]+)\s+-\s+(?:Quantification\s+)?Amplification\s+Results_[A-Z0-9]+\.csv$/i,
+            // Quantification summary (explicit _0.csv only)
+            /^(.+_\d+_[^-]+)\s+-\s+Quantification\s+Summary_0\.csv$/i
         ];
         
         for (const pattern of patterns) {
@@ -870,11 +874,13 @@ class FolderQueueManager {
     }
     
     isAmplificationFile(filename) {
-        return /Amplification\s+Results_[A-Z0-9]+\.csv$/i.test(filename);
+        // Strictly match Quantification Amplification Results_<CHANNEL>.csv
+        return /\bQuantification\s+Amplification\s+Results_[A-Z0-9]+\.csv$/i.test(filename);
     }
     
     isSummaryFile(filename) {
-        return /Results\.csv$/i.test(filename) && !/Amplification/i.test(filename);
+        // Strictly match Quantification Summary_0.csv
+        return /\bQuantification\s+Summary_0\.csv$/i.test(filename);
     }
     
     createQueueItem(pattern, group) {
@@ -971,7 +977,7 @@ class FolderQueueManager {
     }
     
     getChannelFromFilename(filename) {
-        const match = filename.match(/Amplification\s+Results_([A-Z0-9]+)\.csv$/i);
+        const match = filename.match(/Quantification\s+Amplification\s+Results_([A-Z0-9]+)\.csv$/i);
         return match ? match[1] : 'Unknown';
     }
     

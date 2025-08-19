@@ -86,6 +86,18 @@ class MLFeedbackInterface {
                 pathogen_models: []
             });
         }
+
+        // If results already exist (e.g., loaded fast), surface the ML banner once
+        try {
+            if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results && !window.mlNotificationChecked) {
+                setTimeout(() => {
+                    if (this.isInitialized && window.currentAnalysisResults && window.currentAnalysisResults.individual_results && !window.mlNotificationChecked) {
+                        window.mlNotificationChecked = true;
+                        this.checkForMLNotification().catch(() => {});
+                    }
+                }, 500);
+            }
+        } catch (e) { /* no-op */ }
     }
 
     async addMLSectionToModal() {
@@ -4844,17 +4856,18 @@ class MLFeedbackInterface {
                 
             console.log(`🧬 ML Notification: Current test code: ${currentTestCode} (from pattern: ${currentExperimentPattern})`);
             
-            // Check if ML is enabled for this pathogen before showing notification
+            // Check ML enabled status; if disabled, still show an informational banner so users know why it's missing
+            let mlEnabled = true;
             if (currentTestCode) {
                 console.log(`🔍 ML Notification: Checking ML enabled status for pathogen: "${currentTestCode}"`);
-                const mlEnabled = await this.checkMLEnabledForPathogen(currentTestCode);
+                mlEnabled = await this.checkMLEnabledForPathogen(currentTestCode);
                 if (!mlEnabled) {
-                    console.log(`🚫 ML Notification: ML disabled for pathogen ${currentTestCode}, not showing banner`);
-                    return false;
+                    console.log(`🚫 ML Notification: ML disabled for pathogen ${currentTestCode}, showing informational banner`);
+                } else {
+                    console.log(`✅ ML Notification: ML enabled for pathogen ${currentTestCode}, proceeding`);
                 }
-                console.log(`✅ ML Notification: ML enabled for pathogen ${currentTestCode}, showing notification banner`);
             } else {
-                console.log(`⚠️ ML Notification: No test code found, showing general ML notification`);
+                console.log(`⚠️ ML Notification: No test code found, will show general ML notification`);
             }
             
             const response = await fetch('/api/ml-stats');
@@ -4870,7 +4883,17 @@ class MLFeedbackInterface {
                         model.pathogen === currentTestCode
                     );
                     
-                    // PRIORITY: Always show a banner. If pathogen exists but has insufficient data, show a training-needed banner.
+                    // PRIORITY: Always show a banner. If ML disabled for this pathogen, show an informational banner; else continue normal flow.
+                    if (!mlEnabled) {
+                        this.showMLAvailableNotification({
+                            type: 'new-pathogen',
+                            pathogen: currentTestCode || 'Unknown',
+                            samples: result.stats.training_samples || 0,
+                            onAccept: null,
+                            onDecline: () => this.handleMLNotificationDecline()
+                        });
+                        return true;
+                    }
                     if (pathogenModel && pathogenModel.training_samples >= 10) {
                         // Show pathogen-specific ML notification
                         this.showMLAvailableNotification({
@@ -4919,9 +4942,32 @@ class MLFeedbackInterface {
                         return true;
                     }
                 }
+            } else {
+                // If stats endpoint fails but we have results, still show a lightweight banner
+                if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+                    this.showMLAvailableNotification({
+                        type: 'new-pathogen',
+                        pathogen: currentTestCode || 'Unknown',
+                        samples: 0,
+                        onAccept: null,
+                        onDecline: () => this.handleMLNotificationDecline()
+                    });
+                    return true;
+                }
             }
         } catch (error) {
             console.error('Failed to check for ML notification:', error);
+            // Fallback: show minimal banner if we have analysis results
+            if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+                this.showMLAvailableNotification({
+                    type: 'new-pathogen',
+                    pathogen: (typeof extractTestCode === 'function' && typeof getCurrentFullPattern === 'function') ? extractTestCode(getCurrentFullPattern()) || 'Unknown' : 'Unknown',
+                    samples: 0,
+                    onAccept: null,
+                    onDecline: () => this.handleMLNotificationDecline()
+                });
+                return true;
+            }
         }
         
         return false;
@@ -5182,9 +5228,12 @@ class MLFeedbackInterface {
                 }
                 // Fallback to direct data analysis
                 else if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
-                    uncertainCount = Object.values(window.currentAnalysisResults.individual_results).filter(result => 
-                        result.curve_classification && result.curve_classification.edge_case === true
-                    ).length;
+                    const resultsArray = Object.values(window.currentAnalysisResults.individual_results);
+                    if (window.isEdgeCaseClassification) {
+                        uncertainCount = resultsArray.filter(r => window.isEdgeCaseClassification(r)).length;
+                    } else {
+                        uncertainCount = resultsArray.filter(r => r.curve_classification && r.curve_classification.edge_case === true).length;
+                    }
                 }
                 // Final fallback to countEdgeCases if available
                 if (uncertainCount === 0 && window.countEdgeCases) {
@@ -5232,6 +5281,27 @@ class MLFeedbackInterface {
                 
             case 'new-pathogen':
                 notificationClass = 'ml-notification-info';
+                // Compute edge-case count for actionable guidance
+                let newPathogenUncertainCount = 0;
+                if (window.preMLEdgeCaseCount && window.preMLEdgeCaseCount > 0) {
+                    newPathogenUncertainCount = window.preMLEdgeCaseCount;
+                } else if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+                    const resultsArray = Object.values(window.currentAnalysisResults.individual_results);
+                    if (window.isEdgeCaseClassification) {
+                        newPathogenUncertainCount = resultsArray.filter(r => window.isEdgeCaseClassification(r)).length;
+                    } else {
+                        newPathogenUncertainCount = resultsArray.filter(r => r.curve_classification && r.curve_classification.edge_case === true).length;
+                    }
+                }
+                if (newPathogenUncertainCount === 0 && window.countEdgeCases) {
+                    try { newPathogenUncertainCount = window.countEdgeCases(); } catch (e) {}
+                }
+                const newPathogenImprovement = newPathogenUncertainCount > 0 ? `
+                    <div class="ml-improvement-notification">
+                        <span class="improvement-info">💡 ${newPathogenUncertainCount} samples flagged as edge cases</span>
+                        <small style="display:block;margin-top:4px;">Analyze edge cases to assist training</small>
+                    </div>
+                ` : '';
                 notificationContent = `
                     <div class="ml-notification-content">
                         <div class="ml-notification-icon">🧬</div>
@@ -5239,8 +5309,14 @@ class MLFeedbackInterface {
                             <strong>New Pathogen Detected: ${pathogen}</strong><br>
                             📚 ML model needs training for this pathogen (${samples}/20 total samples)<br>
                             <small>💡 Use the ML feedback interface to classify curves and train the model</small>
+                            ${newPathogenImprovement}
                         </div>
                         <div class="ml-notification-actions">
+                            ${newPathogenUncertainCount > 0 ? `
+                                <button class="ml-notification-btn primary" onclick="this.parentElement.parentElement.parentElement.analyzeEdgeCases()">
+                                    Analyze Edge Cases (${newPathogenUncertainCount})
+                                </button>
+                            ` : ''}
                             <button class="ml-notification-btn secondary" onclick="this.parentElement.parentElement.parentElement.declineAction()">
                                 ✅ Got it
                             </button>

@@ -4076,9 +4076,10 @@ function handleFileUpload(file, type = 'amplification') {
     
     // Enhanced validation for file naming conventions
     if (type === 'amplification') {
-        // Validate that amplification files contain "Quantification Amplification Results"
-        if (!file.name.includes('Quantification Amplification Results')) {
-            alert(`Invalid amplification file name. File must contain "Quantification Amplification Results".\nYour file: ${file.name}\nExpected format: AcBVAB_2578825_CFX367393 - Quantification Amplification Results_Cy5.csv`);
+        // Strict: must match "... - Quantification Amplification Results_<Channel>.csv"
+        const ampStrict = /\bQuantification\s+Amplification\s+Results_[A-Za-z0-9]+\.csv$/i.test(file.name);
+        if (!ampStrict) {
+            alert(`Invalid amplification file name. Expected "... - Quantification Amplification Results_<Channel>.csv".\nYour file: ${file.name}`);
             return;
         }
         
@@ -4089,9 +4090,10 @@ function handleFileUpload(file, type = 'amplification') {
             return;
         }
     } else if (type === 'samples') {
-        // Validate that summary files contain "Quantification Summary"
-        if (!file.name.includes('Quantification Summary')) {
-            alert(`Invalid summary file name. File must contain "Quantification Summary".\nYour file: ${file.name}\nExpected format: AcBVAB_2578825_CFX367393 - Quantification Summary_0.csv`);
+        // Strict: ONLY accept "Quantification Summary_0.csv"
+        const isQuantSummary0 = /\bQuantification\s+Summary_0\.csv$/i.test(file.name);
+        if (!isQuantSummary0) {
+            alert(`Invalid summary file name. Expected "... - Quantification Summary_0.csv".\nYour file: ${file.name}`);
             return;
         }
         
@@ -6055,6 +6057,46 @@ function onScaleChange(newScale) {
 // ========================================
 
 /**
+ * Heuristic to decide if a result is an edge case when explicit flag is absent.
+ * Preserves legacy behavior: still recognize edge cases if they fall outside rules.
+ */
+function isEdgeCaseClassification(result) {
+    if (!result) return false;
+    // 1) Respect explicit edge_case flag if present
+    if (result.curve_classification && result.curve_classification.edge_case === true) return true;
+
+    // 2) Use classification categories commonly treated as uncertain
+    const cls = (result.curve_classification && result.curve_classification.classification) ||
+                result.classification || '';
+    const clsNorm = String(cls).toUpperCase();
+    if (clsNorm === 'REDO' || clsNorm === 'INDETERMINATE' || clsNorm === 'UNKNOWN') return true;
+
+    // 3) Borderline amplitude band (same thresholds used for POS/NEG split)
+    const amp = Number(result.amplitude || 0);
+    if (!Number.isNaN(amp) && amp >= 400 && amp <= 500) return true;
+
+    // 4) Presence of anomalies
+    let hasAnomalies = false;
+    if (result.anomalies) {
+        try {
+            const anomalies = typeof result.anomalies === 'string' ? JSON.parse(result.anomalies) : result.anomalies;
+            hasAnomalies = Array.isArray(anomalies) && anomalies.length > 0 && !(anomalies.length === 1 && anomalies[0] === 'None');
+        } catch (e) {
+            hasAnomalies = true; // Conservative: treat parse issues as anomalous
+        }
+    }
+    if (hasAnomalies) return true;
+
+    // 5) Bad S-curve shape combined with non-NEG classification
+    if (result.is_good_scurve === false && clsNorm !== 'NEG') return true;
+
+    return false;
+}
+
+// Expose globally so other modules (ML UI) can use the same heuristic
+window.isEdgeCaseClassification = isEdgeCaseClassification;
+
+/**
  * Get all visible edge cases from the current results table
  * @returns {Array} Array of edge case well objects with details
  */
@@ -6080,9 +6122,10 @@ function getVisibleEdgeCases() {
         const result = currentAnalysisResults.individual_results[wellKey];
         if (!result) return;
         
-        // Check if this is an edge case
-        const isEdgeCase = result.curve_classification && 
-                          result.curve_classification.edge_case === true;
+        // Check if this is an edge case (explicit flag or heuristic fallback)
+        const isEdgeCase = window.isEdgeCaseClassification ? 
+            window.isEdgeCaseClassification(result) : 
+            (result.curve_classification && result.curve_classification.edge_case === true);
         
         if (isEdgeCase) {
             edgeCases.push({

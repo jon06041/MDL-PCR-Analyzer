@@ -1489,8 +1489,9 @@
                     /run_information/i    // Additional: catch run information files
                 ];
 
-                // STRICT base filename regex: Ac[Word]_digits_CFXdigits (no view suffixes)
-                const strictBaseRegex = /^Ac[\w]+_\d+_CFX\d+$/i;
+                // STRICT base filename regex: [Word]_digits_CFXdigits (no view suffixes)
+                // Relaxed to not require the test code to start with "Ac"
+                const strictBaseRegex = /^[A-Za-z][A-Za-z0-9]*_\d+_CFX\d+$/i;
 
                 for (const file of files) {
                     const fileName = file.name || file.webkitRelativePath?.split('/').pop() || file.relativePath || '';
@@ -1532,8 +1533,17 @@
                     if (!summaryMatch) {
                         summaryMatch = fileName.match(alternativeSummaryPattern);
                     }
-                    
-                    if (summaryMatch || fileName.toLowerCase().includes('summary')) {
+                    // Also recognize classic CFX export "Results.csv" as a summary file
+                    const resultsCsvPattern = /^(.+?)[-_|\s]*(\d+)[-_|\s]*([A-Z0-9]+)\s*-\s*Results\.csv$/i;
+                    if (!summaryMatch && /Results\.csv$/i.test(fileName) && !/Amplification/i.test(fileName)) {
+                        // Try to extract base parts from the results filename
+                        const resultsMatch = fileName.match(resultsCsvPattern);
+                        if (resultsMatch && resultsMatch.length >= 4) {
+                            summaryMatch = resultsMatch;
+                        }
+                    }
+
+                    if (summaryMatch || fileName.toLowerCase().includes('summary') || (/Results\.csv$/i.test(fileName) && !/Amplification/i.test(fileName))) {
                         // Enforce strict base pattern for summary host experiment id
                         summaryCount++;
                         console.log(`Identified as summary file: ${fileName}`);
