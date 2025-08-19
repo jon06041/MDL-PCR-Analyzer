@@ -2247,6 +2247,40 @@ def update_session_results(session_id):
 def delete_session(session_id):
     """Delete a single analysis session and its results"""
     try:
+        # Guard: do not allow deleting confirmed sessions from this general endpoint
+        try:
+            import mysql.connector
+            mysql_config = {
+                'host': os.environ.get('MYSQL_HOST', 'localhost'),
+                'user': os.environ.get('MYSQL_USER', 'qpcr_user'),
+                'password': os.environ.get('MYSQL_PASSWORD', 'qpcr_password'),
+                'database': os.environ.get('MYSQL_DATABASE', 'qpcr_analysis')
+            }
+            conn_chk = mysql.connector.connect(**mysql_config)
+            cur_chk = conn_chk.cursor()
+            # Prefer confirmation_status if present, else fall back to is_confirmed when available
+            cur_chk.execute("SHOW COLUMNS FROM analysis_sessions LIKE 'confirmation_status'")
+            has_conf_status = cur_chk.fetchone() is not None
+            confirmation_status = None
+            is_confirmed_flag = None
+            if has_conf_status:
+                cur_chk.execute("SELECT confirmation_status FROM analysis_sessions WHERE id = %s", (session_id,))
+                row = cur_chk.fetchone()
+                confirmation_status = row[0] if row else None
+            else:
+                cur_chk.execute("SHOW COLUMNS FROM analysis_sessions LIKE 'is_confirmed'")
+                if cur_chk.fetchone():
+                    cur_chk.execute("SELECT is_confirmed FROM analysis_sessions WHERE id = %s", (session_id,))
+                    row = cur_chk.fetchone()
+                    is_confirmed_flag = int(row[0]) if row and row[0] is not None else 0
+            cur_chk.close()
+            conn_chk.close()
+            if (confirmation_status and str(confirmation_status).lower() == 'confirmed') or (is_confirmed_flag == 1):
+                return jsonify({'error': 'Confirmed sessions cannot be deleted from this endpoint. Admin-only endpoint required.'}), 403
+        except Exception as guard_e:
+            # If guard check fails, proceed cautiously (do not block non-existent sessions errors below)
+            app.logger.warning(f"Delete session guard check failed: {guard_e}")
+
         # Check if session exists first
         session = AnalysisSession.query.get_or_404(session_id)
         well_count = WellResult.query.filter_by(session_id=session.id).count()
@@ -2306,11 +2340,49 @@ def delete_experiment_by_pattern(experiment_pattern):
         if not sessions:
             return jsonify({'error': f'No sessions found for experiment pattern: {experiment_pattern}'}), 404
         
-        print(f"[DELETE EXPERIMENT] Found {len(sessions)} sessions to delete")
+        print(f"[DELETE EXPERIMENT] Found {len(sessions)} sessions to review for deletion")
         total_wells_deleted = 0
         session_ids_deleted = []
+        session_ids_skipped_confirmed = []
+        
+        # Preload confirmation statuses from DB to avoid deleting confirmed sessions
+        confirmation_map = {}
+        try:
+            import mysql.connector
+            mysql_config = {
+                'host': os.environ.get('MYSQL_HOST', 'localhost'),
+                'user': os.environ.get('MYSQL_USER', 'qpcr_user'),
+                'password': os.environ.get('MYSQL_PASSWORD', 'qpcr_password'),
+                'database': os.environ.get('MYSQL_DATABASE', 'qpcr_analysis')
+            }
+            conn_chk = mysql.connector.connect(**mysql_config)
+            cur_chk = conn_chk.cursor()
+            cur_chk.execute("SHOW COLUMNS FROM analysis_sessions LIKE 'confirmation_status'")
+            has_conf_status = cur_chk.fetchone() is not None
+            ids = tuple([s.id for s in sessions])
+            if ids:
+                if has_conf_status:
+                    cur_chk.execute(f"SELECT id, confirmation_status FROM analysis_sessions WHERE id IN ({','.join(['%s']*len(ids))})", ids)
+                    for row in cur_chk.fetchall():
+                        confirmation_map[row[0]] = row[1]
+                else:
+                    cur_chk.execute("SHOW COLUMNS FROM analysis_sessions LIKE 'is_confirmed'")
+                    has_is_confirmed = cur_chk.fetchone() is not None
+                    if has_is_confirmed:
+                        cur_chk.execute(f"SELECT id, is_confirmed FROM analysis_sessions WHERE id IN ({','.join(['%s']*len(ids))})", ids)
+                        for row in cur_chk.fetchall():
+                            confirmation_map[row[0]] = 'confirmed' if int(row[1] or 0) == 1 else 'pending'
+            cur_chk.close()
+            conn_chk.close()
+        except Exception as e:
+            app.logger.warning(f"[DELETE EXPERIMENT] Could not preload confirmation statuses: {e}")
         
         for session in sessions:
+            status_val = str(confirmation_map.get(session.id, 'pending') or 'pending').lower()
+            if status_val == 'confirmed':
+                session_ids_skipped_confirmed.append(session.id)
+                print(f"[DELETE EXPERIMENT] Skipping confirmed session {session.id}: {session.filename}")
+                continue
             print(f"[DELETE EXPERIMENT] Deleting session {session.id}: {session.filename}")
             
             # Delete wells for this session
@@ -2327,6 +2399,7 @@ def delete_experiment_by_pattern(experiment_pattern):
             'success': True,
             'message': f'Deleted experiment {experiment_pattern}',
             'sessions_deleted': len(session_ids_deleted),
+            'sessions_skipped_confirmed': session_ids_skipped_confirmed,
             'session_ids': session_ids_deleted,
             'wells_deleted': total_wells_deleted
         })
@@ -2338,6 +2411,7 @@ def delete_experiment_by_pattern(experiment_pattern):
 
 # Alternative delete endpoint with enhanced error handling
 @app.route('/sessions/<int:session_id>/force-delete', methods=['DELETE'])
+@production_admin_only
 def force_delete_session(session_id):
     """Force delete a session with enhanced error handling"""
     try:
@@ -2414,6 +2488,74 @@ def force_delete_session(session_id):
         tb = traceback.format_exc()
         print(f"[FORCE DELETE ERROR] {e}\nTraceback:\n{tb}")
         return jsonify({'error': f'Force delete failed: {str(e)}'}), 500
+
+@app.route('/api/sessions/delete-confirmed', methods=['POST'])
+@production_admin_only
+def admin_delete_confirmed_session():
+    """ADMIN ONLY: Delete a confirmed analysis session and its wells"""
+    try:
+        data = request.get_json() or {}
+        session_id = data.get('session_id')
+        if not session_id:
+            return jsonify({'success': False, 'message': 'Missing session_id'}), 400
+        
+        import mysql.connector
+        mysql_config = {
+            'host': os.environ.get('MYSQL_HOST', 'localhost'),
+            'user': os.environ.get('MYSQL_USER', 'qpcr_user'),
+            'password': os.environ.get('MYSQL_PASSWORD', 'qpcr_password'),
+            'database': os.environ.get('MYSQL_DATABASE', 'qpcr_analysis')
+        }
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor()
+        try:
+            # Verify confirmed status
+            confirmation_status = None
+            cursor.execute("SHOW COLUMNS FROM analysis_sessions LIKE 'confirmation_status'")
+            if cursor.fetchone():
+                cursor.execute("SELECT filename, confirmation_status FROM analysis_sessions WHERE id = %s", (session_id,))
+                row = cursor.fetchone()
+                if not row:
+                    return jsonify({'success': False, 'message': f'Session {session_id} not found'}), 404
+                filename, confirmation_status = row[0], row[1]
+                is_confirmed = str(confirmation_status or '').lower() == 'confirmed'
+            else:
+                cursor.execute("SHOW COLUMNS FROM analysis_sessions LIKE 'is_confirmed'")
+                if cursor.fetchone():
+                    cursor.execute("SELECT filename, is_confirmed FROM analysis_sessions WHERE id = %s", (session_id,))
+                    row = cursor.fetchone()
+                    if not row:
+                        return jsonify({'success': False, 'message': f'Session {session_id} not found'}), 404
+                    filename, is_conf = row[0], int(row[1] or 0)
+                    is_confirmed = is_conf == 1
+                else:
+                    # If no explicit flag, allow admin to proceed
+                    cursor.execute("SELECT filename FROM analysis_sessions WHERE id = %s", (session_id,))
+                    row = cursor.fetchone()
+                    if not row:
+                        return jsonify({'success': False, 'message': f'Session {session_id} not found'}), 404
+                    filename = row[0]
+                    is_confirmed = True
+            
+            if not is_confirmed:
+                return jsonify({'success': False, 'message': 'Session is not confirmed. Use pending delete endpoint.'}), 400
+            
+            # Delete wells then session
+            cursor.execute("DELETE FROM well_results WHERE session_id = %s", (session_id,))
+            cursor.execute("DELETE FROM analysis_sessions WHERE id = %s", (session_id,))
+            affected = cursor.rowcount
+            if affected == 0:
+                conn.rollback()
+                return jsonify({'success': False, 'message': f'Failed to delete session {session_id}'}), 500
+            conn.commit()
+            app.logger.info(f"✓ ADMIN deleted confirmed session {session_id} ({filename})")
+            return jsonify({'success': True, 'message': f'Successfully deleted confirmed session {session_id}', 'filename': filename})
+        finally:
+            cursor.close()
+            conn.close()
+    except Exception as e:
+        app.logger.error(f"Error deleting confirmed session: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/experiments/statistics', methods=['POST'])
 def save_experiment_statistics():
@@ -4683,7 +4825,7 @@ def mysql_admin_get_tables():
         conn = mysql.connector.connect(**mysql_config)
         cursor = conn.cursor(dictionary=True)
         
-        # Get table information
+        # Get table information (schema metadata; TABLE_ROWS is approximate for InnoDB)
         cursor.execute("""
             SELECT 
                 TABLE_NAME as name,
@@ -4696,10 +4838,22 @@ def mysql_admin_get_tables():
         """)
         
         tables = cursor.fetchall()
-        
-        # Convert rows to int (it might be None for some tables)
+
+        # Compute exact row counts with SELECT COUNT(*) to fix inaccurate TABLE_ROWS
         for table in tables:
-            table['rows'] = int(table['table_rows']) if table['table_rows'] is not None else 0
+            name = table['name']
+            exact_count = None
+            try:
+                cursor.execute(f"SELECT COUNT(*) AS cnt FROM `{name}`")
+                res = cursor.fetchone()
+                exact_count = int(res['cnt'] if isinstance(res, dict) else res[0])
+            except Exception as e:
+                # Fall back to approximate count if direct count fails (e.g., permissions)
+                exact_count = int(table['table_rows']) if table.get('table_rows') is not None else 0
+                table['count_error'] = str(e)
+
+            table['rows'] = exact_count
+            table['approx_rows'] = int(table['table_rows']) if table.get('table_rows') is not None else 0
             table['data_length'] = int(table['data_length']) if table['data_length'] is not None else 0
         
         cursor.close()
@@ -4793,6 +4947,20 @@ def mysql_admin_get_table_info(table_name):
         """, (table_name,))
         
         stats = cursor.fetchone()
+
+        # Add exact row count (COUNT(*)) for accuracy
+        try:
+            cursor.execute(f"SELECT COUNT(*) AS cnt FROM `{table_name}`")
+            res = cursor.fetchone()
+            exact = int(res['cnt'] if isinstance(res, dict) else res[0])
+        except Exception as e:
+            exact = stats['row_count'] if stats and stats.get('row_count') is not None else 0
+            if stats is None:
+                stats = {}
+            stats['count_error'] = str(e)
+        if stats is None:
+            stats = {}
+        stats['exact_row_count'] = exact
         
         # Get indexes
         cursor.execute(f"SHOW INDEX FROM {table_name}")

@@ -278,12 +278,25 @@ class MLRunManager:
                 'confirmation_rate': round((confirmed_count / (confirmed_count + rejected_count)) * 100, 2) if (confirmed_count + rejected_count) > 0 else 0
             }
     
-    def delete_run(self, run_id):
-        """Delete a run from both tables"""
+    def delete_run(self, run_id, include_confirmed=False):
+        """Delete a run: pending log always; confirmed only if explicitly allowed"""
         with self.engine.connect() as conn:
+            # Always allow deleting from logs (pending/rejected entries)
             conn.execute(text('DELETE FROM ml_run_logs WHERE run_id = :run_id'), {'run_id': run_id})
-            conn.execute(text('DELETE FROM ml_confirmed_runs WHERE run_id = :run_id'), {'run_id': run_id})
-            
+            deleted_confirmed = 0
+            if include_confirmed:
+                result = conn.execute(text('DELETE FROM ml_confirmed_runs WHERE run_id = :run_id'), {'run_id': run_id})
+                try:
+                    deleted_confirmed = result.rowcount  # type: ignore[attr-defined]
+                except Exception:
+                    deleted_confirmed = 0
             conn.commit()
-            
-            return {'success': True, 'message': f'Run {run_id} deleted'}
+            msg = f"Run {run_id} deleted from logs" + (" and confirmed runs" if include_confirmed and deleted_confirmed else "")
+            return {'success': True, 'message': msg}
+
+    def delete_confirmed_run_admin(self, run_id):
+        """ADMIN USE: Delete a confirmed run record"""
+        with self.engine.connect() as conn:
+            conn.execute(text('DELETE FROM ml_confirmed_runs WHERE run_id = :run_id'), {'run_id': run_id})
+            conn.commit()
+            return {'success': True, 'message': f'Confirmed run {run_id} deleted'}
