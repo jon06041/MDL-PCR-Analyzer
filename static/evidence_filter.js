@@ -278,6 +278,8 @@ window.EvidenceFilter = {
     computeDedupedEvidenceSourcesCount,
     normalizeBaseFilename,
     getGlobalEvidenceCount,
+    classifyEvidenceSourceCategory,
+    shouldIncludeSourceForRequirement,
     REQUIREMENT_EVIDENCE_MAPPING,
     EVIDENCE_TYPE_DESCRIPTIONS
 };
@@ -396,4 +398,35 @@ function getGlobalEvidenceCount(requirements, cachedSessions, encryptionPresence
     } catch {}
 
     return sessionBases.size + sourcesCount + encCount;
+}
+
+/**
+ * Try to classify an evidence source into a broader category for matching
+ */
+function classifyEvidenceSourceCategory(source) {
+    const et = ((source && source.evidence_type) || '').toLowerCase();
+    const desc = ((source && source.description) || '').toLowerCase();
+    const filename = ((source && source.filename) || '').toLowerCase();
+    const text = `${et} ${desc} ${filename}`;
+    if (/(encryption|crypt|phi|signature|security|authentication)/.test(text)) return 'encryption_evidence';
+    if (/(validation|software validation|test run|analysis session|amplification|cq|calcj|session)/.test(text)) return 'run_files';
+    if (/(audit|access log|activity log|trail)/.test(text)) return 'audit_logs';
+    if (/(documentation|sop|procedure|policy|manual)/.test(text)) return 'documentation';
+    if (/(risk|hazard|mitigation)/.test(text)) return 'risk_management';
+    return 'general';
+}
+
+/**
+ * Decide if an evidence source belongs in a requirement's modal based on mapping
+ */
+function shouldIncludeSourceForRequirement(reqCode, source) {
+    const allowed = REQUIREMENT_EVIDENCE_MAPPING[reqCode] || REQUIREMENT_EVIDENCE_MAPPING['default'];
+    const cat = classifyEvidenceSourceCategory(source);
+    if (allowed.includes('encryption_evidence') && cat === 'encryption_evidence') return true;
+    if ((allowed.includes('run_files') || allowed.includes('validation_tests')) && cat === 'run_files') return true;
+    if (allowed.includes('audit_logs') && cat === 'audit_logs') return true;
+    if (allowed.includes('documentation') && cat === 'documentation') return true;
+    if (allowed.includes('risk_management') && cat === 'risk_management') return true;
+    // Otherwise, exclude to keep category-appropriate content only
+    return false;
 }

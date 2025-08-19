@@ -1287,7 +1287,13 @@
                 console.log('Using new evidence_sources for', reqCode, ':', requirement.evidence_sources.length, 'sources');
 
                 // Group repeated Data Integrity/File Validation entries by day to reduce noise
-                const rawSources = Array.isArray(requirement.evidence_sources) ? requirement.evidence_sources.slice() : [];
+                // Also filter to category-appropriate entries for this requirement
+                const allSources = Array.isArray(requirement.evidence_sources) ? requirement.evidence_sources.slice() : [];
+                const rawSources = allSources.filter(s => {
+                    try {
+                        return window.EvidenceFilter?.shouldIncludeSourceForRequirement?.(reqCode, s) ?? true;
+                    } catch { return true; }
+                });
                 const renderSources = (() => {
                     // Group by YYYY-MM-DD for integrity/validation types
                     const groups = new Map();
