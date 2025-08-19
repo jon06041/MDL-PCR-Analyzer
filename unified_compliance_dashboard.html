@@ -877,7 +877,21 @@
             // Derive Currently Tracking from grouped implementation statuses to keep groups exclusive
             // active + partial are considered currently tracking; ready_to_implement/planned are not
             const currentlyTracking = (complianceData.active?.length || 0) + (complianceData.partial?.length || 0);
-            const totalEvidence = dashboardData.total_events || 0;
+            // Use deduplicated global evidence count when available; fallback to backend summary
+            let totalEvidence = 0;
+            try {
+                if (window.EvidenceFilter?.getGlobalEvidenceCount) {
+                    totalEvidence = window.EvidenceFilter.getGlobalEvidenceCount(
+                        window.requirementsData || [],
+                        window.cachedSessions || { confirmed: [], pending: [] },
+                        window.encryptionPresenceByReq || {}
+                    ) || 0;
+                } else {
+                    totalEvidence = dashboardData.total_events || 0;
+                }
+            } catch {
+                totalEvidence = dashboardData.total_events || 0;
+            }
             
             // Calculate display groups using complianceData
             const readyToImplementCount = (complianceData.ready_to_implement || []).length;

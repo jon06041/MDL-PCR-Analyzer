@@ -178,16 +178,26 @@ function getRelevantEvidenceCount(reqCode, confirmedSessions, pendingSessions, e
     const filtered = filterEvidenceForRequirement(reqCode, confirmedSessions, pendingSessions, encryptionData);
 
     let count = 0;
-    // Session-based evidence
-    count += filtered.confirmedSessions.length;
-    count += filtered.pendingSessions.length;
+
+    // Session-based evidence (dedupe by base filename to avoid channel-derived duplicates)
+    const sessionBaseSet = new Set();
+    try {
+        const addSession = (s) => {
+            const fn = (s && (s.filename || s.file_name || s.name)) || '';
+            const base = normalizeBaseFilename(fn);
+            if (base) sessionBaseSet.add(base);
+        };
+        (filtered.confirmedSessions || []).forEach(addSession);
+        (filtered.pendingSessions || []).forEach(addSession);
+    } catch {}
+    count += sessionBaseSet.size;
 
     // Count encryption evidence as individual records when available
     count += countEncryptionRecords(filtered.encryptionData);
 
-    // Count pre-materialized evidence sources coming from the API (e.g., encryption items)
-    if (Array.isArray(evidenceSources)) {
-        count += evidenceSources.length;
+    // Count pre-materialized evidence sources from the API with deduplication
+    if (Array.isArray(evidenceSources) && evidenceSources.length) {
+        count += computeDedupedEvidenceSourcesCount(evidenceSources);
     }
 
     return count;
@@ -264,6 +274,10 @@ window.EvidenceFilter = {
     getRelevantEvidenceCount,
     countEncryptionRecords,
     getEvidenceTypeBadge,
+    // expose helpers for dashboard-wide metrics
+    computeDedupedEvidenceSourcesCount,
+    normalizeBaseFilename,
+    getGlobalEvidenceCount,
     REQUIREMENT_EVIDENCE_MAPPING,
     EVIDENCE_TYPE_DESCRIPTIONS
 };
@@ -288,3 +302,98 @@ window.getFilteredEvidenceForRequirement = function(reqCode, allSessions) {
 };
 
 console.log('✅ Evidence Filter System v1.0 loaded successfully');
+
+/**
+ * Normalize a base filename by stripping derived view suffixes and channel suffixes
+ * Examples:
+ *  AcBVAB_2590898_CFX369291_-_End_Point -> AcBVAB_2590898_CFX369291
+ *  AcBVAB_2590898_CFX369291 - Quantification Amplification Results_FAM.csv -> AcBVAB_2590898_CFX369291
+ */
+function normalizeBaseFilename(filename) {
+    if (!filename || typeof filename !== 'string') return '';
+    let base = filename.trim();
+    // Drop extension
+    base = base.replace(/\.[A-Za-z0-9]+$/i, '');
+    // Remove known derived view suffixes
+    base = base.replace(/-\s*_(End|Melt)_?Point.*$/i, '')
+               .replace(/-\s*_?Melt_Curve_Plate_View.*$/i, '')
+               .replace(/-\s*_?Melt_Curve.*$/i, '')
+               .replace(/-\s*_?End_Point.*$/i, '');
+    // Remove channelized export suffix like " - Quantification Amplification Results_FAM"
+    base = base.replace(/\s+-\s+Quantification\s+Amplification\s+Results_[A-Za-z0-9]+$/i, '');
+    // Remove trailing channel fragments like " - FAM" or "_FAM"
+    base = base.replace(/\s*-\s*(FAM|HEX|Cy5|Texas\s*Red)$/i, '')
+               .replace(/_(FAM|HEX|Cy5|TexasRed)$/i, '');
+    // Trim trailing separators
+    base = base.replace(/\s*-\s*$/,'');
+    return base;
+}
+
+/**
+ * Compute deduped count for evidence sources: group repeated Data Integrity/File Validation by day
+ */
+function computeDedupedEvidenceSourcesCount(evidenceSources) {
+    try {
+        const groups = new Map();
+        let others = 0;
+        for (const s of evidenceSources) {
+            const et = ((s && s.evidence_type) || '').toLowerCase();
+            const isIntegrity = et.includes('data integrity') || et.includes('file validation');
+            if (!isIntegrity) { others++; continue; }
+            let dateKey = 'unknown';
+            try {
+                const d = new Date(s.created_at || s.updated_at || Date.now());
+                if (!isNaN(d.getTime())) dateKey = d.toISOString().slice(0,10);
+            } catch {}
+            const key = `${et}__${dateKey}`;
+            groups.set(key, (groups.get(key) || 0) + 1);
+        }
+        return groups.size + others;
+    } catch {
+        return Array.isArray(evidenceSources) ? evidenceSources.length : 0;
+    }
+}
+
+/**
+ * Compute a global, deduplicated evidence total for dashboard metric
+ * - Dedup sessions by base filename
+ * - Group integrity/validation evidence sources by day
+ * - Count encryption evidence records individually
+ */
+function getGlobalEvidenceCount(requirements, cachedSessions, encryptionPresenceByReq) {
+    const reqs = Array.isArray(requirements) ? requirements : [];
+    const confirmed = (cachedSessions && cachedSessions.confirmed) || [];
+    const pending = (cachedSessions && cachedSessions.pending) || [];
+
+    // 1) Session files (dedupe by base)
+    const sessionBases = new Set();
+    const addSess = (s) => {
+        const fn = (s && (s.filename || s.file_name || s.name)) || '';
+        const base = normalizeBaseFilename(fn);
+        if (base) sessionBases.add(base);
+    };
+    try { confirmed.forEach(addSess); } catch {}
+    try { pending.forEach(addSess); } catch {}
+
+    // 2) Evidence sources from requirements (dedupe integrity rows)
+    let sourcesCount = 0;
+    for (const r of reqs) {
+        if (Array.isArray(r.evidence_sources) && r.evidence_sources.length) {
+            sourcesCount += computeDedupedEvidenceSourcesCount(r.evidence_sources);
+        }
+    }
+
+    // 3) Encryption evidence records
+    let encCount = 0;
+    try {
+        const mapping = window.EvidenceFilter?.REQUIREMENT_EVIDENCE_MAPPING || {};
+        for (const r of reqs) {
+            const needsEnc = Array.isArray(mapping[r.id]) && mapping[r.id].includes('encryption_evidence');
+            if (!needsEnc) continue;
+            const encData = encryptionPresenceByReq ? encryptionPresenceByReq[r.id] : null;
+            encCount += countEncryptionRecords(encData);
+        }
+    } catch {}
+
+    return sessionBases.size + sourcesCount + encCount;
+}
