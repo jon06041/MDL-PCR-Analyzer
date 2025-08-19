@@ -595,4 +595,6 @@ if (typeof module !== 'undefined' && module.exports) {
     window.getPathogenTarget = getPathogenTarget;
     window.getRequiredChannels = getRequiredChannels;
     window.getPathogenName = getPathogenName;
+    // Also expose fluorophore extractor for UI fallbacks (pending sessions, etc.)
+    window.extractFluorophoreFromFilename = extractFluorophoreFromFilename;
 }

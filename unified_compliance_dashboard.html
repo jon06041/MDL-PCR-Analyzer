@@ -1766,10 +1766,35 @@
                                                 let pathogenInfo = (session.pathogen_breakdown || '').split(':')[0].trim();
                                                 let pathogenBadgeClass = 'bg-info';
                                                 let pathogenTitle = '';
+                                                
+                                                // If missing/unknown, try to infer from filename using pathogen library helpers
                                                 if (!pathogenInfo || pathogenInfo.toLowerCase() === 'unknown' || pathogenInfo === '-') {
-                                                    pathogenInfo = 'N/A';
-                                                    pathogenBadgeClass = 'bg-secondary';
-                                                    pathogenTitle = 'No pathogen metadata for this session (not applicable or missing)';
+                                                    const filename = session.filename || '';
+                                                    // Extract test code from base pattern (e.g., AcMgen_... -> Mgen)
+                                                    let inferredTest = '';
+                                                    try {
+                                                        if (window.extractTestCode) {
+                                                            // Handle multi-fluorophore prefix and trim artifacts
+                                                            const base = filename.replace(/ -\s+Quantification Amplification Results_[A-Za-z0-9\s]+\.csv$/, '')
+                                                                                .replace(/\s+-\s*$/, '');
+                                                            inferredTest = window.extractTestCode(base);
+                                                        }
+                                                    } catch (e) { /* noop */ }
+                                                    // Map to friendly pathogen name when possible
+                                                    if (inferredTest) {
+                                                        const friendly = window.getPathogenName ? window.getPathogenName(inferredTest) : inferredTest;
+                                                        if (friendly && friendly.toLowerCase() !== 'unknown pathogen') {
+                                                            pathogenInfo = friendly;
+                                                            pathogenBadgeClass = 'bg-info';
+                                                            pathogenTitle = 'Inferred from filename';
+                                                        }
+                                                    }
+                                                    // Final fallback
+                                                    if (!pathogenInfo || pathogenInfo.toLowerCase() === 'unknown' || pathogenInfo === '-' ) {
+                                                        pathogenInfo = 'N/A';
+                                                        pathogenBadgeClass = 'bg-secondary';
+                                                        pathogenTitle = 'No pathogen metadata for this session (not applicable or missing)';
+                                                    }
                                                 }
                                                 const uploadDate = session.upload_timestamp ? new Date(session.upload_timestamp).toLocaleString() : 'N/A';
                                                 const wells = session.total_wells || 0;
