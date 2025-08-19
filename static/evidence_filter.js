@@ -35,8 +35,10 @@ const REQUIREMENT_EVIDENCE_MAPPING = {
     'CFR_11_10_B': ['encryption_evidence', 'audit_logs'],
     // C: Record protection (documentation + some run evidence)
     'CFR_11_10_C': ['documentation', 'run_files'],
-    // D: Audit trail (audit logs)
-    'CFR_11_10_D': ['audit_logs'],
+    // FDA-prefixed alias for 11.10(c)
+    'FDA_CFR_21_11_10_C': ['documentation', 'run_files'],
+    // D: Archive protection / record retention (documentation + run files as supporting proof)
+    'CFR_11_10_D': ['documentation', 'run_files'],
     // E: Controls for system access/security (encryption)
     'CFR_11_10_E': ['encryption_evidence'],
     
@@ -55,11 +57,97 @@ const EVIDENCE_TYPE_DESCRIPTIONS = {
     'software_validation': 'Software Lifecycle and Validation Evidence'
 };
 
+// ---- Policy overrides (per-requirement) stored in localStorage ----
+const POLICY_OVERRIDES_KEY = 'evidence_policy_overrides_v1';
+
+function loadPolicyOverrides() {
+    try {
+        const raw = localStorage.getItem(POLICY_OVERRIDES_KEY);
+        if (!raw) return {};
+        const obj = JSON.parse(raw);
+        return (obj && typeof obj === 'object') ? obj : {};
+    } catch { return {}; }
+}
+
+function savePolicyOverrides(map) {
+    try { localStorage.setItem(POLICY_OVERRIDES_KEY, JSON.stringify(map || {})); } catch {}
+}
+
+function getPolicyOverride(reqCode) {
+    try {
+        const map = loadPolicyOverrides();
+        const val = map[reqCode];
+        if (Array.isArray(val) && val.length) return val;
+        return null;
+    } catch { return null; }
+}
+
+function setPolicyOverride(reqCode, allowedTypes) {
+    try {
+        const map = loadPolicyOverrides();
+        // sanitize to known categories only
+        const known = ['run_files', 'validation_tests', 'encryption_evidence', 'audit_logs', 'documentation', 'risk_management'];
+        const clean = (Array.isArray(allowedTypes) ? allowedTypes : []).filter(t => known.includes(t));
+        if (!clean.length) {
+            delete map[reqCode];
+        } else {
+            map[reqCode] = clean;
+        }
+        savePolicyOverrides(map);
+        return true;
+    } catch { return false; }
+}
+
+function clearPolicyOverride(reqCode) {
+    try {
+        const map = loadPolicyOverrides();
+        delete map[reqCode];
+        savePolicyOverrides(map);
+    } catch {}
+}
+
 /**
  * Filter evidence based on requirement type
  */
+function getAllowedEvidenceTypes(reqCode) {
+    try {
+        if (!reqCode || typeof reqCode !== 'string') return REQUIREMENT_EVIDENCE_MAPPING['default'];
+        const code = reqCode.toUpperCase();
+    // 0) Per-requirement override from UI
+    const override = getPolicyOverride(reqCode);
+    if (override) return override;
+        // Direct mapping first
+        if (REQUIREMENT_EVIDENCE_MAPPING[reqCode]) return REQUIREMENT_EVIDENCE_MAPPING[reqCode];
+
+        // Heuristics by pattern for unmapped IDs
+        // Access control / RBAC
+        if (/RBAC|ACCESS[_\s-]*CONTROL|ISO[_\s-]*27001.*A[_\s-]*9/.test(code)) {
+            return ['audit_logs', 'encryption_evidence'];
+        }
+        // Encryption / security controls
+        if (/ENCRYPT|CRYPTO|SECURITY|HIPAA[_\s-]*164[_\s-]*312/.test(code)) {
+            return ['encryption_evidence'];
+        }
+        // Audit trail
+        if (/AUDIT[_\s-]*TRAIL|CFR[_\s-]*11[_\s-]*10[_\s-]*D/.test(code)) {
+            return ['audit_logs'];
+        }
+        // Validation requirements
+        if (/VALIDATION|CFR[_\s-]*11[_\s-]*10[_\s-]*A|ISO[_\s-]*13485[_\s-]*4[_\s-]*1[_\s-]*6|ISO[_\s-]*14971[_\s-]*4[_\s-]*4/.test(code)) {
+            return ['run_files', 'validation_tests'];
+        }
+        // Quality management
+        if (/ISO[_\s-]*13485/.test(code)) {
+            return ['run_files', 'documentation'];
+        }
+        return REQUIREMENT_EVIDENCE_MAPPING['default'];
+    } catch {
+        return REQUIREMENT_EVIDENCE_MAPPING['default'];
+    }
+}
+
 function filterEvidenceForRequirement(reqCode, confirmedSessions, pendingSessions, encryptionData) {
-    const allowedEvidenceTypes = REQUIREMENT_EVIDENCE_MAPPING[reqCode] || REQUIREMENT_EVIDENCE_MAPPING['default'];
+    const allowedEvidenceTypes = getAllowedEvidenceTypes(reqCode);
     
     const filteredEvidence = {
         confirmedSessions: [],
@@ -107,10 +195,19 @@ function filterEvidenceForRequirement(reqCode, confirmedSessions, pendingSession
  * Determine requirement type for better categorization
  */
 function getRequirementType(reqCode) {
+    // Prefer explicit classifiers
     if (isValidationRequirement(reqCode)) return 'software_validation';
     if (isEncryptionRequirement(reqCode)) return 'data_protection';
     if (isQualityRequirement(reqCode)) return 'quality_management';
     if (isAccessControlRequirement(reqCode)) return 'access_control';
+    // Fallback to allowed evidence policy to infer type for custom IDs
+    try {
+        const allowed = getAllowedEvidenceTypes(reqCode) || [];
+        if (allowed.includes('encryption_evidence') && !allowed.includes('run_files')) return 'data_protection';
+        if (allowed.includes('audit_logs') && !allowed.includes('run_files')) return 'access_control';
+        if (allowed.includes('run_files') || allowed.includes('validation_tests')) return 'software_validation';
+        if (allowed.includes('documentation')) return 'quality_management';
+    } catch {}
     return 'general';
 }
 
@@ -143,7 +240,12 @@ function isEncryptionRequirement(reqCode) {
  * Check if requirement is for quality management
  */
 function isQualityRequirement(reqCode) {
-    return reqCode.includes('ISO_13485') && !isValidationRequirement(reqCode);
+    if (reqCode.includes('ISO_13485') && !isValidationRequirement(reqCode)) return true;
+    // Treat record protection CFR 11.10(c) and archive protection CFR 11.10(d) as documentation oriented
+    const code = (reqCode || '').toUpperCase();
+    if (/CFR[_\s-]*11[_\s-]*10[_\s-]*C/.test(code)) return true;
+    if (/CFR[_\s-]*11[_\s-]*10[_\s-]*D/.test(code)) return true;
+    return false;
 }
 
 /**
@@ -176,6 +278,7 @@ function getEvidenceDescription(reqCode, evidenceCount) {
  */
 function getRelevantEvidenceCount(reqCode, confirmedSessions, pendingSessions, encryptionData, evidenceSources = []) {
     const filtered = filterEvidenceForRequirement(reqCode, confirmedSessions, pendingSessions, encryptionData);
+    const allowedEvidenceTypes = getAllowedEvidenceTypes(reqCode);
 
     let count = 0;
 
@@ -195,9 +298,14 @@ function getRelevantEvidenceCount(reqCode, confirmedSessions, pendingSessions, e
     // Count encryption evidence as individual records when available
     count += countEncryptionRecords(filtered.encryptionData);
 
-    // Count pre-materialized evidence sources from the API with deduplication
+    // Count pre-materialized evidence sources from the API with deduplication, after category filtering
     if (Array.isArray(evidenceSources) && evidenceSources.length) {
-        count += computeDedupedEvidenceSourcesCount(evidenceSources);
+        try {
+            const filteredSources = evidenceSources.filter(s => shouldIncludeSourceForRequirement(reqCode, s));
+            count += computeDedupedEvidenceSourcesCount(filteredSources);
+        } catch {
+            count += computeDedupedEvidenceSourcesCount(evidenceSources);
+        }
     }
 
     return count;
@@ -280,6 +388,11 @@ window.EvidenceFilter = {
     getGlobalEvidenceCount,
     classifyEvidenceSourceCategory,
     shouldIncludeSourceForRequirement,
+    // policy override helpers
+    getAllowedEvidenceTypes,
+    getPolicyOverride,
+    setPolicyOverride,
+    clearPolicyOverride,
     REQUIREMENT_EVIDENCE_MAPPING,
     EVIDENCE_TYPE_DESCRIPTIONS
 };
@@ -303,7 +416,7 @@ window.getFilteredEvidenceForRequirement = function(reqCode, allSessions) {
     return allSessions;
 };
 
-console.log('✅ Evidence Filter System v1.0 loaded successfully');
+console.log('✅ Evidence Filter System v1.1 loaded successfully (2025-08-19)');
 
 /**
  * Normalize a base filename by stripping derived view suffixes and channel suffixes
@@ -407,11 +520,33 @@ function classifyEvidenceSourceCategory(source) {
     const et = ((source && source.evidence_type) || '').toLowerCase();
     const desc = ((source && source.description) || '').toLowerCase();
     const filename = ((source && source.filename) || '').toLowerCase();
-    const text = `${et} ${desc} ${filename}`;
-    if (/(encryption|crypt|phi|signature|security|authentication)/.test(text)) return 'encryption_evidence';
-    if (/(validation|software validation|test run|analysis session|amplification|cq|calcj|session)/.test(text)) return 'run_files';
+    const extra = ((source && (source.category || source.type)) || '').toLowerCase();
+    const text = `${et} ${desc} ${filename} ${extra}`;
+
+    // 1) Access control / Entra / Azure AD signals → audit logs
+    // Prioritize these before generic security/authentication checks
+    const accessControlPatterns = [
+        /\bentra\b|\bentra id\b|\bazure\s*ad\b|\bazuread\b|\baad\b|\bmsal\b|\boauth\b|\bsaml\b|\bsso\b/,
+        /sign[- ]?in|login|logout|conditional access|access review|audit log|directory audit|unified audit|activity log/,
+        /rbac|role assignment|role-based|user assignment|group membership|enterprise application|app registration|service principal/
+    ];
+    if (accessControlPatterns.some((rx) => rx.test(text))) return 'audit_logs';
+
+    // 2) Encryption / security controls (non-access-log specific)
+    if (/(encryption|crypt|phi|signature|security)(?!.*(audit|sign[- ]?in|login|entra|azure\s*ad))/ .test(text)) {
+        return 'encryption_evidence';
+    }
+
+    // 3) qPCR run / validation artifacts — be stricter to avoid matching generic "session"
+    const runFilesPatterns = [
+        /\bvalidation\b|software validation|test run\b|verification\b/,
+        /amplification|cq\b|calcj\b|threshold|baseline|standard curve|control wells|cqj/,
+        /qpcr|pcr\b|cfx\b|well\b|plate\b|fluorophore|fam\b|hex\b|cy5\b|texas\s*red/
+    ];
+    if (runFilesPatterns.some((rx) => rx.test(text))) return 'run_files';
+
     if (/(audit|access log|activity log|trail)/.test(text)) return 'audit_logs';
-    if (/(documentation|sop|procedure|policy|manual)/.test(text)) return 'documentation';
+    if (/(documentation|sop|procedure|policy|manual|archive|backup|retention|record protection|data retention)/.test(text)) return 'documentation';
     if (/(risk|hazard|mitigation)/.test(text)) return 'risk_management';
     return 'general';
 }
@@ -420,7 +555,7 @@ function classifyEvidenceSourceCategory(source) {
  * Decide if an evidence source belongs in a requirement's modal based on mapping
  */
 function shouldIncludeSourceForRequirement(reqCode, source) {
-    const allowed = REQUIREMENT_EVIDENCE_MAPPING[reqCode] || REQUIREMENT_EVIDENCE_MAPPING['default'];
+    const allowed = getAllowedEvidenceTypes(reqCode);
     const cat = classifyEvidenceSourceCategory(source);
     if (allowed.includes('encryption_evidence') && cat === 'encryption_evidence') return true;
     if ((allowed.includes('run_files') || allowed.includes('validation_tests')) && cat === 'run_files') return true;
@@ -430,3 +565,4 @@ function shouldIncludeSourceForRequirement(reqCode, source) {
     // Otherwise, exclude to keep category-appropriate content only
     return false;
 }
+

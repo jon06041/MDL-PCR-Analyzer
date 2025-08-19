@@ -23,181 +23,110 @@
         .dashboard-container {
             max-width: 1600px;
             margin: 0 auto;
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-            overflow: hidden;
-        }
-
-        .header {
-            background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
-            color: white;
-            padding: 30px;
-            text-align: center;
-            position: relative;
-        }
-
-        .back-button {
-            position: absolute;
-            left: 30px;
-            top: 50%;
-            transform: translateY(-50%);
-            background: rgba(255, 255, 255, 0.2);
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            color: white;
-            padding: 12px 20px;
-            border-radius: 50px;
-            text-decoration: none;
-            transition: all 0.3s ease;
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .back-button:hover {
-            background: rgba(255, 255, 255, 0.3);
-            border-color: rgba(255, 255, 255, 0.5);
-            color: white;
-            text-decoration: none;
-            transform: translateY(-50%) scale(1.05);
-        }
-
-        .header h1 {
-            font-size: 2.8em;
-            margin-bottom: 10px;
-            font-weight: 300;
-        }
-
-        .header p {
-            font-size: 1.3em;
-            opacity: 0.9;
-        }
-
-        .compliance-score {
-            position: absolute;
-            top: 20px;
-            right: 30px;
-            background: rgba(255, 255, 255, 0.2);
-            padding: 15px 25px;
-            border-radius: 50px;
-            backdrop-filter: blur(10px);
-        }
-
-        .score-number {
-            font-size: 2.2em;
-            font-weight: bold;
-        }
-
-        .score-label {
-            font-size: 0.9em;
-            opacity: 0.8;
-        }
-
-        .controls {
-            padding: 20px 30px;
-            background: #f8f9fa;
-            border-bottom: 1px solid #e9ecef;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 15px;
-        }
-        
-        .status-card {
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            margin-bottom: 1.5rem;
-            transition: transform 0.2s;
-        }
-        
-        .status-card:hover {
-            transform: translateY(-2px);
-        }
-        
-        .status-active { border-left: 5px solid #28a745; }
-        .status-partial { border-left: 5px solid #ffc107; }
-        .status-planned { border-left: 5px solid #17a2b8; }
         .status-ready { border-left: 5px solid #6f42c1; }
-        
-        .evidence-badge {
-            font-size: 0.8em;
-            padding: 0.3rem 0.6rem;
-            border-radius: 15px;
-            margin: 0.2rem;
-            display: inline-block;
+        /* Evidence configurator JS moved to <script> block below */
+                    audit_logs: ['bg-warning text-dark','Audit Logs'],
+                    documentation: ['bg-info','Documentation'],
+                    risk_management: ['bg-secondary','Risk Mgmt']
+                }; return map[t] || ['bg-secondary','General'];
+            };
+
+            // Build dynamic IDs to avoid collisions and remove inline JS
+            const cfgContainerId = `policyConfigurator-${req.id}`;
+            const toggleBtnId = `policyToggle-${req.id}`;
+            const saveBtnId = `policySave-${req.id}`;
+            const clearBtnId = `policyClear-${req.id}`;
+
+            const selected = new Set(allowed);
+            const badges = allowed.map(t => {
+                const [cls, txt] = badgeFor(t); return `<span class="badge ${cls} me-1">${txt}</span>`;
+            }).join(' ');
+            const tips = allowed.map(t => `<li>${examples[t]}</li>`).join('');
+
+            // Render markup without inline event handlers
+            host.innerHTML = `
+                <div class="alert alert-light border">
+                    <div class="d-flex justify-content-between align-items-start flex-wrap">
+                        <div class="me-2">
+                            <strong>What counts as evidence for this requirement?</strong><br>
+                            ${badges || '<span class="badge bg-secondary">Unspecified</span>'}
+                            ${tips ? `<ul class="mb-0 mt-2">${tips}</ul>` : '<small class="text-muted">Use the configurator to choose expected evidence types for this requirement.</small>'}
+                        </div>
+                        <div>
+                            <button id="${toggleBtnId}" class="btn btn-sm btn-outline-secondary" type="button">Configure</button>
+                        </div>
+                    </div>
+                    <div id="${cfgContainerId}" class="mt-2" style="display: none;">
+                        <div class="row g-2">
+                            ${allTypes.map(t => {
+                                const checked = selected.has(t) ? 'checked' : '';
+                                const [cls, txt] = badgeFor(t);
+                                const cbId = `cfg_${req.id}_${t}`;
+                                return `
+                                    <div class=\"col-md-4\">
+                                        <div class=\"form-check\">
+                                            <input class=\"form-check-input\" type=\"checkbox\" id=\"${cbId}\" value=\"${t}\" ${checked}>
+                                            <label class=\"form-check-label\" for=\"${cbId}\">\n                                                <span class=\"badge ${cls}\">${txt}</span>\n                                            </label>
+                                        </div>
+                                        <small class=\"text-muted\">${examples[t]}</small>
+                                    </div>`;
+                            }).join('')}
+                        </div>
+                        <div class="mt-3 d-flex gap-2">
+                            <button id="${saveBtnId}" class="btn btn-sm btn-primary">Save</button>
+                            <button id="${clearBtnId}" class="btn btn-sm btn-outline-secondary">Clear Override</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Wire up events programmatically to avoid HTML-escaping issues
+            try {
+                const cfgEl = document.getElementById(cfgContainerId);
+                const toggleBtn = document.getElementById(toggleBtnId);
+                const saveBtn = document.getElementById(saveBtnId);
+                const clearBtn = document.getElementById(clearBtnId);
+
+                if (toggleBtn && cfgEl) {
+                    toggleBtn.addEventListener('click', () => {
+                        cfgEl.style.display = (cfgEl.style.display === 'none' || !cfgEl.style.display) ? 'block' : 'none';
+                    });
+                }
+
+                if (saveBtn) {
+                    saveBtn.addEventListener('click', () => {
+                        try {
+                            // Collect selected types from checkboxes inside this configurator
+                            const sel = allTypes.filter(t => {
+                                const cb = document.getElementById(`cfg_${req.id}_${t}`);
+                                return !!(cb && cb.checked);
+                            });
+                            const ok = window.EvidenceFilter?.setPolicyOverride?.(req.id, sel);
+                            if (ok) {
+                                try {
+                                    const b = window.EvidenceFilter?.getEvidenceTypeBadge?.(req.id);
+                                    const el = document.getElementById('evidenceCategoryBadge');
+                                    if (b && el) { el.className = 'badge '+b.class+' ms-1'; el.textContent = b.text; }
+                                } catch {}
+                                // Reload evidence details with new policy
+                                loadEvidenceDetails(req.id);
+                            }
+                        } catch (e) { console.warn('Policy save failed', e); }
+                    });
+                }
+
+                if (clearBtn) {
+                    clearBtn.addEventListener('click', () => {
+                        try {
+                            window.EvidenceFilter?.clearPolicyOverride?.(req.id);
+                            loadEvidenceDetails(req.id);
+                        } catch (e) {}
+                    });
+                }
+            } catch (e) {
+                console.warn('Configurator wiring failed', e);
+            }
         }
-        
-        .evidence-found { background: #d4edda; color: #155724; }
-        .evidence-missing { background: #f8d7da; color: #721c24; }
-        .evidence-partial { background: #fff3cd; color: #856404; }
-        
-        .regulation-section {
-            background: #f8f9fa;
-            border-radius: 8px;
-            padding: 1.5rem;
-            margin-bottom: 2rem;
-        }
-        
-        .requirement-item {
-            background: white;
-            border: 1px solid #dee2e6;
-            border-radius: 6px;
-            padding: 1rem;
-            margin-bottom: 1rem;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .requirement-item:hover {
-            border-color: #007bff;
-            box-shadow: 0 2px 4px rgba(0, 123, 255, 0.1);
-        }
-        
-        .requirement-expanded {
-            border-color: #007bff;
-            background: #f8f9ff;
-        }
-        
-        .implementation-feature {
-            background: #e3f2fd;
-            border-left: 3px solid #2196f3;
-            padding: 0.5rem 1rem;
-            margin: 0.5rem 0;
-            border-radius: 0 4px 4px 0;
-        }
-        
-        .evidence-detail {
-            background: #f1f8e9;
-            border: 1px solid #c3e6cb;
-            border-radius: 4px;
-            padding: 1rem;
-            margin: 1rem 0;
-        }
-        
-        .metric-card {
-            text-align: center;
-            padding: 1.5rem;
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        
-        .metric-number {
-            font-size: 2.5rem;
-            font-weight: bold;
-            color: #007bff;
-        }
-        
-        .export-section {
-            background: #fff;
-            border: 1px solid #dee2e6;
-            border-radius: 8px;
-            padding: 1.5rem;
-            margin: 2rem 0;
-        }
-        
         .roadmap-item {
             border-left: 4px solid #007bff;
             background: #f8f9ff;
@@ -707,8 +636,8 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <!-- Requirement-specific evidence filtering utilities -->
-    <script src="/static/evidence_filter.js"></script>
+    <!-- Requirement-specific evidence filtering utilities (cache-busted) -->
+    <script src="/static/evidence_filter.js?v=20250819a"></script>
     <script>
         let complianceData = {};
         let evidenceData = {};
@@ -940,83 +869,7 @@
                             <br><small class="text-muted">${req.category || 'General'}</small>
                         </div>
                         <div class="evidence-badges">
-                            ${getEvidenceBadges(req.id)}
-                        </div>
-                    </div>
-                    <div id="detail-${req.id}" class="requirement-details" style="display: none;">
-                        <hr>
-                        <p><strong>Description:</strong> ${req.description}</p>
-                        <div class="evidence-detail">
-                            <h6>Evidence Types:</h6>
-                            <div class="d-flex flex-wrap">
-                                ${(req.evidence_types || []).map(type => `
-                                    <span class="badge bg-info me-1 mb-1">${type}</span>
-                                `).join('')}
-                            </div>
-                            <h6>Auto Trackable:</h6>
-                            <span class="badge ${req.auto_trackable ? 'bg-success' : 'bg-secondary'}">${req.auto_trackable ? 'Yes' : 'No'}</span>
-                        </div>
-                    </div>
-                </div>
-            `).join('');
-        }
-
-        function updateOrganizationsTab() {
-            const orgContainer = document.getElementById('organizationRequirements');
-            const orgData = {};
-
-            // Group requirements by category (since we don't have organization field)
-            Object.values(complianceData).flat().forEach(req => {
-                const category = req.category || 'General';
-                if (!orgData[category]) {
-                    orgData[category] = [];
-                }
-                orgData[category].push(req);
-            });
-
-            orgContainer.innerHTML = Object.entries(orgData).map(([category, reqs]) => `
-                <div class="regulation-section">
-                    <h3><i class="fas fa-building"></i> ${category}</h3>
-                    <div class="row">
-                        <div class="col-md-3">
-                            <div class="metric-card">
-                                <div class="metric-number">${reqs.length}</div>
-                                <div class="text-muted">Total Requirements</div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="metric-card">
-                                <div class="metric-number text-success">${reqs.filter(r => getImplementationStatus(r) === 'active').length}</div>
-                                <div class="text-muted">Active</div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="metric-card">
-                                <div class="metric-number text-warning">${reqs.filter(r => getImplementationStatus(r) === 'partial').length}</div>
-                                <div class="text-muted">Partial</div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="metric-card">
-                                <div class="metric-number text-primary">${reqs.filter(r => ['ready_to_implement', 'planned'].includes(getImplementationStatus(r))).length}</div>
-                                <div class="text-muted">Planned</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="mt-3">
-                        ${reqs.map(req => `
-                            <div class="requirement-item">
-                                <div class="d-flex justify-content-between align-items-start">
-                                    <div>
-                                        <strong>${req.title}</strong>
-                                        <br><small class="text-muted">${req.category}</small>
-                                        <br><small>${req.description}</small>
-                                    </div>
-                                    <div>
-                                        <span class="badge bg-${getStatusColor(getImplementationStatus(req))}">${getImplementationStatus(req)}</span>
-                                        ${getEvidenceBadges(req.id)}
-                                    </div>
-                                </div>
+        
                             </div>
                         `).join('')}
                     </div>
@@ -1216,22 +1069,23 @@
                                 <h6>${req.title}</h6>
                                 <p class="text-muted">${req.description}</p>
                                 
-                                <div class="alert alert-info" id="evidenceCountSummary">
+                <div class="alert alert-info" id="evidenceCountSummary">
                                     <strong>Evidence Count:</strong> <span id="evidenceCountValue">${evidenceCount}</span> records found<br>
                                     <strong>Implementation Status:</strong> ${req.implementation_status}<br>
 
                                     <div class="mt-2">
                                         <strong>Evidence Category:</strong>
-                                        ${(() => {
+                    ${(() => {
                                             try {
                                                 const badge = window.EvidenceFilter?.getEvidenceTypeBadge?.(req.id);
-                                                if (badge) return `<span class="badge ${badge.class} ms-1">${badge.text}</span>`;
+                        if (badge) return `<span id="evidenceCategoryBadge" class="badge ${badge.class} ms-1">${badge.text}</span>`;
                                             } catch {}
-                                            return '<span class="badge bg-secondary">General Evidence</span>';
+                        return '<span id="evidenceCategoryBadge" class="badge bg-secondary">General Evidence</span>';
                                         })()}
                                     </div>
                                     <strong>Evidence Types:</strong> ${(req.evidence_types || []).join(', ')}
                                 </div>
+                <div id="policyGuidance" class="mb-2"></div>
                                 
                                 <div class="alert alert-success">
                                     <i class="fas fa-check-circle"></i>
@@ -1274,6 +1128,88 @@
             
             // Load actual evidence records
             loadEvidenceDetails(reqCode);
+            // Render per-requirement guidance and configurator
+            try { renderEvidenceGuidance(req); } catch (e) { console.warn('Guidance render skipped:', e); }
+        }
+
+        function renderEvidenceGuidance(req) {
+            const host = document.getElementById('policyGuidance');
+            if (!host) return;
+            let allowed = [];
+            try { allowed = window.EvidenceFilter?.getAllowedEvidenceTypes?.(req.id) || []; } catch { allowed = []; }
+            const examples = {
+                run_files: 'qPCR analysis run files (confirmed sessions, standardized run artifacts)',
+                validation_tests: 'Software validation test outputs (harness logs, pass/fail summaries)',
+                encryption_evidence: 'Encryption controls (TLS/HTTPS logs, encryption API evidence, config excerpts)',
+                audit_logs: 'Access/activity logs and audit trail entries (role assignment changes, login attempts)',
+                documentation: 'SOPs, policies, and versioned procedural documentation',
+                risk_management: 'Risk assessments and mitigation records'
+            };
+            const allTypes = ['run_files','validation_tests','encryption_evidence','audit_logs','documentation','risk_management'];
+            const badgeFor = (t) => {
+                const map = {
+                    run_files: ['bg-primary','Run Files'],
+                    validation_tests: ['bg-primary','Validation Tests'],
+                    encryption_evidence: ['bg-success','Encryption'],
+                    audit_logs: ['bg-warning text-dark','Audit Logs'],
+                    documentation: ['bg-info','Documentation'],
+                    risk_management: ['bg-secondary','Risk Mgmt']
+                }; return map[t] || ['bg-secondary','General'];
+            };
+
+            const selected = new Set(allowed);
+            const badges = allowed.map(t => {
+                const [cls, txt] = badgeFor(t); return `<span class="badge ${cls} me-1">${txt}</span>`;
+            }).join(' ');
+            const tips = allowed.map(t => `<li>${examples[t]}</li>`).join('');
+
+            host.innerHTML = `
+                <div class="alert alert-light border">
+                    <div class="d-flex justify-content-between align-items-start flex-wrap">
+                        <div class="me-2">
+                            <strong>What counts as evidence for this requirement?</strong><br>
+                            ${badges || '<span class="badge bg-secondary">Unspecified</span>'}
+                            ${tips ? `<ul class="mb-0 mt-2">${tips}</ul>` : '<small class="text-muted">Use the configurator to choose expected evidence types for this requirement.</small>'}
+                        </div>
+                        <div>
+                            <button class="btn btn-sm btn-outline-secondary" type="button" onclick="(function(){ const el=document.getElementById('policyConfigurator'); el.style.display = (el.style.display==='none'?'block':'none'); })()">Configure</button>
+                        </div>
+                    </div>
+                    <div id="policyConfigurator" class="mt-2" style="display: none;">
+                        <div class="row g-2">
+                            ${allTypes.map(t => {
+                                const checked = selected.has(t) ? 'checked' : '';
+                                const [cls, txt] = badgeFor(t);
+                                return `
+                                    <div class=\"col-md-4\">
+                                        <div class=\"form-check\">
+                                            <input class=\"form-check-input\" type=\"checkbox\" id=\"cfg_${t}\" value=\"${t}\" ${checked}>
+                                            <label class=\"form-check-label\" for=\"cfg_${t}\">
+                                                <span class=\"badge ${cls}\">${txt}</span>
+                                            </label>
+                                        </div>
+                                        <small class=\"text-muted\">${examples[t]}</small>
+                                    </div>`;
+                            }).join('')}
+                        </div>
+                        <div class="mt-3 d-flex gap-2">
+                            <button class="btn btn-sm btn-primary" onclick="(function(){
+                                try {
+                                    const sel = ${JSON.stringify(allTypes)}.filter(t => document.getElementById('cfg_'+t)?.checked);
+                                    const ok = window.EvidenceFilter?.setPolicyOverride?.('${req.id}', sel);
+                                    if (ok) {
+                                        // Update badge label
+                                        try { const b = window.EvidenceFilter.getEvidenceTypeBadge('${req.id}'); const el = document.getElementById('evidenceCategoryBadge'); if (b && el) { el.className = 'badge '+b.class+' ms-1'; el.textContent = b.text; } } catch {}
+                                        // Reload evidence details with new policy
+                                        loadEvidenceDetails('${req.id}');
+                                    }
+                                } catch (e) { console.warn('Policy save failed', e); }
+                            })()">Save</button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="(function(){ try { window.EvidenceFilter?.clearPolicyOverride?.('${req.id}'); loadEvidenceDetails('${req.id}'); } catch(e){} })()">Clear Override</button>
+                        </div>
+                    </div>
+                </div>
+            `;
         }
         
         function loadEvidenceDetails(reqCode) {
@@ -1758,8 +1694,12 @@
                     `;
                 }
                 
-                // Add session files evidence
-                if (allSessions.length > 0) {
+                // Add session files evidence if this requirement uses run files
+                const allowRunFiles = (() => {
+                    try { return (window.EvidenceFilter?.getAllowedEvidenceTypes?.(reqCode) || []).some(t => t === 'run_files' || t === 'validation_tests'); } catch { return true; }
+                })();
+
+                if (allowRunFiles && allSessions.length > 0) {
                     evidenceHTML += `
                         <div class="card mb-3">
                             <div class="card-header">
@@ -1849,7 +1789,7 @@
                             </div>
                         </div>
                     `;
-                } else if (!hasEncryptionEvidence) {
+                } else if (allowRunFiles && !hasEncryptionEvidence) {
                     evidenceHTML += `
                         <div class="alert alert-warning">
                             <i class="fas fa-info-circle"></i>
