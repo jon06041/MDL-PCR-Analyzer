@@ -191,15 +191,14 @@ class FolderQueueManager {
     // Pattern matching for qPCR files
     // Recognize "... - Quantification Amplification Results_<channel>.csv" strictly for amplification
     const amplificationPattern = /^(.+?)_(\d+)_([A-Z0-9]+)\s*-\s*(?:Quantification\s+)?Amplification\s+Results_[A-Za-z0-9]+\.csv$/i;
-    // Recognize summary via explicit "Quantification Summary_0.csv" or generic Results.csv
-    const summaryPattern = /^(.+?)_(\d+)_([A-Z0-9]+)\s*-\s*(?:Quantification\s+)?Summary_\d+\.csv$/i;
-    const resultsSummaryPattern = /^(.+?)_(\d+)_([A-Z0-9]+)\s*-\s*Results\.csv$/i;
+    // Recognize summary strictly via explicit "Quantification Summary_0.csv" ONLY
+    const summaryPattern = /^(.+?)_(\d+)_([A-Z0-9]+)\s*-\s*(?:Quantification\s+)?Summary_0\.csv$/i;
         
         for (const file of files) {
             const fileName = file.name || file.webkitRelativePath?.split('/').pop() || '';
             
             // Check if it's a summary file
-            let summaryMatch = fileName.match(summaryPattern) || fileName.match(resultsSummaryPattern);
+            let summaryMatch = fileName.match(summaryPattern);
             if (summaryMatch) {
                 const [, testName, runId, instrument] = summaryMatch;
                 const experimentId = `${testName}_${runId}_${instrument}`;
