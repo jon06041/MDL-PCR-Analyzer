@@ -39,6 +39,29 @@
 
 ## 🔍 CRITICAL ISSUE ANALYSIS (2025-08-18)
 
+### Audit Logs User Attribution (2025-08-20) ✅ IMPLEMENTED
+
+Status: Audit logs now attribute actions to the signed-in user instead of "system"; API responses include a resolved user_id for each entry.
+
+Changes:
+- Backend attribution
+    - app.py: get_current_user now prefers session/request context; ML config and audit endpoints write user_info from the active session.
+    - Audit Log API: /api/ml-config/audit-log enriches each record with computed user_id derived from stored user_info.
+- Frontend display
+    - unified_compliance_dashboard.html uses the API's user_id to render the real user in the audit log table.
+
+Why:
+- Compliance-grade traceability requires accurate user attribution for configuration and access events.
+
+Impact:
+- New audit records show the correct user; historical entries that were written as "system" remain unchanged.
+- No schema changes required; works with existing ml_config_audit_log/unified_user_access_log tables.
+
+Notes:
+- Restart Flask after backend route/logic edits to refresh session handling and MySQL pools.
+- Verified via API response and dashboard render; commit and push completed for device handoff.
+
+
 ### Backend Thresholds Strict Mode (2025-08-18) ✅ IMPLEMENTED
 
 Status: Backend thresholds now use only fixed pathogen/channel mappings. All fallbacks removed to prevent silent drift.
