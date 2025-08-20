@@ -1420,6 +1420,10 @@
             if (!evidenceContainer) return;
             // Track session IDs represented in evidence_sources to avoid duplicate rendering later
             let coveredSessionIds = new Set();
+            // Ensure we have a safe default for renderSources even when evidence_sources path is not taken
+            let renderSources = [];
+            // Simple, per-page-session cache for validation test results
+            try { window.__validationCache = window.__validationCache || null; } catch {}
             
             // If we have evidence_sources from the API, use those instead of the old method
             if (requirement && requirement.evidence_sources && requirement.evidence_sources.length > 0) {
@@ -1433,7 +1437,7 @@
                         return window.EvidenceFilter?.shouldIncludeSourceForRequirement?.(reqCode, s) ?? true;
                     } catch { return true; }
                 });
-                const renderSources = (() => {
+                renderSources = (() => {
                     // Group by YYYY-MM-DD for integrity/validation types
                     const groups = new Map();
                     const others = [];
@@ -1730,11 +1734,22 @@
             }
             // Add software validation tests (comprehensive system validation)
             if (needsValidationTests) {
-                evidencePromises.push(
-                    fetch('/api/unified-compliance/validate-system', { method: 'POST' })
+                // Use a cached result if we have one during this page session
+                const getValidationResult = () => {
+                    try {
+                        if (window.__validationCache && window.__validationCache.result) {
+                            return Promise.resolve(window.__validationCache.result);
+                        }
+                    } catch {}
+                    return fetch('/api/unified-compliance/validate-system', { method: 'POST' })
                         .then(r => r.ok ? r.json() : { success: false, error: r.status })
-                        .catch(() => ({ success: false }))
-                );
+                        .then(data => {
+                            try { window.__validationCache = { result: data, ts: Date.now() }; } catch {}
+                            return data;
+                        })
+                        .catch(() => ({ success: false }));
+                };
+                evidencePromises.push(getValidationResult());
             }
             if (needsAuditLogs) {
                 evidencePromises.push(
@@ -1743,37 +1758,38 @@
             }
             
             Promise.all(evidencePromises).then((results) => {
-                const [confirmedData, pendingData] = results;
-                // Compute offsets safely based on which optional calls were included
-                let idx = 2;
-                const encryptionData = hasEncryptionEvidence ? results[idx++] : null;
-                const validationData = needsValidationTests ? results[idx++] : null;
-                const auditLogData = needsAuditLogs ? results[idx++] : null;
-                
-                console.log('Loading evidence files for', reqCode);
-                
-                const evidenceContainer = document.getElementById('evidenceDetails');
-                if (!evidenceContainer) return;
-                
-                // Combine and filter session files as evidence
-                const confirmedSessions = confirmedData.confirmed_sessions || [];
-                const pendingSessions = pendingData.pending_sessions || [];
-                let filtered = { confirmedSessions, pendingSessions, encryptionData };
                 try {
-                    if (window.EvidenceFilter?.filterEvidenceForRequirement) {
-                        filtered = window.EvidenceFilter.filterEvidenceForRequirement(reqCode, confirmedSessions, pendingSessions, encryptionData);
+                    const [confirmedData, pendingData] = results;
+                    // Compute offsets safely based on which optional calls were included
+                    let idx = 2;
+                    const encryptionData = hasEncryptionEvidence ? results[idx++] : null;
+                    const validationData = needsValidationTests ? results[idx++] : null;
+                    const auditLogData = needsAuditLogs ? results[idx++] : null;
+
+                    console.log('Loading evidence files for', reqCode);
+
+                    const evidenceContainer = document.getElementById('evidenceDetails');
+                    if (!evidenceContainer) return;
+
+                    // Combine and filter session files as evidence
+                    const confirmedSessions = confirmedData.confirmed_sessions || [];
+                    const pendingSessions = pendingData.pending_sessions || [];
+                    let filtered = { confirmedSessions, pendingSessions, encryptionData };
+                    try {
+                        if (window.EvidenceFilter?.filterEvidenceForRequirement) {
+                            filtered = window.EvidenceFilter.filterEvidenceForRequirement(reqCode, confirmedSessions, pendingSessions, encryptionData);
+                        }
+                    } catch (e) {
+                        console.warn('EvidenceFilter failed, showing unfiltered sessions:', e);
                     }
-                } catch (e) {
-                    console.warn('EvidenceFilter failed, showing unfiltered sessions:', e);
-                }
-                const allSessions = [...(filtered.confirmedSessions || []), ...(filtered.pendingSessions || [])];
-                // Remove sessions already represented by evidence_sources to avoid duplicate sections
-                const deDupedSessions = Array.isArray(allSessions)
-                    ? allSessions.filter(s => !(s && typeof s.id !== 'undefined' && coveredSessionIds.has(s.id)))
-                    : [];
-                
-                let evidenceHTML = '';
-                
+                    const allSessions = [...(filtered.confirmedSessions || []), ...(filtered.pendingSessions || [])];
+                    // Remove sessions already represented by evidence_sources to avoid duplicate sections
+                    const deDupedSessions = Array.isArray(allSessions)
+                        ? allSessions.filter(s => !(s && typeof s.id !== 'undefined' && coveredSessionIds.has(s.id)))
+                        : [];
+
+                    let evidenceHTML = '';
+
                 // Add encryption evidence section if available
                 if (hasEncryptionEvidence && encryptionData && encryptionData.success) {
                     console.log('Raw encryption evidence data:', encryptionData);
@@ -2225,57 +2241,71 @@
                     `;
                 }
                 
-                // Show combined evidence or message if none
-                if (!evidenceHTML) {
-                    // If the evidence container already has content (e.g., from evidence_sources),
-                    // do not append a misleading "No evidence" message.
-                    if (!(evidenceContainer && evidenceContainer.innerHTML.trim())) {
-                        evidenceHTML = `
-                            <div class="alert alert-warning">
-                                <i class="fas fa-info-circle"></i>
-                                No evidence found for this requirement.
+                    // Show combined evidence or message if none
+                    if (!evidenceHTML) {
+                        // If the evidence container already has content (e.g., from evidence_sources),
+                        // do not append a misleading "No evidence" message.
+                        if (!(evidenceContainer && evidenceContainer.innerHTML.trim())) {
+                            evidenceHTML = `
+                                <div class="alert alert-warning">
+                                    <i class="fas fa-info-circle"></i>
+                                    No evidence found for this requirement.
+                                </div>
+                            `;
+                        } else {
+                            evidenceHTML = '';
+                        }
+                    }
+
+                    // Append to any existing evidence (from evidence_sources)
+                    if (evidenceHTML && evidenceContainer.innerHTML.trim()) {
+                        evidenceContainer.insertAdjacentHTML('beforeend', evidenceHTML);
+                    } else if (evidenceHTML) {
+                        evidenceContainer.innerHTML = evidenceHTML;
+                    }
+
+                    // Recalculate and update Evidence Count to match everything displayed
+                    try {
+                        const req = (window.requirementsData || []).find(r => r.id === reqCode) || {};
+                        const sources = Array.isArray(req.evidence_sources) ? req.evidence_sources : [];
+                        // Estimate validation test records (respect current allowed types)
+                        let validationCount = 0;
+                        try {
+                            const allowedNow = window.EvidenceFilter?.getAllowedEvidenceTypes?.(reqCode) || [];
+                            const allowVT = allowedNow.includes('validation_tests');
+                            if (allowVT && validationData) {
+                                if (validationData.validation_results && typeof validationData.validation_results === 'object') {
+                                    validationCount = Object.keys(validationData.validation_results).length;
+                                } else {
+                                    const pc = (validationData.passed_checks || []).length;
+                                    const cf = (validationData.critical_failures || []).length;
+                                    const w = (validationData.warnings || []).length;
+                                    validationCount = pc + cf + w;
+                                    // Do not force minimal evidence if zero; reflect actual absence
+                                }
+                            }
+                        } catch {}
+                        const count = window.EvidenceFilter?.getRelevantEvidenceCount?.(reqCode, confirmedSessions, pendingSessions, encryptionData, sources, auditLogData)
+                            || (deDupedSessions.length + (encryptionData ? (window.EvidenceFilter?.countEncryptionRecords?.(encryptionData) || 0) : 0) + sources.length + validationCount);
+                        const el = document.getElementById('evidenceCountValue');
+                        if (el) el.textContent = count;
+                    } catch {}
+
+                    console.log(`✅ Loaded evidence for requirement ${reqCode} (${deDupedSessions.length} sessions${hasEncryptionEvidence ? ', encryption controls' : ''})`);
+                } catch (error) {
+                    console.error('Evidence render error:', error);
+                    const evidenceContainer = document.getElementById('evidenceDetails');
+                    if (evidenceContainer) {
+                        const existing = evidenceContainer.innerHTML.trim();
+                        const alertHtml = `
+                            <div class="alert alert-danger">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                Error rendering evidence: ${error.message}
                             </div>
                         `;
-                    } else {
-                        evidenceHTML = '';
+                        evidenceContainer.innerHTML = existing ? (existing + alertHtml) : alertHtml;
                     }
                 }
-                
-                // Append to any existing evidence (from evidence_sources)
-                if (evidenceHTML && evidenceContainer.innerHTML.trim()) {
-                    evidenceContainer.insertAdjacentHTML('beforeend', evidenceHTML);
-                } else if (evidenceHTML) {
-                    evidenceContainer.innerHTML = evidenceHTML;
-                }
-
-                // Recalculate and update Evidence Count to match everything displayed
-        try {
-                    const req = (window.requirementsData || []).find(r => r.id === reqCode) || {};
-                    const sources = Array.isArray(req.evidence_sources) ? req.evidence_sources : [];
-                    // Estimate validation test records (respect current allowed types)
-                    let validationCount = 0;
-                    try {
-                        const allowedNow = window.EvidenceFilter?.getAllowedEvidenceTypes?.(reqCode) || [];
-                        const allowVT = allowedNow.includes('validation_tests');
-                        if (allowVT && validationData) {
-                            if (validationData.validation_results && typeof validationData.validation_results === 'object') {
-                                validationCount = Object.keys(validationData.validation_results).length;
-                            } else {
-                                const pc = (validationData.passed_checks || []).length;
-                                const cf = (validationData.critical_failures || []).length;
-                                const w = (validationData.warnings || []).length;
-                                validationCount = pc + cf + w;
-                                // Do not force minimal evidence if zero; reflect actual absence
-                            }
-                        }
-                    } catch {}
-                    const count = window.EvidenceFilter?.getRelevantEvidenceCount?.(reqCode, confirmedSessions, pendingSessions, encryptionData, sources, auditLogData)
-            || (deDupedSessions.length + (encryptionData ? (window.EvidenceFilter?.countEncryptionRecords?.(encryptionData) || 0) : 0) + sources.length + validationCount);
-                    const el = document.getElementById('evidenceCountValue');
-                    if (el) el.textContent = count;
-                } catch {}
-                
-        console.log(`✅ Loaded evidence for requirement ${reqCode} (${deDupedSessions.length} sessions${hasEncryptionEvidence ? ', encryption controls' : ''})`);
             }).catch(error => {
                 console.error('Error loading evidence:', error);
                 const evidenceContainer = document.getElementById('evidenceDetails');

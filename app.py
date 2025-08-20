@@ -4335,6 +4335,19 @@ def get_ml_audit_log():
         app.logger.error(f"Failed to get audit log: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/admin/backfill/ml-audit-users', methods=['POST'])
+def backfill_ml_audit_users():
+    """Normalize ml_config_audit_log.user_info to 'admin' or 'system' and preserve original_user"""
+    try:
+        global ml_config_manager
+        if ml_config_manager is None:
+            return jsonify({'error': 'ML configuration manager not initialized'}), 503
+        summary = ml_config_manager.backfill_audit_users_admin_or_system()
+        return jsonify({'success': True, 'summary': summary})
+    except Exception as e:
+        app.logger.error(f"Backfill audit users failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/ml-config/check-enabled/<pathogen_code>/<fluorophore>', methods=['GET'])
 def check_ml_enabled(pathogen_code, fluorophore):
     """Check if ML is enabled for specific pathogen+fluorophore"""
@@ -4679,7 +4692,13 @@ def mysql_admin_interface():
 @app.route('/mysql-viewer')
 @production_admin_only
 def mysql_viewer():
-    """Integrated MySQL viewer interface - ADMIN ONLY in production"""
+    """Integrated MySQL viewer interface - ADMIN ONLY in production.
+    In development, access is allowed by the decorator for convenience, but write queries remain disabled
+    unless explicitly enabled with DEV_MYSQL_ADMIN_ALLOW_WRITES=1.
+    """
+    is_production = os.getenv('ENVIRONMENT', 'development').lower() == 'production'
+    dev_allow_writes = os.getenv('DEV_MYSQL_ADMIN_ALLOW_WRITES', '0').lower() in ('1','true','yes','y','on')
+    env_label = 'production' if is_production else 'development'
     return render_template_string('''
 <!DOCTYPE html>
 <html>
@@ -4735,6 +4754,8 @@ def mysql_viewer():
         <div class="header">
             <h1>🗄️ MySQL Development Viewer</h1>
             <p>Database: {{ config.database }} @ {{ config.host }}:{{ config.port }}</p>
+            <p>Environment: {{ env_label }} • Write queries: <strong>{{ 'Enabled' if dev_allow_writes or env_label == 'production' else 'Disabled' }}</strong></p>
+            <p style="margin-top:8px;font-size:12px;opacity:.85;">Admin-only in all environments. In development, you may optionally set DEV_RELAXED_ADMIN_ACCESS=1 to bypass auth for local testing. To enable writes in dev, set DEV_MYSQL_ADMIN_ALLOW_WRITES=1.</p>
             <p><a href="/" style="color: white;">← Back to Main App</a></p>
         </div>
         
@@ -4782,11 +4803,24 @@ def mysql_viewer():
             executeQuery();
         }
         
+        function isReadOnlyQuery(sql) {
+            const s = sql.trim().toUpperCase();
+            return s.startsWith('SELECT') || s.startsWith('SHOW') || s.startsWith('DESCRIBE') || s.startsWith('EXPLAIN');
+        }
+
         async function executeQuery() {
             const query = document.getElementById('query-input').value.trim();
             if (!query) {
                 alert('Please enter a query');
                 return;
+            }
+
+            // Confirmation for potential write queries
+            if (!isReadOnlyQuery(query)) {
+                const confirmMsg = 'This looks like a write/DDL query. Are you sure you want to execute it?';
+                if (!confirm(confirmMsg)) {
+                    return;
+                }
             }
             
             const container = document.getElementById('results-container');
@@ -4828,7 +4862,9 @@ def mysql_viewer():
                         html += '</tbody></table>';
                         container.innerHTML = html;
                     } else {
-                        container.innerHTML = '<div class="success">Query executed successfully. No rows returned.</div>';
+                        const affected = (typeof data.affected_rows !== 'undefined') ? ` Affected rows: ${data.affected_rows}.` : '';
+                        const msg = data.message ? ` ${data.message}` : '';
+                        container.innerHTML = `<div class="success">Query executed successfully.${affected}${msg}</div>`;
                     }
                 } else {
                     container.innerHTML = `<div class="error">Query Error: ${data.error}</div>`;
@@ -4851,6 +4887,7 @@ def mysql_viewer():
     ''', config=mysql_config)
 
 @app.route('/api/mysql-admin/status', methods=['GET'])
+@production_admin_only
 def mysql_admin_status():
     """Check MySQL connection status"""
     try:
@@ -4886,6 +4923,7 @@ def mysql_admin_status():
         }), 500
 
 @app.route('/api/mysql-admin/tables', methods=['GET'])
+@production_admin_only
 def mysql_admin_get_tables():
     """Get list of all tables with row counts"""
     try:
@@ -4940,8 +4978,12 @@ def mysql_admin_get_tables():
         }), 500
 
 @app.route('/api/mysql-admin/query', methods=['POST'])
+@production_admin_only
 def mysql_admin_execute_query():
-    """Execute a SQL query (READ-ONLY for safety)"""
+    """Execute a SQL query.
+    - In production (admin-only via decorator): allow all commands (SELECT/SHOW/DESCRIBE/EXPLAIN/INSERT/UPDATE/DELETE/DDL).
+    - In development: allow writes only when DEV_MYSQL_ADMIN_ALLOW_WRITES=1; otherwise restrict to read-only (SELECT/SHOW/DESCRIBE/EXPLAIN).
+    """
     try:
         data = request.get_json()
         query = data.get('query', '').strip()
@@ -4952,37 +4994,56 @@ def mysql_admin_execute_query():
                 'error': 'No query provided'
             }), 400
         
-        # Safety check - only allow SELECT, SHOW, DESCRIBE queries for development
-        query_upper = query.upper().strip()
-        allowed_commands = ['SELECT', 'SHOW', 'DESCRIBE', 'EXPLAIN']
+        # Determine environment and allowed command scope
+        is_production = os.getenv('ENVIRONMENT', 'development').lower() == 'production'
+        dev_allow_writes = os.getenv('DEV_MYSQL_ADMIN_ALLOW_WRITES', '0').lower() in ('1','true','yes','y','on')
+        query_upper = query.upper().lstrip()
+        read_only_cmds = ('SELECT', 'SHOW', 'DESCRIBE', 'EXPLAIN')
         
-        if not any(query_upper.startswith(cmd) for cmd in allowed_commands):
-            return jsonify({
-                'success': False,
-                'error': 'Only SELECT, SHOW, DESCRIBE, and EXPLAIN queries are allowed for safety'
-            }), 403
+        if not is_production and not dev_allow_writes:
+            # In development without explicit override, only allow read-only commands
+            if not query_upper.startswith(read_only_cmds):
+                return jsonify({
+                    'success': False,
+                    'error': 'Write queries disabled (dev). Set DEV_MYSQL_ADMIN_ALLOW_WRITES=1 to enable.'
+                }), 403
         
         import mysql.connector
         
         conn = mysql.connector.connect(**mysql_config)
         cursor = conn.cursor(dictionary=True)
         
-        # Execute the query
+        # Execute single statement
         cursor.execute(query)
-        results = cursor.fetchall()
         
-        # Get column names
-        columns = [desc[0] for desc in cursor.description] if cursor.description else []
+        if cursor.with_rows:
+            results = cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description] if cursor.description else []
+            response = {
+                'success': True,
+                'results': results,
+                'columns': columns,
+                'row_count': len(results)
+            }
+        else:
+            affected = cursor.rowcount
+            try:
+                conn.commit()
+            except Exception:
+                pass
+            response = {
+                'success': True,
+                'results': [],
+                'columns': [],
+                'row_count': 0,
+                'affected_rows': int(affected) if affected is not None else 0,
+                'message': f'Query executed. Affected rows: {int(affected) if affected is not None else 0}'
+            }
         
         cursor.close()
         conn.close()
         
-        return jsonify({
-            'success': True,
-            'results': results,
-            'columns': columns,
-            'row_count': len(results)
-        })
+        return jsonify(response)
         
     except Exception as e:
         return jsonify({
@@ -4991,6 +5052,7 @@ def mysql_admin_execute_query():
         }), 500
 
 @app.route('/api/mysql-admin/table-info/<table_name>', methods=['GET'])
+@production_admin_only
 def mysql_admin_get_table_info(table_name):
     """Get detailed information about a specific table"""
     try:
@@ -6113,6 +6175,79 @@ def get_recent_compliance_events():
         
     except Exception as e:
         app.logger.error(f"Error getting recent events: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/backfill/implementation-status', methods=['POST'])
+def backfill_implementation_status():
+    """Backfill compliance_requirements_tracking.compliance_status from evidence.
+    Rules:
+    - evidence_count >= 10 -> completed
+    - evidence_count > 0 -> in_progress
+    - else -> not_started
+    Also sets evidence_count, compliance_percentage, and last_evidence_timestamp.
+    """
+    try:
+        global unified_compliance_manager
+        if not unified_compliance_manager:
+            return jsonify({'error': 'Unified Compliance Manager not available'}), 503
+
+        # Use the manager's DB connection for consistency
+        if not hasattr(unified_compliance_manager, 'get_connection'):
+            return jsonify({'error': 'Backfill requires MySQL manager with get_connection()'}), 500
+
+        conn = unified_compliance_manager.get_connection()
+        cur = conn.cursor()
+        updated = 0
+        details = []
+        try:
+            # Get all requirement_ids in tracking table
+            cur.execute('SELECT requirement_id FROM compliance_requirements_tracking')
+            req_ids = [row[0] for row in cur.fetchall()]
+
+            # For each requirement, compute counts and last ts
+            for req_id in req_ids:
+                # Count evidence
+                cur.execute('SELECT COUNT(*), MAX(created_at) FROM compliance_evidence WHERE requirement_id = %s', (req_id,))
+                row = cur.fetchone()
+                count = row[0] if row and row[0] is not None else 0
+                last_ts = row[1]
+
+                # Determine status
+                if count >= 10:
+                    status = 'completed'
+                elif count > 0:
+                    status = 'in_progress'
+                else:
+                    status = 'not_started'
+
+                percent = min(100.0, (count / 10.0) * 100.0)
+
+                # Update row
+                cur.execute(
+                    '''UPDATE compliance_requirements_tracking
+                       SET evidence_count = %s,
+                           compliance_percentage = %s,
+                           compliance_status = %s,
+                           last_evidence_timestamp = %s,
+                           updated_at = NOW()
+                       WHERE requirement_id = %s''',
+                    (count, percent, status, last_ts, req_id)
+                )
+                if cur.rowcount > 0:
+                    updated += 1
+                    details.append({
+                        'requirement_id': req_id,
+                        'evidence_count': int(count),
+                        'status': status
+                    })
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+
+        return jsonify({'success': True, 'updated': updated, 'details': details[:50]})
+    except Exception as e:
+        app.logger.error(f"Backfill implementation status failed: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/unified-compliance/export', methods=['GET'])

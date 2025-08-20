@@ -80,21 +80,24 @@ def require_any_permission(*permissions):
 
 def production_admin_only(f):
     """
-    Decorator for routes that should only be accessible to administrators in production
-    In development, may have relaxed permissions for debugging
+        Decorator for routes restricted to administrators.
+        Default behavior:
+            - Production: require 'database_management' permission
+            - Development: also require 'database_management' permission
+        Optional override for local debugging:
+            - If DEV_RELAXED_ADMIN_ACCESS=1, allow access without auth in development only
     """
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        is_production = os.getenv('ENVIRONMENT', 'development').lower() == 'production'
-        
-        if is_production:
-            # In production, require database_management permission (admin only)
-            return require_permission('database_management')(f)(*args, **kwargs)
-        else:
-            # In development, allow unauthenticated access for debugging purposes
-            # This enables Simple Browser access during development
-            logger.info(f"Development mode: Allowing access to {request.endpoint}")
-            return f(*args, **kwargs)
+                current_env = os.getenv('ENVIRONMENT', 'development').lower()
+                dev_relaxed = os.getenv('DEV_RELAXED_ADMIN_ACCESS', '0').lower() in ('1','true','yes','y','on')
+
+                if current_env != 'production' and dev_relaxed:
+                        # Explicitly relaxed access for dev only
+                        logger.info(f"Development relaxed access: Allowing access to {request.endpoint}")
+                        return f(*args, **kwargs)
+                # Otherwise require admin permission in all environments
+                return require_permission('database_management')(f)(*args, **kwargs)
             
     return decorated_function
 
