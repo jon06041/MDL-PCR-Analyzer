@@ -1323,6 +1323,10 @@
                         if (b && el) { el.className = 'badge ' + b.class + ' ms-1'; el.textContent = b.text; }
                     } catch {}
                     loadEvidenceDetails(reqId);
+                    // Refresh outer sections so badges/counts align with new policy
+                    try { updateOverviewTab(); } catch {}
+                    try { updateEvidenceTab(); } catch {}
+                    try { updateOrganizationsTab(); } catch {}
                 }
             } catch (e) { console.warn('Policy save failed', e); }
         }
@@ -1330,6 +1334,9 @@
         function clearPolicyOverrideAndReload(reqId) {
             try { window.EvidenceFilter?.clearPolicyOverride?.(reqId); } catch {}
             try { loadEvidenceDetails(reqId); } catch {}
+            try { updateOverviewTab(); } catch {}
+            try { updateEvidenceTab(); } catch {}
+            try { updateOrganizationsTab(); } catch {}
         }
 
         function renderEvidenceGuidance(req) {
@@ -1406,6 +1413,8 @@
             const requirement = window.requirementsData?.find(req => req.id === reqCode);
             const evidenceContainer = document.getElementById('evidenceDetails');
             if (!evidenceContainer) return;
+            // Track session IDs represented in evidence_sources to avoid duplicate rendering later
+            let coveredSessionIds = new Set();
             
             // If we have evidence_sources from the API, use those instead of the old method
             if (requirement && requirement.evidence_sources && requirement.evidence_sources.length > 0) {
@@ -1489,6 +1498,28 @@
                         }
                     );
                 })();
+
+                // Populate coveredSessionIds from Analysis Session entries listed in evidence_sources
+                try {
+                    coveredSessionIds = new Set();
+                    const scanList = Array.from(renderSources);
+                    for (const item of scanList) {
+                        const et = (item.evidence_type || '').toLowerCase();
+                        if (et.includes('analysis session')) {
+                            // Prefer explicit session_id field if provided
+                            if (typeof item.session_id === 'number') {
+                                coveredSessionIds.add(item.session_id);
+                            } else {
+                                const hint = (item.description || item.filename || '');
+                                const m = /Session:\s*(\d+)/i.exec(hint);
+                                if (m) {
+                                    const sid = parseInt(m[1], 10);
+                                    if (!Number.isNaN(sid)) coveredSessionIds.add(sid);
+                                }
+                            }
+                        }
+                    }
+                } catch {}
 
                 let evidenceHTML = '';
                 if (renderSources.length > 0) {
@@ -1719,6 +1750,10 @@
                     console.warn('EvidenceFilter failed, showing unfiltered sessions:', e);
                 }
                 const allSessions = [...(filtered.confirmedSessions || []), ...(filtered.pendingSessions || [])];
+                // Remove sessions already represented by evidence_sources to avoid duplicate sections
+                const deDupedSessions = Array.isArray(allSessions)
+                    ? allSessions.filter(s => !(s && typeof s.id !== 'undefined' && coveredSessionIds.has(s.id)))
+                    : [];
                 
                 let evidenceHTML = '';
                 
@@ -1895,11 +1930,11 @@
                     try { return (window.EvidenceFilter?.getAllowedEvidenceTypes?.(reqCode) || []).some(t => t === 'run_files' || t === 'validation_tests'); } catch { return true; }
                 })();
 
-                if (allowRunFiles && allSessions.length > 0) {
+                if (allowRunFiles && deDupedSessions.length > 0) {
                     evidenceHTML += `
                         <div class="card mb-3">
                             <div class="card-header">
-                                <h6><i class="fas fa-file-alt"></i> Analysis Session Records (${allSessions.length} files)</h6>
+                                <h6><i class="fas fa-file-alt"></i> Analysis Session Records (${deDupedSessions.length} files)</h6>
                             </div>
                             <div class="card-body">
                                 <p class="text-muted mb-3">qPCR analysis files providing evidence for this compliance requirement:</p>
@@ -1917,7 +1952,7 @@
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            ${allSessions.map(session => {
+                                            ${deDupedSessions.map(session => {
                                                 // Derive a user-friendly pathogen label for sessions
                                                 let pathogenInfo = (session.pathogen_breakdown || '').split(':')[0].trim();
                                                 let pathogenBadgeClass = 'bg-info';
@@ -1979,7 +2014,7 @@
                                 <div class="alert alert-info mt-3">
                                     <i class="fas fa-info-circle"></i>
                                     <strong>Evidence Type:</strong> qPCR Analysis Session Files<br>
-                                    <strong>Total Files:</strong> ${allSessions.length}<br>
+                                    <strong>Total Files:</strong> ${deDupedSessions.length}<br>
                                     <strong>Compliance Value:</strong> Each file represents execution of controlled analysis procedures supporting this requirement.
                                 </div>
                             </div>
@@ -2060,16 +2095,16 @@
                 }
 
                 // Recalculate and update Evidence Count to match everything displayed
-                try {
+        try {
                     const req = (window.requirementsData || []).find(r => r.id === reqCode) || {};
                     const sources = Array.isArray(req.evidence_sources) ? req.evidence_sources : [];
                     const count = window.EvidenceFilter?.getRelevantEvidenceCount?.(reqCode, confirmedSessions, pendingSessions, encryptionData, sources, auditLogData)
-                        || (allSessions.length + (encryptionData ? (window.EvidenceFilter?.countEncryptionRecords?.(encryptionData) || 0) : 0) + sources.length);
+            || (deDupedSessions.length + (encryptionData ? (window.EvidenceFilter?.countEncryptionRecords?.(encryptionData) || 0) : 0) + sources.length);
                     const el = document.getElementById('evidenceCountValue');
                     if (el) el.textContent = count;
                 } catch {}
                 
-                console.log(`✅ Loaded evidence for requirement ${reqCode} (${allSessions.length} sessions${hasEncryptionEvidence ? ', encryption controls' : ''})`);
+        console.log(`✅ Loaded evidence for requirement ${reqCode} (${deDupedSessions.length} sessions${hasEncryptionEvidence ? ', encryption controls' : ''})`);
             }).catch(error => {
                 console.error('Error loading evidence:', error);
                 const evidenceContainer = document.getElementById('evidenceDetails');
@@ -2385,6 +2420,8 @@
                     if (confirmedData.success) {
                         confirmedCount = confirmedData.count || 0;
                         updateConfirmedRuns(confirmedData);
+                        // Update models and average accuracy directly from confirmed sessions
+                        try { updateAvgAndModelsFromSessions(confirmedData); } catch (_) {}
                     } else {
                         console.error('❌ Confirmed sessions API error:', confirmedData.message);
                         showErrorInMLSection('mlConfirmedRunsList', confirmedData.message || 'Unknown error');
@@ -2404,17 +2441,49 @@
                         const statsData = await statsResponse.json();
                         if (statsData.success) {
                             updateMLStatistics(statsData.statistics);
+                            // Render pathogen models using confirmed sessions (independent of stats)
                             updatePathogenModels(statsData);
+                        } else {
+                            // Still render pathogen models from confirmed sessions if stats not successful
+                            updatePathogenModels(null);
                         }
+                    } else {
+                        // Stats endpoint not available; proceed to render pathogen models from confirmed sessions
+                        updatePathogenModels(null);
                     }
                 } catch (e) {
                     console.log('ML statistics not available:', e.message);
+                    // Proceed with rendering pathogen models using confirmed sessions so UI doesn’t stall
+                    try { updatePathogenModels(null); } catch (_) {}
                 }
 
             } catch (error) {
                 console.error('🚨 Error loading session validation data:', error);
                 showErrorInMLSection('mlPendingRunsList', `Connection error: ${error.message}`);
             }
+        }
+
+        // Compute and render ML Average Accuracy and Active Pathogen Models from confirmed sessions
+        function updateAvgAndModelsFromSessions(confirmedData) {
+            const sessions = confirmedData?.confirmed_sessions || [];
+            // Average Accuracy
+            let total = 0;
+            let n = 0;
+            sessions.forEach(s => {
+                const acc = parseFloat(s.ml_accuracy_percentage ?? s.expert_accuracy ?? 100);
+                if (!isNaN(acc)) { total += acc; n++; }
+            });
+            const avg = n > 0 ? (total / n) : 0;
+            const mlAvgAccuracyEl = document.getElementById('mlAvgAccuracy');
+            if (mlAvgAccuracyEl) mlAvgAccuracyEl.textContent = `${avg.toFixed(1)}%`;
+            // Active Pathogen Models (unique pathogens across confirmed sessions)
+            const unique = new Set();
+            sessions.forEach(s => {
+                const p = (s.pathogen_breakdown || '').split(':')[0].trim();
+                if (p && p.toLowerCase() !== 'unknown' && p !== '-') unique.add(p);
+            });
+            const mlTotalModelsEl = document.getElementById('mlTotalModels');
+            if (mlTotalModelsEl) mlTotalModelsEl.textContent = unique.size;
         }
 
         function updateSessionStatistics(pendingCount, confirmedCount) {
@@ -2694,19 +2763,23 @@
                         confirmedData.confirmed_sessions.forEach(session => {
                             const pathogenBreakdown = session.pathogen_breakdown || '';
                             const pathogenName = pathogenBreakdown.split(':')[0].trim();
-                            
+
                             if (pathogenName && pathogenName !== 'Unknown') {
                                 if (!pathogenStats[pathogenName]) {
                                     pathogenStats[pathogenName] = {
                                         sessionCount: 0,
-                                        totalAccuracy: 0,
+                                        totalAccuracy: 0,   // percentage 0–100 sum across sessions
                                         totalWells: 0,
                                         versions: new Set()
                                     };
                                 }
-                                
+
                                 pathogenStats[pathogenName].sessionCount++;
-                                pathogenStats[pathogenName].totalAccuracy += parseFloat(session.expert_accuracy || 0);
+                                // Use ML accuracy percentage computed backend with expert grouping; fallback to expert_accuracy, else 100%
+                                const sessionAccuracy = parseFloat(
+                                    (session.ml_accuracy_percentage != null ? session.ml_accuracy_percentage : (session.expert_accuracy != null ? session.expert_accuracy : 100.0))
+                                ) || 0;
+                                pathogenStats[pathogenName].totalAccuracy += sessionAccuracy;
                                 pathogenStats[pathogenName].totalWells += parseInt(session.total_wells || 0);
                                 pathogenStats[pathogenName].versions.add('1.0'); // Version placeholder
                             }
@@ -2728,7 +2801,7 @@
                     }
                     
                     container.innerHTML = pathogenArray.map(([pathogen, stats]) => {
-                        const avgAccuracy = stats.sessionCount > 0 ? stats.totalAccuracy / stats.sessionCount : 0;
+                        const avgAccuracy = stats.sessionCount > 0 ? (stats.totalAccuracy / stats.sessionCount) : 0;
                         const currentVersion = Array.from(stats.versions)[0] || '1.0';
                         
                         return `
