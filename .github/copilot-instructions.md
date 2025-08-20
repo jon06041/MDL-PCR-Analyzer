@@ -1907,3 +1907,21 @@ Testing
 
 Security
 - Do not loosen route protections. Admin-only routes remain admin-only.
+
+## UI selection and filters (2025-08-20) — Known behavior
+
+Context: We shipped brush selection for the amplification chart to enable multi-curve review. While improving, some legacy filter buttons are not reliable in this view. Current, intentional workflow is selection-first.
+
+- Show All Wells / POS / NEG / REDO buttons
+    - Known limitation: These buttons may not update the chart as expected after using brush selection.
+    - Intended workflow: Use Shift+Drag to select wells on the chart. Then click “Show Selected Curve” to render only those and see the list in “Selected Curve Details.”
+    - Selection list: The right panel lists all selected well IDs. Press Escape to clear the list; use “Show All Wells” to reset the chart.
+
+- ML Banner edge-case count briefly incorrect
+    - On initial render, the ML banner may show a placeholder/high initial count for a few seconds before the correct edge-case count appears. This is due to a re-render after table population and will be stabilized in a follow-up.
+    - Functionally harmless; proceed with analysis. If needed, manually trigger an edge-case recount via the main results table refresh.
+
+Action items (queued)
+- Stabilize POS/NEG/REDO filter behavior when returning from selection mode (preserve state and avoid duplicate refreshes).
+- Debounce ML banner updates to avoid brief placeholder counts.
+
