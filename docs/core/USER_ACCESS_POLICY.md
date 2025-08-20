@@ -1,5 +1,7 @@
 # User Access Policy (Short Reference)
 
+[See detailed permissions matrix](./PERMISSIONS_MATRIX.md)
+
 This overview summarizes roles, multi‑role behavior, and key restrictions for documentation deletion and MySQL admin writes.
 
 Multi‑Role
