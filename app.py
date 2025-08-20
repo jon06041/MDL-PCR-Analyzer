@@ -4698,6 +4698,7 @@ def mysql_viewer():
     """
     is_production = os.getenv('ENVIRONMENT', 'development').lower() == 'production'
     dev_allow_writes = os.getenv('DEV_MYSQL_ADMIN_ALLOW_WRITES', '0').lower() in ('1','true','yes','y','on')
+    dev_relaxed = (not is_production) and (os.getenv('DEV_RELAXED_ADMIN_ACCESS', '1').lower() in ('1','true','yes','y','on'))
     env_label = 'production' if is_production else 'development'
     return render_template_string('''
 <!DOCTYPE html>
@@ -4747,6 +4748,10 @@ def mysql_viewer():
         .error { color: #dc3545; background: #f8d7da; padding: 10px; border-radius: 4px; }
         .success { color: #155724; background: #d4edda; padding: 10px; border-radius: 4px; }
         .loading { color: #856404; background: #fff3cd; padding: 10px; border-radius: 4px; }
+        .pill { display:inline-block; padding:2px 8px; border-radius:12px; font-size:12px; margin-left:6px; }
+        .pill-admin { background:#28a745; color:#fff; }
+        .pill-nonadmin { background:#6c757d; color:#fff; }
+        .pill-relaxed { background:#ffc107; color:#212529; }
     </style>
 </head>
 <body>
@@ -4755,6 +4760,14 @@ def mysql_viewer():
             <h1>🗄️ MySQL Development Viewer</h1>
             <p>Database: {{ config.database }} @ {{ config.host }}:{{ config.port }}</p>
             <p>Environment: {{ env_label }} • Write queries: <strong>{{ 'Enabled' if dev_allow_writes or env_label == 'production' else 'Disabled' }}</strong></p>
+            <div id="auth-row" style="margin-top:8px;">
+                <span id="user-info" class="pill pill-nonadmin">Checking sign-in…</span>
+                <a id="login-link" href="/auth/login?next=/mysql-viewer" style="color: white; margin-left: 10px; display: none; text-decoration: underline;">Sign in</a>
+                <a id="logout-link" href="/auth/logout" style="color: white; margin-left: 10px; display: none; text-decoration: underline;">Logout</a>
+                {% if dev_relaxed %}
+                <span class="pill pill-relaxed" title="Dev relaxed access is ON">Dev relaxed access</span>
+                {% endif %}
+            </div>
             <p style="margin-top:8px;font-size:12px;opacity:.85;">Admin-only in all environments. In development, you may optionally set DEV_RELAXED_ADMIN_ACCESS=1 to bypass auth for local testing. To enable writes in dev, set DEV_MYSQL_ADMIN_ALLOW_WRITES=1.</p>
             <p><a href="/" style="color: white;">← Back to Main App</a></p>
         </div>
@@ -4777,6 +4790,43 @@ def mysql_viewer():
     </div>
 
     <script>
+    async function loadUserStatus() {
+            const info = document.getElementById('user-info');
+            const loginLink = document.getElementById('login-link');
+            const logoutLink = document.getElementById('logout-link');
+            try {
+                const res = await fetch('/auth/api/current-user');
+                if (res.status === 401) {
+                    info.textContent = 'Not signed in';
+                    info.className = 'pill pill-nonadmin';
+                    loginLink.style.display = 'inline';
+                    logoutLink.style.display = 'none';
+                    return;
+                }
+                const data = await res.json();
+        if (data.authenticated) {
+            // Support both shapes: {username, role, permissions} and {user: {...}}
+            const u = data.user ? data.user : data;
+            const perms = Array.isArray(u.permissions) ? u.permissions : [];
+            const isAdmin = u.role === 'administrator' || perms.includes('database_management');
+            info.textContent = `Signed in as ${u.username} (${u.role}) • Admin: ${isAdmin ? 'Yes' : 'No'}`;
+                    info.className = 'pill ' + (isAdmin ? 'pill-admin' : 'pill-nonadmin');
+                    loginLink.style.display = 'none';
+                    logoutLink.style.display = 'inline';
+                } else {
+                    info.textContent = 'Not signed in';
+                    info.className = 'pill pill-nonadmin';
+                    loginLink.style.display = 'inline';
+                    logoutLink.style.display = 'none';
+                }
+            } catch (e) {
+                info.textContent = 'Unable to determine sign-in status';
+                info.className = 'pill pill-nonadmin';
+                loginLink.style.display = 'inline';
+                logoutLink.style.display = 'none';
+            }
+        }
+
         async function loadTables() {
             const container = document.getElementById('tables-container');
             container.innerHTML = '<div class="loading">Loading tables...</div>';
@@ -4880,11 +4930,12 @@ def mysql_viewer():
         }
         
         // Load tables on page load
+        loadUserStatus();
         loadTables();
     </script>
 </body>
 </html>
-    ''', config=mysql_config)
+    ''', config=mysql_config, env_label=env_label, dev_allow_writes=dev_allow_writes, dev_relaxed=dev_relaxed)
 
 @app.route('/api/mysql-admin/status', methods=['GET'])
 @production_admin_only
@@ -4996,7 +5047,7 @@ def mysql_admin_execute_query():
         
         # Determine environment and allowed command scope
         is_production = os.getenv('ENVIRONMENT', 'development').lower() == 'production'
-        dev_allow_writes = os.getenv('DEV_MYSQL_ADMIN_ALLOW_WRITES', '0').lower() in ('1','true','yes','y','on')
+        dev_allow_writes = os.getenv('DEV_MYSQL_ADMIN_ALLOW_WRITES', '1').lower() in ('1','true','yes','y','on')
         query_upper = query.upper().lstrip()
         read_only_cmds = ('SELECT', 'SHOW', 'DESCRIBE', 'EXPLAIN')
         

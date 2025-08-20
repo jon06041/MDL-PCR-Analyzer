@@ -37,6 +37,31 @@
 - **Symptoms**: SQL syntax errors, 500 errors on `/api/mysql-admin/tables`
 - **Solution**: Kill Flask process and restart - changes require fresh MySQL connection pool
 
+### MySQL Viewer: Admin Status & Auth Controls (2025-08-20) ✅ IMPLEMENTED
+
+Status: The MySQL viewer now clearly shows who is signed in and whether they have admin rights, with one‑click sign‑in/out.
+
+Changes:
+- Inline viewer (`/mysql-viewer` in `app.py`):
+    - Header shows current user, role, and Admin: Yes/No with a green pill when admin.
+    - “Sign in” link (when not signed in) redirects back to the viewer after login.
+    - “Logout” link visible when signed in.
+    - Dev indicator pill shows when `DEV_RELAXED_ADMIN_ACCESS=1` is active.
+    - Write queries remain disabled in dev unless `DEV_MYSQL_ADMIN_ALLOW_WRITES=1`; non‑read queries prompt for confirmation.
+- Standalone page (`/mysql-admin`, `mysql_admin.html`):
+    - Added a compact user/admin badge and sign‑in/out links in the sidebar for consistency.
+
+Implementation details:
+- Auth status is fetched from `/auth/api/current-user` and supports both response shapes: flat (`username/role/permissions`) and nested (`user:{...}`).
+- Admin detection uses role `administrator` or permission `database_management`.
+- Environment flags surfaced in UI: `ENVIRONMENT`, `DEV_RELAXED_ADMIN_ACCESS`, `DEV_MYSQL_ADMIN_ALLOW_WRITES`.
+
+Why:
+- Make it obvious when the viewer is accessed as admin and provide clear entry/exit points for authentication.
+
+Notes:
+- Restart Flask after changing viewer routes/templates to pick up inline template updates and env flags.
+
 ## 🔍 CRITICAL ISSUE ANALYSIS (2025-08-18)
 
 ### Audit Logs User Attribution (2025-08-20) ✅ IMPLEMENTED

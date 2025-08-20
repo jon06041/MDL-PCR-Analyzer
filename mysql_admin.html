@@ -63,6 +63,11 @@
                 <div class="p-3">
                     <h5><i class="fas fa-database"></i> MySQL Admin</h5>
                     <p class="small text-muted">Development Database Browser</p>
+                    <div class="mt-2">
+                        <span id="userInfo" class="badge bg-secondary">Checking sign-in…</span>
+                        <a id="loginLink" href="/auth/login?next=/mysql-admin" class="ms-2 small" style="display:none;">Sign in</a>
+                        <a id="logoutLink" href="/auth/logout" class="ms-2 small" style="display:none;">Logout</a>
+                    </div>
                     
                     <div class="mb-3">
                         <button class="btn btn-sm btn-primary" onclick="refreshTables()">
@@ -170,8 +175,45 @@
         // Initialize the admin interface
         document.addEventListener('DOMContentLoaded', function() {
             checkConnection();
+            updateUserInfo();
             refreshTables();
         });
+
+        async function updateUserInfo() {
+            const info = document.getElementById('userInfo');
+            const login = document.getElementById('loginLink');
+            const logout = document.getElementById('logoutLink');
+            try {
+                const res = await fetch('/auth/api/current-user');
+                if (res.status === 401) {
+                    info.textContent = 'Not signed in';
+                    info.className = 'badge bg-secondary';
+                    login.style.display = 'inline';
+                    logout.style.display = 'none';
+                    return;
+                }
+                const data = await res.json();
+                if (data.authenticated) {
+                    const u = data.user ? data.user : data;
+                    const perms = Array.isArray(u.permissions) ? u.permissions : [];
+                    const isAdmin = u.role === 'administrator' || perms.includes('database_management');
+                    info.textContent = `${u.username} (${u.role}) • Admin: ${isAdmin ? 'Yes' : 'No'}`;
+                    info.className = 'badge ' + (isAdmin ? 'bg-success' : 'bg-secondary');
+                    login.style.display = 'none';
+                    logout.style.display = 'inline';
+                } else {
+                    info.textContent = 'Not signed in';
+                    info.className = 'badge bg-secondary';
+                    login.style.display = 'inline';
+                    logout.style.display = 'none';
+                }
+            } catch (e) {
+                info.textContent = 'Auth status unavailable';
+                info.className = 'badge bg-secondary';
+                login.style.display = 'inline';
+                logout.style.display = 'none';
+            }
+        }
 
         async function checkConnection() {
             try {
