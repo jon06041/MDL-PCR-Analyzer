@@ -1938,18 +1938,63 @@
                 }
                 
                 // Add Validation Tests section when configured
-                if (needsValidationTests && validationData && validationData !== null) {
+                if (needsValidationTests) {
                     try {
-                        const v = validationData;
-                        // Normalize a few likely shapes
-                        const summary = v.summary || v.validation_summary || {};
-                        const overall = v.overall_status || summary.overall_status || v.status || 'UNKNOWN';
-                        const passed = (v.passed_checks && v.passed_checks.length) || summary.passed || 0;
-                        const warns = (v.warnings && v.warnings.length) || summary.warnings || 0;
-                        const fails = (v.critical_failures && v.critical_failures.length) || summary.critical_failures || 0;
-                        const total = (v.total_requirements || summary.total || (passed + warns + fails)) || 0;
+                        // Aggregate from multiple sources: system validation payload, encryption evidence, and evidence_sources rows
+                        const aggregateValidation = (primary, encryption, sources) => {
+                            const acc = { overall: 'UNKNOWN', passed: 0, warns: 0, fails: 0, total: 0 };
+                            const apply = (v) => {
+                                if (!v) return;
+                                try {
+                                    // Common shapes
+                                    const summary = v.summary || v.validation_summary || {};
+                                    // Arrays of checks
+                                    acc.passed += (Array.isArray(v.passed_checks) ? v.passed_checks.length : (summary.passed || 0));
+                                    acc.warns  += (Array.isArray(v.warnings) ? v.warnings.length : (summary.warnings || summary.major_warnings || 0));
+                                    acc.fails  += (Array.isArray(v.critical_failures) ? v.critical_failures.length : (summary.critical_failures || 0));
+                                    // Map-form validation_results: { test: {status: PASS|WARNING|FAIL} }
+                                    const vrMap = v.validation_results && !Array.isArray(v.validation_results) && typeof v.validation_results === 'object' ? v.validation_results : null;
+                                    if (vrMap) {
+                                        Object.values(vrMap).forEach(x => {
+                                            const s = (x && (x.status || x.result || x.overall_status || '')).toString().toUpperCase();
+                                            if (s.includes('FAIL')) acc.fails += 1;
+                                            else if (s.includes('WARN')) acc.warns += 1;
+                                            else if (s.includes('PASS') || s === 'OK' || s === 'SUCCESS') acc.passed += 1;
+                                        });
+                                    }
+                                    // Overall
+                                    const o = (v.overall_status || summary.overall_status || v.status || '').toString().toUpperCase();
+                                    if (o) acc.overall = o;
+                                } catch {}
+                            };
 
-                        const badge = (overall === 'PASS') ? 'bg-success' : (overall === 'WARNING' ? 'bg-warning' : 'bg-danger');
+                            // 1) Primary system validation
+                            if (primary && primary.success !== false) apply(primary);
+
+                            // 2) Encryption evidence embedded validation
+                            if (encryption && encryption.success !== false) {
+                                let e = encryption.evidence_data || encryption.evidence || encryption;
+                                try { if (typeof e === 'string') e = JSON.parse(e); } catch {}
+                                if (e && e.validation_results) apply(e);
+                            }
+
+                            // 3) Embedded validation inside evidence_sources rows
+                            (Array.isArray(sources) ? sources : []).forEach(src => {
+                                let data = src && src.evidence_data;
+                                try { if (typeof data === 'string') data = JSON.parse(data); } catch {}
+                                if (data && (data.validation_results || data.summary || data.passed_checks)) apply(data);
+                            });
+
+                            acc.total = (acc.passed + acc.warns + acc.fails);
+                            if (acc.overall === 'UNKNOWN') {
+                                // Infer overall from counts if not explicitly provided
+                                acc.overall = acc.fails > 0 ? 'CRITICAL_FAILURE' : (acc.warns > 0 ? 'WARNING' : (acc.passed > 0 ? 'PASS' : 'UNKNOWN'));
+                            }
+                            return acc;
+                        };
+
+                        const vt = aggregateValidation(validationData, encryptionData, renderSources);
+                        const badge = (vt.overall === 'PASS') ? 'bg-success' : (vt.overall === 'WARNING' ? 'bg-warning' : (vt.overall === 'UNKNOWN' ? 'bg-secondary' : 'bg-danger'));
 
                         evidenceHTML += `
                             <div class="card mb-3 border-primary">
@@ -1959,23 +2004,23 @@
                                 <div class="card-body">
                                     <div class="row text-center">
                                         <div class="col-md-3">
-                                            <div><span class="badge ${badge}">${overall}</span></div>
+                                            <div><span class="badge ${badge}">${vt.overall}</span></div>
                                             <small class="text-muted">Overall Status</small>
                                         </div>
                                         <div class="col-md-3">
-                                            <div class="text-success fw-bold">${passed}</div>
+                                            <div class="text-success fw-bold">${vt.passed}</div>
                                             <small class="text-muted">Pass</small>
                                         </div>
                                         <div class="col-md-3">
-                                            <div class="text-warning fw-bold">${warns}</div>
+                                            <div class="text-warning fw-bold">${vt.warns}</div>
                                             <small class="text-muted">Warnings</small>
                                         </div>
                                         <div class="col-md-3">
-                                            <div class="text-danger fw-bold">${fails}</div>
+                                            <div class="text-danger fw-bold">${vt.fails}</div>
                                             <small class="text-muted">Failures</small>
                                         </div>
                                     </div>
-                                    ${total ? `<div class="mt-3"><small class="text-muted">Total checks: ${total}</small></div>` : ''}
+                                    ${vt.total ? `<div class="mt-3"><small class="text-muted">Total checks: ${vt.total}</small></div>` : ''}
                                 </div>
                             </div>
                         `;
