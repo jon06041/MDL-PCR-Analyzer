@@ -1234,10 +1234,19 @@
                                 </div>
                 <div id="policyGuidance" class="mb-2"></div>
                                 
-                                <div class="alert alert-success">
-                                    <i class="fas fa-check-circle"></i>
-                                    <strong>Validation System Tracking:</strong> This requirement is actively being tracked by the validation system. Evidence is being collected automatically during qPCR analysis runs.
-                                </div>
+                                ${(() => {
+                                    try {
+                                        const types = window.EvidenceFilter?.getAllowedEvidenceTypes?.(req.id) || [];
+                                        if (types.includes('run_files') || types.includes('validation_tests')) {
+                                            return `
+                                                <div class="alert alert-success">
+                                                    <i class="fas fa-check-circle"></i>
+                                                    <strong>Validation System Tracking:</strong> This requirement is actively being tracked by the validation system. Evidence is being collected automatically during qPCR analysis runs.
+                                                </div>`;
+                                        }
+                                    } catch {}
+                                    return '';
+                                })()}
                                 
                                 <div id="evidenceDetails">
                                     <div class="text-center py-4">
@@ -1460,13 +1469,15 @@
                     );
                 })();
 
-                let evidenceHTML = `
-                    <div class="card">
-                        <div class="card-header">
-                            <h6 class="mb-0"><i class="fas fa-database"></i> Evidence Records (${renderSources.length})</h6>
-                        </div>
-                        <div class="card-body">
-                            ${(() => {
+                let evidenceHTML = '';
+                if (renderSources.length > 0) {
+                    evidenceHTML += `
+                        <div class="card">
+                            <div class="card-header">
+                                <h6 class="mb-0"><i class="fas fa-database"></i> Evidence Records (${renderSources.length})</h6>
+                            </div>
+                            <div class="card-body">
+                                ${(() => {
                                 try {
                                     const m = renderSources.__dedup_meta || {};
                                     if (!m || typeof m.rawEvidenceSourcesCount !== 'number') return '';
@@ -1495,17 +1506,17 @@
                                     `;
                                 } catch { return ''; }
                             })()}
-                            <div class="table-responsive">
-                                <table class="table table-sm table-striped">
-                                    <thead>
-                                        <tr>
-                                            <th>Type</th>
-                                            <th>Description</th>
-                                            <th>Status</th>
-                                            <th>Date</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>`;
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>Type</th>
+                                                <th>Description</th>
+                                                <th>Status</th>
+                                                <th>Date</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>`;
                 
                 renderSources.forEach((source, index) => {
                     let statusBadge = source.confirmation_status === 'confirmed' ? 
@@ -1621,17 +1632,20 @@
                 });
                 
                 evidenceHTML += `
-                                    </tbody>
-                                </table>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="alert alert-success mt-3">
+                                    <i class="fas fa-check-circle"></i>
+                                    <strong>Evidence Source:</strong> Direct API integration - real-time evidence tracking
+                                </div>
                             </div>
-                            <div class="alert alert-success mt-3">
-                                <i class="fas fa-check-circle"></i>
-                                <strong>Evidence Source:</strong> Direct API integration - real-time evidence tracking
-                            </div>
-                        </div>
-                    </div>`;
-                // Render these and continue to add encryption/session evidence below so the count matches total shown
-                evidenceContainer.innerHTML = evidenceHTML;
+                        </div>`;
+                }
+                // Render sources card (if any) and continue to add logs/sessions so the count matches total shown
+                if (evidenceHTML) {
+                    evidenceContainer.innerHTML = evidenceHTML;
+                }
             }
             
             // Fallback to the original method if no evidence_sources

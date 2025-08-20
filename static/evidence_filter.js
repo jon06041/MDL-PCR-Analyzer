@@ -27,6 +27,8 @@ const REQUIREMENT_EVIDENCE_MAPPING = {
     // Access Control (use encryption + audit logs)
     'HIPAA_164_312_A_1': ['encryption_evidence', 'audit_logs'],
     'ISO_27001_A_9_1_1': ['encryption_evidence', 'audit_logs'],
+    // Entra/Azure AD role management (access control)
+    'ENTRA_ROLE_MANAGEMENT': ['audit_logs'],
     
     // 21 CFR Part 11 (aliases without FDA_ prefix)
     // A: System validation evidence (runs/validation tests)
@@ -120,8 +122,8 @@ function getAllowedEvidenceTypes(reqCode) {
         if (REQUIREMENT_EVIDENCE_MAPPING[reqCode]) return REQUIREMENT_EVIDENCE_MAPPING[reqCode];
 
         // Heuristics by pattern for unmapped IDs
-        // Access control / RBAC
-        if (/RBAC|ACCESS[_\s-]*CONTROL|ISO[_\s-]*27001.*A[_\s-]*9/.test(code)) {
+    // Access control / RBAC / Entra / Azure AD
+    if (/RBAC|ACCESS[_\s-]*CONTROL|ISO[_\s-]*27001.*A[_\s-]*9|ENTRA|AZURE[_\s-]*AD|\bAAD\b|ROLE[_\s-]*MANAGE/.test(code)) {
             return ['audit_logs', 'encryption_evidence'];
         }
         // Encryption / security controls
