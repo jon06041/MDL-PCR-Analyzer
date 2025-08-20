@@ -1707,6 +1707,7 @@
             const allowedTypes = (window.EvidenceFilter?.getAllowedEvidenceTypes?.(reqCode) || []);
             const hasEncryptionEvidence = allowedTypes.includes('encryption_evidence');
             const needsAuditLogs = allowedTypes.includes('audit_logs');
+            const needsValidationTests = allowedTypes.includes('validation_tests');
             
             // Fetch evidence from multiple sources (use cached sessions to avoid extra calls)
             const evidencePromises = [
@@ -1722,6 +1723,14 @@
                     fetch(`/api/unified-compliance/encryption-evidence/${apiId}`).then(r => r.ok ? r.json() : { success: false })
                 );
             }
+            // Add software validation tests (comprehensive system validation)
+            if (needsValidationTests) {
+                evidencePromises.push(
+                    fetch('/api/unified-compliance/validate-system', { method: 'POST' })
+                        .then(r => r.ok ? r.json() : { success: false, error: r.status })
+                        .catch(() => ({ success: false }))
+                );
+            }
             if (needsAuditLogs) {
                 evidencePromises.push(
                     fetch('/api/ml-config/audit-log?limit=50').then(r => r.ok ? r.json() : { success: false })
@@ -1730,8 +1739,11 @@
             
             Promise.all(evidencePromises).then((results) => {
                 const [confirmedData, pendingData] = results;
-                const encryptionData = hasEncryptionEvidence ? (needsAuditLogs ? results[2] : results[2]) : null;
-                const auditLogData = needsAuditLogs ? (hasEncryptionEvidence ? results[3] : results[2]) : null;
+                // Compute offsets safely based on which optional calls were included
+                let idx = 2;
+                const encryptionData = hasEncryptionEvidence ? results[idx++] : null;
+                const validationData = needsValidationTests ? results[idx++] : null;
+                const auditLogData = needsAuditLogs ? results[idx++] : null;
                 
                 console.log('Loading evidence files for', reqCode);
                 
@@ -1925,6 +1937,53 @@
                     `;
                 }
                 
+                // Add Validation Tests section when configured
+                if (needsValidationTests && validationData && validationData !== null) {
+                    try {
+                        const v = validationData;
+                        // Normalize a few likely shapes
+                        const summary = v.summary || v.validation_summary || {};
+                        const overall = v.overall_status || summary.overall_status || v.status || 'UNKNOWN';
+                        const passed = (v.passed_checks && v.passed_checks.length) || summary.passed || 0;
+                        const warns = (v.warnings && v.warnings.length) || summary.warnings || 0;
+                        const fails = (v.critical_failures && v.critical_failures.length) || summary.critical_failures || 0;
+                        const total = (v.total_requirements || summary.total || (passed + warns + fails)) || 0;
+
+                        const badge = (overall === 'PASS') ? 'bg-success' : (overall === 'WARNING' ? 'bg-warning' : 'bg-danger');
+
+                        evidenceHTML += `
+                            <div class="card mb-3 border-primary">
+                                <div class="card-header bg-primary text-white">
+                                    <h6><i class="fas fa-vial"></i> Validation Tests</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row text-center">
+                                        <div class="col-md-3">
+                                            <div><span class="badge ${badge}">${overall}</span></div>
+                                            <small class="text-muted">Overall Status</small>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="text-success fw-bold">${passed}</div>
+                                            <small class="text-muted">Pass</small>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="text-warning fw-bold">${warns}</div>
+                                            <small class="text-muted">Warnings</small>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="text-danger fw-bold">${fails}</div>
+                                            <small class="text-muted">Failures</small>
+                                        </div>
+                                    </div>
+                                    ${total ? `<div class="mt-3"><small class="text-muted">Total checks: ${total}</small></div>` : ''}
+                                </div>
+                            </div>
+                        `;
+                    } catch (e) {
+                        console.warn('Validation tests render failed:', e);
+                    }
+                }
+                
                 // Add session files evidence if this requirement uses run files
                 const allowRunFiles = (() => {
                     try { return (window.EvidenceFilter?.getAllowedEvidenceTypes?.(reqCode) || []).some(t => t === 'run_files' || t === 'validation_tests'); } catch { return true; }
@@ -2098,8 +2157,23 @@
         try {
                     const req = (window.requirementsData || []).find(r => r.id === reqCode) || {};
                     const sources = Array.isArray(req.evidence_sources) ? req.evidence_sources : [];
+                    // Estimate validation test records
+                    let validationCount = 0;
+                    try {
+                        if (needsValidationTests && validationData) {
+                            if (validationData.validation_results && typeof validationData.validation_results === 'object') {
+                                validationCount = Object.keys(validationData.validation_results).length;
+                            } else {
+                                const pc = (validationData.passed_checks || []).length;
+                                const cf = (validationData.critical_failures || []).length;
+                                const w = (validationData.warnings || []).length;
+                                validationCount = pc + cf + w;
+                                if (validationCount === 0) validationCount = 1; // minimal evidence
+                            }
+                        }
+                    } catch {}
                     const count = window.EvidenceFilter?.getRelevantEvidenceCount?.(reqCode, confirmedSessions, pendingSessions, encryptionData, sources, auditLogData)
-            || (deDupedSessions.length + (encryptionData ? (window.EvidenceFilter?.countEncryptionRecords?.(encryptionData) || 0) : 0) + sources.length);
+            || (deDupedSessions.length + (encryptionData ? (window.EvidenceFilter?.countEncryptionRecords?.(encryptionData) || 0) : 0) + sources.length + validationCount);
                     const el = document.getElementById('evidenceCountValue');
                     if (el) el.textContent = count;
                 } catch {}
