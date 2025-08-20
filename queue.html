@@ -332,7 +332,7 @@
                 <div class="queue-stats">
                     <div class="stat-card">
                         <span class="stat-number" id="total-experiments">0</span>
-                        <span class="stat-label">Experiments</span>
+                        <span class="stat-label">Runs</span>
                     </div>
                     <div class="stat-card">
                         <span class="stat-number" id="total-files">0</span>
@@ -354,7 +354,7 @@
                                onkeyup="QueueManager.filterQueue()">
                         
                         <select id="filter-status" class="filter-select" onchange="QueueManager.filterQueue()">
-                            <option value="all">All Experiments</option>
+                            <option value="all">All Runs</option>
                             <option value="ready" selected>Ready for Analysis</option>
                             <option value="analyzed">Already Analyzed</option>
                             <option value="recent">Recently Modified</option>
@@ -385,7 +385,7 @@
                                 <th width="3%">
                                     <input type="checkbox" id="select-all-checkbox" onchange="QueueManager.toggleSelectAll()">
                                 </th>
-                                <th width="25%">Experiment</th>
+                                <th width="25%">Runs</th>
                                 <th width="15%">Files</th>
                                 <th width="20%">Channels</th>
                                 <th width="15%">Last Modified</th>

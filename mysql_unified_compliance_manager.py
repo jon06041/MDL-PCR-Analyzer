@@ -54,6 +54,8 @@ class MySQLUnifiedComplianceManager:
             'USER_LOGIN': ['ACCESS_LOGGING', 'ENTRA_SSO_INTEGRATION'],
             'ACCESS_DENIED': ['ACCESS_LOGGING', 'ENTRA_CONDITIONAL_ACCESS'],
             'FILE_UPLOADED': ['CFR_11_10_B', 'DATA_ENCRYPTION_TRANSIT'],
+            # Documentation uploads (procedural docs, SOPs) map primarily to record protection
+            'DOCUMENTATION_UPLOADED': ['CFR_11_10_C', 'ISO_13485_4_2_3'],
             'DATA_MODIFIED': ['CFR_11_10_B', 'ACCESS_LOGGING'],
             
             # Training & Competency

@@ -759,6 +759,38 @@ class Base(DeclarativeBase):
     pass
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
+
+# ===== File Upload (Documentation) Configuration =====
+import os
+import json as _json  # avoid clashing with other json imports
+from uuid import uuid4
+from werkzeug.utils import secure_filename
+from flask import send_file
+
+# Base upload folder for compliance documents (created at runtime)
+BASE_UPLOAD_DIR = os.environ.get('COMPLIANCE_UPLOAD_DIR', os.path.join(os.getcwd(), 'uploads', 'compliance_docs'))
+os.makedirs(BASE_UPLOAD_DIR, exist_ok=True)
+
+# Limit upload size (20 MB by default)
+app.config['MAX_CONTENT_LENGTH'] = int(os.environ.get('MAX_UPLOAD_MB', 20)) * 1024 * 1024
+
+ALLOWED_DOC_EXTENSIONS = {
+    'pdf', 'doc', 'docx', 'txt', 'md', 'rtf', 'csv', 'tsv', 'xlsx', 'xls',
+    'png', 'jpg', 'jpeg'
+}
+
+def _allowed_doc_file(filename: str) -> bool:
+    try:
+        return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_DOC_EXTENSIONS
+    except Exception:
+        return False
+
+def _ensure_req_dir(req_id: str) -> str:
+    # Create requirement-specific folder under the base uploads dir
+    safe_req = ''.join(ch for ch in (req_id or '') if ch.isalnum() or ch in ('_', '-', '.'))[:128]
+    req_dir = os.path.join(BASE_UPLOAD_DIR, safe_req or 'general')
+    os.makedirs(req_dir, exist_ok=True)
+    return req_dir
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or "qpcr_analyzer_secret_key_2025"
 
 # Global quota flag to prevent repeated database operations when quota exceeded
@@ -6343,6 +6375,286 @@ def get_unified_compliance_requirements():
         
     except Exception as e:
         app.logger.error(f"Error getting compliance requirements: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# ===== Unified Compliance: Documentation Evidence (Upload/List/Serve) =====
+
+@app.route('/api/unified-compliance/evidence/documentation/upload', methods=['POST'])
+@require_permission(Permissions.MANAGE_COMPLIANCE_EVIDENCE)
+def upload_compliance_documentation():
+    """Upload a documentation file and create a compliance evidence record.
+    Form fields: file (multipart), requirement_id (str), description (optional)
+    """
+    try:
+        if not unified_compliance_manager:
+            return jsonify({'error': 'Unified Compliance Manager not available'}), 503
+
+        # Validate multipart
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+        file = request.files['file']
+        if not file or file.filename == '':
+            return jsonify({'error': 'Empty filename'}), 400
+        if not _allowed_doc_file(file.filename):
+            return jsonify({'error': 'Unsupported file type'}), 400
+
+        requirement_id = request.form.get('requirement_id', '').strip() or request.args.get('requirement_id', '').strip()
+        if not requirement_id:
+            return jsonify({'error': 'requirement_id is required'}), 400
+
+        # Save file to requirement-specific directory with randomized name
+        original_name = secure_filename(file.filename)
+        ext = (original_name.rsplit('.', 1)[1].lower() if '.' in original_name else 'bin')
+        stored_name = f"{uuid4().hex}.{ext}"
+        req_dir = _ensure_req_dir(requirement_id)
+        abs_path = os.path.join(req_dir, stored_name)
+        file.save(abs_path)
+
+        # Gather metadata
+        size_bytes = os.path.getsize(abs_path) if os.path.exists(abs_path) else 0
+        mime = file.mimetype or 'application/octet-stream'
+
+        # Build evidence payload stored in JSON
+        user_id = get_current_user()
+        evidence_payload = {
+            'evidence_kind': 'documentation',
+            'filename': original_name,
+            'stored_name': stored_name,
+            'mime_type': mime,
+            'size_bytes': size_bytes,
+            'requirement_id': requirement_id,
+            'upload_user': user_id,
+            'storage_relpath': os.path.relpath(abs_path, BASE_UPLOAD_DIR),
+            'description': request.form.get('description') or '',
+        }
+
+        # Log event and create evidence via manager; map to DOCUMENTATION_UPLOADED
+        event_id = unified_compliance_manager.track_compliance_event(
+            'DOCUMENTATION_UPLOADED',
+            evidence_payload,
+            user_id=user_id,
+            session_id=request.headers.get('X-Session-Id')
+        )
+
+        return jsonify({
+            'success': True,
+            'event_id': event_id,
+            'evidence': evidence_payload
+        })
+    except Exception as e:
+        app.logger.error(f"Upload failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/unified-compliance/evidence/documentation/list', methods=['GET'])
+@require_permission(Permissions.VIEW_COMPLIANCE_DASHBOARD)
+def list_compliance_documentation():
+    """List uploaded documentation evidence for a requirement.
+    Query: requirement_id (str)
+    """
+    try:
+        if not unified_compliance_manager:
+            return jsonify({'error': 'Unified Compliance Manager not available'}), 503
+
+        requirement_id = request.args.get('requirement_id', '').strip()
+        if not requirement_id:
+            return jsonify({'error': 'requirement_id is required'}), 400
+
+        # Query evidence entries for this requirement with documentation kind in JSON
+        conn = unified_compliance_manager.get_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                '''
+                SELECT ce.id, ce.created_at, ce.validation_status, ce.evidence_data
+                FROM compliance_evidence ce
+                WHERE ce.requirement_id = %s
+                ORDER BY ce.created_at DESC
+                LIMIT 200
+                ''',
+                (requirement_id,)
+            )
+            rows = cur.fetchall() or []
+        finally:
+            cur.close(); conn.close()
+
+        # Filter and normalize to documentation records
+        docs = []
+        for r in rows:
+            try:
+                data = r.get('evidence_data')
+                if isinstance(data, (bytes, bytearray)):
+                    data = data.decode('utf-8', errors='ignore')
+                if isinstance(data, str):
+                    data = _json.loads(data)
+                if not isinstance(data, dict):
+                    continue
+                if (data.get('evidence_kind') or '').lower() != 'documentation':
+                    # skip non-documentation evidence
+                    continue
+                docs.append({
+                    'evidence_id': r.get('id'),
+                    'created_at': r.get('created_at').isoformat() if r.get('created_at') else None,
+                    'validation_status': r.get('validation_status'),
+                    'filename': data.get('filename'),
+                    'mime_type': data.get('mime_type'),
+                    'size_bytes': data.get('size_bytes'),
+                    'storage_relpath': data.get('storage_relpath'),
+                    'description': data.get('description') or ''
+                })
+            except Exception:
+                continue
+
+        return jsonify({'success': True, 'requirement_id': requirement_id, 'documents': docs})
+    except Exception as e:
+        app.logger.error(f"List documentation failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/unified-compliance/evidence/documentation/serve/<int:evidence_id>', methods=['GET'])
+@require_permission(Permissions.VIEW_COMPLIANCE_DASHBOARD)
+def serve_compliance_documentation(evidence_id: int):
+    """Stream a stored documentation file for a given evidence id."""
+    try:
+        if not unified_compliance_manager:
+            return jsonify({'error': 'Unified Compliance Manager not available'}), 503
+
+        # Lookup evidence_data for this id
+        conn = unified_compliance_manager.get_connection()
+        cur = conn.cursor(dictionary=True)
+        row = None
+        try:
+            cur.execute('SELECT requirement_id, evidence_data FROM compliance_evidence WHERE id = %s', (evidence_id,))
+            row = cur.fetchone()
+        finally:
+            cur.close(); conn.close()
+
+        if not row:
+            return jsonify({'error': 'Evidence not found'}), 404
+        data = row.get('evidence_data')
+        if isinstance(data, (bytes, bytearray)):
+            data = data.decode('utf-8', errors='ignore')
+        if isinstance(data, str):
+            try: data = _json.loads(data)
+            except Exception: data = {}
+        if not isinstance(data, dict) or (data.get('evidence_kind') or '').lower() != 'documentation':
+            return jsonify({'error': 'Not a documentation evidence record'}), 400
+
+        rel = data.get('storage_relpath')
+        stored_name = data.get('stored_name')
+        original_name = data.get('filename') or stored_name or f'document_{evidence_id}'
+        if not rel:
+            return jsonify({'error': 'Stored path missing'}), 404
+
+        abs_path = os.path.join(BASE_UPLOAD_DIR, rel)
+        # Harden against path traversal; ensure path stays within BASE_UPLOAD_DIR
+        base_real = os.path.realpath(BASE_UPLOAD_DIR)
+        abs_real = os.path.realpath(abs_path)
+        if not abs_real.startswith(base_real + os.sep) and abs_real != base_real:
+            return jsonify({'error': 'Invalid path'}), 400
+        if not os.path.exists(abs_path):
+            return jsonify({'error': 'File not found on server'}), 404
+
+        # Log access event for audit (read action)
+        try:
+            track_compliance_automatically('DATA_EXPORTED', {
+                'action': 'DOCUMENT_VIEW',
+                'evidence_id': evidence_id,
+                'requirement_id': row.get('requirement_id'),
+                'filename': original_name
+            })
+        except Exception:
+            pass
+
+        return send_file(abs_path, as_attachment=False, download_name=original_name)
+    except Exception as e:
+        app.logger.error(f"Serve documentation failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# Secure deletion of documentation evidence (QC Technician, Compliance Officer, Admin only)
+@app.route('/api/unified-compliance/evidence/documentation/delete/<int:evidence_id>', methods=['DELETE'])
+@require_authentication
+def delete_compliance_documentation(evidence_id: int):
+    """Delete a documentation evidence record and its stored file.
+    Access restricted to roles: qc_technician, compliance_officer, administrator.
+    """
+    try:
+        if not unified_compliance_manager:
+            return jsonify({'error': 'Unified Compliance Manager not available'}), 503
+
+        # Enforce explicit role allowlist (disallow research_user even at same level)
+        from flask import g
+        allowed_roles = {'qc_technician', 'compliance_officer', 'administrator'}
+        user_role = (g.current_user or {}).get('role') if hasattr(g, 'current_user') else None
+        if user_role not in allowed_roles:
+            return jsonify({'error': 'Insufficient role for deletion'}), 403
+
+        # Lookup evidence record
+        conn = unified_compliance_manager.get_connection()
+        cur = conn.cursor(dictionary=True)
+        row = None
+        try:
+            cur.execute('SELECT id, requirement_id, evidence_data FROM compliance_evidence WHERE id = %s', (evidence_id,))
+            row = cur.fetchone()
+        finally:
+            cur.close(); conn.close()
+
+        if not row:
+            return jsonify({'error': 'Evidence not found'}), 404
+
+        data = row.get('evidence_data')
+        if isinstance(data, (bytes, bytearray)):
+            data = data.decode('utf-8', errors='ignore')
+        if isinstance(data, str):
+            try:
+                data = _json.loads(data)
+            except Exception:
+                data = {}
+        if not isinstance(data, dict) or (data.get('evidence_kind') or '').lower() != 'documentation':
+            return jsonify({'error': 'Not a documentation evidence record'}), 400
+
+        rel = data.get('storage_relpath')
+        original_name = data.get('filename') or f'document_{evidence_id}'
+        file_deleted = False
+
+        if rel:
+            abs_path = os.path.join(BASE_UPLOAD_DIR, rel)
+            base_real = os.path.realpath(BASE_UPLOAD_DIR)
+            abs_real = os.path.realpath(abs_path)
+            if abs_real.startswith(base_real + os.sep) or abs_real == base_real:
+                if os.path.exists(abs_path):
+                    try:
+                        os.remove(abs_path)
+                        file_deleted = True
+                    except Exception as fe:
+                        app.logger.warning(f"Failed to delete file for evidence {evidence_id}: {fe}")
+            else:
+                app.logger.warning(f"Path traversal blocked during delete for evidence {evidence_id}: {abs_real}")
+
+        # Delete DB record
+        conn = unified_compliance_manager.get_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute('DELETE FROM compliance_evidence WHERE id = %s', (evidence_id,))
+            conn.commit()
+        finally:
+            cur.close(); conn.close()
+
+        # Log deletion event
+        try:
+            track_compliance_automatically('DOCUMENTATION_DELETED', {
+                'action': 'DOCUMENT_DELETE',
+                'evidence_id': evidence_id,
+                'requirement_id': row.get('requirement_id'),
+                'filename': original_name,
+                'file_deleted': file_deleted
+            })
+        except Exception:
+            pass
+
+        return jsonify({'success': True, 'evidence_id': evidence_id, 'file_deleted': file_deleted})
+    except Exception as e:
+        app.logger.error(f"Delete documentation failed: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/unified-compliance/recent-events', methods=['GET'])

@@ -511,6 +511,17 @@ class UnifiedAuthManager:
                        details: Dict = None):
         """Log authentication events for audit purposes"""
         try:
+            # Best-effort enrich details with request context (method/path)
+            try:
+                from flask import request as _flask_request
+                if details is None:
+                    details = {}
+                if isinstance(details, dict):
+                    details.setdefault('method', getattr(_flask_request, 'method', None))
+                    details.setdefault('path', getattr(_flask_request, 'path', None))
+                    details.setdefault('endpoint', getattr(_flask_request, 'endpoint', None))
+            except Exception:
+                pass
             connection = mysql.connector.connect(**self.mysql_config)
             cursor = connection.cursor()
             
