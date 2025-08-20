@@ -3037,7 +3037,7 @@ def ml_submit_feedback():
             expert_classification, well_id, pathogen
         )
         
-        # ALSO save feedback to MySQL database for persistence and stats
+        # Persist feedback once: avoid duplicate rows when ml_tracker already logged it
         try:
             import mysql.connector
             mysql_config = {
@@ -3048,68 +3048,74 @@ def ml_submit_feedback():
                 'database': os.environ.get("MYSQL_DATABASE", "qpcr_analysis"),
                 'charset': 'utf8mb4'
             }
-            
+
             conn = mysql.connector.connect(**mysql_config)
-            cursor = conn.cursor()
-            
-            # Get original prediction for comparison
-            original_prediction = enhanced_metrics.get('original_prediction', 'Unknown')
-            
-            # Insert feedback into ml_expert_decisions table with is_correction computed
-            insert_sql = '''
-                INSERT INTO ml_expert_decisions 
-                (session_id, well_id, pathogen, original_prediction, expert_correction, 
-                 confidence, rfu_data, cycles, features_used, feedback_context, is_correction)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
-                    CASE 
-                        WHEN %s IS NULL OR %s IS NULL THEN NULL
-                        WHEN (
-                            UPPER(%s) IN ('WEAK_POSITIVE','POSITIVE','STRONG_POSITIVE') AND UPPER(%s) IN ('WEAK_POSITIVE','POSITIVE','STRONG_POSITIVE')
-                        ) OR (
-                            UPPER(%s) IN ('INDETERMINATE','SUSPICIOUS','REDO') AND UPPER(%s) IN ('INDETERMINATE','SUSPICIOUS','REDO')
-                        ) OR (
-                            UPPER(%s) = 'NEGATIVE' AND UPPER(%s) = 'NEGATIVE'
-                        ) THEN 0
-                        ELSE 1
-                    END
-                )
-            '''
-            
-            cursor.execute(insert_sql, (
-                data.get('session_id', 'ml_learning_test'),
+            cursor = conn.cursor(dictionary=True)
+
+            original_prediction = enhanced_metrics.get('original_prediction', existing_metrics.get('classification', 'Unknown'))
+
+            # Check for an existing recent decision for the same well/pathogen and class pair
+            dedup_sql = (
+                "SELECT id FROM ml_expert_decisions "
+                "WHERE well_id = %s "
+                "AND (pathogen = %s OR %s IS NULL OR pathogen IS NULL) "
+                "AND ( (original_prediction = %s AND expert_correction = %s) "
+                "   OR (ml_prediction = %s AND expert_decision = %s) ) "
+                "AND COALESCE(feedback_timestamp, `timestamp`) > (NOW() - INTERVAL 10 MINUTE) "
+                "ORDER BY id DESC LIMIT 1"
+            )
+            params = (
                 well_id,
-                pathogen,
-                original_prediction,
-                expert_classification,
-                1.0,  # Expert feedback has 100% confidence
-                json.dumps(rfu_data),
-                json.dumps(cycles),
-                json.dumps(enhanced_metrics),
-                f"Expert feedback via ML interface - {pathogen}",
-                # Parameters used by CASE for is_correction
-                original_prediction, expert_classification,
-                original_prediction, expert_classification,
+                pathogen, pathogen,
                 original_prediction, expert_classification,
                 original_prediction, expert_classification
-            ))
-            
-            conn.commit()
-            cursor.close()
-            conn.close()
-            
-            # Log whether this counts as a correction using new grouping logic
-            is_correction = is_expert_correction(original_prediction, expert_classification)
-            correction_status = "CORRECTION" if is_correction else "SAME GROUP (no correction)"
-            original_group = get_classification_group(original_prediction)
-            expert_group = get_classification_group(expert_classification)
-            
-            print(f"✅ Expert feedback saved to MySQL database: {original_prediction} -> {expert_classification} for {pathogen}")
-            print(f"📊 Classification groups: {original_prediction} ({original_group}) -> {expert_classification} ({expert_group})")
-            print(f"🎯 Accuracy impact: {correction_status}")
-            
+            )
+            try:
+                cursor.execute(dedup_sql, params)
+                existing_row = cursor.fetchone()
+            except Exception as qerr:
+                existing_row = None
+                print(f"[ML FEEDBACK] Dedup query warning (continuing): {qerr}")
+
+            if existing_row:
+                # Already logged (likely by ml_tracker); skip duplicate insert
+                print(f"[ML FEEDBACK] Skipping duplicate DB insert for well {well_id} ({original_prediction} -> {expert_classification})")
+            else:
+                # Insert minimal compatible record; ml_tracker stores detailed one already
+                insert_sql = (
+                    "INSERT INTO ml_expert_decisions "
+                    "(session_id, well_id, pathogen, original_prediction, expert_correction, confidence, features_used, feedback_context, is_correction) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s, CASE "
+                    " WHEN %s IS NULL OR %s IS NULL THEN NULL "
+                    " WHEN (UPPER(%s) IN ('WEAK_POSITIVE','POSITIVE','STRONG_POSITIVE') AND UPPER(%s) IN ('WEAK_POSITIVE','POSITIVE','STRONG_POSITIVE')) "
+                    "   OR (UPPER(%s) IN ('INDETERMINATE','SUSPICIOUS','REDO') AND UPPER(%s) IN ('INDETERMINATE','SUSPICIOUS','REDO')) "
+                    "   OR (UPPER(%s) = 'NEGATIVE' AND UPPER(%s) = 'NEGATIVE') THEN 0 ELSE 1 END)"
+                )
+                cursor.execute(insert_sql, (
+                    data.get('session_id', 'ml_learning_test'),
+                    well_id,
+                    pathogen,
+                    original_prediction,
+                    expert_classification,
+                    1.0,
+                    json.dumps(enhanced_metrics),
+                    f"Expert feedback via ML interface - {pathogen}",
+                    # CASE params
+                    original_prediction, expert_classification,
+                    original_prediction, expert_classification,
+                    original_prediction, expert_classification,
+                    original_prediction, expert_classification
+                ))
+                conn.commit()
+
+                is_correction = is_expert_correction(original_prediction, expert_classification)
+                original_group = get_classification_group(original_prediction)
+                expert_group = get_classification_group(expert_classification)
+                print(f"✅ Expert feedback persisted: {original_prediction} -> {expert_classification} ({original_group} -> {expert_group}); correction={is_correction}")
+
+            cursor.close(); conn.close()
         except Exception as mysql_error:
-            print(f"⚠️ Could not save feedback to MySQL database: {mysql_error}")
-            # Don't fail the entire request if MySQL save fails
+            print(f"⚠️ Could not persist feedback to MySQL (non-fatal): {mysql_error}")
         
         # Update the well classification in the database for session persistence
         session_id = data.get('session_id')
