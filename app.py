@@ -1106,11 +1106,23 @@ def track_security_compliance(security_event, security_data, user_id='user'):
 
 # Add a simple session tracking function
 def get_current_user():
-    """Get current authenticated user id if available, else fallback.
-    Uses Flask session set by auth routes (session['username']).
+    """Return current authenticated user identifier.
+    Order of preference: request.current_user.username → g.current_user.username →
+    session['username'] → session['user_id'] → 'system'.
     """
     try:
-        from flask import session as flask_session
+        # Prefer enriched request context if middleware attached it
+        from flask import g, request, session as flask_session
+        if hasattr(request, 'current_user') and isinstance(request.current_user, dict):
+            cu = request.current_user
+            ident = cu.get('username') or cu.get('display_name') or cu.get('user_id')
+            if ident:
+                return ident
+        if hasattr(g, 'current_user') and isinstance(getattr(g, 'current_user', None), dict):
+            cu = g.current_user
+            ident = cu.get('username') or cu.get('display_name') or cu.get('user_id')
+            if ident:
+                return ident
         user = flask_session.get('username') or flask_session.get('user_id')
         if user and isinstance(user, str):
             return user
@@ -4085,9 +4097,9 @@ def update_pathogen_ml_config(pathogen_code, fluorophore):
         data = request.get_json()
         enabled = data.get('enabled', True)
         
-        # Get user info from request (for future role-based access)
+        # Get user info (prefer authenticated session over ad-hoc header)
         user_info = {
-            'user_id': request.headers.get('X-User-ID', 'anonymous'),
+            'user_id': get_current_user(),
             'ip': request.remote_addr,
             'notes': data.get('notes', '')
         }
@@ -4172,9 +4184,9 @@ def update_system_ml_config(config_key):
         data = request.get_json()
         value = str(data.get('value', ''))
         
-        # Get user info for audit
+        # Get user info for audit (session-based)
         user_info = {
-            'user_id': request.headers.get('X-User-ID', 'anonymous'),
+            'user_id': get_current_user(),
             'ip': request.remote_addr,
             'notes': data.get('notes', '')
         }
@@ -4243,9 +4255,9 @@ def reset_ml_training_data():
                 'error': 'Missing or invalid confirmation. Use "RESET_TRAINING_DATA"'
             }), 400
         
-        # Get user info for audit
+        # Get user info for audit (session-based)
         user_info = {
-            'user_id': request.headers.get('X-User-ID', 'anonymous'),
+            'user_id': get_current_user(),
             'ip': request.remote_addr,
             'notes': data.get('notes', 'Manual training data reset')
         }
@@ -4284,11 +4296,39 @@ def get_ml_audit_log():
             return jsonify({'error': 'ML configuration manager not initialized'}), 503
         
         limit = int(request.args.get('limit', 50))
-        log_entries = ml_config_manager.get_audit_log(limit)
+        raw_entries = ml_config_manager.get_audit_log(limit)
+
+        # Enrich entries with parsed user identifier so UI shows actual user
+        enriched = []
+        for e in (raw_entries or []):
+            try:
+                user_display = 'system'
+                ui = e.get('user_info')
+                if isinstance(ui, str) and ui:
+                    import json as _json
+                    try:
+                        parsed = _json.loads(ui)
+                        user_display = (
+                            parsed.get('user_id') or
+                            parsed.get('username') or
+                            parsed.get('display_name') or
+                            'system'
+                        )
+                    except Exception:
+                        # Keep default on bad JSON
+                        pass
+                elif isinstance(ui, dict):
+                    user_display = ui.get('user_id') or ui.get('username') or ui.get('display_name') or 'system'
+                # Copy original dict and add computed field without mutating DB values
+                new_e = dict(e)
+                new_e['user_id'] = user_display
+                enriched.append(new_e)
+            except Exception:
+                enriched.append(e)
         
         return jsonify({
             'success': True,
-            'log_entries': log_entries
+            'log_entries': enriched
         })
         
     except Exception as e:
