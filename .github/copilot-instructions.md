@@ -1868,5 +1868,42 @@ Purpose: Summarize how our CQJ/CalcJ quant differs from vendor tools and how to 
     - Keep a lightweight record of the folder name/path in localStorage for display.
     - Provide a subtle inline prompt to reselect when auto-restore isn’t possible.
 
-    Security constraints:
-    - Browsers do not allow arbitrary disk path access without user gesture. Handle persistence only works where FS Access API + permissions are supported and previously granted.
+        Security constraints:
+        - Browsers do not allow arbitrary disk path access without user gesture. Handle persistence only works where FS Access API + permissions are supported and previously granted.
+
+## RBAC: Multi‑Role Users (2025-08-20) — REQUIRED UPDATE
+
+Status: We’re migrating from single-role-per-user to multi-role-per-user. Keep backward compatibility during transition.
+
+Key rules
+- Users can hold multiple roles simultaneously (e.g., [qc_technician, compliance_officer]).
+- Effective permissions are the union of permissions across all roles.
+- Role hierarchy checks use the highest-level role assigned.
+- Session/user payloads must expose both:
+    - roles: [string]
+    - role: string (primary/highest role) for legacy consumers
+
+Backend guidance
+- In `unified_auth_manager.py`:
+    - Accept and persist multiple roles; until DB is migrated, store roles in session JSON.
+    - Compute `effective_permissions = sorted(set(p for r in roles for p in PERMISSIONS.get(r, [])))`.
+    - Compute `primary_role = max(roles, key=lambda r: ROLES.get(r, 0))`.
+    - Return `{ roles, role: primary_role, permissions: effective_permissions }` from `validate_session`.
+- In `permission_middleware.py` and `permission_decorators.py`:
+    - When checking role levels, use `roles` if present; compare required level against the max level among roles.
+    - Permission checks should rely on `current_user['permissions']` (already unioned).
+
+Frontend guidance
+- `/api/permissions/check` should include `roles` in addition to `role`.
+- UI may show primary role with a tooltip listing all roles.
+
+Data model notes
+- Short-term: roles in session only. Long-term: add `user_roles(user_id, role)` and merge at login.
+
+Testing
+- User with roles [viewer, qc_technician] can run basic analysis and validate results.
+- `require_role('compliance_officer')` passes if any assigned role meets/exceeds that level.
+- Legacy consumers reading `role` keep working.
+
+Security
+- Do not loosen route protections. Admin-only routes remain admin-only.
