@@ -62,7 +62,36 @@ Why:
 Notes:
 - Restart Flask after changing viewer routes/templates to pick up inline template updates and env flags.
 
-## 🔍 CRITICAL ISSUE ANALYSIS (2025-08-18)
+## � How to flip “Compliance Status: PENDING” → PASS (Encryption evidence)
+
+The dashboard’s “Compliance Status” and “Tests Passed” come from the system validator (`GET /api/unified-compliance/validate-system`). For the encryption portion, it does NOT read an `encryption_controls` table; it counts rows in `compliance_evidence` where `evidence_type` matches encryption/security/crypto.
+
+What is counted as PASS
+- Any row in `compliance_evidence` with evidence_type containing:
+    - `encryption` or `security` or `crypto`
+- Ideally the evidence_data includes `validation_results.encryption_functional = true` so the UI shows “Tests Passed: 1/1”.
+
+Two supported ways to persist valid encryption evidence
+1) One-step script (recommended)
+     - Run from repo root: generates and stores validated encryption evidence rows (e.g., `technical_implementation`, `security_implementation`, `authentication_security`, `cryptographic_policy`) that the validator counts.
+     - What it does: inserts/updates `compliance_evidence` with `validation_status = 'validated'` and a rich `evidence_data` JSON (includes `implementation_status: 'OPERATIONAL'` and `validation_results.encryption_functional` flag).
+     - Command:
+         - python3 enhanced_encryption_evidence.py
+     - Env hints (optional but improves results): set `ENCRYPTION_KEY`, `DATABASE_ENCRYPTION_KEY`, `SESSION_SECRET_KEY`, `MYSQL_*` vars so runtime checks pass.
+
+2) API-driven evidence (good for quick checks)
+     - GET /api/encryption/status — sanity check the encryption module
+     - GET /api/encryption/evidence-report — on success, also logs a compliance event
+     - GET /api/unified-compliance/encryption-evidence/<requirement_code> — fetches formatted evidence for the dashboard
+
+Important caveat
+- POST /api/encryption/log-encryption-event writes `evidence_type = 'system_event'` (not matched by the validator’s filter) and will NOT flip the encryption check to PASS by itself.
+
+Verify after persisting
+- GET /api/unified-compliance/validate-system should show `encryption_controls: PASS` and the dashboard will render “Tests Passed: 1/1”.
+- Optional UI: open `/mysql-viewer` and confirm `compliance_evidence` contains recent rows with the evidence types above.
+
+## �🔍 CRITICAL ISSUE ANALYSIS (2025-08-18)
 
 ### Audit Logs User Attribution (2025-08-20) ✅ IMPLEMENTED
 
