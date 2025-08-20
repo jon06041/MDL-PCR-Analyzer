@@ -820,10 +820,11 @@
                 // Preload audit logs once if any requirement needs them so overview counts include logs
                 try {
                     const mapping = window.EvidenceFilter?.REQUIREMENT_EVIDENCE_MAPPING || {};
-                    const needsAudit = (window.requirementsData || []).some(r => Array.isArray(mapping[r.id]) && mapping[r.id].includes('audit_logs'));
+            const needsAudit = (window.requirementsData || []).some(r => Array.isArray(mapping[r.id]) && mapping[r.id].includes('audit_logs'));
                     if (needsAudit) {
                         try {
-                            const res = await fetch('/api/ml-config/audit-log?limit=200');
+                // Use auth audit log for access/Entra evidence
+                const res = await fetch('/api/auth/audit-log?limit=200');
                             window.auditLogCache = res.ok ? await res.json() : null;
                         } catch (e) {
                             console.warn('Audit log preload failed:', e);
@@ -1753,7 +1754,7 @@
             }
             if (needsAuditLogs) {
                 evidencePromises.push(
-                    fetch('/api/ml-config/audit-log?limit=50').then(r => r.ok ? r.json() : { success: false })
+                    fetch('/api/auth/audit-log?limit=50').then(r => r.ok ? r.json() : { success: false })
                 );
             }
             

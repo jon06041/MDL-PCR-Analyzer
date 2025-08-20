@@ -421,6 +421,89 @@ class MySQLUnifiedComplianceManager:
             cursor.close()
             conn.close()
 
+    def validate_system_compliance(self) -> Dict[str, Any]:
+        """Run lightweight system validation and return a structured summary used by the dashboard.
+        Returns a dict with keys: overall_status, passed_checks, warnings, critical_failures,
+        validation_results (map), total_requirements, overall_compliance_score.
+        """
+        results: Dict[str, Any] = {
+            'overall_status': 'PASS',
+            'passed_checks': [],
+            'warnings': [],
+            'critical_failures': [],
+            'validation_results': {},
+            'total_requirements': 0,
+            'overall_compliance_score': 0
+        }
+
+        # Check 1: Encryption evidence present for key requirements
+        try:
+            conn = self.get_connection()
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT COUNT(*)
+                FROM compliance_evidence
+                WHERE evidence_type LIKE '%encryption%' OR evidence_type LIKE '%security%'
+                """
+            )
+            enc_count = cur.fetchone()[0] or 0
+            if enc_count > 0:
+                results['validation_results']['encryption_controls'] = { 'status': 'PASS', 'message': f'{enc_count} encryption evidence records found' }
+                results['passed_checks'].append({'check': 'encryption_controls'})
+            else:
+                results['validation_results']['encryption_controls'] = { 'status': 'WARNING', 'message': 'No encryption evidence records found' }
+                results['warnings'].append({'check': 'encryption_controls'})
+            cur.close(); conn.close()
+        except Exception as e:
+            results['validation_results']['encryption_controls'] = { 'status': 'WARNING', 'message': f'Check failed: {e}' }
+            results['warnings'].append({'check': 'encryption_controls'})
+
+        # Check 2: Access/Audit logging present in auth_audit_log
+        try:
+            conn = self.get_connection()
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM auth_audit_log WHERE timestamp > DATE_SUB(NOW(), INTERVAL 30 DAY)")
+            audit_recent = cur.fetchone()[0] or 0
+            status = 'PASS' if audit_recent > 0 else 'WARNING'
+            msg = f'{audit_recent} auth audit events in last 30 days' if audit_recent > 0 else 'No recent auth audit events'
+            results['validation_results']['access_logging'] = { 'status': status, 'message': msg }
+            (results['passed_checks'] if status == 'PASS' else results['warnings']).append({'check': 'access_logging'})
+            cur.close(); conn.close()
+        except Exception as e:
+            results['validation_results']['access_logging'] = { 'status': 'WARNING', 'message': f'Check failed: {e}' }
+            results['warnings'].append({'check': 'access_logging'})
+
+        # Check 3: Analysis sessions exist (software actually used)
+        try:
+            conn = self.get_connection()
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM analysis_sessions")
+            sess_count = cur.fetchone()[0] or 0
+            status = 'PASS' if sess_count > 0 else 'WARNING'
+            msg = f'{sess_count} analysis sessions recorded' if sess_count > 0 else 'No analysis sessions found'
+            results['validation_results']['software_operation'] = { 'status': status, 'message': msg }
+            (results['passed_checks'] if status == 'PASS' else results['warnings']).append({'check': 'software_operation'})
+            cur.close(); conn.close()
+        except Exception as e:
+            results['validation_results']['software_operation'] = { 'status': 'WARNING', 'message': f'Check failed: {e}' }
+            results['warnings'].append({'check': 'software_operation'})
+
+        # Summarize
+        results['total_requirements'] = len(results['validation_results'])
+        score = 0.0
+        for v in results['validation_results'].values():
+            s = (v.get('status') or '').upper()
+            score += 1.0 if s == 'PASS' else (0.5 if s.startswith('WARN') else 0.0)
+        results['overall_compliance_score'] = round((score / max(1, results['total_requirements'])) * 100, 1)
+        if any((v.get('status') or '').upper().startswith('FAIL') for v in results['validation_results'].values()):
+            results['overall_status'] = 'CRITICAL_FAILURE'
+        elif any((v.get('status') or '').upper().startswith('WARN') for v in results['validation_results'].values()):
+            results['overall_status'] = 'WARNING'
+        else:
+            results['overall_status'] = 'PASS'
+
+        return results
     def get_compliance_dashboard_data(self, days: int = 30):
         """Get compliance dashboard data for the last N days"""
         conn = self.get_connection()

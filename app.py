@@ -4335,6 +4335,138 @@ def get_ml_audit_log():
         app.logger.error(f"Failed to get audit log: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/auth/audit-log', methods=['GET'])
+def get_auth_audit_log():
+    """Get authentication/access audit log entries from auth_audit_log (for Entra/access evidence)"""
+    try:
+        limit = int(request.args.get('limit', 100))
+        # Use global MySQL config helper to respect DATABASE_URL and env vars
+        mysql_config = get_mysql_config() if 'get_mysql_config' in globals() else {
+            'host': os.environ.get("MYSQL_HOST", "127.0.0.1"),
+            'port': int(os.environ.get("MYSQL_PORT", 3306)),
+            'user': os.environ.get("MYSQL_USER", "qpcr_user"),
+            'password': os.environ.get("MYSQL_PASSWORD", "qpcr_password"),
+            'database': os.environ.get("MYSQL_DATABASE", "qpcr_analysis"),
+            'charset': 'utf8mb4'
+        }
+
+        import mysql.connector
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute(
+            """
+            SELECT id, username, auth_method, action, ip_address, user_agent, timestamp, details
+            FROM auth_audit_log
+            ORDER BY timestamp DESC
+            LIMIT %s
+            """,
+            (limit,)
+        )
+        rows = cursor.fetchall() or []
+
+        # Normalize to match dashboard expectations (log_entries array)
+        entries = []
+        for r in rows:
+            try:
+                details = r.get('details')
+                if isinstance(details, str):
+                    try:
+                        import json as _json
+                        details = _json.loads(details)
+                    except Exception:
+                        pass
+                # Derive activity fields from details when available
+                method = None
+                path = None
+                status_code = None
+                endpoint = None
+                try:
+                    if isinstance(details, dict):
+                        method = details.get('method') or details.get('http_method') or details.get('req_method')
+                        path = details.get('path') or details.get('endpoint') or details.get('url') or details.get('request_path')
+                        status_code = details.get('status') or details.get('status_code') or details.get('response_status')
+                        endpoint = details.get('endpoint') or details.get('route')
+                except Exception:
+                    pass
+                entries.append({
+                    'id': r.get('id'),
+                    'timestamp': r.get('timestamp').isoformat() if r.get('timestamp') else None,
+                    'action': r.get('action'),
+                    'auth_method': r.get('auth_method'),
+                    'user': r.get('username'),
+                    'ip_address': r.get('ip_address'),
+                    'user_agent': r.get('user_agent'),
+                    'details': details,
+                    # Expose derived fields for UI rendering of true activity
+                    'method': method,
+                    'path': path,
+                    'status_code': status_code,
+                    'endpoint': endpoint
+                })
+            except Exception:
+                # Best-effort passthrough
+                entries.append(r)
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({
+            'success': True,
+            'log_entries': entries,
+            'source': 'auth_audit_log'
+        })
+    except Exception as e:
+        app.logger.error(f"Failed to get auth audit log: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml-model-versions', methods=['GET'])
+def get_ml_model_versions():
+    """Return a summary and recent rows from ml_model_versions to verify capture"""
+    try:
+        mysql_config = get_mysql_config() if 'get_mysql_config' in globals() else {
+            'host': os.environ.get("MYSQL_HOST", "127.0.0.1"),
+            'port': int(os.environ.get("MYSQL_PORT", 3306)),
+            'user': os.environ.get("MYSQL_USER", "qpcr_user"),
+            'password': os.environ.get("MYSQL_PASSWORD", "qpcr_password"),
+            'database': os.environ.get("MYSQL_DATABASE", "qpcr_analysis"),
+            'charset': 'utf8mb4'
+        }
+
+        import mysql.connector
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+
+        # Basic presence check
+        cursor.execute("SHOW TABLES LIKE 'ml_model_versions'")
+        table_exists = cursor.fetchone() is not None
+        if not table_exists:
+            cursor.close(); conn.close()
+            return jsonify({'success': True, 'exists': False, 'count': 0, 'rows': []})
+
+        cursor.execute("SELECT COUNT(*) AS cnt FROM ml_model_versions")
+        count = cursor.fetchone().get('cnt', 0)
+        cursor.execute(
+            """
+            SELECT id, pathogen_code, version_number, training_samples_count,
+                   creation_date, is_active, performance_notes, model_type
+            FROM ml_model_versions
+            ORDER BY creation_date DESC
+            LIMIT 10
+            """
+        )
+        rows = cursor.fetchall() or []
+        # ISO-format dates
+        for r in rows:
+            if isinstance(r.get('creation_date'), (datetime,)):
+                r['creation_date'] = r['creation_date'].isoformat()
+
+        cursor.close(); conn.close()
+        return jsonify({'success': True, 'exists': True, 'count': count, 'rows': rows})
+    except Exception as e:
+        app.logger.error(f"Failed to read ml_model_versions: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/admin/backfill/ml-audit-users', methods=['POST'])
 def backfill_ml_audit_users():
     """Normalize ml_config_audit_log.user_info to 'admin' or 'system' and preserve original_user"""
