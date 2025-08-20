@@ -1,271 +1,80 @@
-# Role-Based Access Control (RBAC) Requirements
+# User Access Policy (RBAC) — Multi‑Role, Evidence Deletion, MySQL Admin Writes
 
-## 🏢 Organizational Roles & Permissions
+This document replaces the previous single‑role RBAC specification. It defines how users authenticate and what they can do, including multi‑role membership, who may delete uploaded documentation, and who can write to MySQL.
 
-### 1. **Viewer** (Read-Only Access)
-**Purpose**: External stakeholders, observers, auditors who need read-only access
+## Multi‑Role Model
 
-**Permissions**:
-- ✅ `view_analysis_results` - View PCR analysis results and charts
-- ✅ `view_compliance_dashboard` - Access compliance tracking dashboard  
-- ✅ `export_data` - Export analysis results and reports
-- ✅ `view_ml_statistics` - View ML model performance metrics
+- A user may hold multiple roles at once: roles: [string].
+- Effective permissions are the union of all role permissions: permissions: [string].
+- For backward compatibility, a primary role is exposed as role: string (the highest role).
+- Authorization checks should consume permissions; role checks use the highest role when required.
 
-**Restrictions**:
-- ❌ Cannot upload files or run analyses
-- ❌ Cannot modify any settings or thresholds
-- ❌ Cannot provide ML feedback or manage compliance
-- ❌ No administrative functions
+Examples
+- Viewer-only: roles [viewer] → read-only.
+- QC + Viewer: roles [qc_technician, viewer] → all QC capabilities plus read-only.
+- Admin: roles [administrator, …] → full access including admin-only features.
 
----
+Status
+- Sessions and APIs must expose roles (array) and role (primary). Legacy consumers keep working with role.
 
-### 2. **Lab Technician** (Basic Operations)
-**Purpose**: Laboratory staff performing routine PCR testing
+## Roles and Core Capabilities
 
-**Permissions**:
-- ✅ All Viewer permissions PLUS:
-- ✅ `upload_files` - Upload PCR data files (CSV, amplification data)
-- ✅ `run_basic_analysis` - Execute standard PCR curve analysis
+Viewer (read-only)
+- View analysis results, compliance dashboard, ML statistics; export data.
 
-**Restrictions**:
-- ❌ Cannot run ML analysis or provide ML feedback
-- ❌ Cannot modify thresholds or validate results
-- ❌ Cannot manage compliance evidence or requirements
-- ❌ No administrative functions
+Lab Technician (operations)
+- All Viewer; upload files; run basic analysis.
 
-**Use Cases**:
-- Daily PCR testing workflows
-- Data upload and basic analysis
-- Routine quality control testing
+QC Technician (validation)
+- All Lab Technician; run ML analysis; modify thresholds; validate results; provide ML feedback; manage compliance evidence.
 
----
+Research User (flexible uploads)
+- All QC Technician; upload non‑standard files; manual file/channel mapping; use experimental analysis.
 
-### 3. **QC Technician** (Analysis & Validation)
-**Purpose**: Quality control specialists responsible for result validation
+Compliance Officer (regulatory)
+- All QC Technician; manage compliance requirements; view audit logs/reports.
 
-**Permissions**:
-- ✅ All Lab Technician permissions PLUS:
-- ✅ `run_ml_analysis` - Execute machine learning curve classification
-- ✅ `modify_thresholds` - Adjust analysis thresholds and parameters
-- ✅ `validate_results` - Mark results as validated/approved
-- ✅ `manage_compliance_evidence` - Add evidence for regulatory compliance
-- ✅ `view_ml_statistics` - Access ML model performance data
-- ✅ `provide_ml_feedback` - Train ML models with expert feedback
+Administrator (system admin)
+- All permissions from all roles plus exclusive admin functions: system reset, user management, database management, system configuration.
 
-**Key Responsibilities**:
-- Result validation and approval workflows
-- ML model training and optimization
-- Threshold calibration and optimization
-- Compliance evidence documentation
+Note: Exact permission IDs map to the backend (e.g., RUN_BASIC_ANALYSIS, RUN_ML_ANALYSIS, MANAGE_COMPLIANCE_EVIDENCE, DATABASE_MANAGEMENT). UI should gate features using the permissions returned by /auth/api/current-user.
 
----
+## Deleting Uploaded Documentation (Evidence)
 
-### 4. **Research User** (Experimental Upload Flexibility)
-**Purpose**: Research scientists using the system for experimental studies and non-standard workflows
+- Who may delete: only QC Technician, Compliance Officer, and Administrator.
+- Enforcement: server enforces a role allow‑list on DELETE /api/unified-compliance/evidence/documentation/delete/<evidence_id> and audits every deletion.
+- Scope: deletion removes the stored file (path‑validated) and the corresponding compliance_evidence row when evidence_kind=documentation.
+- UX: unauthorized users do not see the Delete control; server returns 403 if called directly.
 
-**Permissions**: 
-- ✅ All QC Technician permissions PLUS:
-- ✅ `upload_non_standard_files` - Upload amplification and summary files that don't follow standard naming conventions
-- ✅ `manual_file_mapping` - Manually specify file types and channels for non-conforming uploads
-- ✅ `experimental_analysis` - Access to experimental features and analysis methods
+Audit and Safety
+- Uploads are logged (DOCUMENTATION_UPLOADED). Deletions are logged (DOCUMENTATION_DELETED). File serving is path‑safe and logged (DATA_EXPORTED).
 
-**Special Capabilities**:
-- **Flexible File Upload**: Can upload files without strict naming convention requirements
-- **Manual File Classification**: Can specify which files are amplification vs summary data
-- **Channel Assignment**: Can manually assign fluorophore channels to uploaded files
-- **Experimental Workflows**: Access to research-specific analysis features
+## MySQL Admin Access and Writes
 
-**File Upload Requirements for Research Users**:
-- ✅ **Must still be valid amplification data files** (CSV format with cycle/fluorescence data)
-- ✅ **Must still provide summary files** for Cq value integration (can be non-standard naming)
-- ✅ **Manual mapping interface** to specify file types and channels when naming convention not followed
-- ✅ **Data validation** still applies (proper CSV structure, valid fluorescence values)
+- Admin‑only: Only users with the Administrator role can access database management and perform write operations via the integrated MySQL viewer.
+- Viewer URLs: /mysql-viewer (inline), /mysql-admin (standalone); API: /api/mysql-admin/*.
+- Dev flags
+    - DEV_RELAXED_ADMIN_ACCESS=1: shows relaxed admin indicator in UI (dev only).
+    - DEV_MYSQL_ADMIN_ALLOW_WRITES=1: enables write queries in dev; writes stay blocked otherwise.
+- Operational notes
+    - After schema/route changes, restart Flask to refresh MySQL pools and viewer routes.
+    - The viewer header shows the signed‑in user, roles, and an Admin badge when applicable; sign‑in/out links provided.
 
-**Restrictions**:
-- ❌ Cannot manage compliance requirements (only evidence)
-- ❌ No audit access or user management
-- ❌ No administrative functions
+Security
+- SQLite is forbidden; MySQL only (pymysql/mysql.connector). Backups run via mysqldump; admin features are audited.
 
----
+## Backward Compatibility and Checks
 
-### 5. **Compliance Officer** (Regulatory Oversight)
-**Purpose**: Regulatory compliance specialists ensuring FDA/regulatory adherence
+- Session payloads: expose both roles (array) and role (primary). Compute effective permissions as the union.
+- Role hierarchy: checks use the highest role among roles; permission checks use current_user.permissions.
+- Frontend: prefer permission‑based gating; may display the primary role with a tooltip listing all roles.
 
-**Permissions**:
-- ✅ All QC Technician permissions PLUS:
-- ✅ `manage_compliance_requirements` - Define and manage regulatory requirements
-- ✅ `audit_access` - View audit logs and access reports
+## Quick Testing Matrix
 
-**Key Responsibilities**:
-- Regulatory requirement management
-- Compliance dashboard oversight
-- Audit trail monitoring
-- FDA validation documentation
+- Viewer: cannot upload, delete, or access admin DB tools.
+- Lab Technician: can upload/run basic analysis; cannot delete documentation or access DB tools.
+- QC Technician: can delete documentation; can validate results and provide ML feedback.
+- Compliance Officer: can delete documentation; can manage requirements and view audits.
+- Administrator: can delete documentation; can write via MySQL viewer (subject to env flags in dev); sees admin badges.
 
----
-
-### 6. **Administrator** (Full System Access + Exclusive Features)
-**Purpose**: System administrators with complete access to all features plus exclusive administrative functions
-
-**Permissions**:
-- ✅ **ALL permissions from ALL roles** (complete system access)
-- ✅ **EXCLUSIVE access to administrative functions:**
-  - `system_reset` - **ONLY administrators** can access "Reset Everything" button
-  - `database_management` - **ONLY administrators** can access database backups
-  - `manage_users` - **ONLY administrators** can create/modify/delete user accounts
-  - `system_administration` - **ONLY administrators** can configure system settings
-
-**Full Access Includes**:
-- ✅ All lab operations (upload, analysis, validation)
-- ✅ All compliance features (evidence, requirements, audit)
-- ✅ All ML features (analysis, feedback, statistics)
-- ✅ All research features (experimental uploads, manual mapping)
-- ✅ All QC features (threshold modification, result validation)
-
-**Exclusive Administrative Access**:
-- ✅ **"Reset Everything" Button**: Emergency system reset (ADMIN ONLY)
-- ✅ **Database Backup Manager**: Full backup/restore operations (ADMIN ONLY)
-- ✅ **User Management**: Create/modify/delete any user account (ADMIN ONLY)
-- ✅ **System Configuration**: Authentication, security, system settings (ADMIN ONLY)
-
-**Key Responsibilities**:
-- Complete system oversight and management
-- User account administration
-- System maintenance and emergency recovery
-- Database management and security
-- All operational functions when needed
-
----
-
-## 🔐 Permission Implementation Strategy
-
-### Current Status ✅
-- **Database Schema**: Authentication tables exist and working
-- **Role Definitions**: Complete role hierarchy implemented
-- **Permission Mapping**: All permissions mapped to roles
-- **Authentication**: Dual Entra ID + local authentication working
-
-### Next Steps 🚀
-
-#### 1. **Research User File Upload Enhancement**
-Implement flexible file upload system for research users:
-
-```python
-@require_permission('upload_non_standard_files')
-@app.route('/api/upload-research')
-def research_upload():
-    # Allow files without naming convention requirements
-    # Provide manual mapping interface for file type/channel assignment
-```
-
-#### 2. **Administrator Exclusive Features Protection**
-Ensure ONLY administrators can access exclusive administrative functions:
-
-```javascript
-// Show administrative features ONLY for administrators
-if (userPermissions.includes('system_reset')) {
-    showResetButton();  // Only administrators see this
-}
-if (userPermissions.includes('database_management')) {
-    showBackupManager();  // Only administrators see this
-}
-// Administrators have access to ALL other features too
-```
-
-#### 3. **Permission Middleware Implementation**
-Create Flask decorators to enforce permissions on API endpoints:
-
-```python
-@require_permission('upload_files')
-@app.route('/api/upload')
-def upload_endpoint():
-    # Only users with upload_files permission can access
-```
-
-#### 4. **Research User File Upload Interface**
-Create specialized upload interface for research users:
-- **Manual File Type Selection**: Dropdown to specify amplification vs summary files
-- **Channel Assignment**: Manual fluorophore channel mapping
-- **Validation Override**: Research-specific validation rules
-- **Naming Convention Bypass**: Upload files with any naming pattern
-
-#### 2. **Frontend Permission Control**
-Hide/show UI elements based on user permissions:
-
-```javascript
-// Show upload button only if user has upload_files permission
-if (userPermissions.includes('upload_files')) {
-    showUploadButton();
-}
-```
-
-#### 3. **Role Management Interface**
-Create admin interface for:
-- User role assignment
-- Permission verification
-- Audit log viewing
-- Role-based reporting
-
-#### 4. **Compliance Integration**
-Link role permissions to FDA compliance requirements:
-- QC Technician validation → 21 CFR Part 11 compliance
-- Compliance Officer oversight → Audit trail requirements
-- Administrator controls → System security requirements
-
----
-
-## 🎯 Implementation Priority
-
-### Phase 1: Core Permission Enforcement (HIGH PRIORITY)
-1. **API Endpoint Protection**: Add permission decorators to all Flask routes
-2. **Frontend Permission Gates**: Hide restricted UI elements
-3. **File Upload Restrictions**: Enforce upload permissions
-4. **Analysis Restrictions**: Protect ML and advanced analysis features
-
-### Phase 2: Advanced Role Features (MEDIUM PRIORITY)
-1. **Role Management UI**: Admin interface for user/role management
-2. **Permission Audit**: Track permission usage and access patterns
-3. **Role-Based Dashboards**: Customize dashboards per role
-4. **Workflow Enforcement**: Multi-step approval workflows
-
-### Phase 3: Compliance Integration (ONGOING)
-1. **FDA Mapping**: Link permissions to specific FDA requirements
-2. **Audit Reporting**: Generate compliance reports by role
-3. **Validation Workflows**: Implement QC approval processes
-4. **Access Documentation**: Automatic audit trail generation
-
----
-
-## 🧪 Testing Strategy
-
-### Role Testing Matrix
-- [ ] **Viewer**: Can only view, cannot modify anything
-- [ ] **Lab Technician**: Can upload and run basic analysis only
-- [ ] **QC Technician**: Can validate results and train ML models
-- [ ] **Research User**: Same as QC + flexible file uploads with manual mapping
-- [ ] **Compliance Officer**: Can manage requirements and audit access
-- [ ] **Administrator**: **FULL access to ALL features** + exclusive access to reset button and database backups
-
-### Security Testing
-- [ ] **Permission Bypass**: Verify users cannot access restricted features
-- [ ] **Administrative Exclusivity**: Ensure ONLY administrators can access reset/backup functions
-- [ ] **API Security**: Test API endpoints respect permission requirements
-- [ ] **Session Security**: Verify role changes require re-authentication
-
----
-
-## 📋 Current Database Schema
-
-### Users Table (`local_users`)
-- `user_id`, `username`, `password_hash`, `role`, `email`, `display_name`
-- `created_at`, `last_login`, `is_active`
-
-### Sessions Table (`user_sessions`) 
-- `session_id`, `user_id`, `username`, `role`, `auth_method`
-- `created_at`, `last_activity`, `expires_at`, `entra_oid`, `tenant_id`
-
-### Audit Table (`auth_audit_log`)
-- `username`, `auth_method`, `action`, `ip_address`, `user_agent`
-- `timestamp`, `details` (JSON)
-
-Ready for permission middleware implementation! 🚀
+— End of policy —
