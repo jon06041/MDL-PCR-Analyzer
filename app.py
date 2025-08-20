@@ -1106,25 +1106,33 @@ def track_security_compliance(security_event, security_data, user_id='user'):
 
 # Add a simple session tracking function
 def get_current_user():
-    """Get current user (simplified for now)"""
-    # For now, return default user. Later this will integrate with authentication
-    return 'user'
+    """Get current authenticated user id if available, else fallback.
+    Uses Flask session set by auth routes (session['username']).
+    """
+    try:
+        from flask import session as flask_session
+        user = flask_session.get('username') or flask_session.get('user_id')
+        if user and isinstance(user, str):
+            return user
+    except Exception:
+        pass
+    return 'system'
 
 def track_user_session(action='access'):
     """Track user session for compliance"""
     if unified_compliance_manager:
         try:
             user_id = get_current_user()
-            session_details = {
-                'timestamp': datetime.utcnow().isoformat(),
-                'user_agent': request.headers.get('User-Agent', 'unknown'),
-                'endpoint': request.endpoint if hasattr(request, 'endpoint') else 'unknown'
-            }
-            
+            # Pull session id if auth module set it
+            from flask import session as flask_session
+            session_id = flask_session.get('session_id')
+            # Persist normalized access record
             unified_compliance_manager.log_user_access(
                 user_id=user_id,
-                action=action,
-                details=session_details
+                session_id=session_id or '',
+                access_type=action,
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get('User-Agent', 'unknown'),
             )
         except Exception as e:
             print(f"Warning: Could not track user session: {e}")
@@ -5585,9 +5593,9 @@ def get_fda_compliance_dashboard_data():
         
         dashboard_data = fda_compliance_manager.get_compliance_dashboard_data(days)
         
-        # Log this action for audit trail
+        # Log this action for audit trail (use authenticated user if available)
         fda_compliance_manager.log_user_action(
-            user_id='system',
+            user_id=get_current_user(),
             user_role='operator',
             action_type='dashboard_access',
             resource_accessed='fda_compliance_dashboard',
@@ -5628,9 +5636,9 @@ def export_fda_compliance_report():
             end_date=end_date
         )
         
-        # Log this action for audit trail
+        # Log this action for audit trail (use authenticated user if available)
         fda_compliance_manager.log_user_action(
-            user_id='system',
+            user_id=get_current_user(),
             user_role='operator',
             action_type='report_export',
             resource_accessed='fda_compliance_report',

@@ -603,7 +603,8 @@ class MySQLUnifiedComplianceManager:
                 # Software validation requirements (session files evidence) 
                 'CFR_11_10_A': 'run_files',  # Access controls
                 'CFR_11_10_C': 'run_files',  # System documentation
-                'CFR_11_10_D': 'run_files',  # Document controls
+                # CFR 11.10(d) Archive protection should surface encryption/audit controls primarily
+                'CFR_11_10_D': 'encryption_evidence',
                 'CFR_11_10_F': 'run_files',  # System checks
                 'CFR_11_10_G': 'run_files',  # System validation
                 'CFR_11_10_H': 'run_files',  # System backups

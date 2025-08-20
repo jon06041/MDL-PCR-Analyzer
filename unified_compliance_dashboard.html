@@ -804,8 +804,7 @@
                     if (encReqs.length > 0) {
                         await Promise.all(encReqs.map(async (r) => {
                             try {
-                                const apiId = (r.id && /^CFR_11_10_[A-Z]$/.test(r.id)) ? r.id.replace(/^CFR_11_10_([A-Z])$/, 'FDA_CFR_21_11_10_$1') : r.id;
-                                const res = await fetch(`/api/unified-compliance/encryption-evidence/${apiId}`);
+                                const res = await fetch(`/api/unified-compliance/encryption-evidence/${r.id}`);
                                 const data = res.ok ? await res.json() : null;
                                 window.encryptionPresenceByReq[r.id] = data && data.success ? data : null;
                             } catch (e) {
@@ -818,6 +817,25 @@
                     console.warn('Encryption presence preload skipped:', e);
                 }
 
+                // Preload audit logs once if any requirement needs them so overview counts include logs
+                try {
+                    const mapping = window.EvidenceFilter?.REQUIREMENT_EVIDENCE_MAPPING || {};
+                    const needsAudit = (window.requirementsData || []).some(r => Array.isArray(mapping[r.id]) && mapping[r.id].includes('audit_logs'));
+                    if (needsAudit) {
+                        try {
+                            const res = await fetch('/api/ml-config/audit-log?limit=200');
+                            window.auditLogCache = res.ok ? await res.json() : null;
+                        } catch (e) {
+                            console.warn('Audit log preload failed:', e);
+                            window.auditLogCache = null;
+                        }
+                    } else {
+                        window.auditLogCache = null;
+                    }
+                } catch (e) {
+                    console.warn('Audit preload skipped:', e);
+                }
+
                 // Helper to compute evidence count for a requirement using cached sessions and preloaded encryption presence
                 function getEvidenceCountForReq(reqId) {
                     try {
@@ -826,8 +844,9 @@
                         const encData = (window.encryptionPresenceByReq || {})[reqId] || null;
                         const req = (window.requirementsData || []).find(r => r.id === reqId) || {};
                         const sources = Array.isArray(req.evidence_sources) ? req.evidence_sources : [];
+                        const auditLogs = window.auditLogCache || null;
                         if (window.EvidenceFilter?.getRelevantEvidenceCount) {
-                            return window.EvidenceFilter.getRelevantEvidenceCount(reqId, confirmed, pending, encData, sources) || 0;
+                            return window.EvidenceFilter.getRelevantEvidenceCount(reqId, confirmed, pending, encData, sources, auditLogs) || 0;
                         }
                     } catch {}
                     return 0;
@@ -1035,7 +1054,8 @@
                 try {
             const encData = (window.encryptionPresenceByReq || {})[req.id] || null;
             const sources = Array.isArray(req.evidence_sources) ? req.evidence_sources : [];
-            evidenceCount = window.EvidenceFilter?.getRelevantEvidenceCount?.(req.id, confirmed, pending, encData, sources) || 0;
+            const auditLogs = window.auditLogCache || null;
+            evidenceCount = window.EvidenceFilter?.getRelevantEvidenceCount?.(req.id, confirmed, pending, encData, sources, auditLogs) || 0;
                 } catch { evidenceCount = 0; }
                 const hasEvidence = evidenceCount > 0;
 
@@ -1162,7 +1182,8 @@
                     const encData = (window.encryptionPresenceByReq || {})[reqCode] || null;
                     const req = window.requirementsData.find(r => r.id === reqCode) || {};
                     const sources = Array.isArray(req.evidence_sources) ? req.evidence_sources : [];
-                    evidenceCount = window.EvidenceFilter.getRelevantEvidenceCount(reqCode, confirmed, pending, encData, sources);
+                    const auditLogs = window.auditLogCache || null;
+                    evidenceCount = window.EvidenceFilter.getRelevantEvidenceCount(reqCode, confirmed, pending, encData, sources, auditLogs);
                 } else {
                     const req = window.requirementsData.find(r => r.id === reqCode);
                     evidenceCount = req ? (Array.isArray(req.evidence_sources) ? req.evidence_sources.length : (req.evidence_count || 0)) : 0;
@@ -1664,7 +1685,8 @@
             
             // Add encryption evidence if relevant
             if (hasEncryptionEvidence) {
-                const apiId = (reqCode && /^CFR_11_10_[A-Z]$/.test(reqCode)) ? reqCode.replace(/^CFR_11_10_([A-Z])$/, 'FDA_CFR_21_11_10_$1') : reqCode;
+                // Use the requirement code as-is; backend supports CFR_11_10_* directly
+                const apiId = reqCode;
                 evidencePromises.push(
                     fetch(`/api/unified-compliance/encryption-evidence/${apiId}`).then(r => r.ok ? r.json() : { success: false })
                 );

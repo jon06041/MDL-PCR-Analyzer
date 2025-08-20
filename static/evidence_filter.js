@@ -39,8 +39,8 @@ const REQUIREMENT_EVIDENCE_MAPPING = {
     'CFR_11_10_C': ['documentation', 'run_files'],
     // FDA-prefixed alias for 11.10(c)
     'FDA_CFR_21_11_10_C': ['documentation', 'run_files'],
-    // D: Archive protection / record retention (documentation + run files as supporting proof)
-    'CFR_11_10_D': ['documentation', 'run_files'],
+    // D: Archive protection / record retention — encryption + audit logs are primary, with run files/docs as supporting
+    'CFR_11_10_D': ['encryption_evidence', 'audit_logs', 'run_files', 'documentation'],
     // E: Controls for system access/security (encryption)
     'CFR_11_10_E': ['encryption_evidence'],
     
@@ -230,10 +230,10 @@ function isValidationRequirement(reqCode) {
  */
 function isEncryptionRequirement(reqCode) {
     const encryptionRequirements = [
-    'FDA_CFR_21_11_10_B', 'FDA_CFR_21_11_10_E', 'FDA_CFR_21_11_50',
+    'FDA_CFR_21_11_10_B', 'FDA_CFR_21_11_10_E', 'FDA_CFR_21_11_10_D', 'FDA_CFR_21_11_50',
     'HIPAA_164_312_A_2_IV', 'ISO_27001_A_10_1_1', 'ISO_27001_A_10_1_2',
     // CFR 11 aliases
-    'CFR_11_10_B', 'CFR_11_10_E'
+    'CFR_11_10_B', 'CFR_11_10_E', 'CFR_11_10_D'
     ];
     return encryptionRequirements.includes(reqCode);
 }
@@ -243,10 +243,17 @@ function isEncryptionRequirement(reqCode) {
  */
 function isQualityRequirement(reqCode) {
     if (reqCode.includes('ISO_13485') && !isValidationRequirement(reqCode)) return true;
-    // Treat record protection CFR 11.10(c) and archive protection CFR 11.10(d) as documentation oriented
+    // Record protection CFR 11.10(c) is documentation oriented
     const code = (reqCode || '').toUpperCase();
-    if (/CFR[_\s-]*11[_\s-]*10[_\s-]*C/.test(code)) return true;
-    if (/CFR[_\s-]*11[_\s-]*10[_\s-]*D/.test(code)) return true;
+    if (/CFR[ _-]*11[ _-]*10[ _-]*C/.test(code)) return true;
+    // Archive protection CFR 11.10(d): prefer encryption/audit classification when policy allows those
+    if (/CFR[ _-]*11[ _-]*10[ _-]*D/.test(code)) {
+        try {
+            const allowed = getAllowedEvidenceTypes(reqCode) || [];
+            if (allowed.includes('encryption_evidence') || allowed.includes('audit_logs')) return false;
+        } catch {}
+        return true; // fallback if nothing else specified
+    }
     return false;
 }
 
