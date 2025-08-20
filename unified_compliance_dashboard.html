@@ -1333,6 +1333,11 @@
 
         function clearPolicyOverrideAndReload(reqId) {
             try { window.EvidenceFilter?.clearPolicyOverride?.(reqId); } catch {}
+            try {
+                const b = window.EvidenceFilter.getEvidenceTypeBadge(reqId);
+                const el = document.getElementById('evidenceCategoryBadge');
+                if (b && el) { el.className = 'badge ' + b.class + ' ms-1'; el.textContent = b.text; }
+            } catch {}
             try { loadEvidenceDetails(reqId); } catch {}
             try { updateOverviewTab(); } catch {}
             try { updateEvidenceTab(); } catch {}
@@ -2021,6 +2026,51 @@
                                         </div>
                                     </div>
                                     ${vt.total ? `<div class="mt-3"><small class="text-muted">Total checks: ${vt.total}</small></div>` : ''}
+                                    ${(() => {
+                                        try {
+                                            const details = [];
+                                            const pushMap = (m, srcLabel) => {
+                                                if (!m || typeof m !== 'object') return;
+                                                Object.entries(m).forEach(([name, obj]) => {
+                                                    const s = (obj && (obj.status || obj.result || obj.overall_status || '')).toString().toUpperCase() || 'UNKNOWN';
+                                                    const msg = (obj && (obj.message || obj.description || obj.detail || '')) || '';
+                                                    details.push({ name, status: s, message: msg, src: srcLabel || '' });
+                                                });
+                                            };
+                                            if (validationData && validationData.validation_results && typeof validationData.validation_results === 'object') {
+                                                pushMap(validationData.validation_results, 'System');
+                                            }
+                                            try {
+                                                let e = encryptionData && (encryptionData.evidence_data || encryptionData.evidence || encryptionData);
+                                                if (typeof e === 'string') { try { e = JSON.parse(e); } catch {} }
+                                                if (e && e.validation_results) pushMap(e.validation_results, 'Encryption');
+                                            } catch {}
+                                            (Array.isArray(renderSources) ? renderSources : []).forEach(src => {
+                                                let data = src && src.evidence_data;
+                                                if (typeof data === 'string') { try { data = JSON.parse(data); } catch {} }
+                                                if (data && data.validation_results) pushMap(data.validation_results, src.evidence_type || 'Evidence');
+                                            });
+                                            if (!details.length) return '';
+                                            const listId = `valDetails-${Date.now()}`;
+                                            const rows = details.map(d => {
+                                                const color = d.status.includes('FAIL') ? 'text-danger' : (d.status.includes('WARN') ? 'text-warning' : (d.status.includes('PASS') ? 'text-success' : 'text-muted'));
+                                                return `<tr><td>${d.src}</td><td>${d.name}</td><td class=\"${color}\">${d.status}</td><td>${d.message || ''}</td></tr>`;
+                                            }).join('');
+                                            return `
+                                                <div class=\"mt-3\">
+                                                    <a href=\"#\" onclick=\"(function(){ const el=document.getElementById('${listId}'); if(el){ el.style.display=(el.style.display==='none'?'block':'none'); } })(); return false;\">Show test details</a>
+                                                    <div id=\"${listId}\" style=\"display:none\" class=\"mt-2\">
+                                                        <div class=\"table-responsive\">
+                                                            <table class=\"table table-sm\">
+                                                                <thead><tr><th>Source</th><th>Check</th><th>Status</th><th>Message</th></tr></thead>
+                                                                <tbody>${rows}</tbody>
+                                                            </table>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            `;
+                                        } catch { return ''; }
+                                    })()}
                                 </div>
                             </div>
                         `;
@@ -2202,10 +2252,12 @@
         try {
                     const req = (window.requirementsData || []).find(r => r.id === reqCode) || {};
                     const sources = Array.isArray(req.evidence_sources) ? req.evidence_sources : [];
-                    // Estimate validation test records
+                    // Estimate validation test records (respect current allowed types)
                     let validationCount = 0;
                     try {
-                        if (needsValidationTests && validationData) {
+                        const allowedNow = window.EvidenceFilter?.getAllowedEvidenceTypes?.(reqCode) || [];
+                        const allowVT = allowedNow.includes('validation_tests');
+                        if (allowVT && validationData) {
                             if (validationData.validation_results && typeof validationData.validation_results === 'object') {
                                 validationCount = Object.keys(validationData.validation_results).length;
                             } else {
@@ -2213,7 +2265,7 @@
                                 const cf = (validationData.critical_failures || []).length;
                                 const w = (validationData.warnings || []).length;
                                 validationCount = pc + cf + w;
-                                if (validationCount === 0) validationCount = 1; // minimal evidence
+                                // Do not force minimal evidence if zero; reflect actual absence
                             }
                         }
                     } catch {}

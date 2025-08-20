@@ -387,6 +387,19 @@ function countAuditLogRecords(auditLogData) {
  * Get evidence type badge for UI display
  */
 function getEvidenceTypeBadge(reqCode) {
+    // Prefer explicit allowed evidence types (including user override) to choose a primary badge
+    try {
+        const allowed = getAllowedEvidenceTypes(reqCode) || [];
+        const has = (t) => allowed.includes(t);
+        // Priority: validation_tests > encryption > audit_logs > documentation > risk_management > run_files
+        if (has('validation_tests')) return { class: 'bg-primary', text: 'Validation Tests' };
+        if (has('encryption_evidence')) return { class: 'bg-success', text: 'Encryption Controls' };
+        if (has('audit_logs')) return { class: 'bg-warning text-dark', text: 'Access Controls' };
+        if (has('documentation')) return { class: 'bg-info', text: 'Quality Documentation' };
+        if (has('risk_management')) return { class: 'bg-secondary', text: 'Risk Mgmt' };
+        if (has('run_files')) return { class: 'bg-primary', text: 'Run Files' };
+    } catch {}
+    // Fallback to category inference
     const type = getRequirementType(reqCode);
     const badges = {
         'software_validation': { class: 'bg-primary', text: 'Validation Tests' },
