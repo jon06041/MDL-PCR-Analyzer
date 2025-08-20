@@ -271,6 +271,11 @@ function updateAppState(newState) {
     window.currentFluorophore = window.appState.currentFluorophore;
     window.currentScaleMode = window.appState.currentScaleMode;
     currentScaleMode = window.appState.currentScaleMode;
+    // Sync chart mode for legacy code paths
+    if (typeof window.appState.currentChartMode !== 'undefined') {
+        window.currentChartMode = window.appState.currentChartMode;
+        try { currentChartMode = window.appState.currentChartMode; } catch (e) {}
+    }
     
     // Update all UI elements to match new state
     syncUIElements();
@@ -349,7 +354,8 @@ function syncUIElements() {
         'all': 'showAllBtn',
         'pos': 'showPosBtn', 
         'neg': 'showNegBtn',
-        'redo': 'showRedoBtn'
+        'redo': 'showRedoBtn',
+        'selected': 'showSelectedBtn'
     };
     
     const activeBtn = document.getElementById(buttonMapping[state.currentChartMode]);
@@ -12973,17 +12979,22 @@ document.addEventListener('DOMContentLoaded', function() {
     const showSelectedBtn = document.getElementById('showSelectedBtn');
     if (showSelectedBtn) {
         showSelectedBtn.addEventListener('click', function() {
-            currentChartMode = 'selected';
-            updateChartDisplayMode();
-            updateActiveButton(this);
-            // Clear any filtered curve details when switching to selected mode
-            const wellSelector = document.getElementById('wellSelect');
-            if (wellSelector && wellSelector.value && wellSelector.value !== 'ALL_WELLS') {
-                showWellDetails(wellSelector.value);
+            updateAppState({ currentChartMode: 'selected' });
+            if (window.selectedWellKeys && window.selectedWellKeys.length > 0) {
+                showSelectedCurves(window.selectedWellKeys);
+                updateActiveButton(this);
+            } else {
+                updateChartDisplayMode();
+                const wellSelector = document.getElementById('wellSelect');
+                if (wellSelector && wellSelector.value && wellSelector.value !== 'ALL_WELLS') {
+                    showWellDetails(wellSelector.value);
+                } else {
+                    const details = document.getElementById('curveDetails');
+                    if (details) details.innerHTML = '<p>Select a well to view curve details</p>';
+                }
             }
         });
-        // Set as active by default
-        showSelectedBtn.classList.add('active');
+        // Don't force active by default; honor state mapping
     }
     
     // Show All Wells button
@@ -13045,6 +13056,163 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
+// ==============================
+// Brush selection (Shift + Drag)
+// ==============================
+(function setupBrushSelection() {
+    const canvasEl = document.getElementById('amplificationChart');
+    const containerEl = canvasEl ? canvasEl.parentElement : null;
+    const overlay = document.getElementById('selectionOverlay');
+    if (!canvasEl || !overlay) return;
+
+    let isSelecting = false;
+    let startX = 0, startY = 0, currentX = 0, currentY = 0; // in canvas coordinates
+
+    function onMouseDown(e) {
+        if (!e.shiftKey || !window.amplificationChart) return;
+        const canvasRect = canvasEl.getBoundingClientRect();
+        const containerRect = containerEl.getBoundingClientRect();
+        isSelecting = true;
+        startX = e.clientX - canvasRect.left;
+        startY = e.clientY - canvasRect.top;
+        currentX = startX; currentY = startY;
+        const offsetX = canvasRect.left - containerRect.left;
+        const offsetY = canvasRect.top - containerRect.top;
+        overlay.style.left = (offsetX + startX) + 'px';
+        overlay.style.top = (offsetY + startY) + 'px';
+        overlay.style.width = '0px';
+        overlay.style.height = '0px';
+        overlay.style.display = 'block';
+        e.preventDefault();
+    }
+
+    function onMouseMove(e) {
+        if (!isSelecting) return;
+        const canvasRect = canvasEl.getBoundingClientRect();
+        const containerRect = containerEl.getBoundingClientRect();
+        const offsetX = canvasRect.left - containerRect.left;
+        const offsetY = canvasRect.top - containerRect.top;
+        currentX = Math.min(Math.max(e.clientX - canvasRect.left, 0), canvasRect.width);
+        currentY = Math.min(Math.max(e.clientY - canvasRect.top, 0), canvasRect.height);
+        const x = Math.min(startX, currentX);
+        const y = Math.min(startY, currentY);
+        const w = Math.abs(currentX - startX);
+        const h = Math.abs(currentY - startY);
+        overlay.style.left = (offsetX + x) + 'px';
+        overlay.style.top = (offsetY + y) + 'px';
+        overlay.style.width = w + 'px';
+        overlay.style.height = h + 'px';
+        e.preventDefault();
+    }
+
+    function onMouseUp(e) {
+        if (!isSelecting) return;
+        isSelecting = false;
+        overlay.style.display = 'none';
+        if (!window.amplificationChart || !currentAnalysisResults) return;
+
+        const chart = window.amplificationChart;
+        const chartArea = chart.chartArea;
+        const xScale = chart.scales.x;
+        const yScale = chart.scales.y;
+
+        // Convert selection (canvas coords) and clip to chart area (also in canvas coords)
+        const sx = Math.min(startX, currentX);
+        const sy = Math.min(startY, currentY);
+        const ex = Math.max(startX, currentX);
+        const ey = Math.max(startY, currentY);
+
+        const left = Math.max(sx, chartArea.left);
+        const right = Math.min(ex, chartArea.right);
+        const top = Math.max(sy, chartArea.top);
+        const bottom = Math.min(ey, chartArea.bottom);
+        if (right <= left || bottom <= top) return; // no selection in chart area
+
+        // Map to data values using pixel -> value
+        const xMin = xScale.getValueForPixel(left);
+        const xMax = xScale.getValueForPixel(right);
+        const yMaxVal = yScale.getValueForPixel(top);    // note: y is inverted in pixels
+        const yMinVal = yScale.getValueForPixel(bottom);
+
+        // Collect wells whose any point falls within selection
+        const selected = new Set();
+        const results = currentAnalysisResults.individual_results || {};
+        for (const [wellKey, wellData] of Object.entries(results)) {
+            try {
+                const cycles = typeof wellData.raw_cycles === 'string' ? JSON.parse(wellData.raw_cycles) : wellData.raw_cycles;
+                const rfu = typeof wellData.raw_rfu === 'string' ? JSON.parse(wellData.raw_rfu) : wellData.raw_rfu;
+                if (!cycles || !rfu) continue;
+                for (let i = 0; i < cycles.length; i++) {
+                    const x = cycles[i];
+                    const y = rfu[i];
+                    if (x >= xMin && x <= xMax && y >= yMinVal && y <= yMaxVal) {
+                        selected.add(wellKey);
+                        break;
+                    }
+                }
+            } catch {}
+        }
+
+        window.selectedWellKeys = Array.from(selected);
+        if (window.selectedWellKeys.length > 0) {
+            // Update details panel with selection list
+            updateSelectedDetailsList(window.selectedWellKeys);
+            // Switch to selected mode and display only selected wells
+            currentChartMode = 'selected';
+            showSelectedCurves(window.selectedWellKeys);
+            const showSelectedBtn = document.getElementById('showSelectedBtn');
+            if (showSelectedBtn) updateActiveButton(showSelectedBtn);
+        }
+    }
+
+    canvasEl.addEventListener('mousedown', onMouseDown, { passive: false });
+    window.addEventListener('mousemove', onMouseMove, { passive: false });
+    window.addEventListener('mouseup', onMouseUp, { passive: false });
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            window.selectedWellKeys = [];
+            const details = document.getElementById('curveDetails');
+            if (details) details.innerHTML = '<p>Select a well to view individual curve details</p>';
+            // No chart change on escape; user can click Show All to reset
+        }
+    });
+})();
+
+function updateSelectedDetailsList(wellKeys) {
+    const container = document.getElementById('curveDetails');
+    if (!container) return;
+    const list = wellKeys.map(k => `<li>${k}</li>`).join('');
+    container.innerHTML = `<h4>Selected Curve Details</h4><p>${wellKeys.length} wells selected</p><ul>${list}</ul>`;
+}
+
+function showSelectedCurves(wellKeys) {
+    if (!currentAnalysisResults || !currentAnalysisResults.individual_results) return;
+    const ctx = document.getElementById('amplificationChart').getContext('2d');
+    safeDestroyChart();
+    const datasets = [];
+    for (const key of wellKeys) {
+        const wellData = currentAnalysisResults.individual_results[key];
+        if (!wellData) continue;
+        try {
+            const cycles = typeof wellData.raw_cycles === 'string' ? JSON.parse(wellData.raw_cycles) : wellData.raw_cycles;
+            const rfu = typeof wellData.raw_rfu === 'string' ? JSON.parse(wellData.raw_rfu) : wellData.raw_rfu;
+            if (!cycles || !rfu) continue;
+            const wellId = wellData.well_id || key.split('_')[0];
+            const fluorophore = wellData.fluorophore || 'Unknown';
+            const ds = createDatasetForWell(wellId, fluorophore, cycles, rfu, datasets.length, 'multi');
+            datasets.push(ds);
+        } catch {}
+    }
+    if (datasets.length === 0) return;
+    const chartConfig = createChartConfiguration('line', datasets, `Selected Curves (${datasets.length})`);
+    configureChartOptions(chartConfig, 'multi', datasets.length);
+    window.amplificationChart = new Chart(ctx, chartConfig);
+    setTimeout(() => {
+        if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
+        if (window.amplificationChart?.update) window.amplificationChart.update('none');
+    }, 100);
+}
+
 function updateActiveButton(activeBtn) {
     // Remove active class from all buttons
     const buttons = document.querySelectorAll('.view-controls .control-btn');
@@ -13077,7 +13245,10 @@ function updateChartDisplayMode() {
     
     switch (currentChartMode) {
         case 'selected':
-            if (selectedWell && selectedWell !== 'ALL_WELLS') {
+            if (window.selectedWellKeys && window.selectedWellKeys.length > 0) {
+                showSelectedCurves(window.selectedWellKeys);
+                updateSelectedDetailsList(window.selectedWellKeys);
+            } else if (selectedWell && selectedWell !== 'ALL_WELLS') {
                 // console.log('Calling showSelectedCurve for:', selectedWell);
                 showSelectedCurve(selectedWell);
             } else {
