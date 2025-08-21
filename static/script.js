@@ -257,6 +257,19 @@ window.appState = {
     isUpdating: false
 };
 
+// Stable ML session key used to dedupe banners even when pattern/session_id arrives later
+function getStableMLSessionKey(results) {
+    // Prefer existing stable key to avoid churn
+    if (window._stableMLSessionKey) return window._stableMLSessionKey;
+    // Try session_id, then pattern, then filename, else a page-scope fallback
+    const byId = results && (results.session_id || results.sessionId);
+    const byPattern = (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null;
+    const byFilename = window.currentSessionFilename || (window.currentSessionData && window.currentSessionData.filename);
+    const fallback = 'page-run';
+    window._stableMLSessionKey = byId || byPattern || byFilename || fallback;
+    return window._stableMLSessionKey;
+}
+
 // State update function that coordinates all UI elements
 function updateAppState(newState) {
     if (window.appState.isUpdating) {
@@ -4371,6 +4384,7 @@ async function performAnalysis() {
     // Reset ML notification/banner state for a fresh analysis run
     window.mlNotificationChecked = false;
     window.mlAutoAnalysisUserChoice = null;
+    window._stableMLSessionKey = null; // reset stable ML key for new run
 
     // Debug: Check current data state
     // console.log('🧪 ANALYSIS DEBUG - Current state:', {
@@ -4804,19 +4818,37 @@ async function displayAnalysisResults(results) {
     
     populateWellSelector(individualResults);
     
-    // Show ML notification banner once per session and then populate table
+    // Show ML notification banner once per session (defer until pathogen is known)
     if (window.mlFeedbackInterface && results && results.individual_results) {
-        const currentSessionKey = results.session_id || getCurrentFullPattern() || 'unknown-session';
+        const currentSessionKey = getStableMLSessionKey(results);
+        const testCodeKnown = (() => {
+            try {
+                const pattern = getCurrentFullPattern();
+                return Boolean(pattern && extractTestCode(pattern));
+            } catch { return false; }
+        })();
         window._mlBannerShownFor = window._mlBannerShownFor || new Set();
         const bannerAlreadyShown = window._mlBannerShownFor.has(currentSessionKey) || window.mlNotificationChecked;
         
         if (!bannerAlreadyShown) {
-            window.mlNotificationChecked = true; // prevent duplicates
-            window._mlBannerShownFor.add(currentSessionKey);
-            try {
-                await window.mlFeedbackInterface.checkForMLNotification();
-            } catch (error) {
-                console.log('ML notification check failed:', error);
+            const trigger = async () => {
+                window.mlNotificationChecked = true; // prevent duplicates
+                window._mlBannerShownFor.add(currentSessionKey);
+                try { await window.mlFeedbackInterface.checkForMLNotification(); }
+                catch (error) { console.log('ML notification check failed:', error); }
+            };
+            if (testCodeKnown) {
+                await trigger();
+            } else {
+                // Wait briefly for pattern extraction; if still unknown, skip noisy banner
+                setTimeout(async () => {
+                    const patternLater = getCurrentFullPattern && getCurrentFullPattern();
+                    if (patternLater && extractTestCode(patternLater)) {
+                        await trigger();
+                    } else {
+                        // Defer banner entirely until user interaction or refresh
+                    }
+                }, 400);
             }
         }
         // Always populate the table regardless of banner outcome
@@ -5039,19 +5071,34 @@ async function displayMultiFluorophoreResults(results) {
     }
     populateWellSelector(results.individual_results);
     
-    // Show ML notification banner once per session and then populate table
+    // Show ML notification banner once per session (defer until pathogen is known)
     if (window.mlFeedbackInterface && results && results.individual_results) {
-        const currentSessionKey = results.session_id || getCurrentFullPattern() || 'unknown-session';
+        const currentSessionKey = getStableMLSessionKey(results);
+        const testCodeKnown = (() => {
+            try {
+                const pattern = getCurrentFullPattern();
+                return Boolean(pattern && extractTestCode(pattern));
+            } catch { return false; }
+        })();
         window._mlBannerShownFor = window._mlBannerShownFor || new Set();
         const bannerAlreadyShown = window._mlBannerShownFor.has(currentSessionKey) || window.mlNotificationChecked;
         
         if (!bannerAlreadyShown) {
-            window.mlNotificationChecked = true; // prevent duplicates
-            window._mlBannerShownFor.add(currentSessionKey);
-            try {
-                await window.mlFeedbackInterface.checkForMLNotification();
-            } catch (error) {
-                console.log('ML notification check failed for multichannel:', error);
+            const trigger = async () => {
+                window.mlNotificationChecked = true; // prevent duplicates
+                window._mlBannerShownFor.add(currentSessionKey);
+                try { await window.mlFeedbackInterface.checkForMLNotification(); }
+                catch (error) { console.log('ML notification check failed for multichannel:', error); }
+            };
+            if (testCodeKnown) {
+                await trigger();
+            } else {
+                setTimeout(async () => {
+                    const patternLater = getCurrentFullPattern && getCurrentFullPattern();
+                    if (patternLater && extractTestCode(patternLater)) {
+                        await trigger();
+                    }
+                }, 400);
             }
         }
         // Always populate the table regardless of banner outcome
