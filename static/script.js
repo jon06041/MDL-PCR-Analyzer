@@ -8,6 +8,9 @@ window.chartUpdating = false;
 // Global flag to prevent multiple simultaneous chart initializations
 window.chartInitializing = false;
 
+// Guard to suppress auto chart updates during explicit/manual updates
+window.suppressAutoChartUpdate = false;
+
 // ========================================
 // AUTHENTICATED FETCH UTILITY
 // ========================================
@@ -494,21 +497,24 @@ function updateDisplays() {
     }
     
     // Update chart based on current state - only if analysis results are available
-    // SKIP chart recreation if we're just updating thresholds OR if chart already exists
-    if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results && 
-        !window.chartInitializing && !window.chartUpdating && !window.amplificationChart) {
-        console.log('🔍 CHART-CREATION - Creating initial chart');
-        if (state.currentChartMode === 'all') {
-            showAllCurves(state.currentFluorophore);
-        } else if (state.currentChartMode === 'pos') {
-            showGoodCurves(state.currentFluorophore);
-        } else if (state.currentChartMode === 'neg') {
-            showResultsFiltered(state.currentFluorophore, 'neg');
-        } else if (state.currentChartMode === 'redo') {
-            showResultsFiltered(state.currentFluorophore, 'redo');
+    if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results &&
+        !window.chartInitializing && !window.chartUpdating) {
+        if (window.amplificationChart) {
+            // Chart exists: switch display mode immediately to reflect filter buttons/selection
+            try { updateChartDisplayMode(); } catch (e) { /* no-op */ }
+        } else if (!window.suppressAutoChartUpdate) {
+            // No chart yet and not suppressed: create initial chart
+            console.log('🔍 CHART-CREATION - Creating initial chart');
+            if (state.currentChartMode === 'all') {
+                showAllCurves(state.currentFluorophore);
+            } else if (state.currentChartMode === 'pos') {
+                showGoodCurves(state.currentFluorophore);
+            } else if (state.currentChartMode === 'neg') {
+                showResultsFiltered(state.currentFluorophore, 'neg');
+            } else if (state.currentChartMode === 'redo') {
+                showResultsFiltered(state.currentFluorophore, 'redo');
+            }
         }
-    } else {
-        // console.log('🔄 CHART-LOADING - Skipping chart recreation - chart exists or conditions not met');
     }
     
     // Update table filter
@@ -5289,10 +5295,7 @@ function createUnifiedChart(chartType, selectedFluorophore = 'all', filterType =
     // console.log(`Creating unified chart: ${chartType} for fluorophore: ${selectedFluorophore} with filter: ${filterType}`);
     
     const ctx = document.getElementById('amplificationChart').getContext('2d');
-    
-    // Destroy existing chart safely
-    safeDestroyChart();
-    
+
     const datasets = [];
     const results = currentAnalysisResults.individual_results;
     
@@ -5329,9 +5332,14 @@ function createUnifiedChart(chartType, selectedFluorophore = 'all', filterType =
     });
     
     if (datasets.length === 0) {
+        // No matching datasets for this filter; keep existing chart visible to avoid a blank UI
         // console.warn(`No data available for ${chartType} chart with filter ${filterType}`);
+        window.chartInitializing = false;
         return;
     }
+
+    // Destroy existing chart safely (only after we know we have data to show)
+    safeDestroyChart();
     
     // Create chart configuration
     const chartConfig = createChartConfiguration(
@@ -5378,20 +5386,33 @@ function createUnifiedChart(chartType, selectedFluorophore = 'all', filterType =
 
 // Helper function to determine if a well should be included based on filter type
 function shouldIncludeWell(wellData, filterType) {
+    // Unified strict criteria used across table/details
     const amplitude = wellData.amplitude || 0;
-    const isGoodSCurve = wellData.is_good_scurve || false;
-    
-    switch (filterType) {
+    const isGoodSCurve = Boolean(wellData.is_good_scurve);
+
+    // Determine anomalies once
+    let hasAnomalies = false;
+    if (wellData.anomalies) {
+        try {
+            const anomalies = typeof wellData.anomalies === 'string' ? JSON.parse(wellData.anomalies) : wellData.anomalies;
+            hasAnomalies = Array.isArray(anomalies) && anomalies.length > 0 && !(anomalies.length === 1 && anomalies[0] === 'None');
+        } catch (e) {
+            hasAnomalies = true;
+        }
+    }
+    const cqVal = wellData.cq_value;
+
+    switch ((filterType || 'all')) {
         case 'all':
             return true;
-        case 'good':
-            return amplitude > 500;
+        case 'good': // legacy "good" meaning POS-like strong S-curves
         case 'pos':
-            return isGoodSCurve && amplitude > 500;
+            return isGoodSCurve && amplitude > 500 && !hasAnomalies;
         case 'neg':
-            return isGoodSCurve && amplitude <= 500;
+            return (amplitude < 400 || !isGoodSCurve || isNaN(Number(cqVal)));
         case 'redo':
-            return !isGoodSCurve;
+            return (!isGoodSCurve || (amplitude >= 400 && amplitude <= 500) || (amplitude > 500 && hasAnomalies))
+                   && !(amplitude < 400 || !isGoodSCurve || isNaN(Number(cqVal)));
         default:
             return true;
     }
@@ -5539,6 +5560,27 @@ fluorophoreSelector.addEventListener('change', function() {
         showAllBtn.classList.add('active');
     }
 });
+
+    // Auto-select single channel if only one fluorophore is present
+    try {
+        const uniqueFluors = [...new Set(Object.values(individualResults).map(r => r.fluorophore).filter(Boolean))];
+        if (uniqueFluors.length === 1) {
+            const onlyFluor = uniqueFluors[0];
+            // Set selector value
+            fluorophoreSelector.value = onlyFluor;
+            // Update app state and dependent UI (threshold, chart mode)
+            updateAppState({ currentFluorophore: onlyFluor });
+            setTimeout(() => { try { updateThresholdInputFromState(); } catch (e) {} }, 50);
+            // Default to show all curves for that fluorophore
+            if (typeof window !== 'undefined') window.currentChartMode = 'all';
+            try { updateChartDisplayMode(); } catch (e) {}
+            // Reflect button active state
+            const showAllBtn = document.getElementById('showAllBtn');
+            if (showAllBtn) updateActiveButton(showAllBtn);
+        }
+    } catch (e) {
+        // no-op
+    }
 }
 
 /**
@@ -12979,6 +13021,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const showSelectedBtn = document.getElementById('showSelectedBtn');
     if (showSelectedBtn) {
         showSelectedBtn.addEventListener('click', function() {
+            // Prevent the state updater from auto-creating a chart while we switch to selected view
+            window.suppressAutoChartUpdate = true;
             updateAppState({ currentChartMode: 'selected' });
             if (window.selectedWellKeys && window.selectedWellKeys.length > 0) {
                 showSelectedCurves(window.selectedWellKeys);
@@ -12993,6 +13037,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (details) details.innerHTML = '<p>Select a well to view curve details</p>';
                 }
             }
+            // Re-enable normal auto updates
+            window.suppressAutoChartUpdate = false;
         });
         // Don't force active by default; honor state mapping
     }
@@ -13002,9 +13048,12 @@ document.addEventListener('DOMContentLoaded', function() {
     if (showAllBtn) {
         showAllBtn.addEventListener('click', function() {
             // console.log('Show All Wells button clicked');
+            window.suppressAutoChartUpdate = true;
             updateAppState({ currentChartMode: 'all' });
             // Clear any filtered curve details when switching to all wells mode
             document.getElementById('curveDetails').innerHTML = '<p>Select a well to view individual curve details</p>';
+            try { updateChartDisplayMode(); } catch (e) {}
+            window.suppressAutoChartUpdate = false;
         });
     }
     
@@ -13013,7 +13062,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (showPosBtn) {
         showPosBtn.addEventListener('click', function() {
             // console.log('POS Results button clicked');
+            window.suppressAutoChartUpdate = true;
             updateAppState({ currentChartMode: 'pos' });
+            try { updateChartDisplayMode(); } catch (e) {}
+            window.suppressAutoChartUpdate = false;
         });
     }
     
@@ -13022,7 +13074,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (showNegBtn) {
         showNegBtn.addEventListener('click', function() {
             // console.log('NEG Results button clicked');
+            window.suppressAutoChartUpdate = true;
             updateAppState({ currentChartMode: 'neg' });
+            try { updateChartDisplayMode(); } catch (e) {}
+            window.suppressAutoChartUpdate = false;
         });
     }
     
@@ -13031,7 +13086,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (showRedoBtn) {
         showRedoBtn.addEventListener('click', function() {
             // console.log('REDO Results button clicked');
+            window.suppressAutoChartUpdate = true;
             updateAppState({ currentChartMode: 'redo' });
+            try { updateChartDisplayMode(); } catch (e) {}
+            window.suppressAutoChartUpdate = false;
         });
     }
     
@@ -13181,8 +13239,42 @@ document.addEventListener('DOMContentLoaded', function() {
 function updateSelectedDetailsList(wellKeys) {
     const container = document.getElementById('curveDetails');
     if (!container) return;
-    const list = wellKeys.map(k => `<li>${k}</li>`).join('');
-    container.innerHTML = `<h4>Selected Curve Details</h4><p>${wellKeys.length} wells selected</p><ul>${list}</ul>`;
+    if (!currentAnalysisResults || !currentAnalysisResults.individual_results) {
+        container.innerHTML = '<p>No analysis results available</p>';
+        return;
+    }
+    // Build enriched list for selected wells
+    const items = [];
+    let fluor = null;
+    for (const k of wellKeys) {
+        const data = currentAnalysisResults.individual_results[k];
+        if (!data) continue;
+        const wellId = data.well_id || k.split('_')[0];
+        const sampleName = data.sample || data.sample_name || 'N/A';
+        const amplitude = Math.round(Number(data.amplitude || 0));
+        const f = data.fluorophore || 'Unknown';
+        fluor = fluor && fluor !== f ? 'All' : (fluor || f);
+        items.push({ wellId, sampleName, amplitude });
+    }
+    // Sort by well ID (A1..P1, A2..)
+    items.sort((a, b) => {
+        const am = a.wellId.match(/([A-Z]+)(\d+)/);
+        const bm = b.wellId.match(/([A-Z]+)(\d+)/);
+        if (am && bm) {
+            const lc = am[1].localeCompare(bm[1]);
+            if (lc !== 0) return lc;
+            return parseInt(am[2]) - parseInt(bm[2]);
+        }
+        return a.wellId.localeCompare(b.wellId);
+    });
+    const titleFluor = fluor || 'All';
+    const list = items.map(it => `<div class="sample-item"><span class="sample-well">${it.wellId}</span><span class="sample-name">${it.sampleName}</span><span class="sample-amplitude">${it.amplitude}</span></div>`).join('');
+    container.innerHTML = `
+        <div class="filtered-samples-section">
+            <h4>Selected Samples (${titleFluor})</h4>
+            <div class="filtered-samples-list">${list}</div>
+        </div>
+    `;
 }
 
 function showSelectedCurves(wellKeys) {
@@ -13224,7 +13316,11 @@ function updateActiveButton(activeBtn) {
 
 function updateChartDisplayMode() {
     // console.log('updateChartDisplayMode called with mode:', currentChartMode);
-    
+    // Guard against re-entrant updates during chart init/update
+    if (window.chartInitializing || window.chartUpdating) {
+        return;
+    }
+
     if (!currentAnalysisResults) {
         // console.error('No currentAnalysisResults in updateChartDisplayMode');
         return;

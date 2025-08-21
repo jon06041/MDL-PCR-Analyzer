@@ -1925,3 +1925,23 @@ Action items (queued)
 - Stabilize POS/NEG/REDO filter behavior when returning from selection mode (preserve state and avoid duplicate refreshes).
 - Debounce ML banner updates to avoid brief placeholder counts.
 
+### Fluorophore auto-selection and Selected Samples details (2025-08-21) — REQUIRED UPDATE
+
+Purpose: Improve first-load UX and selection details clarity in the amplification viewer.
+
+- Main chart fluorophore defaulting
+    - If exactly one fluorophore is present in the current analysis, auto-select that channel in the main fluorophore selector so curves render without extra clicks.
+    - If multiple fluorophores are present, keep the selector at “All Fluorophores” by default.
+    - Ensure threshold input and chart mode update accordingly after auto-selection.
+
+- Selected Samples panel formatting
+    - When users brush-select wells, the right panel should display a compact list titled: “Selected Samples (<Fluorophore>)”.
+    - For each selected well, show three lines in order: Well ID (e.g., A1), Sample Name/ID (e.g., 13799773-1-2539786), and Amplitude (integer, e.g., 1104).
+    - Use the current fluorophore if set; otherwise, infer from the selection. If mixed, label as “Selected Samples (All)”.
+    - Sorting: by well ID (A1, B1, … P1, A2, …) to match table/grouping behavior.
+
+Implementation notes:
+- Do not remove the “All Fluorophores” option; only set the selector value programmatically when there’s a single-channel dataset.
+- Update chart rendering via the existing chart mode switcher after setting the selector value.
+- Reuse existing parsing for sample name and amplitude from individual_results when building the Selected Samples list.
+
