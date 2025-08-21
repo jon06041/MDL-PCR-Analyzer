@@ -657,8 +657,11 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
                 well_result.parameter_errors = safe_json_dumps(well_data.get('parameter_errors'), [])
                 well_result.fitted_curve = safe_json_dumps(well_data.get('fitted_curve'), [])
                 well_result.anomalies = safe_json_dumps(well_data.get('anomalies'), [])
-                well_result.raw_cycles = safe_json_dumps(well_data.get('raw_cycles'), [])
-                well_result.raw_rfu = safe_json_dumps(well_data.get('raw_rfu'), [])
+                # Persist raw data; gracefully fallback to alternate keys
+                raw_cycles_val = well_data.get('raw_cycles') or well_data.get('cycles') or well_data.get('x_data')
+                raw_rfu_val = well_data.get('raw_rfu') or well_data.get('rfu') or well_data.get('y_data')
+                well_result.raw_cycles = safe_json_dumps(raw_cycles_val, [])
+                well_result.raw_rfu = safe_json_dumps(raw_rfu_val, [])
                 well_result.sample_name = str(well_data.get('sample_name', '')) if well_data.get('sample_name') else None
                 cq_value_raw = well_data.get('cq_value')
                 well_result.cq_value = float(cq_value_raw) if cq_value_raw is not None and cq_value_raw != '' else None
@@ -2069,8 +2072,11 @@ def save_combined_session():
                 well_result.parameter_errors = safe_json_dumps(well_data.get('parameter_errors'), [])
                 well_result.fitted_curve = safe_json_dumps(well_data.get('fitted_curve'), [])
                 well_result.anomalies = safe_json_dumps(well_data.get('anomalies'), [])
-                well_result.raw_cycles = safe_json_dumps(well_data.get('raw_cycles'), [])
-                well_result.raw_rfu = safe_json_dumps(well_data.get('raw_rfu'), [])
+                # Persist raw data; gracefully fallback to alternate keys
+                raw_cycles_val = well_data.get('raw_cycles') or well_data.get('cycles') or well_data.get('x_data')
+                raw_rfu_val = well_data.get('raw_rfu') or well_data.get('rfu') or well_data.get('y_data')
+                well_result.raw_cycles = safe_json_dumps(raw_cycles_val, [])
+                well_result.raw_rfu = safe_json_dumps(raw_rfu_val, [])
 
                 well_result.sample_name = str(well_data.get('sample_name', '')) if well_data.get('sample_name') else None
                 well_result.cq_value = float(well_data.get('cq_value', 0)) if well_data.get('cq_value') is not None else None

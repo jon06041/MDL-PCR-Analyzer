@@ -674,6 +674,18 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
         # Add anomaly detection
         anomalies = detect_curve_anomalies(cycles, rfu)
         analysis['anomalies'] = anomalies
+
+        # Ensure raw data is always present even if curve analysis failed
+        # This guarantees downstream storage/visualization has RFU/cycle arrays
+        try:
+            if not isinstance(analysis.get('raw_cycles'), list) or not analysis.get('raw_cycles'):
+                analysis['raw_cycles'] = [float(x) for x in cycles] if isinstance(cycles, (list, tuple)) else []
+            if not isinstance(analysis.get('raw_rfu'), list) or not analysis.get('raw_rfu'):
+                analysis['raw_rfu'] = [float(x) for x in rfu] if isinstance(rfu, (list, tuple)) else []
+        except Exception:
+            # Best-effort; leave empty lists on failure
+            analysis.setdefault('raw_cycles', [])
+            analysis.setdefault('raw_rfu', [])
         # Add curve classification - ML ENABLED WITH CONFIDENCE SAFEGUARDS + RULE-BASED FALLBACK
         if 'error' in analysis:
             analysis['curve_classification'] = {

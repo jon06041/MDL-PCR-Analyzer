@@ -394,6 +394,20 @@ well_result.test_code = test_code
 4. **Fix authentication**: Enable proper user auth or bypass for testing
 5. **CalcJ validation**: Verify CalcJ calculation works with extracted test_code
 
+### Runtime verification (2025-08-21) — Verified on combined session save
+
+Observed live log confirming `test_code` extraction and assignment for a specific well key:
+
+```
+🔧 [CRITICAL DEBUG] Setting test_code='Mgen' for well A20_FAM in save_combined_session()
+[2025-08-21 19:28:40,660] INFO in app: 🔧 [CRITICAL DEBUG] Setting test_code='Mgen' for well A20_FAM in save_combined_session()
+```
+
+Notes:
+- Confirms `extract_test_code_from_filename(...)` resolved `Mgen` and persisted it during `save_combined_session()` flow.
+- Use MySQL Viewer (/mysql-viewer) to spot-check `well_results.test_code` for the affected session/well.
+
+
 **Files Modified**:
 - `app.py`: Enhanced WellResult creation with test_code extraction
 - `test_upload_simulation.py`: Created for API testing (auth blocked)

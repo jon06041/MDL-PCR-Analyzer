@@ -6903,33 +6903,57 @@ function updateChart(wellKey, cyclesData = null, rfuData = null, wellData = null
         cycles = cyclesData;
         rfu = rfuData;
     } else {
+        // Use the same robust conversion as the modal
+        const toArray = (val) => {
+            if (Array.isArray(val)) return val;
+            if (val && typeof val === 'object' && Number.isFinite(val.length) && val.length > 0) {
+                try { return Array.from(val); } catch { /* noop */ }
+            }
+            if (val && typeof val === 'object') {
+                try {
+                    const keys = Object.keys(val);
+                    const numeric = keys.every(k => /^\d+$/.test(k));
+                    const ordered = numeric ? keys.sort((a,b) => Number(a) - Number(b)) : keys;
+                    const arr = ordered.map(k => val[k]).map(Number).filter(n => Number.isFinite(n));
+                    if (arr.length > 0) return arr;
+                } catch { /* noop */ }
+            }
+            if (typeof val === 'string') {
+                try {
+                    const parsed = JSON.parse(val);
+                    if (Array.isArray(parsed)) return parsed;
+                    if (parsed && typeof parsed === 'object') {
+                        const keys = Object.keys(parsed);
+                        const numeric = keys.every(k => /^\d+$/.test(k));
+                        const ordered = numeric ? keys.sort((a,b) => Number(a) - Number(b)) : keys;
+                        const arr = ordered.map(k => parsed[k]).map(Number).filter(n => Number.isFinite(n));
+                        if (arr.length > 0) return arr;
+                    }
+                } catch { /* fall through */ }
+                const parts = val.split(/[;,\s]+/).map(x => x.trim()).filter(Boolean);
+                const nums = parts.map(Number).filter(n => Number.isFinite(n));
+                if (nums.length > 0) return nums;
+            }
+            return [];
+        };
+
         try {
-            if (wellResult.raw_cycles) {
-                let parsedCycles = typeof wellResult.raw_cycles === 'string' ? 
-                    JSON.parse(wellResult.raw_cycles) : wellResult.raw_cycles;
-                
-                // Convert object to array if needed (database sometimes stores as object)
-                if (parsedCycles && typeof parsedCycles === 'object' && !Array.isArray(parsedCycles)) {
-                    cycles = Object.values(parsedCycles);
-                } else {
-                    cycles = parsedCycles;
-                }
-            }
-            if (wellResult.raw_rfu) {
-                let parsedRfu = typeof wellResult.raw_rfu === 'string' ? 
-                    JSON.parse(wellResult.raw_rfu) : wellResult.raw_rfu;
-                
-                // Convert object to array if needed (database sometimes stores as object)
-                if (parsedRfu && typeof parsedRfu === 'object' && !Array.isArray(parsedRfu)) {
-                    rfu = Object.values(parsedRfu);
-                } else {
-                    rfu = parsedRfu;
-                }
-            }
+            if (wellResult.raw_cycles !== undefined) cycles = toArray(wellResult.raw_cycles);
+            if (wellResult.raw_rfu !== undefined) rfu = toArray(wellResult.raw_rfu);
         } catch (e) {
-            // console.error('Error parsing raw data for well:', wellKey, e);
             return;
         }
+    }
+
+    // If we have RFU but no cycles, synthesize cycles as 1..N
+    if ((cycles && rfu) && (cycles.length === 0 || cycles.length !== rfu.length) && rfu.length > 0) {
+        cycles = Array.from({ length: rfu.length }, (_, i) => i + 1);
+    }
+    // Ensure equal length by trimming to min length
+    if ((cycles && rfu) && cycles.length !== rfu.length) {
+        const m = Math.min(cycles.length, rfu.length);
+        cycles = cycles.slice(0, m);
+        rfu = rfu.slice(0, m);
     }
     
     if (!cycles || cycles.length === 0 || !rfu || rfu.length === 0) {
@@ -10294,24 +10318,25 @@ function scheduleMLBannerOnceForSession(results) {
         (function check() {
             const pattern = (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null;
             const testCode = (pattern && typeof extractTestCode === 'function') ? extractTestCode(pattern) : null;
-            const tableReady = !!document.getElementById('resultsTableBody');
-            if (testCode && tableReady) return resolve({ pattern, testCode });
-            if (Date.now() - start > maxMs) return resolve({ pattern, testCode });
+            const tbody = document.getElementById('resultsTableBody');
+            const tableReady = !!tbody && tbody.querySelectorAll('tr').length > 0;
+            if (testCode && tableReady) return resolve({ pattern, testCode, tableReady });
+            if (Date.now() - start > maxMs) return resolve({ pattern, testCode, tableReady });
             setTimeout(check, 100);
         })();
     });
 
-    waitForReady().then(() => {
+    waitForReady().then(({ pattern, testCode, tableReady }) => {
+        // Only fire when we have a test code and the table has rows
+        if (!testCode || !tableReady) return;
         // Final guard against duplicates
         if (window._mlBannerShownFor.has(sessionKey) || window.mlNotificationChecked) return;
         window._mlBannerShownFor.add(sessionKey);
         window.mlNotificationChecked = true;
         try {
-            // Recompute edge cases now that the table is rendered
             if (typeof window.countEdgeCases === 'function') {
                 try { window.countEdgeCases(); } catch (e) {}
             }
-            // Trigger banner build
             if (window.mlFeedbackInterface && typeof window.mlFeedbackInterface.checkForMLNotification === 'function') {
                 window.mlFeedbackInterface.checkForMLNotification().catch(() => {});
             }
@@ -14198,26 +14223,54 @@ function createModalChart(wellKey, wellData) {
     // Parse raw data
     let cycles, rfu;
     const toArray = (val) => {
+        // Already an array
         if (Array.isArray(val)) return val;
+
+        // Typed arrays or array-like with length
+        if (val && typeof val === 'object' && Number.isFinite(val.length) && val.length > 0) {
+            try { return Array.from(val); } catch { /* noop */ }
+        }
+
+        // If it's a JS object, convert values (preserving numeric key order when possible)
+        if (val && typeof val === 'object') {
+            try {
+                const keys = Object.keys(val);
+                // If keys look numeric, sort them numerically
+                const numeric = keys.every(k => /^\d+$/.test(k));
+                const orderedKeys = numeric ? keys.sort((a,b) => Number(a) - Number(b)) : keys;
+                const arr = orderedKeys.map(k => val[k]).map(Number).filter(n => Number.isFinite(n));
+                if (arr.length > 0) return arr;
+            } catch { /* noop */ }
+        }
+
+        // String input: try JSON first
         if (typeof val === 'string') {
-            // Try JSON first
             try {
                 const parsed = JSON.parse(val);
                 if (Array.isArray(parsed)) return parsed;
-            } catch {}
+                if (parsed && typeof parsed === 'object') {
+                    const keys = Object.keys(parsed);
+                    const numeric = keys.every(k => /^\d+$/.test(k));
+                    const orderedKeys = numeric ? keys.sort((a,b) => Number(a) - Number(b)) : keys;
+                    const arr = orderedKeys.map(k => parsed[k]).map(Number).filter(n => Number.isFinite(n));
+                    if (arr.length > 0) return arr;
+                }
+            } catch { /* fall through */ }
+
             // Fallback: split on comma/semicolon/whitespace
             const parts = val.split(/[;,\s]+/).map(x => x.trim()).filter(Boolean);
             const nums = parts.map(Number).filter(n => Number.isFinite(n));
             if (nums.length > 0) return nums;
         }
+
         return [];
     };
     try {
         cycles = toArray(wellData.raw_cycles);
         rfu = toArray(wellData.raw_rfu);
-        // Fallback to cycles/rfu fields if raw_* are empty
-        if ((!cycles || cycles.length === 0) && Array.isArray(wellData.cycles)) cycles = [...wellData.cycles];
-        if ((!rfu || rfu.length === 0) && Array.isArray(wellData.rfu)) rfu = [...wellData.rfu];
+    // Fallback to cycles/rfu fields if raw_* are empty
+    if ((!cycles || cycles.length === 0) && (wellData.cycles !== undefined)) cycles = toArray(wellData.cycles);
+    if ((!rfu || rfu.length === 0) && (wellData.rfu !== undefined)) rfu = toArray(wellData.rfu);
         // Fallback to raw_data [{x,y}] or [{cycle,rfu}]
         if ((cycles.length === 0 || rfu.length === 0) && wellData.raw_data) {
             try {
