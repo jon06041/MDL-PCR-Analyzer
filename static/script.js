@@ -257,19 +257,6 @@ window.appState = {
     isUpdating: false
 };
 
-// Stable ML session key used to dedupe banners even when pattern/session_id arrives later
-function getStableMLSessionKey(results) {
-    // Prefer existing stable key to avoid churn
-    if (window._stableMLSessionKey) return window._stableMLSessionKey;
-    // Try session_id, then pattern, then filename, else a page-scope fallback
-    const byId = results && (results.session_id || results.sessionId);
-    const byPattern = (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null;
-    const byFilename = window.currentSessionFilename || (window.currentSessionData && window.currentSessionData.filename);
-    const fallback = 'page-run';
-    window._stableMLSessionKey = byId || byPattern || byFilename || fallback;
-    return window._stableMLSessionKey;
-}
-
 // State update function that coordinates all UI elements
 function updateAppState(newState) {
     if (window.appState.isUpdating) {
@@ -4384,7 +4371,6 @@ async function performAnalysis() {
     // Reset ML notification/banner state for a fresh analysis run
     window.mlNotificationChecked = false;
     window.mlAutoAnalysisUserChoice = null;
-    window._stableMLSessionKey = null; // reset stable ML key for new run
 
     // Debug: Check current data state
     // console.log('🧪 ANALYSIS DEBUG - Current state:', {
@@ -4818,43 +4804,12 @@ async function displayAnalysisResults(results) {
     
     populateWellSelector(individualResults);
     
-    // Show ML notification banner once per session (defer until pathogen is known)
+    // Always populate the table first
+    populateResultsTable(individualResults);
+
+    // Schedule ML banner only after experiment/test code and table are ready
     if (window.mlFeedbackInterface && results && results.individual_results) {
-        const currentSessionKey = getStableMLSessionKey(results);
-        const testCodeKnown = (() => {
-            try {
-                const pattern = getCurrentFullPattern();
-                return Boolean(pattern && extractTestCode(pattern));
-            } catch { return false; }
-        })();
-        window._mlBannerShownFor = window._mlBannerShownFor || new Set();
-        const bannerAlreadyShown = window._mlBannerShownFor.has(currentSessionKey) || window.mlNotificationChecked;
-        
-        if (!bannerAlreadyShown) {
-            const trigger = async () => {
-                window.mlNotificationChecked = true; // prevent duplicates
-                window._mlBannerShownFor.add(currentSessionKey);
-                try { await window.mlFeedbackInterface.checkForMLNotification(); }
-                catch (error) { console.log('ML notification check failed:', error); }
-            };
-            if (testCodeKnown) {
-                await trigger();
-            } else {
-                // Wait briefly for pattern extraction; if still unknown, skip noisy banner
-                setTimeout(async () => {
-                    const patternLater = getCurrentFullPattern && getCurrentFullPattern();
-                    if (patternLater && extractTestCode(patternLater)) {
-                        await trigger();
-                    } else {
-                        // Defer banner entirely until user interaction or refresh
-                    }
-                }, 400);
-            }
-        }
-        // Always populate the table regardless of banner outcome
-        populateResultsTable(individualResults);
-    } else {
-        populateResultsTable(individualResults);
+        scheduleMLBannerOnceForSession(results);
     }
 
     // --- Force "Show All Curves" view and activate button after analysis loads ---
@@ -5071,40 +5026,12 @@ async function displayMultiFluorophoreResults(results) {
     }
     populateWellSelector(results.individual_results);
     
-    // Show ML notification banner once per session (defer until pathogen is known)
+    // Always populate the table first
+    populateResultsTable(results.individual_results);
+
+    // Schedule ML banner only after experiment/test code and table are ready
     if (window.mlFeedbackInterface && results && results.individual_results) {
-        const currentSessionKey = getStableMLSessionKey(results);
-        const testCodeKnown = (() => {
-            try {
-                const pattern = getCurrentFullPattern();
-                return Boolean(pattern && extractTestCode(pattern));
-            } catch { return false; }
-        })();
-        window._mlBannerShownFor = window._mlBannerShownFor || new Set();
-        const bannerAlreadyShown = window._mlBannerShownFor.has(currentSessionKey) || window.mlNotificationChecked;
-        
-        if (!bannerAlreadyShown) {
-            const trigger = async () => {
-                window.mlNotificationChecked = true; // prevent duplicates
-                window._mlBannerShownFor.add(currentSessionKey);
-                try { await window.mlFeedbackInterface.checkForMLNotification(); }
-                catch (error) { console.log('ML notification check failed for multichannel:', error); }
-            };
-            if (testCodeKnown) {
-                await trigger();
-            } else {
-                setTimeout(async () => {
-                    const patternLater = getCurrentFullPattern && getCurrentFullPattern();
-                    if (patternLater && extractTestCode(patternLater)) {
-                        await trigger();
-                    }
-                }, 400);
-            }
-        }
-        // Always populate the table regardless of banner outcome
-        populateResultsTable(results.individual_results);
-    } else {
-        populateResultsTable(results.individual_results);
+        scheduleMLBannerOnceForSession(results);
     }
     
     // Create control grids for multi-fluorophore analysis
@@ -10297,6 +10224,55 @@ function exportResults() {
     window.URL.revokeObjectURL(url);
 }
 
+// Defer ML banner until we have experiment pattern, test code, and a rendered table for accurate edge-case counts
+function scheduleMLBannerOnceForSession(results) {
+    // Derive a stable session key using multiple fallbacks to avoid duplicate banners
+    let sessionKey = null;
+    try {
+        const pattern = (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null;
+        const testCode = (pattern && typeof extractTestCode === 'function') ? extractTestCode(pattern) : null;
+        const baseName = (results && results.filename) ? String(results.filename).split(' - ')[0] : null;
+        sessionKey = results.session_id || pattern || baseName || testCode || 'unknown-session';
+    } catch {
+        sessionKey = results?.session_id || 'unknown-session';
+    }
+    window._mlBannerShownFor = window._mlBannerShownFor || new Set();
+    if (window._mlBannerShownFor.has(sessionKey)) return; // already handled
+
+    // Helper: resolve when we have a test code and results table body present
+    const waitForReady = () => new Promise(resolve => {
+        const start = Date.now();
+        const maxMs = 3000; // 3s max wait
+        (function check() {
+            const pattern = (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null;
+            const testCode = (pattern && typeof extractTestCode === 'function') ? extractTestCode(pattern) : null;
+            const tableReady = !!document.getElementById('resultsTableBody');
+            if (testCode && tableReady) return resolve({ pattern, testCode });
+            if (Date.now() - start > maxMs) return resolve({ pattern, testCode });
+            setTimeout(check, 100);
+        })();
+    });
+
+    waitForReady().then(() => {
+        // Final guard against duplicates
+        if (window._mlBannerShownFor.has(sessionKey) || window.mlNotificationChecked) return;
+        window._mlBannerShownFor.add(sessionKey);
+        window.mlNotificationChecked = true;
+        try {
+            // Recompute edge cases now that the table is rendered
+            if (typeof window.countEdgeCases === 'function') {
+                try { window.countEdgeCases(); } catch (e) {}
+            }
+            // Trigger banner build
+            if (window.mlFeedbackInterface && typeof window.mlFeedbackInterface.checkForMLNotification === 'function') {
+                window.mlFeedbackInterface.checkForMLNotification().catch(() => {});
+            }
+        } catch (e) {
+            // no-op
+        }
+    });
+}
+
 // Generate CSV with Multi-Fluorophore Support
 function generateResultsCSV() {
     const headers = [
@@ -13655,17 +13631,35 @@ function showWellModal(wellKey) {
 function buildModalNavigationList() {
     modalNavigationList = [];
     
-    // CRITICAL FIX: Build navigation from ALL analysis results, not just visible table rows
-    // This prevents filters from breaking modal navigation after expert feedback
-    if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
-        console.log('🔄 Building modal navigation list from complete analysis results');
+    // Primary: build navigation from the current table DOM order (matches user-visible sort/filter)
+    const tableRows = document.querySelectorAll('#resultsTableBody tr[data-well-key]');
+    if (tableRows && tableRows.length > 0) {
+        console.log('🔄 Building modal navigation list from current table order');
+        tableRows.forEach((row) => {
+            const wellKey = row.getAttribute('data-well-key');
+            // Prefer explicit sample-name cell if present
+            const sampleCell = row.querySelector('.sample-name');
+            const sampleName = sampleCell ? sampleCell.textContent.trim() : (function() {
+                // Fallback: look up from analysis results
+                try {
+                    const allResults = window.currentAnalysisResults?.individual_results || {};
+                    return (allResults[wellKey]?.sample_name || allResults[wellKey]?.sample || 'Unknown Sample');
+                } catch {
+                    return 'Unknown Sample';
+                }
+            })();
+            modalNavigationList.push({ wellKey, sampleName });
+            console.log(`📋 Added to navigation (table): ${wellKey} (${sampleName})`);
+        });
+    } else if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+        // Fallback: use complete analysis results in plate order
+        console.log('📊 Table empty; building modal navigation from complete analysis results');
         const allResults = window.currentAnalysisResults.individual_results;
         const allWellKeys = Object.keys(allResults);
 
         // Helper: natural plate order comparator (A1..A12, B1..)
         const fluorOrder = ['FAM', 'HEX', 'Texas Red', 'Cy5'];
         const wellKeyToParts = (key) => {
-            // key may be like "A1_Cy5" or just "A1"
             const [wellId, maybeFluor] = key.split('_');
             const row = wellId ? wellId.match(/^[A-P]/i)?.[0]?.toUpperCase() || 'Z' : 'Z';
             const col = wellId ? parseInt(wellId.replace(/^[A-P]/i, ''), 10) || 0 : 0;
@@ -13681,39 +13675,16 @@ function buildModalNavigationList() {
             return A.fluorIdx - B.fluorIdx;
         };
 
-        // Sort keys into plate order
         allWellKeys.sort(plateOrderCompare);
-        
-        console.log('� Total wells in analysis results:', allWellKeys.length);
-        
-        allWellKeys.forEach((wellKey, index) => {
-            const wellData = allResults[wellKey];
+        console.log('📦 Total wells in analysis results:', allWellKeys.length);
+        allWellKeys.forEach((wellKey) => {
+            const wellData = allResults[wellKey] || {};
             const sampleName = wellData.sample_name || wellData.sample || 'Unknown Sample';
-            
-            modalNavigationList.push({
-                wellKey: wellKey,
-                sampleName: sampleName
-            });
-            console.log(`📋 Added to navigation: ${wellKey} (${sampleName})`);
+            modalNavigationList.push({ wellKey, sampleName });
+            console.log(`📋 Added to navigation (results): ${wellKey} (${sampleName})`);
         });
     } else {
-        console.warn('⚠️ No analysis results available for building modal navigation, trying table rows...');
-        
-        // Fallback: Build from table rows if analysis results not available
-        const tableRows = document.querySelectorAll('#resultsTable tbody tr[data-well-key]');
-        console.log('📊 Fallback: Using table rows, found:', tableRows.length);
-        
-        tableRows.forEach((row) => {
-            const wellKey = row.getAttribute('data-well-key');
-            const sampleCell = row.querySelector('.sample-name');
-            const sampleName = sampleCell ? sampleCell.textContent.trim() : 'Unknown Sample';
-            
-            modalNavigationList.push({
-                wellKey: wellKey,
-                sampleName: sampleName
-            });
-            console.log(`📋 Added to navigation from table: ${wellKey} (${sampleName})`);
-        });
+        console.warn('⚠️ No table rows or analysis results available for modal navigation');
     }
     
     console.log('✅ Modal navigation list built with', modalNavigationList.length, 'items');
@@ -14178,18 +14149,65 @@ function createModalChart(wellKey, wellData) {
     
     // Parse raw data
     let cycles, rfu;
+    const toArray = (val) => {
+        if (Array.isArray(val)) return val;
+        if (typeof val === 'string') {
+            // Try JSON first
+            try {
+                const parsed = JSON.parse(val);
+                if (Array.isArray(parsed)) return parsed;
+            } catch {}
+            // Fallback: split on comma/semicolon/whitespace
+            const parts = val.split(/[;,\s]+/).map(x => x.trim()).filter(Boolean);
+            const nums = parts.map(Number).filter(n => Number.isFinite(n));
+            if (nums.length > 0) return nums;
+        }
+        return [];
+    };
     try {
-        cycles = typeof wellData.raw_cycles === 'string' ? 
-            JSON.parse(wellData.raw_cycles) : (Array.isArray(wellData.raw_cycles) ? wellData.raw_cycles : []);
-        rfu = typeof wellData.raw_rfu === 'string' ? 
-            JSON.parse(wellData.raw_rfu) : (Array.isArray(wellData.raw_rfu) ? wellData.raw_rfu : []);
+        cycles = toArray(wellData.raw_cycles);
+        rfu = toArray(wellData.raw_rfu);
         // Fallback to cycles/rfu fields if raw_* are empty
-        if ((!cycles || cycles.length === 0) && Array.isArray(wellData.cycles)) cycles = wellData.cycles;
-        if ((!rfu || rfu.length === 0) && Array.isArray(wellData.rfu)) rfu = wellData.rfu;
+        if ((!cycles || cycles.length === 0) && Array.isArray(wellData.cycles)) cycles = [...wellData.cycles];
+        if ((!rfu || rfu.length === 0) && Array.isArray(wellData.rfu)) rfu = [...wellData.rfu];
+        // Fallback to raw_data [{x,y}] or [{cycle,rfu}]
+        if ((cycles.length === 0 || rfu.length === 0) && wellData.raw_data) {
+            try {
+                const rawData = typeof wellData.raw_data === 'string' ? JSON.parse(wellData.raw_data) : wellData.raw_data;
+                if (Array.isArray(rawData) && rawData.length > 0) {
+                    const xs = [];
+                    const ys = [];
+                    rawData.forEach(p => {
+                        if (p && typeof p === 'object') {
+                            const x = (p.x ?? p.cycle ?? p.Cycle ?? p[0]);
+                            const y = (p.y ?? p.rfu ?? p.RFU ?? p[1]);
+                            if (Number.isFinite(Number(x)) && Number.isFinite(Number(y))) {
+                                xs.push(Number(x));
+                                ys.push(Number(y));
+                            }
+                        }
+                    });
+                    if (xs.length > 0 && ys.length > 0) {
+                        cycles = xs;
+                        rfu = ys;
+                    }
+                }
+            } catch {}
+        }
     } catch (e) {
-        // console.error('Error parsing well data for modal:', e);
         cycles = [];
         rfu = [];
+    }
+
+    // If we have RFU but no cycles, synthesize cycles as 1..N
+    if ((cycles.length === 0 || cycles.length !== rfu.length) && rfu.length > 0) {
+        cycles = Array.from({ length: rfu.length }, (_, i) => i + 1);
+    }
+    // Ensure equal length by trimming to min length
+    if (cycles.length !== rfu.length) {
+        const m = Math.min(cycles.length, rfu.length);
+        cycles = cycles.slice(0, m);
+        rfu = rfu.slice(0, m);
     }
 
     // If still no data, render an empty chart with a friendly message area
