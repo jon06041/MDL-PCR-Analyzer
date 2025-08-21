@@ -4664,20 +4664,7 @@ async function displayAnalysisResults(results) {
     // Ensure global is set before any UI/chart calls
     window.currentAnalysisResults = results;
     
-    // Show ML notification banner (without auto-running analysis)
-    // User must manually click "Improve Results" to trigger ML analysis
-    if (window.mlFeedbackInterface && results && results.individual_results && !window.mlNotificationChecked) {
-        window.mlNotificationChecked = true; // Set flag to prevent duplicate notifications
-        // Small delay to allow analysis results to be fully processed
-        setTimeout(async () => {
-            try {
-                await window.mlFeedbackInterface.checkForMLNotification();
-                console.log("DEBUG: Called checkForMLNotification after analysis results");
-            } catch (error) {
-                console.log('ML notification check failed:', error);
-            }
-        }, 2000);
-    }
+    // Note: ML notification is triggered once later in this function to avoid duplicates
     
     // IMMEDIATE: Initialize thresholds as soon as analysis results are available
     if (window.initializeChannelThresholds) {
@@ -4817,23 +4804,24 @@ async function displayAnalysisResults(results) {
     
     populateWellSelector(individualResults);
     
-    // Show ML notification banner (without auto-running analysis) 
-    // User must manually click "Improve Results" to trigger ML analysis
-    if (window.mlFeedbackInterface && results && results.individual_results && !window.mlNotificationChecked) {
-        window.mlNotificationChecked = true; // Set flag to prevent duplicate notifications
+    // Show ML notification banner once per session and then populate table
+    if (window.mlFeedbackInterface && results && results.individual_results) {
+        const currentSessionKey = results.session_id || getCurrentFullPattern() || 'unknown-session';
+        window._mlBannerShownFor = window._mlBannerShownFor || new Set();
+        const bannerAlreadyShown = window._mlBannerShownFor.has(currentSessionKey) || window.mlNotificationChecked;
         
-        // Show ML banner first and wait for user choice before populating table
-        try {
-            await window.mlFeedbackInterface.checkForMLNotification();
-            // Only populate table after ML banner has been handled
-            populateResultsTable(individualResults);
-        } catch (error) {
-            console.log('ML notification check failed:', error);
-            // Still populate table if ML check fails
-            populateResultsTable(individualResults);
+        if (!bannerAlreadyShown) {
+            window.mlNotificationChecked = true; // prevent duplicates
+            window._mlBannerShownFor.add(currentSessionKey);
+            try {
+                await window.mlFeedbackInterface.checkForMLNotification();
+            } catch (error) {
+                console.log('ML notification check failed:', error);
+            }
         }
+        // Always populate the table regardless of banner outcome
+        populateResultsTable(individualResults);
     } else {
-        // No ML check needed, populate table immediately
         populateResultsTable(individualResults);
     }
 
@@ -5051,23 +5039,24 @@ async function displayMultiFluorophoreResults(results) {
     }
     populateWellSelector(results.individual_results);
     
-    // Show ML notification banner (without auto-running analysis)
-    // User must manually click "Improve Results" to trigger ML analysis
-    if (window.mlFeedbackInterface && results && results.individual_results && !window.mlNotificationChecked) {
-        window.mlNotificationChecked = true; // Set flag to prevent duplicate notifications
+    // Show ML notification banner once per session and then populate table
+    if (window.mlFeedbackInterface && results && results.individual_results) {
+        const currentSessionKey = results.session_id || getCurrentFullPattern() || 'unknown-session';
+        window._mlBannerShownFor = window._mlBannerShownFor || new Set();
+        const bannerAlreadyShown = window._mlBannerShownFor.has(currentSessionKey) || window.mlNotificationChecked;
         
-        // Show ML banner first and wait for user choice before populating table
-        try {
-            await window.mlFeedbackInterface.checkForMLNotification();
-            // Only populate table after ML banner has been handled
-            populateResultsTable(results.individual_results);
-        } catch (error) {
-            console.log('ML notification check failed for multichannel:', error);
-            // Still populate table if ML check fails
-            populateResultsTable(results.individual_results);
+        if (!bannerAlreadyShown) {
+            window.mlNotificationChecked = true; // prevent duplicates
+            window._mlBannerShownFor.add(currentSessionKey);
+            try {
+                await window.mlFeedbackInterface.checkForMLNotification();
+            } catch (error) {
+                console.log('ML notification check failed for multichannel:', error);
+            }
         }
+        // Always populate the table regardless of banner outcome
+        populateResultsTable(results.individual_results);
     } else {
-        // No ML check needed, populate table immediately
         populateResultsTable(results.individual_results);
     }
     
@@ -5488,166 +5477,84 @@ function updateVisibleChannels(selectedFluorophore, datasets) {
 function populateFluorophoreSelector(individualResults) {
     const fluorophoreSelector = document.getElementById('fluorophoreSelect');
     if (!fluorophoreSelector) return;
-    
+
     // Store results globally for filtering
-    // 🛡️ PROTECTED: Use safe setting to prevent contamination
     if (!setAnalysisResults({ individual_results: individualResults }, 'fresh-analysis-individual')) {
-        // console.warn('🛡️ Individual results setting was blocked');
+        // Protected set may be blocked in some views; safe to ignore
     }
-    
-    // Clear existing options except "All Fluorophores"
+
+    // Reset options with the "All" default first
     fluorophoreSelector.innerHTML = '<option value="all">All Fluorophores</option>';
-    
-    // Get unique fluorophores
-    const fluorophores = [...new Set(Object.values(individualResults).map(result => result.fluorophore || 'Unknown'))];
+
+    // Unique fluorophores in preferred order
+    const fluorophores = [...new Set(Object.values(individualResults).map(r => r.fluorophore || 'Unknown'))];
     const fluorophoreOrder = ['FAM', 'HEX', 'Texas Red', 'Cy5'];
-    
-    // Sort fluorophores
     fluorophores.sort((a, b) => {
-        const aIndex = fluorophoreOrder.indexOf(a);
-        const bIndex = fluorophoreOrder.indexOf(b);
-        
-        if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
-        if (aIndex !== -1) return -1;
-        if (bIndex !== -1) return 1;
+        const ai = fluorophoreOrder.indexOf(a);
+        const bi = fluorophoreOrder.indexOf(b);
+        if (ai !== -1 && bi !== -1) return ai - bi;
+        if (ai !== -1) return -1;
+        if (bi !== -1) return 1;
         return a.localeCompare(b);
     });
-    
-    // Get current experiment pattern and extract test code for pathogen targets
+
+    // Determine test code for pathogen target hints
     const experimentPattern = getCurrentFullPattern();
     const testCode = extractTestCode(experimentPattern);
-    
-    // Add fluorophore options with well counts and pathogen targets
-    fluorophores.forEach(fluorophore => {
-        const count = Object.values(individualResults).filter(result => 
-            (result.fluorophore || 'Unknown') === fluorophore
-        ).length;
-        
-        // Get pathogen target for this fluorophore
-        const pathogenTarget = getPathogenTarget(testCode, fluorophore);
-        const displayTarget = pathogenTarget !== "Unknown" ? ` - ${pathogenTarget}` : "";
-        
-        const option = document.createElement('option');
-        option.value = fluorophore;
-        option.textContent = `${fluorophore}${displayTarget} (${count} wells)`;
-        fluorophoreSelector.appendChild(option);
-    });
-    
-    // Add event listener for fluorophore filtering - uses state management
-fluorophoreSelector.addEventListener('change', function() {
-    const selectedFluorophore = this.value;
-    // console.log('🔄 FLUOROPHORE - Selector changed to:', selectedFluorophore);
-    
-    // Update app state - this will coordinate all UI elements
-    updateAppState({
-        currentFluorophore: selectedFluorophore
-    });
-    
-    // Update threshold input for new fluorophore
-    setTimeout(() => {
-        updateThresholdInputFromState();
-    }, 50);
-    
-    // Reset chart mode to 'all' and update display
-    currentChartMode = 'all';
-    updateChartDisplayMode();
-    
-    // Update button states to reflect 'all' mode
-    const buttons = document.querySelectorAll('.view-controls .control-btn');
-    buttons.forEach(btn => btn.classList.remove('active'));
-    const showAllBtn = document.getElementById('showAllBtn');
-    if (showAllBtn) {
-        showAllBtn.classList.add('active');
-    }
-});
 
-    // Auto-select single channel if only one fluorophore is present
-    try {
-        const uniqueFluors = [...new Set(Object.values(individualResults).map(r => r.fluorophore).filter(Boolean))];
-        if (uniqueFluors.length === 1) {
-            const onlyFluor = uniqueFluors[0];
-            // Set selector value
-            fluorophoreSelector.value = onlyFluor;
-            // Update app state and dependent UI (threshold, chart mode)
-            updateAppState({ currentFluorophore: onlyFluor });
-            setTimeout(() => { try { updateThresholdInputFromState(); } catch (e) {} }, 50);
-            // Default to show all curves for that fluorophore
-            if (typeof window !== 'undefined') window.currentChartMode = 'all';
-            try { updateChartDisplayMode(); } catch (e) {}
-            // Reflect button active state
-            const showAllBtn = document.getElementById('showAllBtn');
-            if (showAllBtn) updateActiveButton(showAllBtn);
-        }
-    } catch (e) {
-        // no-op
-    }
-}
+    // Populate options with counts and targets
+    fluorophores.forEach(fluor => {
+        const count = Object.values(individualResults).filter(r => (r.fluorophore || 'Unknown') === fluor).length;
+        const pathogenTarget = getPathogenTarget(testCode, fluor);
+        const displayTarget = pathogenTarget !== 'Unknown' ? ` - ${pathogenTarget}` : '';
+        const opt = document.createElement('option');
+        opt.value = fluor;
+        opt.textContent = `${fluor}${displayTarget} (${count} wells)`;
+        fluorophoreSelector.appendChild(opt);
+    });
 
-/**
- * Universal filter synchronization function to ensure all filter dropdowns match table state
- */
-function synchronizeAllFilterStates() {
-    // console.log('🔄 SYNC - Starting universal filter state synchronization');
-    
-    try {
-        // Get current visible wells in table
-        const visibleWells = [];
-        const tableRows = document.querySelectorAll('#resultsTable tbody tr:not([style*="display: none"])');
-        
-        tableRows.forEach(row => {
-            const wellId = row.querySelector('td:first-child')?.textContent?.trim();
-            if (wellId) {
-                visibleWells.push(wellId);
-            }
-        });
-        
-        // console.log(`🔄 SYNC - Found ${visibleWells.length} visible wells in table`);
-        
-        // Synchronize well selector dropdown
-        const wellSelector = document.getElementById('wellSelector');
-        if (wellSelector && visibleWells.length > 0) {
-            // Check if current selection is valid
-            const currentValue = wellSelector.value;
-            const isCurrentVisible = visibleWells.includes(currentValue);
-            
-            if (!isCurrentVisible && currentValue !== 'all') {
-                // Reset to first visible well or 'all'
-                if (visibleWells.length === 1) {
-                    wellSelector.value = visibleWells[0];
-                } else {
-                    wellSelector.value = 'all';
-                }
-                // console.log(`🔄 SYNC - Updated well selector from '${currentValue}' to '${wellSelector.value}'`);
-            }
-        }
-        
-        // Synchronize fluorophore selector
-        const fluorophoreSelector = document.getElementById('fluorophoreSelect');
-        if (fluorophoreSelector && currentAnalysisResults?.individual_results) {
-            const visibleFluorophores = new Set();
-            
-            visibleWells.forEach(wellId => {
-                const wellData = currentAnalysisResults.individual_results[wellId];
-                if (wellData?.fluorophore) {
-                    visibleFluorophores.add(wellData.fluorophore);
-                }
-            });
-            
-            const currentFluor = fluorophoreSelector.value;
-            if (currentFluor !== 'all' && !visibleFluorophores.has(currentFluor)) {
-                if (visibleFluorophores.size === 1) {
-                    fluorophoreSelector.value = Array.from(visibleFluorophores)[0];
-                } else {
-                    fluorophoreSelector.value = 'all';
-                }
-                // console.log(`🔄 SYNC - Updated fluorophore selector from '${currentFluor}' to '${fluorophoreSelector.value}'`);
-            }
-        }
-        
-        // console.log('🔄 SYNC - Filter synchronization completed successfully');
-        
-    } catch (error) {
-        // console.error('🔄 SYNC - Error during filter synchronization:', error);
+    // Change handler keeps state and UI in sync
+    fluorophoreSelector.addEventListener('change', function () {
+        const selectedFluorophore = this.value;
+        updateAppState({ currentFluorophore: selectedFluorophore });
+        setTimeout(() => { try { updateThresholdInputFromState(); } catch (e) {} }, 50);
+        currentChartMode = 'all';
+        try { updateChartDisplayMode(); } catch (e) {}
+        const buttons = document.querySelectorAll('.view-controls .control-btn');
+        buttons.forEach(btn => btn.classList.remove('active'));
+        const showAllBtn = document.getElementById('showAllBtn');
+        if (showAllBtn) showAllBtn.classList.add('active');
+    });
+
+    // Auto-default selection
+    let requiredChannels = [];
+    if (typeof getRequiredChannels === 'function' && testCode) {
+        try { requiredChannels = getRequiredChannels(testCode) || []; } catch (e) { requiredChannels = []; }
+    }
+    const uniqueFluors = [...new Set(Object.values(individualResults)
+        .map(r => r.fluorophore)
+        .filter(f => f && f !== 'Unknown'))];
+
+    let targetDefault = null;
+    if (requiredChannels.length === 1) {
+        const onlyReq = requiredChannels[0];
+        const hasOption = Array.from(fluorophoreSelector.options).some(opt => opt.value === onlyReq);
+        if (hasOption) targetDefault = onlyReq;
+    }
+    if (!targetDefault && uniqueFluors.length === 1) {
+        targetDefault = uniqueFluors[0];
+    }
+
+    if (targetDefault) {
+        fluorophoreSelector.value = targetDefault;
+        updateAppState({ currentFluorophore: targetDefault });
+        setTimeout(() => { try { updateThresholdInputFromState(); } catch (e) {} }, 50);
+        if (typeof window !== 'undefined') window.currentChartMode = 'all';
+        try { updateChartDisplayMode(); } catch (e) {}
+    } else {
+        // Multiple channels: keep "All Fluorophores"
+        fluorophoreSelector.value = 'all';
+        updateAppState({ currentFluorophore: 'all' });
     }
 }
 
@@ -5775,9 +5682,9 @@ function populateWellSelector(individualResults) {
     // First populate the fluorophore selector
     populateFluorophoreSelector(individualResults);
 
-    // Always default to 'all' fluorophores ("All Wells Overlay") on load, even for single-channel runs
-    // This ensures the user always sees the overlay option by default
-    filterWellsByFluorophore('all');
+    // Respect the selector's default: if a single required/unique channel was chosen, use it; else 'all'
+    const currentFluor = (window.appState && window.appState.currentFluorophore) ? window.appState.currentFluorophore : 'all';
+    filterWellsByFluorophore(currentFluor);
 
     // Optionally, set the well selector to 'ALL_WELLS' if present
     const wellSelector = document.getElementById('wellSelect');
@@ -5787,8 +5694,8 @@ function populateWellSelector(individualResults) {
             wellSelector.value = 'ALL_WELLS';
         }
     }
-    // Always force "Show All Curves" view and activate button after analysis loads
-    if (typeof showAllCurves === 'function') showAllCurves('all');
+    // Default view respects current fluor; keep multi-curve overlay by default
+    if (typeof showAllCurves === 'function') showAllCurves(currentFluor);
     const showAllBtn = document.getElementById('showAllBtn');
     if (showAllBtn) showAllBtn.classList.add('active');
 }
@@ -6818,35 +6725,36 @@ function updateSelectedCurveDetails() {
 }
 
 function showFilteredCurveDetails(fluorophore, filterMode) {
-    if (!fluorophore || fluorophore === 'all' || !filterMode || filterMode === 'all') {
+    if (!fluorophore || !filterMode || filterMode === 'all') {
         return;
     }
     
     // Set the current fluorophore for filtering via state management
-    updateAppState({
-        currentFluorophore: fluorophore
-    });
+    // If user chose a specific fluorophore, lock state; if 'all', keep current state
+    if (fluorophore !== 'all') {
+        updateAppState({ currentFluorophore: fluorophore });
+    }
     
     // Generate filtered samples HTML
     const filteredSamplesHtml = generateFilteredSamplesHtml(filterMode);
     
     const filterTypeLabel = filterMode.toUpperCase();
     const detailsHtml = `
-        <h3>${filterTypeLabel} Results for ${fluorophore}</h3>
+        <h3>${filterTypeLabel} Results for ${fluorophore === 'all' ? 'All' : fluorophore}</h3>
         <div class="quality-status good">
             <strong>Filter Mode:</strong> ${filterTypeLabel} Results Only
         </div>
         <div class="metrics-grid">
             <div class="metric">
                 <span class="metric-label">Fluorophore:</span>
-                <span class="metric-value">${fluorophore}</span>
+                <span class="metric-value">${fluorophore === 'all' ? 'All' : fluorophore}</span>
             </div>
             <div class="metric">
                 <span class="metric-label">Filter:</span>
                 <span class="metric-value">${filterTypeLabel}</span>
             </div>
         </div>
-        ${filteredSamplesHtml}
+        ${generateFilteredSamplesHtml(filterMode)}
     `;
     
     document.getElementById('curveDetails').innerHTML = detailsHtml;
@@ -6861,7 +6769,7 @@ function generateFilteredSamplesHtml(effectiveFilterMode = null) {
     const filterMode = effectiveFilterMode || currentFilterMode;
     
     // Ensure filter variables are defined (defensive programming for historical sessions)
-    if (!filterMode || !currentFluorophore || filterMode === 'all' || currentFluorophore === 'all') {
+    if (!filterMode || filterMode === 'all') {
         return '';
     }
     
@@ -6871,7 +6779,7 @@ function generateFilteredSamplesHtml(effectiveFilterMode = null) {
     
     Object.entries(currentAnalysisResults.individual_results).forEach(([wellKey, result]) => {
         const resultFluorophore = result.fluorophore || 'Unknown';
-        if (resultFluorophore !== currentFluorophore) return;
+        if (currentFluorophore && currentFluorophore !== 'all' && resultFluorophore !== currentFluorophore) return;
 
         const amplitude = result.amplitude || 0;
 
@@ -6937,7 +6845,7 @@ function generateFilteredSamplesHtml(effectiveFilterMode = null) {
     
     return `
         <div class="filtered-samples-section">
-            <h4>${filterType} Samples (${currentFluorophore})</h4>
+            <h4>${filterType} Samples (${currentFluorophore && currentFluorophore !== 'all' ? currentFluorophore : 'All'})</h4>
             <div class="filtered-samples-list">
                 ${sampleListHtml}
             </div>
@@ -9653,26 +9561,10 @@ function displayLocalAnalysisHistory(history) {
 async function loadSessionDetails(sessionId) {
     try {
         console.log(`🔄 Loading session ${sessionId} from database...`);
-        
-        // Check if this is a fresh load after refresh
-        const pendingSessionLoad = localStorage.getItem('pendingSessionLoad');
-        if (!pendingSessionLoad) {
-            // First time - store session ID and refresh
-            console.log('Storing session ID and refreshing browser');
-            safeSetItem(localStorage, 'pendingSessionLoad', sessionId);
-            window.location.reload();
-            return;
-        } else if (pendingSessionLoad !== sessionId) {
-            // Different session ID - store new one and refresh
-            console.log('Different session - storing new ID and refreshing');
-            safeSetItem(localStorage, 'pendingSessionLoad', sessionId);
-            window.location.reload();
-            return;
-        }
-        
-        // This is after refresh - clear the flag and proceed with loading
-        localStorage.removeItem('pendingSessionLoad');
-        console.log(`🔄 Loading session after refresh: ${sessionId}`);
+    // Clear any legacy pendingSessionLoad flag to prevent redundant loads
+    try { localStorage.removeItem('pendingSessionLoad'); } catch (e) {}
+    // In-place session loading (no full page reload to preserve UI state)
+    // Any necessary cleanup is handled by downstream display functions
         
         // Handle combined sessions
         if (typeof sessionId === 'string' && sessionId.startsWith('combined_')) {
@@ -9874,8 +9766,18 @@ transformedResults.individual_results[wellKey] = {
     threshold_value: well.threshold_value ? parseFloat(well.threshold_value) : null,
     
     // 🔍 Add CQJ and CalcJ fields from database for ML classification
-    cqj: well.cqj || {},
-    calcj: well.calcj || {},
+    cqj: (() => {
+        try {
+            if (!well.cqj) return {};
+            return typeof well.cqj === 'string' ? JSON.parse(well.cqj) : well.cqj;
+        } catch (e) { return {}; }
+    })(),
+    calcj: (() => {
+        try {
+            if (!well.calcj) return {};
+            return typeof well.calcj === 'string' ? JSON.parse(well.calcj) : well.calcj;
+        } catch (e) { return {}; }
+    })(),
     
     // 🔍 CRITICAL FIX: Calculate SNR from raw data for individual session loading
     snr: (() => {
@@ -13712,6 +13614,28 @@ function buildModalNavigationList() {
         console.log('🔄 Building modal navigation list from complete analysis results');
         const allResults = window.currentAnalysisResults.individual_results;
         const allWellKeys = Object.keys(allResults);
+
+        // Helper: natural plate order comparator (A1..A12, B1..)
+        const fluorOrder = ['FAM', 'HEX', 'Texas Red', 'Cy5'];
+        const wellKeyToParts = (key) => {
+            // key may be like "A1_Cy5" or just "A1"
+            const [wellId, maybeFluor] = key.split('_');
+            const row = wellId ? wellId.match(/^[A-P]/i)?.[0]?.toUpperCase() || 'Z' : 'Z';
+            const col = wellId ? parseInt(wellId.replace(/^[A-P]/i, ''), 10) || 0 : 0;
+            const fluor = maybeFluor || (allResults[key]?.fluorophore || '');
+            const fluorIdx = fluorOrder.indexOf(fluor);
+            return { row, col, fluorIdx: fluorIdx === -1 ? Number.MAX_SAFE_INTEGER : fluorIdx };
+        };
+        const plateOrderCompare = (a, b) => {
+            const A = wellKeyToParts(a);
+            const B = wellKeyToParts(b);
+            if (A.row !== B.row) return A.row.localeCompare(B.row);
+            if (A.col !== B.col) return A.col - B.col;
+            return A.fluorIdx - B.fluorIdx;
+        };
+
+        // Sort keys into plate order
+        allWellKeys.sort(plateOrderCompare);
         
         console.log('� Total wells in analysis results:', allWellKeys.length);
         
@@ -14209,13 +14133,20 @@ function createModalChart(wellKey, wellData) {
     let cycles, rfu;
     try {
         cycles = typeof wellData.raw_cycles === 'string' ? 
-            JSON.parse(wellData.raw_cycles) : wellData.raw_cycles;
+            JSON.parse(wellData.raw_cycles) : (Array.isArray(wellData.raw_cycles) ? wellData.raw_cycles : []);
         rfu = typeof wellData.raw_rfu === 'string' ? 
-            JSON.parse(wellData.raw_rfu) : wellData.raw_rfu;
+            JSON.parse(wellData.raw_rfu) : (Array.isArray(wellData.raw_rfu) ? wellData.raw_rfu : []);
+        // Fallback to cycles/rfu fields if raw_* are empty
+        if ((!cycles || cycles.length === 0) && Array.isArray(wellData.cycles)) cycles = wellData.cycles;
+        if ((!rfu || rfu.length === 0) && Array.isArray(wellData.rfu)) rfu = wellData.rfu;
     } catch (e) {
         // console.error('Error parsing well data for modal:', e);
-        return;
+        cycles = [];
+        rfu = [];
     }
+
+    // If still no data, render an empty chart with a friendly message area
+    const hasData = Array.isArray(cycles) && Array.isArray(rfu) && cycles.length > 0 && rfu.length > 0;
     
     // Parse fitted curve data if available
     let fitData = [];
@@ -14238,7 +14169,7 @@ function createModalChart(wellKey, wellData) {
     const wellId = wellData.well_id || wellKey.split('_')[0];
     const fluorophore = wellData.fluorophore || 'Unknown';
     
-    const datasets = [
+    const datasets = hasData ? [
         {
             label: `${wellId} (${fluorophore}) - Raw Data`,
             data: cycles.map((cycle, index) => ({
@@ -14253,9 +14184,9 @@ function createModalChart(wellKey, wellData) {
             showLine: false,
             pointStyle: 'circle'
         }
-    ];
+    ] : [];
     
-    if (fitData.length > 0) {
+    if (fitData.length > 0 && hasData) {
         datasets.push({
             label: `${wellId} (${fluorophore}) - Fitted Curve`,
             data: fitData,
@@ -14308,7 +14239,7 @@ function createModalChart(wellKey, wellData) {
                 //     font: { size: 16, weight: 'bold' }
                 // },
                 legend: {
-                    display: true,
+                    display: hasData,
                     position: 'top'
                 },
                 ...(annotation ? { annotation } : {})
@@ -14333,6 +14264,21 @@ function createModalChart(wellKey, wellData) {
             }
         }
     });
+
+    // Optional: When no data, overlay a simple message using Canvas API
+    if (!hasData) {
+        const chartArea = modalChart.chartArea;
+        const c = modalChart.ctx;
+        c.save();
+        c.fillStyle = '#7f8c8d';
+        c.font = '14px sans-serif';
+        const msg = 'No curve data available for this well';
+        const textWidth = c.measureText(msg).width;
+        const x = (chartArea.left + chartArea.right - textWidth) / 2;
+        const y = (chartArea.top + chartArea.bottom) / 2;
+        c.fillText(msg, x, y);
+        c.restore();
+    }
 }
 
 function populateModalDetails(wellKey, wellData) {
@@ -15635,8 +15581,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
             
-            // Reload the current session
-            window.location.reload();
+            // Reload the current session in-place (preserves fluorophore selection logic)
+            try {
+                await loadSessionDetails(window.currentSessionId);
+            } catch (e) {
+                console.error('Failed to reload session in-place:', e);
+                // Fallback to hard reload only if necessary
+                // window.location.reload();
+            }
         });
     }
 });

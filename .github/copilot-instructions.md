@@ -62,6 +62,24 @@ Why:
 Notes:
 - Restart Flask after changing viewer routes/templates to pick up inline template updates and env flags.
 
+## 🚀 Quick Git: add/commit/push (for AI agent and humans)
+
+Use this minimal, safe workflow to commit changes:
+
+- Stage changes: git add -A
+- Create a clear commit: git commit -m "<scope>: <concise change> [ticket|date]"
+- Push current branch: git push
+
+Guidelines
+- Small, atomic commits; group related file edits together.
+- Include what and why in the message; avoid noisy diffs.
+- If pushing a new branch: git push -u origin <branch>
+- If main has moved: git pull --rebase origin main, resolve, then git push.
+
+Examples
+- git commit -m "frontend: fix fluorophore defaulting; preserve overlay when multi-channel"
+- git commit -m "docs: add quick git add/commit/push guide"
+
 ## � How to flip “Compliance Status: PENDING” → PASS (Encryption evidence)
 
 The dashboard’s “Compliance Status” and “Tests Passed” come from the system validator (`GET /api/unified-compliance/validate-system`). For the encryption portion, it does NOT read an `encryption_controls` table; it counts rows in `compliance_evidence` where `evidence_type` matches encryption/security/crypto.

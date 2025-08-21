@@ -87,9 +87,10 @@ class MLFeedbackInterface {
             });
         }
 
-        // If results already exist (e.g., loaded fast), surface the ML banner once
+        // Banner is managed centrally in main script (script.js) to avoid duplicates.
+        // If you need the ML interface to self-trigger banners, set window.enableMLBannerAutostart = true before init.
         try {
-            if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results && !window.mlNotificationChecked) {
+            if (window.enableMLBannerAutostart && window.currentAnalysisResults && window.currentAnalysisResults.individual_results && !window.mlNotificationChecked) {
                 setTimeout(() => {
                     if (this.isInitialized && window.currentAnalysisResults && window.currentAnalysisResults.individual_results && !window.mlNotificationChecked) {
                         window.mlNotificationChecked = true;
