@@ -5276,16 +5276,64 @@ function createUnifiedChart(chartType, selectedFluorophore = 'all', filterType =
         }
         
         try {
-            const cycles = typeof wellData.raw_cycles === 'string' ? 
-                JSON.parse(wellData.raw_cycles) : wellData.raw_cycles;
-            const rfu = typeof wellData.raw_rfu === 'string' ? 
-                JSON.parse(wellData.raw_rfu) : wellData.raw_rfu;
-            
-            if (cycles && rfu && cycles.length === rfu.length) {
+            // Robust parsing matching modal logic
+            const toArray = (val) => {
+                if (Array.isArray(val)) return val;
+                if (typeof val === 'string') {
+                    try {
+                        const parsed = JSON.parse(val);
+                        if (Array.isArray(parsed)) return parsed;
+                    } catch {}
+                    const parts = val.split(/[;,\s]+/).map(x => x.trim()).filter(Boolean);
+                    const nums = parts.map(Number).filter(n => Number.isFinite(n));
+                    if (nums.length > 0) return nums;
+                }
+                return [];
+            };
+
+            let cycles = toArray(wellData.raw_cycles);
+            let rfu = toArray(wellData.raw_rfu);
+            // Fallback to alternate fields
+            if ((!cycles || cycles.length === 0) && Array.isArray(wellData.cycles)) cycles = [...wellData.cycles];
+            if ((!rfu || rfu.length === 0) && Array.isArray(wellData.rfu)) rfu = [...wellData.rfu];
+            // Fallback to raw_data points
+            if ((cycles.length === 0 || rfu.length === 0) && wellData.raw_data) {
+                try {
+                    const rawData = typeof wellData.raw_data === 'string' ? JSON.parse(wellData.raw_data) : wellData.raw_data;
+                    if (Array.isArray(rawData) && rawData.length > 0) {
+                        const xs = [];
+                        const ys = [];
+                        rawData.forEach(p => {
+                            if (p && typeof p === 'object') {
+                                const x = (p.x ?? p.cycle ?? p.Cycle ?? p[0]);
+                                const y = (p.y ?? p.rfu ?? p.RFU ?? p[1]);
+                                if (Number.isFinite(Number(x)) && Number.isFinite(Number(y))) {
+                                    xs.push(Number(x));
+                                    ys.push(Number(y));
+                                }
+                            }
+                        });
+                        if (xs.length > 0 && ys.length > 0) {
+                            cycles = xs;
+                            rfu = ys;
+                        }
+                    }
+                } catch {}
+            }
+            // Synthesize cycles if missing but RFU exists
+            if ((cycles.length === 0 || cycles.length !== rfu.length) && rfu.length > 0) {
+                cycles = Array.from({ length: rfu.length }, (_, i) => i + 1);
+            }
+            // Trim to min length
+            if (cycles.length !== rfu.length) {
+                const m = Math.min(cycles.length, rfu.length);
+                cycles = cycles.slice(0, m);
+                rfu = rfu.slice(0, m);
+            }
+
+            if (cycles && rfu && cycles.length > 0 && cycles.length === rfu.length) {
                 const wellId = wellData.well_id || wellKey.split('_')[0];
                 const fluorophore = wellData.fluorophore || 'Unknown';
-                
-                // Create dataset with appropriate styling
                 const dataset = createDatasetForWell(wellId, fluorophore, cycles, rfu, index, chartType);
                 datasets.push(dataset);
             }
