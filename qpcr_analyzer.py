@@ -697,6 +697,31 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
             }
         else:
             # TRY ML CLASSIFICATION WITH CONFIDENCE SAFEGUARDS FIRST
+            # --- Early REDO pre-check using vendor Cq (before ML) ---
+            already_classified = False
+            try:
+                vendor_cq = data.get('cq_value') or analysis.get('cq_value')
+                r2_score_val = analysis.get('r2_score', 1.0)
+                if vendor_cq is not None and r2_score_val < 0.75:
+                    redo_probe = classify_curve(
+                        r2_score_val,
+                        analysis.get('steepness', 0),
+                        analysis.get('quality_filters', {}).get('snr_check', {}).get('snr', 0),
+                        analysis.get('midpoint', 50),
+                        analysis.get('baseline', 100),
+                        amplitude=analysis.get('amplitude', 0),
+                        cq_value=analysis.get('cqj') if analysis.get('cqj') else None,
+                        vendor_cq_value=vendor_cq
+                    )
+                    if redo_probe and redo_probe.get('classification') == 'REDO':
+                        analysis['curve_classification'] = redo_probe
+                        analysis['curve_classification']['method'] = 'Rule-based (REDO pre-check)'
+                        already_classified = True
+                        print(f"🟡 REDO pre-check applied for {well_id}: {redo_probe.get('reason')}")
+            except Exception as _e:
+                # Non-fatal; continue to ML
+                pass
+
             try:
                 from ml_curve_classifier import ml_classifier
                 
@@ -720,12 +745,13 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                     cqj_val = py_cqj(well_for_cqj, threshold)
                     ml_metrics['cqj'] = cqj_val
                 
-                print(f"🤖 ML Analysis: Attempting ML classification for {well_id} with {len(ml_metrics)} metrics")
-                ml_result = ml_classifier.predict_classification(
-                    rfu, cycles, ml_metrics, pathogen, well_id
-                )
-                analysis['curve_classification'] = ml_result
-                print(f"🤖 ML Result: {ml_result.get('classification')} via {ml_result.get('method')} (confidence: {ml_result.get('confidence', 'N/A')})")
+                if not already_classified:
+                    print(f"🤖 ML Analysis: Attempting ML classification for {well_id} with {len(ml_metrics)} metrics")
+                    ml_result = ml_classifier.predict_classification(
+                        rfu, cycles, ml_metrics, pathogen, well_id
+                    )
+                    analysis['curve_classification'] = ml_result
+                    print(f"🤖 ML Result: {ml_result.get('classification')} via {ml_result.get('method')} (confidence: {ml_result.get('confidence', 'N/A')})")
                 
             except Exception as e:
                 print(f"⚠️ ML Failed for {well_id}: {e}")
