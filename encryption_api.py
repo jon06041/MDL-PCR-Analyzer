@@ -5,7 +5,14 @@ Provides REST endpoints for encryption compliance and data protection
 """
 
 from flask import Blueprint, jsonify, request, current_app
-from data_encryption import DataEncryption, FieldEncryption
+# Attempt to import encryption module; gracefully degrade if missing deps (e.g., cryptography)
+ENCRYPTION_IMPORT_ERROR = None
+try:
+    from data_encryption import DataEncryption, FieldEncryption
+except Exception as _enc_err:
+    DataEncryption = None  # type: ignore
+    FieldEncryption = None  # type: ignore
+    ENCRYPTION_IMPORT_ERROR = _enc_err
 import mysql.connector
 import os
 import json
@@ -22,6 +29,10 @@ encryption_handler = None
 def get_encryption_handler():
     """Get or create encryption handler"""
     global encryption_handler
+    if ENCRYPTION_IMPORT_ERROR is not None or DataEncryption is None:
+        raise RuntimeError(
+            f"Encryption unavailable: {ENCRYPTION_IMPORT_ERROR!s}" if ENCRYPTION_IMPORT_ERROR else "Encryption module not loaded"
+        )
     if encryption_handler is None:
         encryption_handler = DataEncryption()
     return encryption_handler
@@ -45,13 +56,17 @@ def get_mysql_connection():
 def encryption_status():
     """Get encryption system status"""
     try:
-        enc = get_encryption_handler()
-        
-        # Test encryption capability
-        test_data = "test_encryption_status"
-        encrypted = enc.encrypt_field(test_data)
-        decrypted = enc.decrypt_field(encrypted)
-        encryption_working = (test_data == decrypted)
+        encryption_working = False
+        error = None
+        if ENCRYPTION_IMPORT_ERROR is None and DataEncryption is not None:
+            enc = get_encryption_handler()
+            # Test encryption capability
+            test_data = "test_encryption_status"
+            encrypted = enc.encrypt_field(test_data)
+            decrypted = enc.decrypt_field(encrypted)
+            encryption_working = (test_data == decrypted)
+        else:
+            error = str(ENCRYPTION_IMPORT_ERROR)
         
         # Check database connection
         conn = get_mysql_connection()
@@ -64,7 +79,8 @@ def encryption_status():
             'database_connected': db_connected,
             'encryption_algorithm': 'AES-128 Fernet',
             'key_derivation': 'PBKDF2-HMAC-SHA256',
-            'status': 'operational' if (encryption_working and db_connected) else 'partial',
+            'status': 'operational' if (encryption_working and db_connected) else ('partial' if db_connected else 'error'),
+            'error': error,
             'timestamp': datetime.now().isoformat()
         }
         
@@ -84,6 +100,9 @@ def encryption_status():
 def encrypt_field():
     """Encrypt a single field value"""
     try:
+        if ENCRYPTION_IMPORT_ERROR is not None or DataEncryption is None:
+            return jsonify({'error': 'Encryption not available on this deployment', 'detail': str(ENCRYPTION_IMPORT_ERROR)}), 503
+
         data = request.get_json()
         if not data or 'value' not in data:
             return jsonify({'error': 'Missing value field'}), 400
@@ -105,6 +124,9 @@ def encrypt_field():
 def decrypt_field():
     """Decrypt a single field value"""
     try:
+        if ENCRYPTION_IMPORT_ERROR is not None or DataEncryption is None:
+            return jsonify({'error': 'Encryption not available on this deployment', 'detail': str(ENCRYPTION_IMPORT_ERROR)}), 503
+
         data = request.get_json()
         if not data or 'encrypted_value' not in data:
             return jsonify({'error': 'Missing encrypted_value field'}), 400
