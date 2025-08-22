@@ -510,7 +510,8 @@ class MLCurveClassifier:
                 existing_metrics.get('midpoint', 0),
                 existing_metrics.get('baseline', 0),
                 existing_metrics.get('amplitude', 0),
-                cq_value=existing_metrics.get('cqj') or existing_metrics.get('cq_value')  # CRITICAL FIX: Pass CQJ value to classification
+                cq_value=existing_metrics.get('cqj') or existing_metrics.get('cq_value'),  # Prefer CQJ for rule-based
+                vendor_cq_value=existing_metrics.get('cq_value')  # Pass vendor Cq separately for REDO rule
             )
             
             print(f"🔍 ML Debug: Rule-based classification result: {result}")

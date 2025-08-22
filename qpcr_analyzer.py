@@ -738,7 +738,8 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                     analysis.get('midpoint', 50),
                     analysis.get('baseline', 100),
                     amplitude=analysis.get('amplitude', 0),
-                    cq_value=analysis.get('cq_value')
+                    cq_value=analysis.get('cq_value'),
+                    vendor_cq_value=analysis.get('cq_value')
                 )
                 # Mark as rule-based method
                 analysis['curve_classification']['method'] = 'Rule-based (ML failed)'
