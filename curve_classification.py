@@ -23,6 +23,11 @@ SNR_CUTOFFS = {
     'Negative': 1.0            # Below detection (reduced from 2.0)
 }
 
+from log_utils import get_logger
+
+logger = get_logger("curve_classification")
+
+
 def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, cq_value=None, **kwargs):
     """
     STRICT qPCR curve classification with clear positive/negative criteria.
@@ -148,6 +153,9 @@ def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, c
     # If curve fit is low but a vendor CQ is present, recommend REDO instead of NEGATIVE.
     # Place before confident_negative so it takes precedence when applicable.
     if r2 < 0.75 and has_valid_vendor_cq:
+        logger.info(
+            f"Rule REDO satisfied | r2={r2:.4f} | vendor_cq={vendor_cq_float:.2f} | snr={snr} | amp={amplitude}"
+        )
         return {
             'classification': 'REDO',
             'confidence': 0.80,

@@ -1,6 +1,11 @@
 from flask import Flask, request, jsonify, send_from_directory, Response, render_template_string
 import json
 import os
+from log_utils import configure_root_logger, get_logger
+
+# Configure logging as early as possible
+configure_root_logger()
+app_logger = get_logger("app")
 import re
 import traceback
 import logging

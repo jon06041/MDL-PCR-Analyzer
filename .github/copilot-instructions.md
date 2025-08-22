@@ -1,3 +1,29 @@
+## Analyzer logging and indentation fixes (2025-08-22) ✅ IMPLEMENTED
+
+Status: Stabilized analyzer runtime logging and fixed indentation errors that blocked server start. Added targeted observability around the REDO pre-check path.
+
+Changes:
+- Logging switch and probes
+    - qpcr_analyzer.py: use structured logger (log_utils.get_logger) for key events instead of transient prints.
+    - Added a targeted probe before the REDO rule: `logger.info("REDO pre-check probe | well=... | R2=... | vendor_cq=...")` to make it obvious why a well does or doesn’t flip to REDO.
+    - When REDO is applied: `logger.warning("REDO pre-check applied | well=... | reason=...")`.
+    - Replaced noisy print lines in the ML and fallback blocks with logger.info/debug where appropriate.
+- Indentation corrections
+    - Fixed an unexpected indent near channel detection (around line ~648). The channel/fluorophore detection block was misaligned outside the for-loop; now correctly nested.
+    - Normalized the CQJ/CalcJ integration block indentation (around line ~794) so CQJ assignment, logging, and subsequent CalcJ prep are inside the per-well loop.
+    - Verified with `python3 -m py_compile qpcr_analyzer.py` during development; ensure to re-run after edits to catch whitespace regressions.
+
+Why:
+- Console output scrolls fast; structured logs via logger allow tailing and filtering without losing messages.
+- The indentation issues caused startup failures; correcting them restores analyzer execution and ensures downstream CalcJ logic runs per well.
+
+Dev tips:
+- Log tail (example)
+    - Use a terminal to tail the dev logs or container logs as needed; prefer INFO for probes, DEBUG for verbose.
+- If logs are still easy to miss in stdout, consider wiring `log_utils.configure_root_logger()` to a rotating file handler (path-controlled via env) and tail it.
+
+Next:
+- With the pre-check probe in place, re-run datasets to confirm cases with `r2 < 0.75` and valid vendor Cq flip to REDO prior to ML. Investigate wells that log probes but do not flip (likely missing vendor Cq or R² ≥ threshold at evaluation time).
 # MDL PCR Analyzer - AI Coding Agent Instructions
 
 ## 🚨 CRITICAL ALERT: NO SQLITE ALLOWED 🚨

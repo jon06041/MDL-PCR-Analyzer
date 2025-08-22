@@ -4,6 +4,9 @@ import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend for Railway deployment
 import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score
+from log_utils import get_logger
+
+logger = get_logger("qpcr_analyzer")
 import pandas as pd
 import warnings
 from curve_classification import classify_curve
@@ -640,7 +643,7 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
 
         # Ensure fluorophore/channel is present for each well
         channel_name = data.get('fluorophore')
-        print(f"🔍 DEBUG Channel Detection - Well: {well_id}, Original fluorophore: {channel_name}, Data keys: {list(data.keys())}")
+        logger.debug(f"Channel Detection - Well: {well_id}, Original fluorophore: {channel_name}, Keys: {list(data.keys())}")
         
         if not channel_name:
             # Extract fluorophore from well_id if available (e.g., "A1_HEX" -> "HEX")
@@ -649,16 +652,16 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                 # Validate it's a known fluorophore
                 if potential_fluorophore in ['FAM', 'HEX', 'Texas Red', 'Cy5', 'TexasRed']:
                     channel_name = potential_fluorophore
-                    print(f"🔍 DEBUG: Extracted channel from well_id: {channel_name}")
+                    logger.debug(f"Extracted channel from well_id: {channel_name}")
                 else:
                     channel_name = 'FAM'  # Default to FAM instead of Unknown
-                    print(f"🔍 DEBUG: Invalid potential fluorophore from well_id: {potential_fluorophore}, defaulting to FAM")
+                    logger.debug(f"Invalid potential fluorophore from well_id: {potential_fluorophore}, defaulting to FAM")
             else:
                 channel_name = 'FAM'  # Default to FAM for single-channel analysis
-                print(f"🔍 DEBUG: No valid fluorophore pattern in well_id: {well_id}, defaulting to FAM")
+                logger.debug(f"No valid fluorophore pattern in well_id: {well_id}, defaulting to FAM")
             data['fluorophore'] = channel_name
         
-        print(f"🔍 DEBUG: Final channel_name for {well_id}: {channel_name}")
+        logger.debug(f"Final channel_name for {well_id}: {channel_name}")
 
         # Store cycle info from first well - convert to Python types
         if cycle_info is None and len(cycles) > 0:
@@ -702,6 +705,8 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
             try:
                 vendor_cq = data.get('cq_value') or analysis.get('cq_value')
                 r2_score_val = analysis.get('r2_score', 1.0)
+                # Persist a targeted debug entry for observability
+                logger.info(f"REDO pre-check probe | well={well_id} | R2={r2_score_val} | vendor_cq={vendor_cq}")
                 if vendor_cq is not None and r2_score_val < 0.75:
                     redo_probe = classify_curve(
                         r2_score_val,
@@ -717,10 +722,10 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                         analysis['curve_classification'] = redo_probe
                         analysis['curve_classification']['method'] = 'Rule-based (REDO pre-check)'
                         already_classified = True
-                        print(f"🟡 REDO pre-check applied for {well_id}: {redo_probe.get('reason')}")
+                        logger.warning(f"REDO pre-check applied | well={well_id} | reason={redo_probe.get('reason')}")
             except Exception as _e:
                 # Non-fatal; continue to ML
-                pass
+                logger.exception(f"REDO pre-check exception | well={well_id}")
 
             try:
                 from ml_curve_classifier import ml_classifier
@@ -746,16 +751,16 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                     ml_metrics['cqj'] = cqj_val
                 
                 if not already_classified:
-                    print(f"🤖 ML Analysis: Attempting ML classification for {well_id} with {len(ml_metrics)} metrics")
+                    logger.info(f"ML Analysis: Attempting ML classification | well={well_id} | metrics={len(ml_metrics)}")
                     ml_result = ml_classifier.predict_classification(
                         rfu, cycles, ml_metrics, pathogen, well_id
                     )
                     analysis['curve_classification'] = ml_result
-                    print(f"🤖 ML Result: {ml_result.get('classification')} via {ml_result.get('method')} (confidence: {ml_result.get('confidence', 'N/A')})")
+                    logger.info(f"ML Result | well={well_id} | class={ml_result.get('classification')} | method={ml_result.get('method')} | conf={ml_result.get('confidence', 'N/A')}")
                 
             except Exception as e:
-                print(f"⚠️ ML Failed for {well_id}: {e}")
-                print(f"🔄 Falling back to rule-based classification")
+                logger.exception(f"ML Failed | well={well_id}")
+                logger.info("Falling back to rule-based classification")
                 # FALLBACK TO RULE-BASED CLASSIFICATION
                 analysis['curve_classification'] = classify_curve(
                     analysis.get('r2_score', 0),
@@ -769,7 +774,7 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                 )
                 # Mark as rule-based method
                 analysis['curve_classification']['method'] = 'Rule-based (ML failed)'
-                print(f"� Fallback Result: {analysis['curve_classification'].get('classification')} via Rule-based")
+                logger.info(f"Rule-based Fallback Result | well={well_id} | class={analysis['curve_classification'].get('classification')}")
 
         # --- Per-channel CQJ/CalcJ integration (dict, robust) ---
         # Prepare well dict for CQJ/CalcJ utils
@@ -783,12 +788,12 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
 
         # Store CQJ first (needed for CalcJ calculation)
         analysis['cqj'] = {channel_name: cqj_val}
-        print(f"🔍 CQJ ASSIGNMENT: well={well_id}, channel_name='{channel_name}', cqj_val={cqj_val}")
+        logger.debug(f"CQJ assignment | well={well_id} | channel={channel_name} | cqj={cqj_val}")
 
         # Update the pre-populated well data with actual CQJ value
         if well_id in all_well_results_for_calcj:
             all_well_results_for_calcj[well_id]['cqj_value'] = cqj_val
-            print(f"🔍 CQJ UPDATE: Updated {well_id} with CQJ value {cqj_val}")
+            logger.debug(f"CQJ update | well={well_id} updated with CQJ={cqj_val}")
 
         # CalcJ calculation will be done after test_code extraction
         analysis['calcj'] = {channel_name: None}  # Placeholder
