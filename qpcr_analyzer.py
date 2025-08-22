@@ -4,11 +4,85 @@ import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend for Railway deployment
 import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score
+from log_utils import get_logger
+
+logger = get_logger("qpcr_analyzer")
 import pandas as pd
 import warnings
 from curve_classification import classify_curve
 
 warnings.filterwarnings('ignore')
+
+
+def get_pathogen_threshold(well_data, L=None, B=None):
+    """
+    Get pathogen-specific threshold value for a well based on test code and fluorophore.
+    Strictly returns pathogen-specific fixed threshold when defined; no fallbacks.
+    
+    Args:
+        well_data: Dict containing well information (test_code, fluorophore)
+        L: Sigmoid amplitude (for fallback calculation)
+        B: Sigmoid baseline (for fallback calculation)
+    
+    Returns:
+        float | None: Threshold value in RFU, or None if not defined for this test/channel
+    """
+    # Pathogen-specific fixed threshold values (matching threshold_strategies.js)
+    PATHOGEN_FIXED_THRESHOLDS = {
+        "BVAB": { 
+            "FAM": 250, "HEX": 250, "Cy5": 250 
+        },
+        "BVPanelPCR1": {
+            "FAM": 200, "HEX": 250, "Texas Red": 150, "Cy5": 200
+        },
+        "BVPanelPCR2": {
+            "FAM": 350, "HEX": 350, "Texas Red": 200, "Cy5": 350
+        },
+        "BVPanelPCR3": { 
+            "CY5": 100, "Cy5": 100, "FAM": 100, "HEX": 100, "Texas Red": 100
+        },
+        "Calb": { "HEX": 150 },
+        "Cglab": { "FAM": 150 },
+        "CHVIC": { "FAM": 250 },
+        "Ckru": { "FAM": 280 },
+        "Cpara": { "FAM": 200 },
+        "Ctrach": { "FAM": 150 },
+        "Ctrop": { "FAM": 200 },
+        "Efaecalis": { "FAM": 200 },
+        "FLUA": { "FAM": 265 },
+        "FLUB": { "Cy5": 225 },
+        "GBS": { "FAM": 300 },
+        "Lacto": { "FAM": 150 },
+        "Mgen": { "FAM": 500 },
+        "Ngon": { "HEX": 200 },
+        "NOV": { "FAM": 500 },
+        "Saureus": { "FAM": 250 },
+        "Tvag": { "FAM": 250 }
+    }
+    
+    # Get test code and fluorophore from well data
+    test_code = well_data.get('test_code') if well_data else None
+    fluorophore = well_data.get('fluorophore') if well_data else None
+    # Normalize common channel aliases
+    if fluorophore == 'TexasRed':
+        fluorophore = 'Texas Red'
+    if fluorophore == 'CY5':
+        fluorophore = 'Cy5'
+    
+    print(f"🔍 get_pathogen_threshold DEBUG: well_data keys: {list(well_data.keys()) if well_data else 'None'}")
+    print(f"🔍 get_pathogen_threshold DEBUG: test_code='{test_code}', fluorophore='{fluorophore}'")
+    
+    # Try to get pathogen-specific threshold
+    if test_code and fluorophore and test_code in PATHOGEN_FIXED_THRESHOLDS:
+        pathogen_thresholds = PATHOGEN_FIXED_THRESHOLDS[test_code]
+        if fluorophore in pathogen_thresholds:
+            threshold_value = pathogen_thresholds[fluorophore]
+            print(f"🎯 Using pathogen-specific threshold: {test_code} {fluorophore} = {threshold_value} RFU")
+            return float(threshold_value)
+
+    # Strict mode: no fallback. If mapping is missing, return None and let caller decide.
+    print(f"⚠️ No pathogen/channel threshold mapping for test_code={test_code or 'unknown'}, fluorophore={fluorophore or 'unknown'} — returning None (strict)")
+    return None
 
 
 def sigmoid(x, L, k, x0, B):
@@ -171,18 +245,27 @@ def check_exponential_growth(rfu, min_max_growth_rate=5.0):
     }
 
 
-def analyze_curve_quality(cycles, rfu, plot=False, 
-                         # Quality filter parameters
-                         min_start_cycle=5,
-                         min_amplitude=100,
-                         min_plateau_rfu=50,
-                         min_snr=3.0,
-                         min_growth_rate=5.0,
-                         threshold_factor=10.0):
-    """Analyze if a curve matches S-shaped pattern and return quality metrics
-    threshold_factor: multiplier for baseline std to set threshold line (default 10.0)
+def analyze_curve_quality(well_id, data, experiment_name, test_code=None):
     """
+    Enhanced curve quality analysis with integrated classification and ML integration.
+    Returns comprehensive analysis including quality metrics and curve classification.
+    """
+    print(f"🔍 FUNCTION CALLED: analyze_curve_quality for well {well_id}, experiment {experiment_name}, test_code={test_code}")
     try:
+        # Extract cycles and rfu from data
+        cycles = data['cycles']
+        rfu = data['rfu']
+        
+        # Quality filter parameters - use defaults since they're not passed anymore
+        min_start_cycle = 5
+        min_amplitude = 100
+        min_plateau_rfu = 50
+        min_snr = 3.0
+        min_growth_rate = 5.0
+        threshold_factor = 10.0
+        well_data = data  # Use the data as well_data
+        plot = False  # Default to no plotting
+        
         # Ensure we have enough data points
         if len(cycles) < 5 or len(rfu) < 5:
             return {
@@ -231,13 +314,15 @@ def analyze_curve_quality(cycles, rfu, plot=False,
         )
 
         # Fit sigmoid with bounds
-        popt, pcov = curve_fit(sigmoid,
-                               cycles,
-                               rfu,
-                               p0=[L_guess, k_guess, x0_guess, B_guess],
-                               bounds=bounds,
-                               maxfev=5000,
-                               method='trf')
+        popt, pcov = curve_fit(
+            sigmoid,
+            cycles,
+            rfu,
+            p0=[L_guess, k_guess, x0_guess, B_guess],
+            bounds=bounds,
+            maxfev=5000,
+            method='trf'
+        )
 
         # Calculate fit quality
         fit_rfu = sigmoid(cycles, *popt)
@@ -250,13 +335,9 @@ def analyze_curve_quality(cycles, rfu, plot=False,
         # Extract parameters
         L, k, x0, B = popt
 
-        # --- Exponential phase targeting for threshold ---
-        # Inflection point (steepest slope) for sigmoid: RFU = L/2 + B
-        exp_phase_threshold = L / 2 + B
-        # Ensure threshold is within 10-90% of max RFU (exponential phase window)
-        min_thresh = B + 0.10 * (L)
-        max_thresh = B + 0.90 * (L)
-        threshold_value = min(max(exp_phase_threshold, min_thresh), max_thresh)
+        # Determine threshold from pathogen-specific config (mirrors frontend strategies)
+        threshold_value = get_pathogen_threshold(well_data, L, B)
+        print(f"🔧 Threshold selected: {threshold_value} RFU (test_code={well_data.get('test_code')}, fluorophore={well_data.get('fluorophore')})")
 
         # Calculate additional steepness focusing on post-cycle 8 exponential phase
         post_cycle8_mask = cycles >= 8
@@ -387,8 +468,8 @@ def analyze_curve_quality(cycles, rfu, plot=False,
             'residuals': [float(x) for x in residuals],
             'post_cycle8_steepness': float(post_cycle8_steepness),
 
-            # Add threshold_value to criteria for frontend use
-            'threshold_value': float(threshold_value)
+            # Add threshold_value to criteria for frontend use (None when undefined)
+            'threshold_value': (float(threshold_value) if threshold_value is not None else None)
         }
 
         if plot:
@@ -402,8 +483,9 @@ def analyze_curve_quality(cycles, rfu, plot=False,
                      'r-',
                      label='Sigmoid Fit (R²={:.3f})'.format(r2),
                      linewidth=2)
-            # Add threshold line
-            plt.axhline(y=threshold_value, color='orange', linestyle='--', label=f'Threshold ({threshold_value:.1f})')
+            # Add threshold line if defined
+            if threshold_value is not None:
+                plt.axhline(y=threshold_value, color='orange', linestyle='--', label=f'Threshold ({threshold_value:.1f})')
             plt.xlabel('Cycle')
             plt.ylabel('RFU')
             plt.legend()
@@ -522,15 +604,16 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
     good_curves = []
     cycle_info = None
 
-
     # --- Import new CQJ/CalcJ utils ---
-    from cqj_calcj_utils import calculate_cqj as py_cqj, calculate_calcj as py_calcj
+    from cqj_calcj_utils import calculate_cqj as py_cqj
 
+    # Pre-populate all well data for control detection in CalcJ calculation
+    # This ensures control wells are available regardless of processing order
+    all_well_results_for_calcj = {}
+    
+    # Pre-populate basic well info (CQJ values will be added during processing)
     for well_id, data in data_dict.items():
-        cycles = data['cycles']
-        rfu = data['rfu']
-
-        # Ensure fluorophore/channel is present for each well
+        # Extract channel name using same logic as main loop
         channel_name = data.get('fluorophore')
         if not channel_name:
             # Extract fluorophore from well_id if available (e.g., "A1_HEX" -> "HEX")
@@ -540,10 +623,45 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                 if potential_fluorophore in ['FAM', 'HEX', 'Texas Red', 'Cy5', 'TexasRed']:
                     channel_name = potential_fluorophore
                 else:
-                    channel_name = 'Unknown'
+                    channel_name = 'FAM'  # Default to FAM instead of Unknown
             else:
-                channel_name = 'Unknown'  # Don't default to FAM
+                channel_name = 'FAM'  # Default to FAM for single-channel analysis
+        
+        all_well_results_for_calcj[well_id] = {
+            'sample_name': data.get('sample_name', ''),
+            'well_id': well_id,
+            'cqj_value': None,  # Will be filled during processing
+            'channel': channel_name,
+            'fluorophore': channel_name,
+            'test_code': data.get('test_code', ''),
+            'experiment_pattern': data.get('experiment_pattern', '')
+        }
+
+    for well_id, data in data_dict.items():
+        cycles = data['cycles']
+        rfu = data['rfu']
+
+        # Ensure fluorophore/channel is present for each well
+        channel_name = data.get('fluorophore')
+        logger.debug(f"Channel Detection - Well: {well_id}, Original fluorophore: {channel_name}, Keys: {list(data.keys())}")
+        
+        if not channel_name:
+            # Extract fluorophore from well_id if available (e.g., "A1_HEX" -> "HEX")
+            if '_' in well_id and len(well_id.split('_')) >= 2:
+                potential_fluorophore = well_id.split('_')[-1]
+                # Validate it's a known fluorophore
+                if potential_fluorophore in ['FAM', 'HEX', 'Texas Red', 'Cy5', 'TexasRed']:
+                    channel_name = potential_fluorophore
+                    logger.debug(f"Extracted channel from well_id: {channel_name}")
+                else:
+                    channel_name = 'FAM'  # Default to FAM instead of Unknown
+                    logger.debug(f"Invalid potential fluorophore from well_id: {potential_fluorophore}, defaulting to FAM")
+            else:
+                channel_name = 'FAM'  # Default to FAM for single-channel analysis
+                logger.debug(f"No valid fluorophore pattern in well_id: {well_id}, defaulting to FAM")
             data['fluorophore'] = channel_name
+        
+        logger.debug(f"Final channel_name for {well_id}: {channel_name}")
 
         # Store cycle info from first well - convert to Python types
         if cycle_info is None and len(cycles) > 0:
@@ -553,12 +671,24 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                 'count': int(len(cycles))
             }
 
-        # Pass quality filter parameters to analysis
-        analysis = analyze_curve_quality(cycles, rfu, **quality_filter_params)
+        # Pass quality filter parameters AND well data to analysis for pathogen-specific thresholds
+        analysis = analyze_curve_quality(well_id, data, "batch_experiment", data.get('test_code'))
 
         # Add anomaly detection
         anomalies = detect_curve_anomalies(cycles, rfu)
         analysis['anomalies'] = anomalies
+
+        # Ensure raw data is always present even if curve analysis failed
+        # This guarantees downstream storage/visualization has RFU/cycle arrays
+        try:
+            if not isinstance(analysis.get('raw_cycles'), list) or not analysis.get('raw_cycles'):
+                analysis['raw_cycles'] = [float(x) for x in cycles] if isinstance(cycles, (list, tuple)) else []
+            if not isinstance(analysis.get('raw_rfu'), list) or not analysis.get('raw_rfu'):
+                analysis['raw_rfu'] = [float(x) for x in rfu] if isinstance(rfu, (list, tuple)) else []
+        except Exception:
+            # Best-effort; leave empty lists on failure
+            analysis.setdefault('raw_cycles', [])
+            analysis.setdefault('raw_rfu', [])
         # Add curve classification - ML ENABLED WITH CONFIDENCE SAFEGUARDS + RULE-BASED FALLBACK
         if 'error' in analysis:
             analysis['curve_classification'] = {
@@ -570,6 +700,33 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
             }
         else:
             # TRY ML CLASSIFICATION WITH CONFIDENCE SAFEGUARDS FIRST
+            # --- Early REDO pre-check using vendor Cq (before ML) ---
+            already_classified = False
+            try:
+                vendor_cq = data.get('cq_value') or analysis.get('cq_value')
+                r2_score_val = analysis.get('r2_score', 1.0)
+                # Persist a targeted debug entry for observability
+                logger.info(f"REDO pre-check probe | well={well_id} | R2={r2_score_val} | vendor_cq={vendor_cq}")
+                if vendor_cq is not None and r2_score_val < 0.75:
+                    redo_probe = classify_curve(
+                        r2_score_val,
+                        analysis.get('steepness', 0),
+                        analysis.get('quality_filters', {}).get('snr_check', {}).get('snr', 0),
+                        analysis.get('midpoint', 50),
+                        analysis.get('baseline', 100),
+                        amplitude=analysis.get('amplitude', 0),
+                        cq_value=analysis.get('cqj') if analysis.get('cqj') else None,
+                        vendor_cq_value=vendor_cq
+                    )
+                    if redo_probe and redo_probe.get('classification') == 'REDO':
+                        analysis['curve_classification'] = redo_probe
+                        analysis['curve_classification']['method'] = 'Rule-based (REDO pre-check)'
+                        already_classified = True
+                        logger.warning(f"REDO pre-check applied | well={well_id} | reason={redo_probe.get('reason')}")
+            except Exception as _e:
+                # Non-fatal; continue to ML
+                logger.exception(f"REDO pre-check exception | well={well_id}")
+
             try:
                 from ml_curve_classifier import ml_classifier
                 
@@ -593,16 +750,17 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                     cqj_val = py_cqj(well_for_cqj, threshold)
                     ml_metrics['cqj'] = cqj_val
                 
-                print(f"🤖 ML Analysis: Attempting ML classification for {well_id} with {len(ml_metrics)} metrics")
-                ml_result = ml_classifier.predict_classification(
-                    rfu, cycles, ml_metrics, pathogen, well_id
-                )
-                analysis['curve_classification'] = ml_result
-                print(f"🤖 ML Result: {ml_result.get('classification')} via {ml_result.get('method')} (confidence: {ml_result.get('confidence', 'N/A')})")
+                if not already_classified:
+                    logger.info(f"ML Analysis: Attempting ML classification | well={well_id} | metrics={len(ml_metrics)}")
+                    ml_result = ml_classifier.predict_classification(
+                        rfu, cycles, ml_metrics, pathogen, well_id
+                    )
+                    analysis['curve_classification'] = ml_result
+                    logger.info(f"ML Result | well={well_id} | class={ml_result.get('classification')} | method={ml_result.get('method')} | conf={ml_result.get('confidence', 'N/A')}")
                 
             except Exception as e:
-                print(f"⚠️ ML Failed for {well_id}: {e}")
-                print(f"🔄 Falling back to rule-based classification")
+                logger.exception(f"ML Failed | well={well_id}")
+                logger.info("Falling back to rule-based classification")
                 # FALLBACK TO RULE-BASED CLASSIFICATION
                 analysis['curve_classification'] = classify_curve(
                     analysis.get('r2_score', 0),
@@ -611,11 +769,12 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                     analysis.get('midpoint', 50),
                     analysis.get('baseline', 100),
                     amplitude=analysis.get('amplitude', 0),
-                    cq_value=analysis.get('cq_value')
+                    cq_value=analysis.get('cq_value'),
+                    vendor_cq_value=analysis.get('cq_value')
                 )
                 # Mark as rule-based method
                 analysis['curve_classification']['method'] = 'Rule-based (ML failed)'
-                print(f"� Fallback Result: {analysis['curve_classification'].get('classification')} via Rule-based")
+                logger.info(f"Rule-based Fallback Result | well={well_id} | class={analysis['curve_classification'].get('classification')}")
 
         # --- Per-channel CQJ/CalcJ integration (dict, robust) ---
         # Prepare well dict for CQJ/CalcJ utils
@@ -626,21 +785,201 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
         }
         threshold = analysis.get('threshold_value')
         cqj_val = py_cqj(well_for_cqj, threshold) if threshold is not None else None
-        # CalcJ calculation moved to frontend - backend should not calculate it
-        # calcj_val = py_calcj(well_for_cqj, threshold) if threshold is not None else None
 
-        # Store as dict for per-channel support (even if only one channel)
+        # Store CQJ first (needed for CalcJ calculation)
         analysis['cqj'] = {channel_name: cqj_val}
-        # analysis['calcj'] = {channel_name: calcj_val}
+        logger.debug(f"CQJ assignment | well={well_id} | channel={channel_name} | cqj={cqj_val}")
+
+        # Update the pre-populated well data with actual CQJ value
+        if well_id in all_well_results_for_calcj:
+            all_well_results_for_calcj[well_id]['cqj_value'] = cqj_val
+            logger.debug(f"CQJ update | well={well_id} updated with CQJ={cqj_val}")
+
+        # CalcJ calculation will be done after test_code extraction
+        analysis['calcj'] = {channel_name: None}  # Placeholder
 
         from app import get_pathogen_target
         test_code = data.get('test_code', None)
         analysis['pathogen_target'] = get_pathogen_target(test_code, channel_name) if test_code else channel_name
 
+        # CalcJ calculation using control-based standard curve method (same as frontend)
+        from cqj_calcj_utils import calculate_calcj_with_controls
+        if threshold is not None and cqj_val is not None:
+            try:
+                # Use existing dynamic test code extraction (no hard-coded values)
+                if not test_code:
+                    # Import the ML pathogen extraction function for dynamic extraction
+                    from ml_curve_classifier import extract_pathogen_from_well_data
+                    
+                    # Prepare well data for pathogen extraction
+                    well_data_with_context = dict(well_for_cqj)
+                    well_data_with_context.update({
+                        'experiment_pattern': data.get('experiment_pattern', ''),
+                        'fluorophore': channel_name,
+                        'channel': channel_name,
+                        'current_experiment_pattern': data.get('experiment_pattern', ''),
+                        'extracted_test_code': data.get('extracted_test_code', '')
+                    })
+                    
+                    # Extract test code dynamically using existing ML function
+                    extracted_pathogen = extract_pathogen_from_well_data(well_data_with_context)
+                    if extracted_pathogen and extracted_pathogen != 'Unknown':
+                        test_code = extracted_pathogen
+                        print(f"🔍 CALCJ: Dynamically extracted test_code='{test_code}' using ML pathogen extraction")
+                    else:
+                        # Fallback: Extract from experiment pattern if ML extraction fails
+                        experiment_pattern = data.get('experiment_pattern', '')
+                        if experiment_pattern:
+                            # Use the same extraction logic as the existing pathogen detection
+                            if experiment_pattern.startswith('Ac') and len(experiment_pattern) > 2:
+                                test_code = experiment_pattern[2:].split('_')[0]  # Remove 'Ac' prefix
+                            else:
+                                test_code = experiment_pattern.split('_')[0]
+                            print(f"🔍 CALCJ: Extracted test_code='{test_code}' from experiment_pattern='{experiment_pattern}' (ML fallback)")
+                        else:
+                            test_code = None
+                            print(f"🔍 CALCJ: No test_code found - cannot calculate CalcJ without pathogen context")
+                
+                # Only proceed if we have a valid test_code
+                if test_code:
+                    # Prepare well data with CQJ value
+                    well_data_for_calcj = dict(well_for_cqj)
+                    well_data_for_calcj['cqj_value'] = cqj_val
+                    
+                    # Update test_code in pre-populated well data
+                    if well_id in all_well_results_for_calcj:
+                        all_well_results_for_calcj[well_id]['test_code'] = test_code
+                    
+                    # Use control-based standard curve calculation with actual well data
+                    calcj_result = calculate_calcj_with_controls(
+                        well_data_for_calcj, 
+                        threshold, 
+                        all_well_results_for_calcj,  # Pass actual well results instead of {}
+                        test_code, 
+                        channel_name
+                    )
+                    
+                    if calcj_result and isinstance(calcj_result, dict):
+                        calcj_val = calcj_result.get('calcj_value')
+                        calcj_method = calcj_result.get('method', 'control_based')
+                        print(f"🔍 CALCJ STANDARD-CURVE: well={well_id}, calcj_val={calcj_val}, method={calcj_method}, test_code={test_code}")
+                    else:
+                        calcj_val = None
+                        print(f"🔍 CALCJ STANDARD-CURVE FAILED: well={well_id}, result={calcj_result}")
+                else:
+                    calcj_val = None
+                    print(f"🔍 CALCJ SKIPPED - NO TEST CODE: well={well_id} (cannot determine pathogen context)")
+                    
+            except Exception as e:
+                calcj_val = None
+                print(f"🔍 CALCJ STANDARD-CURVE ERROR: well={well_id}, error={e}")
+            
+            analysis['calcj'][channel_name] = calcj_val
+        else:
+            calcj_val = None
+            print(f"🔍 CALCJ SKIPPED: well={well_id}, threshold={threshold}, cqj_val={cqj_val}")
+            analysis['calcj'][channel_name] = calcj_val
+
+        print(f"🔍 CALCJ FINAL: well={well_id}, channel_name='{channel_name}', calcj_val={analysis['calcj'][channel_name]}")
+
         results[well_id] = analysis
 
         if analysis.get('is_good_scurve', False):
             good_curves.append(well_id)
+
+    # SECOND PASS: CalcJ calculation after all CQJ values are computed
+    # Relax gating: attempt CalcJ and let the utility handle insufficient controls
+    for well_id, analysis in results.items():
+        # Skip if this well is a control (CalcJ for controls is handled as fixed in utils if invoked)
+        sample_name = all_well_results_for_calcj.get(well_id, {}).get('sample_name', '')
+        is_control = any(tag in sample_name for tag in ['H-', 'L-', 'M-', 'NTC'])
+
+        # Determine channel from pre-populated metadata, falling back to data-assigned channel
+        meta = all_well_results_for_calcj.get(well_id, {})
+        channel_name = meta.get('channel') or meta.get('fluorophore') or 'FAM'
+
+        # Skip if no CQJ for this well/channel
+        cqj_data = analysis.get('cqj', {})
+        cqj_val = cqj_data.get(channel_name) if isinstance(cqj_data, dict) else None
+        if cqj_val is None:
+            continue
+
+        # Get test_code from pre-populated metadata
+        test_code = meta.get('test_code')
+        if not test_code:
+            continue
+
+        # Recalculate CalcJ with all controls available; include context for control detection
+        from cqj_calcj_utils import calculate_calcj_with_controls
+        # Strict: do not inject default threshold; require mapped threshold
+        threshold = analysis.get('threshold_value')
+        if threshold is None:
+            # Skip CalcJ if no threshold was determined for this well/channel
+            continue
+        well_data_for_calcj = {
+            'cqj_value': cqj_val,
+            'well_id': well_id,
+            'sample_name': sample_name,
+            'fluorophore': channel_name
+        }
+
+        calcj_result = calculate_calcj_with_controls(
+            well_data_for_calcj,
+            threshold,
+            all_well_results_for_calcj,
+            test_code,
+            channel_name
+        )
+
+        if calcj_result and isinstance(calcj_result, dict):
+            calcj_val = calcj_result.get('calcj_value')
+            # Update the results with the new CalcJ value using the actual channel
+            if 'calcj' not in analysis:
+                analysis['calcj'] = {}
+            analysis['calcj'][channel_name] = calcj_val
+            results[well_id] = analysis
+
+        # Enforce display rules for this well post-calculation attempt
+        try:
+            cls = analysis.get('curve_classification', {})
+            classification_label = cls.get('classification') if isinstance(cls, dict) else str(cls)
+            # Negative samples should show N/A for CalcJ
+            if classification_label and str(classification_label).upper() == 'NEGATIVE':
+                if 'calcj' not in analysis:
+                    analysis['calcj'] = {}
+                analysis['calcj'][channel_name] = 'N/A'
+            # If CQJ exists but CalcJ absent, set N/A
+            cqj_map = analysis.get('cqj', {}) or {}
+            cqj_for_channel = cqj_map.get(channel_name)
+            calcj_map = analysis.get('calcj', {}) or {}
+            calcj_for_channel = calcj_map.get(channel_name)
+            if (cqj_for_channel is not None) and (calcj_for_channel is None):
+                if 'calcj' not in analysis:
+                    analysis['calcj'] = {}
+                analysis['calcj'][channel_name] = 'N/A'
+        except Exception:
+            pass
+
+    # Final enforcement of display rules across all wells (in case CalcJ wasn't attempted)
+    for well_id, analysis in results.items():
+        try:
+            ch = analysis.get('fluorophore') or next(iter((analysis.get('cqj') or {}).keys()), 'FAM')
+            cls = analysis.get('curve_classification', {})
+            classification_label = cls.get('classification') if isinstance(cls, dict) else str(cls)
+            if classification_label and str(classification_label).upper() == 'NEGATIVE':
+                if 'calcj' not in analysis:
+                    analysis['calcj'] = {}
+                analysis['calcj'][ch] = 'N/A'
+            cqj_map = analysis.get('cqj', {}) or {}
+            cqj_for_channel = cqj_map.get(ch)
+            calcj_map = analysis.get('calcj', {}) or {}
+            calcj_for_channel = calcj_map.get(ch)
+            if (cqj_for_channel is not None) and (calcj_for_channel is None):
+                if 'calcj' not in analysis:
+                    analysis['calcj'] = {}
+                analysis['calcj'][ch] = 'N/A'
+        except Exception:
+            continue
 
     # <-- The return statement should be here, outside the for-loop!
     return {
@@ -914,23 +1253,6 @@ def calculate_cqj(well_data, threshold):
         if val >= threshold:
             return cycles[i]
     return None
-
-def calculate_calcj(cqj, h_cq, m_cq, l_cq, h_val, m_val, l_val):
-    """Calculate Calc-J using log-linear interpolation between H, M, L controls."""
-    # Requires all Cq and value controls to be present
-    if None in (cqj, h_cq, m_cq, l_cq, h_val, m_val, l_val):
-        return None
-    # Log-linear interpolation (standard curve):
-    # log10(conc) = slope * (Cq - intercept)
-    # For now, use two-point slope between H and L
-    try:
-        import math
-        slope = (math.log10(h_val) - math.log10(l_val)) / (l_cq - h_cq)
-        intercept = math.log10(h_val) - slope * h_cq
-        log_conc = slope * cqj + intercept
-        return 10 ** log_conc
-    except Exception:
-        return None
 
 # In batch_analyze_wells or after per-well analysis:
 # For each well, after analysis, add:

@@ -59,12 +59,30 @@ class MLValidationTracker:
                     )
                 """))
                 
-                # Determine teaching outcome
+                # Determine teaching outcome using classification grouping
                 teaching_outcome = "correction_needed"
-                if original_prediction == expert_correction:
-                    teaching_outcome = "prediction_confirmed"
+                
+                # Group classifications for accuracy calculation
+                def get_classification_group(classification):
+                    if not classification:
+                        return 'UNKNOWN'
+                    classification = classification.upper()
+                    if classification in ['WEAK_POSITIVE', 'POSITIVE', 'STRONG_POSITIVE']:
+                        return 'POSITIVE'
+                    elif classification in ['INDETERMINATE', 'SUSPICIOUS', 'REDO']:
+                        return 'REDO'
+                    elif classification in ['NEGATIVE']:
+                        return 'NEGATIVE'
+                    else:
+                        return 'UNKNOWN'
+                
+                original_group = get_classification_group(original_prediction)
+                expert_group = get_classification_group(expert_correction)
+                
+                if original_group == expert_group:
+                    teaching_outcome = "prediction_confirmed"  # Same group = confirmed for accuracy
                 else:
-                    teaching_outcome = "prediction_corrected"
+                    teaching_outcome = "prediction_corrected"  # Different group = correction
                 
                 # Calculate improvement score based on confidence and correctness
                 improvement_score = 0.0
@@ -73,13 +91,24 @@ class MLValidationTracker:
                 else:
                     improvement_score = max(0.0, 1.0 - (confidence if confidence else 0.5))
                 
-                # Insert expert decision
+                # Insert expert decision, computing is_correction from grouping
                 conn.execute(text("""
                     INSERT INTO ml_expert_decisions 
                     (well_id, pathogen, original_prediction, expert_correction, confidence, 
-                     features_used, teaching_outcome, user_id, improvement_score)
+                     features_used, teaching_outcome, user_id, improvement_score, is_correction)
                     VALUES (:well_id, :pathogen, :original_prediction, :expert_correction, 
-                            :confidence, :features_used, :teaching_outcome, :user_id, :improvement_score)
+                            :confidence, :features_used, :teaching_outcome, :user_id, :improvement_score,
+                            CASE 
+                                WHEN :original_prediction IS NULL OR :expert_correction IS NULL THEN NULL
+                                WHEN (
+                                    UPPER(:original_prediction) IN ('WEAK_POSITIVE','POSITIVE','STRONG_POSITIVE') AND UPPER(:expert_correction) IN ('WEAK_POSITIVE','POSITIVE','STRONG_POSITIVE')
+                                ) OR (
+                                    UPPER(:original_prediction) IN ('INDETERMINATE','SUSPICIOUS','REDO') AND UPPER(:expert_correction) IN ('INDETERMINATE','SUSPICIOUS','REDO')
+                                ) OR (
+                                    UPPER(:original_prediction) = 'NEGATIVE' AND UPPER(:expert_correction) = 'NEGATIVE'
+                                ) THEN 0
+                                ELSE 1
+                            END)
                 """), {
                     'well_id': well_id,
                     'pathogen': pathogen,
@@ -612,6 +641,20 @@ class MLValidationTracker:
     
     def track_analysis_run(self, session_id, file_name, pathogen_codes, total_samples, ml_samples_analyzed, accuracy_percentage=None):
         """Track a complete analysis run for ML validation dashboard"""
+        
+        # Check if ML training is paused for this session
+        try:
+            from ml_training_manager import ml_training_manager
+            if ml_training_manager.is_training_paused(str(session_id)):
+                self.logger.info(f"ML training is paused for session {session_id} - skipping ML run creation")
+                return  # Skip creating ML runs when training is paused
+        except ImportError:
+            # ml_training_manager not available, continue normally
+            pass
+        except Exception as e:
+            self.logger.warning(f"Error checking training pause status: {e}")
+            # Continue normally if check fails
+        
         with self.engine.connect() as conn:
             try:
                 # Create table if it doesn't exist

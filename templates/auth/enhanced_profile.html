@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Profile - MDL qPCR Analyzer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .profile-card {
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            border: none;
+        }
+        
+        .profile-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 15px 15px 0 0;
+            padding: 2rem;
+            text-align: center;
+        }
+        
+        .profile-avatar {
+            width: 80px;
+            height: 80px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 1rem;
+            font-size: 2rem;
+        }
+        
+        .auth-badge {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            border-radius: 25px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            margin-top: 0.5rem;
+        }
+        
+        .auth-entra {
+            background: #0078d4;
+            color: white;
+        }
+        
+        .auth-local {
+            background: #28a745;
+            color: white;
+        }
+        
+        .role-badge {
+            font-size: 0.9rem;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-weight: 500;
+        }
+        
+        .role-administrator {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .role-compliance_officer {
+            background: #6f42c1;
+            color: white;
+        }
+        
+        .role-qc_technician {
+            background: #0d6efd;
+            color: white;
+        }
+        
+        .role-research_user {
+            background: #20c997;
+            color: white;
+        }
+        
+        .role-lab_technician {
+            background: #fd7e14;
+            color: white;
+        }
+        
+        .role-viewer {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .permission-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .permission-item {
+            display: flex;
+            align-items: center;
+            padding: 0.75rem;
+            border-radius: 8px;
+            background: #f8f9fa;
+            margin-bottom: 0.5rem;
+            transition: all 0.3s ease;
+        }
+        
+        .permission-item:hover {
+            background: #e9ecef;
+            transform: translateX(5px);
+        }
+        
+        .permission-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 1rem;
+            font-size: 1.1rem;
+        }
+        
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .info-item:last-child {
+            border-bottom: none;
+        }
+        
+        .info-label {
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        .info-value {
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <div class="container mt-4">
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <!-- Back to Dashboard -->
+                <div class="mb-3">
+                    <a href="{{ url_for('index') }}" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i> Back to Dashboard
+                    </a>
+                </div>
+                
+                <!-- Profile Card -->
+                <div class="card profile-card">
+                    <div class="profile-header">
+                        <div class="profile-avatar">
+                            <i class="fas fa-user"></i>
+                        </div>
+                        <h3>{{ user.display_name or user.username }}</h3>
+                        <p class="mb-2">{{ user.email or 'No email provided' }}</p>
+                        <div class="auth-badge auth-{{ user.auth_method }}">
+                            {% if user.auth_method == 'entra_id' %}
+                                <i class="fab fa-microsoft"></i> Microsoft Entra ID
+                            {% else %}
+                                <i class="fas fa-key"></i> Local Authentication
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    <div class="card-body p-4">
+                        <!-- User Information -->
+                        <h5 class="mb-3"><i class="fas fa-user-circle"></i> Account Information</h5>
+                        <div class="mb-4">
+                            <div class="info-item">
+                                <span class="info-label">Username</span>
+                                <span class="info-value">{{ user.username }}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Role</span>
+                                <span class="role-badge role-{{ user.role }}">
+                                    {{ user.role|replace('_', ' ')|title }}
+                                </span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Authentication Method</span>
+                                <span class="info-value">
+                                    {% if user.auth_method == 'entra_id' %}
+                                        <i class="fab fa-microsoft text-primary"></i> Microsoft Entra ID
+                                    {% else %}
+                                        <i class="fas fa-key text-success"></i> Local Database
+                                    {% endif %}
+                                </span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Session Expires</span>
+                                <span class="info-value">
+                                    <i class="fas fa-clock"></i>
+                                    <span id="sessionExpiry">{{ user.session_expires }}</span>
+                                </span>
+                            </div>
+                        </div>
+                        
+                        <!-- Permissions -->
+                        <h5 class="mb-3"><i class="fas fa-shield-alt"></i> Permissions</h5>
+                        <div class="permission-list">
+                            {% for permission in user.permissions %}
+                            <div class="permission-item">
+                                <div class="permission-icon bg-primary text-white">
+                                    {% set icon_map = {
+                                        'view_analysis_results': 'fa-chart-line',
+                                        'upload_files': 'fa-upload',
+                                        'run_basic_analysis': 'fa-play',
+                                        'run_ml_analysis': 'fa-robot',
+                                        'modify_thresholds': 'fa-sliders-h',
+                                        'validate_results': 'fa-check-double',
+                                        'view_compliance_dashboard': 'fa-clipboard-check',
+                                        'manage_compliance_evidence': 'fa-folder-open',
+                                        'manage_compliance_requirements': 'fa-tasks',
+                                        'export_data': 'fa-download',
+                                        'view_ml_statistics': 'fa-chart-bar',
+                                        'provide_ml_feedback': 'fa-comments',
+                                        'audit_access': 'fa-eye',
+                                        'manage_users': 'fa-users',
+                                        'system_administration': 'fa-cogs',
+                                        'database_management': 'fa-database'
+                                    } %}
+                                    <i class="fas {{ icon_map.get(permission, 'fa-check') }}"></i>
+                                </div>
+                                <div>
+                                    <strong>{{ permission|replace('_', ' ')|title }}</strong>
+                                    <br>
+                                    <small class="text-muted">
+                                        {% set descriptions = {
+                                            'view_analysis_results': 'View qPCR analysis results and reports',
+                                            'upload_files': 'Upload qPCR data files for analysis',
+                                            'run_basic_analysis': 'Execute basic qPCR analysis workflows',
+                                            'run_ml_analysis': 'Run machine learning curve classification',
+                                            'modify_thresholds': 'Adjust analysis thresholds and parameters',
+                                            'validate_results': 'Validate and approve analysis results',
+                                            'view_compliance_dashboard': 'Access compliance tracking dashboard',
+                                            'manage_compliance_evidence': 'Manage compliance evidence records',
+                                            'manage_compliance_requirements': 'Configure compliance requirements',
+                                            'export_data': 'Export analysis data and reports',
+                                            'view_ml_statistics': 'View ML model performance statistics',
+                                            'provide_ml_feedback': 'Provide feedback to improve ML models',
+                                            'audit_access': 'Access audit logs and user activity',
+                                            'manage_users': 'Manage user accounts and permissions',
+                                            'system_administration': 'System configuration and administration',
+                                            'database_management': 'Database administration and maintenance'
+                                        } %}
+                                        {{ descriptions.get(permission, 'System permission') }}
+                                    </small>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        
+                        <!-- Actions -->
+                        <div class="mt-4 pt-3 border-top">
+                            <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                                <a href="{{ url_for('auth.logout') }}" class="btn btn-outline-danger">
+                                    <i class="fas fa-sign-out-alt"></i> Logout
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Role Description -->
+                <div class="card mt-4">
+                    <div class="card-header">
+                        <h6 class="mb-0"><i class="fas fa-info-circle"></i> Role Description</h6>
+                    </div>
+                    <div class="card-body">
+                        {% set role_descriptions = {
+                            'viewer': 'Read-only access to view analysis results and compliance dashboards. Can export data but cannot modify system settings.',
+                            'lab_technician': 'Basic operational access for routine qPCR analysis. Can upload files and run standard analysis workflows.',
+                            'research_user': 'Research-focused access with ML analysis capabilities. Can run advanced analysis and provide ML feedback.',
+                            'qc_technician': 'Quality control specialist with validation permissions. Can validate results and manage compliance evidence.',
+                            'compliance_officer': 'Full compliance management access. Can manage requirements, evidence, and audit system compliance.',
+                            'administrator': 'Full system administration access. Can manage users, system configuration, and database operations.'
+                        } %}
+                        <p class="mb-0">{{ role_descriptions.get(user.role, 'Custom role with specific permissions.') }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Format session expiry time
+        document.addEventListener('DOMContentLoaded', function() {
+            const expiryElement = document.getElementById('sessionExpiry');
+            if (expiryElement) {
+                const expiryTime = new Date(expiryElement.textContent);
+                const now = new Date();
+                const diffMs = expiryTime - now;
+                const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+                const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+                
+                if (diffMs > 0) {
+                    expiryElement.textContent = `${diffHours}h ${diffMinutes}m remaining`;
+                    expiryElement.className = 'text-success';
+                } else {
+                    expiryElement.textContent = 'Expired';
+                    expiryElement.className = 'text-danger';
+                }
+            }
+        });
+    </script>
+</body>
+</html>

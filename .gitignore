@@ -83,6 +83,8 @@ instance/
 
 # Logs
 *.log
+# Database backups (large, generated artifacts)
+db_backups/
 # Ignore backup and intermediate JS files
 static/script_backup_*.js
 static/script_main_backup.js

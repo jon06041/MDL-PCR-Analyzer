@@ -8,6 +8,42 @@ window.chartUpdating = false;
 // Global flag to prevent multiple simultaneous chart initializations
 window.chartInitializing = false;
 
+// Guard to suppress auto chart updates during explicit/manual updates
+window.suppressAutoChartUpdate = false;
+
+// ========================================
+// AUTHENTICATED FETCH UTILITY
+// ========================================
+
+/**
+ * Enhanced fetch wrapper with authentication handling
+ * Automatically includes credentials and handles 401 responses
+ */
+async function authenticatedFetch(url, options = {}) {
+    // Ensure credentials are included for session management
+    const defaultOptions = {
+        credentials: 'same-origin',
+        ...options
+    };
+    
+    try {
+        const response = await fetch(url, defaultOptions);
+        
+        // Handle 401 Authentication Required
+        if (response.status === 401) {
+            console.log(`🔐 Authentication required for ${url} - redirecting to login`);
+            const currentPath = encodeURIComponent(window.location.pathname + window.location.search);
+            window.location.href = `/auth/login?next=${currentPath}`;
+            throw new Error('Authentication required - redirecting to login');
+        }
+        
+        return response;
+    } catch (error) {
+        // Re-throw the error for the caller to handle
+        throw error;
+    }
+}
+
 // Anti-throttling and visibility monitoring
 let isTabInBackground = false;
 let backgroundWarningShown = false;
@@ -49,7 +85,7 @@ document.addEventListener('visibilitychange', function() {
 async function checkBackendHealth() {
     try {
         const startTime = performance.now();
-        const response = await fetch('/health', { 
+        const response = await authenticatedFetch('/health', { 
             method: 'GET',
             headers: { 'X-Health-Check': 'frontend' }
         });
@@ -238,6 +274,11 @@ function updateAppState(newState) {
     window.currentFluorophore = window.appState.currentFluorophore;
     window.currentScaleMode = window.appState.currentScaleMode;
     currentScaleMode = window.appState.currentScaleMode;
+    // Sync chart mode for legacy code paths
+    if (typeof window.appState.currentChartMode !== 'undefined') {
+        window.currentChartMode = window.appState.currentChartMode;
+        try { currentChartMode = window.appState.currentChartMode; } catch (e) {}
+    }
     
     // Update all UI elements to match new state
     syncUIElements();
@@ -316,7 +357,8 @@ function syncUIElements() {
         'all': 'showAllBtn',
         'pos': 'showPosBtn', 
         'neg': 'showNegBtn',
-        'redo': 'showRedoBtn'
+        'redo': 'showRedoBtn',
+        'selected': 'showSelectedBtn'
     };
     
     const activeBtn = document.getElementById(buttonMapping[state.currentChartMode]);
@@ -455,21 +497,24 @@ function updateDisplays() {
     }
     
     // Update chart based on current state - only if analysis results are available
-    // SKIP chart recreation if we're just updating thresholds OR if chart already exists
-    if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results && 
-        !window.chartInitializing && !window.chartUpdating && !window.amplificationChart) {
-        console.log('🔍 CHART-CREATION - Creating initial chart');
-        if (state.currentChartMode === 'all') {
-            showAllCurves(state.currentFluorophore);
-        } else if (state.currentChartMode === 'pos') {
-            showGoodCurves(state.currentFluorophore);
-        } else if (state.currentChartMode === 'neg') {
-            showResultsFiltered(state.currentFluorophore, 'neg');
-        } else if (state.currentChartMode === 'redo') {
-            showResultsFiltered(state.currentFluorophore, 'redo');
+    if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results &&
+        !window.chartInitializing && !window.chartUpdating) {
+        if (window.amplificationChart) {
+            // Chart exists: switch display mode immediately to reflect filter buttons/selection
+            try { updateChartDisplayMode(); } catch (e) { /* no-op */ }
+        } else if (!window.suppressAutoChartUpdate) {
+            // No chart yet and not suppressed: create initial chart
+            console.log('🔍 CHART-CREATION - Creating initial chart');
+            if (state.currentChartMode === 'all') {
+                showAllCurves(state.currentFluorophore);
+            } else if (state.currentChartMode === 'pos') {
+                showGoodCurves(state.currentFluorophore);
+            } else if (state.currentChartMode === 'neg') {
+                showResultsFiltered(state.currentFluorophore, 'neg');
+            } else if (state.currentChartMode === 'redo') {
+                showResultsFiltered(state.currentFluorophore, 'redo');
+            }
         }
-    } else {
-        // console.log('🔄 CHART-LOADING - Skipping chart recreation - chart exists or conditions not met');
     }
     
     // Update table filter
@@ -1661,28 +1706,21 @@ async function handleThresholdStrategyChange() {
                 well.cqj_value = null;
             }
             
-            // Calculate CalcJ using H/M/L control-based method or fallback to basic
+            // Calculate CalcJ using H/M/L control-based method ONLY (no fallback to amplitude/threshold)
             if (well.calcj && channel in well.calcj) {
                 well.calcj_value = typeof well.calcj[channel] === 'string' ? parseFloat(well.calcj[channel]) : well.calcj[channel];
             } else if (typeof window.calculateCalcjWithControls === 'function' && testCode && channel) {
-                // Try control-based calculation first
+                // Use ONLY control-based calculation - no fallbacks
                 const numericThreshold = typeof threshold === 'string' ? parseFloat(threshold) : threshold;
                 const calcjResult = window.calculateCalcjWithControls(well, numericThreshold, resultsObj, testCode, channel);
                 well.calcj_value = calcjResult.calcj_value;
                 well.calcj_method = calcjResult.method; // Track which method was used
                 // console.log(`✅ CALCJ-CALC - ${wellKey}: ${well.calcj_value} (method: ${calcjResult.method})`);
-            } else if (typeof window.calculateCalcj === 'function' && well.amplitude) {
-                // Fallback to basic calculation if control-based not available
-                const numericThreshold = typeof threshold === 'string' ? parseFloat(threshold) : threshold;
-                const numericAmplitude = typeof well.amplitude === 'string' ? parseFloat(well.amplitude) : well.amplitude;
-                well.amplitude = numericAmplitude;
-                well.calcj_value = window.calculateCalcj(well, numericThreshold);
-                well.calcj_method = 'basic';
-                // console.log(`✅ CALCJ-CALC - ${wellKey}: ${well.calcj_value} (method: basic)`);
             } else {
+                // No fallback calculation - all runs must have proper controls
                 well.calcj_value = null;
-                well.calcj_method = 'failed';
-                // console.warn(`❌ CALCJ-MISSING - Cannot calculate CalcJ for ${wellKey}`);
+                well.calcj_method = 'no_controls_available';
+                // console.warn(`❌ CALCJ-MISSING - Control-based calculation required for ${wellKey}`);
             }
             
             // console.log(`📊 CQJ/CALCJ - ${wellKey}: CQJ=${well.cqj_value}, CalcJ=${well.calcj_value}, threshold=${threshold}`);
@@ -2903,7 +2941,8 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
                     'X-Timestamp': new Date().toISOString() // Help backend track timing
                 },
                 body: JSON.stringify(payload),
-                signal: controller.signal
+                signal: controller.signal,
+                credentials: 'same-origin' // Ensure session cookies are sent
             });
             
             // Debug: Log successful response
@@ -2948,6 +2987,26 @@ async function analyzeSingleChannel(data, fluorophore, experimentPattern) {
                 }
                 
                 console.error(`❌ DEBUG-ERROR - Backend HTTP error for ${fluorophore}: ${msg}`);
+                
+                // Handle 401 Authentication Required - redirect to login
+                if (response.status === 401) {
+                    console.log(`🔐 Authentication required - redirecting to login page`);
+                    const currentPath = encodeURIComponent(window.location.pathname + window.location.search);
+                    window.location.href = `/auth/login?next=${currentPath}`;
+                    return { individual_results: {} };
+                }
+                
+                // Handle 403 Permission Denied - show proper error message
+                if (response.status === 403) {
+                    let permissionMsg = 'You do not have permission to run qPCR analysis.';
+                    if (errorDetails && errorDetails.required_permission) {
+                        permissionMsg = `Permission required: ${errorDetails.required_permission}. Please contact your administrator to grant access.`;
+                    }
+                    console.log(`🚫 Permission denied - showing error message`);
+                    alert(`Authentication Error: ${permissionMsg}`);
+                    return { individual_results: {} };
+                }
+                
                 return { individual_results: {} };
             }
             result = await response.json();
@@ -4029,9 +4088,10 @@ function handleFileUpload(file, type = 'amplification') {
     
     // Enhanced validation for file naming conventions
     if (type === 'amplification') {
-        // Validate that amplification files contain "Quantification Amplification Results"
-        if (!file.name.includes('Quantification Amplification Results')) {
-            alert(`Invalid amplification file name. File must contain "Quantification Amplification Results".\nYour file: ${file.name}\nExpected format: AcBVAB_2578825_CFX367393 - Quantification Amplification Results_Cy5.csv`);
+        // Strict: must match "... - Quantification Amplification Results_<Channel>.csv"
+        const ampStrict = /\bQuantification\s+Amplification\s+Results_[A-Za-z0-9]+\.csv$/i.test(file.name);
+        if (!ampStrict) {
+            alert(`Invalid amplification file name. Expected "... - Quantification Amplification Results_<Channel>.csv".\nYour file: ${file.name}`);
             return;
         }
         
@@ -4042,9 +4102,10 @@ function handleFileUpload(file, type = 'amplification') {
             return;
         }
     } else if (type === 'samples') {
-        // Validate that summary files contain "Quantification Summary"
-        if (!file.name.includes('Quantification Summary')) {
-            alert(`Invalid summary file name. File must contain "Quantification Summary".\nYour file: ${file.name}\nExpected format: AcBVAB_2578825_CFX367393 - Quantification Summary_0.csv`);
+        // Strict: ONLY accept "Quantification Summary_0.csv"
+        const isQuantSummary0 = /\bQuantification\s+Summary_0\.csv$/i.test(file.name);
+        if (!isQuantSummary0) {
+            alert(`Invalid summary file name. Expected "... - Quantification Summary_0.csv".\nYour file: ${file.name}`);
             return;
         }
         
@@ -4307,6 +4368,10 @@ async function performAnalysis() {
     // console.log('🔒 [ANALYSIS START] Starting fresh analysis');
     // console.log('🧪 ANALYSIS DEBUG - performAnalysis function called!');
     
+    // Reset ML notification/banner state for a fresh analysis run
+    window.mlNotificationChecked = false;
+    window.mlAutoAnalysisUserChoice = null;
+
     // Debug: Check current data state
     // console.log('🧪 ANALYSIS DEBUG - Current state:', {
         // amplificationFilesCount: Object.keys(amplificationFiles).length,
@@ -4599,20 +4664,7 @@ async function displayAnalysisResults(results) {
     // Ensure global is set before any UI/chart calls
     window.currentAnalysisResults = results;
     
-    // Show ML notification banner (without auto-running analysis)
-    // User must manually click "Improve Results" to trigger ML analysis
-    if (window.mlFeedbackInterface && results && results.individual_results && !window.mlNotificationChecked) {
-        window.mlNotificationChecked = true; // Set flag to prevent duplicate notifications
-        // Small delay to allow analysis results to be fully processed
-        setTimeout(async () => {
-            try {
-                await window.mlFeedbackInterface.checkForMLNotification();
-                console.log("DEBUG: Called checkForMLNotification after analysis results");
-            } catch (error) {
-                console.log('ML notification check failed:', error);
-            }
-        }, 2000);
-    }
+    // Note: ML notification is triggered once later in this function to avoid duplicates
     
     // IMMEDIATE: Initialize thresholds as soon as analysis results are available
     if (window.initializeChannelThresholds) {
@@ -4752,24 +4804,12 @@ async function displayAnalysisResults(results) {
     
     populateWellSelector(individualResults);
     
-    // Show ML notification banner (without auto-running analysis) 
-    // User must manually click "Improve Results" to trigger ML analysis
-    if (window.mlFeedbackInterface && results && results.individual_results && !window.mlNotificationChecked) {
-        window.mlNotificationChecked = true; // Set flag to prevent duplicate notifications
-        
-        // Show ML banner first and wait for user choice before populating table
-        try {
-            await window.mlFeedbackInterface.checkForMLNotification();
-            // Only populate table after ML banner has been handled
-            populateResultsTable(individualResults);
-        } catch (error) {
-            console.log('ML notification check failed:', error);
-            // Still populate table if ML check fails
-            populateResultsTable(individualResults);
-        }
-    } else {
-        // No ML check needed, populate table immediately
-        populateResultsTable(individualResults);
+    // Always populate the table first
+    populateResultsTable(individualResults);
+
+    // Schedule ML banner only after experiment/test code and table are ready
+    if (window.mlFeedbackInterface && results && results.individual_results) {
+        scheduleMLBannerOnceForSession(results);
     }
 
     // --- Force "Show All Curves" view and activate button after analysis loads ---
@@ -4986,24 +5026,12 @@ async function displayMultiFluorophoreResults(results) {
     }
     populateWellSelector(results.individual_results);
     
-    // Show ML notification banner (without auto-running analysis)
-    // User must manually click "Improve Results" to trigger ML analysis
-    if (window.mlFeedbackInterface && results && results.individual_results && !window.mlNotificationChecked) {
-        window.mlNotificationChecked = true; // Set flag to prevent duplicate notifications
-        
-        // Show ML banner first and wait for user choice before populating table
-        try {
-            await window.mlFeedbackInterface.checkForMLNotification();
-            // Only populate table after ML banner has been handled
-            populateResultsTable(results.individual_results);
-        } catch (error) {
-            console.log('ML notification check failed for multichannel:', error);
-            // Still populate table if ML check fails
-            populateResultsTable(results.individual_results);
-        }
-    } else {
-        // No ML check needed, populate table immediately
-        populateResultsTable(results.individual_results);
+    // Always populate the table first
+    populateResultsTable(results.individual_results);
+
+    // Schedule ML banner only after experiment/test code and table are ready
+    if (window.mlFeedbackInterface && results && results.individual_results) {
+        scheduleMLBannerOnceForSession(results);
     }
     
     // Create control grids for multi-fluorophore analysis
@@ -5128,9 +5156,42 @@ async function saveCombinedSessionToDatabase(results, experimentPattern) {
             return;
         }
         
+        // Transform results to include CalcJ data in backend-expected format
+        const transformedResults = { ...results };
+        if (transformedResults.individual_results) {
+            Object.keys(transformedResults.individual_results).forEach(wellKey => {
+                const well = transformedResults.individual_results[wellKey];
+                
+                // Add CalcJ in backend-expected format - combine all fluorophore values
+                const calcjData = {};
+                const cqjData = {};
+                
+                fluorophores.forEach(fluor => {
+                    // Check if well has calcj_value for this fluorophore
+                    if (well.calcj_value !== undefined && well.calcj_value !== null) {
+                        calcjData[fluor] = well.calcj_value;
+                    }
+                    
+                    // Check if well has cqj_value for this fluorophore  
+                    if (well.cqj_value !== undefined && well.cqj_value !== null) {
+                        cqjData[fluor] = well.cqj_value;
+                    }
+                });
+                
+                if (Object.keys(calcjData).length > 0) {
+                    well.calcj = calcjData;
+                }
+                if (Object.keys(cqjData).length > 0) {
+                    well.cqj = cqjData;
+                }
+                
+                console.log(`💾 [SAVE-TRANSFORM-MULTI] ${wellKey}: calcj=${JSON.stringify(well.calcj)}, cqj=${JSON.stringify(well.cqj)}`);
+            });
+        }
+        
         const sessionData = {
             filename: `Multi-Fluorophore_${experimentPattern}`,
-            combined_results: results,
+            combined_results: transformedResults,
             fluorophores: fluorophores
         };
         
@@ -5197,10 +5258,7 @@ function createUnifiedChart(chartType, selectedFluorophore = 'all', filterType =
     // console.log(`Creating unified chart: ${chartType} for fluorophore: ${selectedFluorophore} with filter: ${filterType}`);
     
     const ctx = document.getElementById('amplificationChart').getContext('2d');
-    
-    // Destroy existing chart safely
-    safeDestroyChart();
-    
+
     const datasets = [];
     const results = currentAnalysisResults.individual_results;
     
@@ -5218,16 +5276,64 @@ function createUnifiedChart(chartType, selectedFluorophore = 'all', filterType =
         }
         
         try {
-            const cycles = typeof wellData.raw_cycles === 'string' ? 
-                JSON.parse(wellData.raw_cycles) : wellData.raw_cycles;
-            const rfu = typeof wellData.raw_rfu === 'string' ? 
-                JSON.parse(wellData.raw_rfu) : wellData.raw_rfu;
-            
-            if (cycles && rfu && cycles.length === rfu.length) {
+            // Robust parsing matching modal logic
+            const toArray = (val) => {
+                if (Array.isArray(val)) return val;
+                if (typeof val === 'string') {
+                    try {
+                        const parsed = JSON.parse(val);
+                        if (Array.isArray(parsed)) return parsed;
+                    } catch {}
+                    const parts = val.split(/[;,\s]+/).map(x => x.trim()).filter(Boolean);
+                    const nums = parts.map(Number).filter(n => Number.isFinite(n));
+                    if (nums.length > 0) return nums;
+                }
+                return [];
+            };
+
+            let cycles = toArray(wellData.raw_cycles);
+            let rfu = toArray(wellData.raw_rfu);
+            // Fallback to alternate fields
+            if ((!cycles || cycles.length === 0) && Array.isArray(wellData.cycles)) cycles = [...wellData.cycles];
+            if ((!rfu || rfu.length === 0) && Array.isArray(wellData.rfu)) rfu = [...wellData.rfu];
+            // Fallback to raw_data points
+            if ((cycles.length === 0 || rfu.length === 0) && wellData.raw_data) {
+                try {
+                    const rawData = typeof wellData.raw_data === 'string' ? JSON.parse(wellData.raw_data) : wellData.raw_data;
+                    if (Array.isArray(rawData) && rawData.length > 0) {
+                        const xs = [];
+                        const ys = [];
+                        rawData.forEach(p => {
+                            if (p && typeof p === 'object') {
+                                const x = (p.x ?? p.cycle ?? p.Cycle ?? p[0]);
+                                const y = (p.y ?? p.rfu ?? p.RFU ?? p[1]);
+                                if (Number.isFinite(Number(x)) && Number.isFinite(Number(y))) {
+                                    xs.push(Number(x));
+                                    ys.push(Number(y));
+                                }
+                            }
+                        });
+                        if (xs.length > 0 && ys.length > 0) {
+                            cycles = xs;
+                            rfu = ys;
+                        }
+                    }
+                } catch {}
+            }
+            // Synthesize cycles if missing but RFU exists
+            if ((cycles.length === 0 || cycles.length !== rfu.length) && rfu.length > 0) {
+                cycles = Array.from({ length: rfu.length }, (_, i) => i + 1);
+            }
+            // Trim to min length
+            if (cycles.length !== rfu.length) {
+                const m = Math.min(cycles.length, rfu.length);
+                cycles = cycles.slice(0, m);
+                rfu = rfu.slice(0, m);
+            }
+
+            if (cycles && rfu && cycles.length > 0 && cycles.length === rfu.length) {
                 const wellId = wellData.well_id || wellKey.split('_')[0];
                 const fluorophore = wellData.fluorophore || 'Unknown';
-                
-                // Create dataset with appropriate styling
                 const dataset = createDatasetForWell(wellId, fluorophore, cycles, rfu, index, chartType);
                 datasets.push(dataset);
             }
@@ -5237,9 +5343,14 @@ function createUnifiedChart(chartType, selectedFluorophore = 'all', filterType =
     });
     
     if (datasets.length === 0) {
+        // No matching datasets for this filter; keep existing chart visible to avoid a blank UI
         // console.warn(`No data available for ${chartType} chart with filter ${filterType}`);
+        window.chartInitializing = false;
         return;
     }
+
+    // Destroy existing chart safely (only after we know we have data to show)
+    safeDestroyChart();
     
     // Create chart configuration
     const chartConfig = createChartConfiguration(
@@ -5286,20 +5397,33 @@ function createUnifiedChart(chartType, selectedFluorophore = 'all', filterType =
 
 // Helper function to determine if a well should be included based on filter type
 function shouldIncludeWell(wellData, filterType) {
+    // Unified strict criteria used across table/details
     const amplitude = wellData.amplitude || 0;
-    const isGoodSCurve = wellData.is_good_scurve || false;
-    
-    switch (filterType) {
+    const isGoodSCurve = Boolean(wellData.is_good_scurve);
+
+    // Determine anomalies once
+    let hasAnomalies = false;
+    if (wellData.anomalies) {
+        try {
+            const anomalies = typeof wellData.anomalies === 'string' ? JSON.parse(wellData.anomalies) : wellData.anomalies;
+            hasAnomalies = Array.isArray(anomalies) && anomalies.length > 0 && !(anomalies.length === 1 && anomalies[0] === 'None');
+        } catch (e) {
+            hasAnomalies = true;
+        }
+    }
+    const cqVal = wellData.cq_value;
+
+    switch ((filterType || 'all')) {
         case 'all':
             return true;
-        case 'good':
-            return amplitude > 500;
+        case 'good': // legacy "good" meaning POS-like strong S-curves
         case 'pos':
-            return isGoodSCurve && amplitude > 500;
+            return isGoodSCurve && amplitude > 500 && !hasAnomalies;
         case 'neg':
-            return isGoodSCurve && amplitude <= 500;
+            return (amplitude < 400 || !isGoodSCurve || isNaN(Number(cqVal)));
         case 'redo':
-            return !isGoodSCurve;
+            return (!isGoodSCurve || (amplitude >= 400 && amplitude <= 500) || (amplitude > 500 && hasAnomalies))
+                   && !(amplitude < 400 || !isGoodSCurve || isNaN(Number(cqVal)));
         default:
             return true;
     }
@@ -5375,145 +5499,84 @@ function updateVisibleChannels(selectedFluorophore, datasets) {
 function populateFluorophoreSelector(individualResults) {
     const fluorophoreSelector = document.getElementById('fluorophoreSelect');
     if (!fluorophoreSelector) return;
-    
+
     // Store results globally for filtering
-    // 🛡️ PROTECTED: Use safe setting to prevent contamination
     if (!setAnalysisResults({ individual_results: individualResults }, 'fresh-analysis-individual')) {
-        // console.warn('🛡️ Individual results setting was blocked');
+        // Protected set may be blocked in some views; safe to ignore
     }
-    
-    // Clear existing options except "All Fluorophores"
+
+    // Reset options with the "All" default first
     fluorophoreSelector.innerHTML = '<option value="all">All Fluorophores</option>';
-    
-    // Get unique fluorophores
-    const fluorophores = [...new Set(Object.values(individualResults).map(result => result.fluorophore || 'Unknown'))];
+
+    // Unique fluorophores in preferred order
+    const fluorophores = [...new Set(Object.values(individualResults).map(r => r.fluorophore || 'Unknown'))];
     const fluorophoreOrder = ['FAM', 'HEX', 'Texas Red', 'Cy5'];
-    
-    // Sort fluorophores
     fluorophores.sort((a, b) => {
-        const aIndex = fluorophoreOrder.indexOf(a);
-        const bIndex = fluorophoreOrder.indexOf(b);
-        
-        if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
-        if (aIndex !== -1) return -1;
-        if (bIndex !== -1) return 1;
+        const ai = fluorophoreOrder.indexOf(a);
+        const bi = fluorophoreOrder.indexOf(b);
+        if (ai !== -1 && bi !== -1) return ai - bi;
+        if (ai !== -1) return -1;
+        if (bi !== -1) return 1;
         return a.localeCompare(b);
     });
-    
-    // Get current experiment pattern and extract test code for pathogen targets
+
+    // Determine test code for pathogen target hints
     const experimentPattern = getCurrentFullPattern();
     const testCode = extractTestCode(experimentPattern);
-    
-    // Add fluorophore options with well counts and pathogen targets
-    fluorophores.forEach(fluorophore => {
-        const count = Object.values(individualResults).filter(result => 
-            (result.fluorophore || 'Unknown') === fluorophore
-        ).length;
-        
-        // Get pathogen target for this fluorophore
-        const pathogenTarget = getPathogenTarget(testCode, fluorophore);
-        const displayTarget = pathogenTarget !== "Unknown" ? ` - ${pathogenTarget}` : "";
-        
-        const option = document.createElement('option');
-        option.value = fluorophore;
-        option.textContent = `${fluorophore}${displayTarget} (${count} wells)`;
-        fluorophoreSelector.appendChild(option);
-    });
-    
-    // Add event listener for fluorophore filtering - uses state management
-fluorophoreSelector.addEventListener('change', function() {
-    const selectedFluorophore = this.value;
-    // console.log('🔄 FLUOROPHORE - Selector changed to:', selectedFluorophore);
-    
-    // Update app state - this will coordinate all UI elements
-    updateAppState({
-        currentFluorophore: selectedFluorophore
-    });
-    
-    // Update threshold input for new fluorophore
-    setTimeout(() => {
-        updateThresholdInputFromState();
-    }, 50);
-    
-    // Reset chart mode to 'all' and update display
-    currentChartMode = 'all';
-    updateChartDisplayMode();
-    
-    // Update button states to reflect 'all' mode
-    const buttons = document.querySelectorAll('.view-controls .control-btn');
-    buttons.forEach(btn => btn.classList.remove('active'));
-    const showAllBtn = document.getElementById('showAllBtn');
-    if (showAllBtn) {
-        showAllBtn.classList.add('active');
-    }
-});
-}
 
-/**
- * Universal filter synchronization function to ensure all filter dropdowns match table state
- */
-function synchronizeAllFilterStates() {
-    // console.log('🔄 SYNC - Starting universal filter state synchronization');
-    
-    try {
-        // Get current visible wells in table
-        const visibleWells = [];
-        const tableRows = document.querySelectorAll('#resultsTable tbody tr:not([style*="display: none"])');
-        
-        tableRows.forEach(row => {
-            const wellId = row.querySelector('td:first-child')?.textContent?.trim();
-            if (wellId) {
-                visibleWells.push(wellId);
-            }
-        });
-        
-        // console.log(`🔄 SYNC - Found ${visibleWells.length} visible wells in table`);
-        
-        // Synchronize well selector dropdown
-        const wellSelector = document.getElementById('wellSelector');
-        if (wellSelector && visibleWells.length > 0) {
-            // Check if current selection is valid
-            const currentValue = wellSelector.value;
-            const isCurrentVisible = visibleWells.includes(currentValue);
-            
-            if (!isCurrentVisible && currentValue !== 'all') {
-                // Reset to first visible well or 'all'
-                if (visibleWells.length === 1) {
-                    wellSelector.value = visibleWells[0];
-                } else {
-                    wellSelector.value = 'all';
-                }
-                // console.log(`🔄 SYNC - Updated well selector from '${currentValue}' to '${wellSelector.value}'`);
-            }
-        }
-        
-        // Synchronize fluorophore selector
-        const fluorophoreSelector = document.getElementById('fluorophoreSelect');
-        if (fluorophoreSelector && currentAnalysisResults?.individual_results) {
-            const visibleFluorophores = new Set();
-            
-            visibleWells.forEach(wellId => {
-                const wellData = currentAnalysisResults.individual_results[wellId];
-                if (wellData?.fluorophore) {
-                    visibleFluorophores.add(wellData.fluorophore);
-                }
-            });
-            
-            const currentFluor = fluorophoreSelector.value;
-            if (currentFluor !== 'all' && !visibleFluorophores.has(currentFluor)) {
-                if (visibleFluorophores.size === 1) {
-                    fluorophoreSelector.value = Array.from(visibleFluorophores)[0];
-                } else {
-                    fluorophoreSelector.value = 'all';
-                }
-                // console.log(`🔄 SYNC - Updated fluorophore selector from '${currentFluor}' to '${fluorophoreSelector.value}'`);
-            }
-        }
-        
-        // console.log('🔄 SYNC - Filter synchronization completed successfully');
-        
-    } catch (error) {
-        // console.error('🔄 SYNC - Error during filter synchronization:', error);
+    // Populate options with counts and targets
+    fluorophores.forEach(fluor => {
+        const count = Object.values(individualResults).filter(r => (r.fluorophore || 'Unknown') === fluor).length;
+        const pathogenTarget = getPathogenTarget(testCode, fluor);
+        const displayTarget = pathogenTarget !== 'Unknown' ? ` - ${pathogenTarget}` : '';
+        const opt = document.createElement('option');
+        opt.value = fluor;
+        opt.textContent = `${fluor}${displayTarget} (${count} wells)`;
+        fluorophoreSelector.appendChild(opt);
+    });
+
+    // Change handler keeps state and UI in sync
+    fluorophoreSelector.addEventListener('change', function () {
+        const selectedFluorophore = this.value;
+        updateAppState({ currentFluorophore: selectedFluorophore });
+        setTimeout(() => { try { updateThresholdInputFromState(); } catch (e) {} }, 50);
+        currentChartMode = 'all';
+        try { updateChartDisplayMode(); } catch (e) {}
+        const buttons = document.querySelectorAll('.view-controls .control-btn');
+        buttons.forEach(btn => btn.classList.remove('active'));
+        const showAllBtn = document.getElementById('showAllBtn');
+        if (showAllBtn) showAllBtn.classList.add('active');
+    });
+
+    // Auto-default selection
+    let requiredChannels = [];
+    if (typeof getRequiredChannels === 'function' && testCode) {
+        try { requiredChannels = getRequiredChannels(testCode) || []; } catch (e) { requiredChannels = []; }
+    }
+    const uniqueFluors = [...new Set(Object.values(individualResults)
+        .map(r => r.fluorophore)
+        .filter(f => f && f !== 'Unknown'))];
+
+    let targetDefault = null;
+    if (requiredChannels.length === 1) {
+        const onlyReq = requiredChannels[0];
+        const hasOption = Array.from(fluorophoreSelector.options).some(opt => opt.value === onlyReq);
+        if (hasOption) targetDefault = onlyReq;
+    }
+    if (!targetDefault && uniqueFluors.length === 1) {
+        targetDefault = uniqueFluors[0];
+    }
+
+    if (targetDefault) {
+        fluorophoreSelector.value = targetDefault;
+        updateAppState({ currentFluorophore: targetDefault });
+        setTimeout(() => { try { updateThresholdInputFromState(); } catch (e) {} }, 50);
+        if (typeof window !== 'undefined') window.currentChartMode = 'all';
+        try { updateChartDisplayMode(); } catch (e) {}
+    } else {
+        // Multiple channels: keep "All Fluorophores"
+        fluorophoreSelector.value = 'all';
+        updateAppState({ currentFluorophore: 'all' });
     }
 }
 
@@ -5548,10 +5611,30 @@ function filterWellsByFluorophore(selectedFluorophore) {
     allOption.textContent = selectedFluorophore === 'all' ? 'All Wells Overlay' : `All ${selectedFluorophore} Wells`;
     wellSelector.appendChild(allOption);
     
-    // Filter results by fluorophore
+    // Filter results by fluorophore (more permissive for debugging missing fluorophore assignments)
     const filteredResults = Object.entries(analysisResults.individual_results).filter(([wellKey, result]) => {
         if (selectedFluorophore === 'all') return true;
-        return (result.fluorophore || 'Unknown') === selectedFluorophore;
+        
+        const resultFluorophore = result.fluorophore || 'Unknown';
+        
+        // Primary match: exact fluorophore match
+        if (resultFluorophore === selectedFluorophore) {
+            return true;
+        }
+        
+        // Secondary match: include wells with missing fluorophore data if they look like samples
+        // This helps with cases like A20 where fluorophore assignment might be missing
+        if (resultFluorophore === 'Unknown' && selectedFluorophore !== 'Unknown') {
+            // Check if this looks like a sample well (A1, B2, etc.) rather than a control
+            const wellId = result.well_id || wellKey;
+            const samplePattern = /^[A-H]\d+$/i; // Matches A1, B2, H12, etc.
+            if (samplePattern.test(wellId) || samplePattern.test(wellKey)) {
+                console.log(`🔍 WELL-FILTER: Including ${wellKey} (${wellId}) with missing fluorophore in ${selectedFluorophore} filter`);
+                return true;
+            }
+        }
+        
+        return false;
     });
     
     // Sort wells according to the selected mode
@@ -5621,9 +5704,9 @@ function populateWellSelector(individualResults) {
     // First populate the fluorophore selector
     populateFluorophoreSelector(individualResults);
 
-    // Always default to 'all' fluorophores ("All Wells Overlay") on load, even for single-channel runs
-    // This ensures the user always sees the overlay option by default
-    filterWellsByFluorophore('all');
+    // Respect the selector's default: if a single required/unique channel was chosen, use it; else 'all'
+    const currentFluor = (window.appState && window.appState.currentFluorophore) ? window.appState.currentFluorophore : 'all';
+    filterWellsByFluorophore(currentFluor);
 
     // Optionally, set the well selector to 'ALL_WELLS' if present
     const wellSelector = document.getElementById('wellSelect');
@@ -5633,8 +5716,8 @@ function populateWellSelector(individualResults) {
             wellSelector.value = 'ALL_WELLS';
         }
     }
-    // Always force "Show All Curves" view and activate button after analysis loads
-    if (typeof showAllCurves === 'function') showAllCurves('all');
+    // Default view respects current fluor; keep multi-curve overlay by default
+    if (typeof showAllCurves === 'function') showAllCurves(currentFluor);
     const showAllBtn = document.getElementById('showAllBtn');
     if (showAllBtn) showAllBtn.classList.add('active');
 }
@@ -5951,6 +6034,46 @@ function onScaleChange(newScale) {
 // ========================================
 
 /**
+ * Heuristic to decide if a result is an edge case when explicit flag is absent.
+ * Preserves legacy behavior: still recognize edge cases if they fall outside rules.
+ */
+function isEdgeCaseClassification(result) {
+    if (!result) return false;
+    // 1) Respect explicit edge_case flag if present
+    if (result.curve_classification && result.curve_classification.edge_case === true) return true;
+
+    // 2) Use classification categories commonly treated as uncertain
+    const cls = (result.curve_classification && result.curve_classification.classification) ||
+                result.classification || '';
+    const clsNorm = String(cls).toUpperCase();
+    if (clsNorm === 'REDO' || clsNorm === 'INDETERMINATE' || clsNorm === 'UNKNOWN') return true;
+
+    // 3) Borderline amplitude band (same thresholds used for POS/NEG split)
+    const amp = Number(result.amplitude || 0);
+    if (!Number.isNaN(amp) && amp >= 400 && amp <= 500) return true;
+
+    // 4) Presence of anomalies
+    let hasAnomalies = false;
+    if (result.anomalies) {
+        try {
+            const anomalies = typeof result.anomalies === 'string' ? JSON.parse(result.anomalies) : result.anomalies;
+            hasAnomalies = Array.isArray(anomalies) && anomalies.length > 0 && !(anomalies.length === 1 && anomalies[0] === 'None');
+        } catch (e) {
+            hasAnomalies = true; // Conservative: treat parse issues as anomalous
+        }
+    }
+    if (hasAnomalies) return true;
+
+    // 5) Bad S-curve shape combined with non-NEG classification
+    if (result.is_good_scurve === false && clsNorm !== 'NEG') return true;
+
+    return false;
+}
+
+// Expose globally so other modules (ML UI) can use the same heuristic
+window.isEdgeCaseClassification = isEdgeCaseClassification;
+
+/**
  * Get all visible edge cases from the current results table
  * @returns {Array} Array of edge case well objects with details
  */
@@ -5976,9 +6099,10 @@ function getVisibleEdgeCases() {
         const result = currentAnalysisResults.individual_results[wellKey];
         if (!result) return;
         
-        // Check if this is an edge case
-        const isEdgeCase = result.curve_classification && 
-                          result.curve_classification.edge_case === true;
+        // Check if this is an edge case (explicit flag or heuristic fallback)
+        const isEdgeCase = window.isEdgeCaseClassification ? 
+            window.isEdgeCaseClassification(result) : 
+            (result.curve_classification && result.curve_classification.edge_case === true);
         
         if (isEdgeCase) {
             edgeCases.push({
@@ -6623,35 +6747,36 @@ function updateSelectedCurveDetails() {
 }
 
 function showFilteredCurveDetails(fluorophore, filterMode) {
-    if (!fluorophore || fluorophore === 'all' || !filterMode || filterMode === 'all') {
+    if (!fluorophore || !filterMode || filterMode === 'all') {
         return;
     }
     
     // Set the current fluorophore for filtering via state management
-    updateAppState({
-        currentFluorophore: fluorophore
-    });
+    // If user chose a specific fluorophore, lock state; if 'all', keep current state
+    if (fluorophore !== 'all') {
+        updateAppState({ currentFluorophore: fluorophore });
+    }
     
     // Generate filtered samples HTML
     const filteredSamplesHtml = generateFilteredSamplesHtml(filterMode);
     
     const filterTypeLabel = filterMode.toUpperCase();
     const detailsHtml = `
-        <h3>${filterTypeLabel} Results for ${fluorophore}</h3>
+        <h3>${filterTypeLabel} Results for ${fluorophore === 'all' ? 'All' : fluorophore}</h3>
         <div class="quality-status good">
             <strong>Filter Mode:</strong> ${filterTypeLabel} Results Only
         </div>
         <div class="metrics-grid">
             <div class="metric">
                 <span class="metric-label">Fluorophore:</span>
-                <span class="metric-value">${fluorophore}</span>
+                <span class="metric-value">${fluorophore === 'all' ? 'All' : fluorophore}</span>
             </div>
             <div class="metric">
                 <span class="metric-label">Filter:</span>
                 <span class="metric-value">${filterTypeLabel}</span>
             </div>
         </div>
-        ${filteredSamplesHtml}
+        ${generateFilteredSamplesHtml(filterMode)}
     `;
     
     document.getElementById('curveDetails').innerHTML = detailsHtml;
@@ -6666,7 +6791,7 @@ function generateFilteredSamplesHtml(effectiveFilterMode = null) {
     const filterMode = effectiveFilterMode || currentFilterMode;
     
     // Ensure filter variables are defined (defensive programming for historical sessions)
-    if (!filterMode || !currentFluorophore || filterMode === 'all' || currentFluorophore === 'all') {
+    if (!filterMode || filterMode === 'all') {
         return '';
     }
     
@@ -6676,7 +6801,7 @@ function generateFilteredSamplesHtml(effectiveFilterMode = null) {
     
     Object.entries(currentAnalysisResults.individual_results).forEach(([wellKey, result]) => {
         const resultFluorophore = result.fluorophore || 'Unknown';
-        if (resultFluorophore !== currentFluorophore) return;
+        if (currentFluorophore && currentFluorophore !== 'all' && resultFluorophore !== currentFluorophore) return;
 
         const amplitude = result.amplitude || 0;
 
@@ -6742,7 +6867,7 @@ function generateFilteredSamplesHtml(effectiveFilterMode = null) {
     
     return `
         <div class="filtered-samples-section">
-            <h4>${filterType} Samples (${currentFluorophore})</h4>
+            <h4>${filterType} Samples (${currentFluorophore && currentFluorophore !== 'all' ? currentFluorophore : 'All'})</h4>
             <div class="filtered-samples-list">
                 ${sampleListHtml}
             </div>
@@ -6778,33 +6903,57 @@ function updateChart(wellKey, cyclesData = null, rfuData = null, wellData = null
         cycles = cyclesData;
         rfu = rfuData;
     } else {
+        // Use the same robust conversion as the modal
+        const toArray = (val) => {
+            if (Array.isArray(val)) return val;
+            if (val && typeof val === 'object' && Number.isFinite(val.length) && val.length > 0) {
+                try { return Array.from(val); } catch { /* noop */ }
+            }
+            if (val && typeof val === 'object') {
+                try {
+                    const keys = Object.keys(val);
+                    const numeric = keys.every(k => /^\d+$/.test(k));
+                    const ordered = numeric ? keys.sort((a,b) => Number(a) - Number(b)) : keys;
+                    const arr = ordered.map(k => val[k]).map(Number).filter(n => Number.isFinite(n));
+                    if (arr.length > 0) return arr;
+                } catch { /* noop */ }
+            }
+            if (typeof val === 'string') {
+                try {
+                    const parsed = JSON.parse(val);
+                    if (Array.isArray(parsed)) return parsed;
+                    if (parsed && typeof parsed === 'object') {
+                        const keys = Object.keys(parsed);
+                        const numeric = keys.every(k => /^\d+$/.test(k));
+                        const ordered = numeric ? keys.sort((a,b) => Number(a) - Number(b)) : keys;
+                        const arr = ordered.map(k => parsed[k]).map(Number).filter(n => Number.isFinite(n));
+                        if (arr.length > 0) return arr;
+                    }
+                } catch { /* fall through */ }
+                const parts = val.split(/[;,\s]+/).map(x => x.trim()).filter(Boolean);
+                const nums = parts.map(Number).filter(n => Number.isFinite(n));
+                if (nums.length > 0) return nums;
+            }
+            return [];
+        };
+
         try {
-            if (wellResult.raw_cycles) {
-                let parsedCycles = typeof wellResult.raw_cycles === 'string' ? 
-                    JSON.parse(wellResult.raw_cycles) : wellResult.raw_cycles;
-                
-                // Convert object to array if needed (database sometimes stores as object)
-                if (parsedCycles && typeof parsedCycles === 'object' && !Array.isArray(parsedCycles)) {
-                    cycles = Object.values(parsedCycles);
-                } else {
-                    cycles = parsedCycles;
-                }
-            }
-            if (wellResult.raw_rfu) {
-                let parsedRfu = typeof wellResult.raw_rfu === 'string' ? 
-                    JSON.parse(wellResult.raw_rfu) : wellResult.raw_rfu;
-                
-                // Convert object to array if needed (database sometimes stores as object)
-                if (parsedRfu && typeof parsedRfu === 'object' && !Array.isArray(parsedRfu)) {
-                    rfu = Object.values(parsedRfu);
-                } else {
-                    rfu = parsedRfu;
-                }
-            }
+            if (wellResult.raw_cycles !== undefined) cycles = toArray(wellResult.raw_cycles);
+            if (wellResult.raw_rfu !== undefined) rfu = toArray(wellResult.raw_rfu);
         } catch (e) {
-            // console.error('Error parsing raw data for well:', wellKey, e);
             return;
         }
+    }
+
+    // If we have RFU but no cycles, synthesize cycles as 1..N
+    if ((cycles && rfu) && (cycles.length === 0 || cycles.length !== rfu.length) && rfu.length > 0) {
+        cycles = Array.from({ length: rfu.length }, (_, i) => i + 1);
+    }
+    // Ensure equal length by trimming to min length
+    if ((cycles && rfu) && cycles.length !== rfu.length) {
+        const m = Math.min(cycles.length, rfu.length);
+        cycles = cycles.slice(0, m);
+        rfu = rfu.slice(0, m);
     }
     
     if (!cycles || cycles.length === 0 || !rfu || rfu.length === 0) {
@@ -8033,6 +8182,26 @@ function saveAnalysisToHistory(filename, results) {
 
 async function saveSingleFluorophoreSession(filename, results, fluorophore) {
     try {
+        // Transform results to include CalcJ data in backend-expected format
+        const transformedResults = { ...results };
+        if (transformedResults.individual_results) {
+            Object.keys(transformedResults.individual_results).forEach(wellKey => {
+                const well = transformedResults.individual_results[wellKey];
+                
+                // Add CalcJ in backend-expected format: {"FAM": calcj_value}
+                if (well.calcj_value !== undefined && well.calcj_value !== null) {
+                    well.calcj = { [fluorophore]: well.calcj_value };
+                }
+                
+                // Add CQJ in backend-expected format: {"FAM": cqj_value}  
+                if (well.cqj_value !== undefined && well.cqj_value !== null) {
+                    well.cqj = { [fluorophore]: well.cqj_value };
+                }
+                
+                console.log(`💾 [SAVE-TRANSFORM] ${wellKey}: calcj_value=${well.calcj_value} → calcj=${JSON.stringify(well.calcj)}`);
+            });
+        }
+        
         const response = await fetch('/sessions/save-combined', {
             method: 'POST',
             headers: {
@@ -8040,7 +8209,7 @@ async function saveSingleFluorophoreSession(filename, results, fluorophore) {
             },
             body: JSON.stringify({
                 filename: filename,
-                combined_results: results,
+                combined_results: transformedResults,
                 fluorophores: [fluorophore]
             })
         });
@@ -8173,7 +8342,7 @@ function getLocalAnalysisHistory() {
 async function loadAnalysisHistory() {
     try {
         // Try to load from server first
-        const response = await fetch('/sessions');
+        const response = await authenticatedFetch('/sessions');
         const data = await response.json();
         
         if (data.sessions && data.sessions.length > 0) {
@@ -8738,6 +8907,26 @@ function groupSessionsByExperiment(sessions) {
     const combinedSessions = [];
     
     Object.entries(experimentGroups).forEach(([experimentPattern, groupSessions]) => {
+        // 🚨 FIX: Check for existing combined session in database first
+        const existingCombinedSession = groupSessions.find(session => {
+            // Look for session that matches the experiment pattern exactly (no fluorophore suffix)
+            // This indicates a real combined session from the database
+            return session.filename === experimentPattern || 
+                   (session.filename.includes(experimentPattern) && 
+                    !session.filename.includes(' - ') && 
+                    !session.filename.includes('_FAM') && 
+                    !session.filename.includes('_HEX') && 
+                    !session.filename.includes('_Cy5') && 
+                    !session.filename.includes('_Texas Red'));
+        });
+        
+        if (existingCombinedSession) {
+            // 🎯 Use the real combined session from database instead of creating virtual one
+            console.log(`✅ Found existing combined session in database: ${existingCombinedSession.filename} (ID: ${existingCombinedSession.id})`);
+            combinedSessions.push(existingCombinedSession);
+            return;
+        }
+        
         // Filter out sessions without detectable fluorophores for multi-fluorophore combinations
         const validSessions = groupSessions.filter(session => {
             const fluorophore = detectFluorophoreFromFilename(session.filename);
@@ -8972,13 +9161,23 @@ function calculatePathogenBreakdownFromSessions(sessions) {
         }
         
         let positive = 0;
-        const total = session.well_results ? session.well_results.length : 0;
+        let total = 0; // Count only non-control wells
         
         if (session.well_results) {
             session.well_results.forEach(well => {
-                const amplitude = well.amplitude || 0;
-                if (well.is_good_scurve && amplitude > 500) {
-                    positive++;
+                // Check if this is a control well - exclude from statistics
+                const sampleName = well.sample_name || '';
+                const isControl = sampleName && ['H-', 'M-', 'L-', 'NTC-'].some(prefix => 
+                    sampleName.startsWith(prefix)
+                );
+                
+                // Only count non-control wells
+                if (!isControl) {
+                    total++;
+                    const amplitude = well.amplitude || 0;
+                    if (well.is_good_scurve && amplitude > 500) {
+                        positive++;
+                    }
                 }
             });
         }
@@ -9302,23 +9501,29 @@ function displayAnalysisHistory(sessions) {
     
     // Group sessions by experiment pattern and create multi-fluorophore sessions
     const groupedSessions = groupSessionsByExperiment(sessions);
+
+    // 🔒 UI-only soft delete: filter out any hidden session IDs from localStorage
+    const hiddenIds = new Set(
+        (() => {
+            try { return JSON.parse(localStorage.getItem('hiddenSessionIds_v1') || '[]'); } catch (e) { return []; }
+        })().map(String)
+    );
+    const visibleGroupedSessions = groupedSessions.filter(s => !hiddenIds.has(String(s.id)));
     
     // Store grouped sessions globally for reference
-    window.currentCombinedSessions = groupedSessions;
+    window.currentCombinedSessions = visibleGroupedSessions;
+    // Back-compat: also expose under analysisHistory so other callers can find them
+    // (Some legacy code still reads window.analysisHistory when resolving combined sessions)
+    window.analysisHistory = visibleGroupedSessions;
     
     // Sort grouped sessions by upload timestamp (newest first)
-    const sortedSessions = [...groupedSessions].sort((a, b) => 
+    const sortedSessions = [...visibleGroupedSessions].sort((a, b) => 
         new Date(b.upload_timestamp) - new Date(a.upload_timestamp)
     );
     
     const tableHtml = `
         <div class="history-table-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
             <span style="font-weight: bold; color: #2c3e50;">Session History</span>
-            <button onclick="deleteAllSessions()" 
-                    style="background: #e74c3c; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px;"
-                    title="Delete all analysis sessions">
-                Delete All
-            </button>
         </div>
         <table class="history-table">
             <thead>
@@ -9402,26 +9607,10 @@ function displayLocalAnalysisHistory(history) {
 async function loadSessionDetails(sessionId) {
     try {
         console.log(`🔄 Loading session ${sessionId} from database...`);
-        
-        // Check if this is a fresh load after refresh
-        const pendingSessionLoad = localStorage.getItem('pendingSessionLoad');
-        if (!pendingSessionLoad) {
-            // First time - store session ID and refresh
-            console.log('Storing session ID and refreshing browser');
-            safeSetItem(localStorage, 'pendingSessionLoad', sessionId);
-            window.location.reload();
-            return;
-        } else if (pendingSessionLoad !== sessionId) {
-            // Different session ID - store new one and refresh
-            console.log('Different session - storing new ID and refreshing');
-            safeSetItem(localStorage, 'pendingSessionLoad', sessionId);
-            window.location.reload();
-            return;
-        }
-        
-        // This is after refresh - clear the flag and proceed with loading
-        localStorage.removeItem('pendingSessionLoad');
-        console.log(`🔄 Loading session after refresh: ${sessionId}`);
+    // Clear any legacy pendingSessionLoad flag to prevent redundant loads
+    try { localStorage.removeItem('pendingSessionLoad'); } catch (e) {}
+    // In-place session loading (no full page reload to preserve UI state)
+    // Any necessary cleanup is handled by downstream display functions
         
         // Handle combined sessions
         if (typeof sessionId === 'string' && sessionId.startsWith('combined_')) {
@@ -9442,7 +9631,7 @@ async function loadSessionDetails(sessionId) {
             }
         }
         
-        // 🆕 Use the new database loading function for individual sessions
+    // 🆕 Use the new database loading function for individual sessions
         const sessionData = await window.loadSessionFromDatabase(sessionId);
         if (!sessionData) {
             throw new Error('Failed to load session from database');
@@ -9623,8 +9812,18 @@ transformedResults.individual_results[wellKey] = {
     threshold_value: well.threshold_value ? parseFloat(well.threshold_value) : null,
     
     // 🔍 Add CQJ and CalcJ fields from database for ML classification
-    cqj: well.cqj || {},
-    calcj: well.calcj || {},
+    cqj: (() => {
+        try {
+            if (!well.cqj) return {};
+            return typeof well.cqj === 'string' ? JSON.parse(well.cqj) : well.cqj;
+        } catch (e) { return {}; }
+    })(),
+    calcj: (() => {
+        try {
+            if (!well.calcj) return {};
+            return typeof well.calcj === 'string' ? JSON.parse(well.calcj) : well.calcj;
+        } catch (e) { return {}; }
+    })(),
     
     // 🔍 CRITICAL FIX: Calculate SNR from raw data for individual session loading
     snr: (() => {
@@ -9684,7 +9883,11 @@ transformedResults.individual_results[wellKey] = {
             autoSelectedFluorophore = sessionFluorophores[0];
         }
         
-        // Set analysis results for proper display (permanent for history loading)
+    // Before displaying, reset ML notification state so banners/buttons appear for loaded sessions
+    window.mlNotificationChecked = false;
+    window.mlAutoAnalysisUserChoice = null;
+
+    // Set analysis results for proper display (permanent for history loading)
         setAnalysisResults(transformedResults, 'history-session-load');
         
         // 🔍 DISABLED: ML enhancement for session data
@@ -9722,7 +9925,7 @@ transformedResults.individual_results[wellKey] = {
         // This ensures control grids appear for both single-channel and multi-channel tests
         // console.log('🔍 UNIVERSAL DISPLAY - Triggering control validation for individual session');
         
-        // Display using multi-fluorophore layout (handles both single and multi-channel)
+    // Display using multi-fluorophore layout (handles both single and multi-channel)
         displayMultiFluorophoreResults(transformedResults);
         
         // Clear the preselected fluorophore after use
@@ -9857,7 +10060,7 @@ async function deleteSession(sessionId, event) {
     deleteBtn.disabled = true;
     
     try {
-        const response = await fetch(`/sessions/${sessionId}`, { method: 'DELETE' });
+        const response = await authenticatedFetch(`/sessions/${sessionId}`, { method: 'DELETE' });
         
         if (!response.ok) {
             const errorData = await response.json();
@@ -10091,6 +10294,56 @@ function exportResults() {
     a.click();
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
+}
+
+// Defer ML banner until we have experiment pattern, test code, and a rendered table for accurate edge-case counts
+function scheduleMLBannerOnceForSession(results) {
+    // Derive a stable session key using multiple fallbacks to avoid duplicate banners
+    let sessionKey = null;
+    try {
+        const pattern = (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null;
+        const testCode = (pattern && typeof extractTestCode === 'function') ? extractTestCode(pattern) : null;
+        const baseName = (results && results.filename) ? String(results.filename).split(' - ')[0] : null;
+        sessionKey = results.session_id || pattern || baseName || testCode || 'unknown-session';
+    } catch {
+        sessionKey = results?.session_id || 'unknown-session';
+    }
+    window._mlBannerShownFor = window._mlBannerShownFor || new Set();
+    if (window._mlBannerShownFor.has(sessionKey)) return; // already handled
+
+    // Helper: resolve when we have a test code and results table body present
+    const waitForReady = () => new Promise(resolve => {
+        const start = Date.now();
+        const maxMs = 3000; // 3s max wait
+        (function check() {
+            const pattern = (typeof getCurrentFullPattern === 'function') ? getCurrentFullPattern() : null;
+            const testCode = (pattern && typeof extractTestCode === 'function') ? extractTestCode(pattern) : null;
+            const tbody = document.getElementById('resultsTableBody');
+            const tableReady = !!tbody && tbody.querySelectorAll('tr').length > 0;
+            if (testCode && tableReady) return resolve({ pattern, testCode, tableReady });
+            if (Date.now() - start > maxMs) return resolve({ pattern, testCode, tableReady });
+            setTimeout(check, 100);
+        })();
+    });
+
+    waitForReady().then(({ pattern, testCode, tableReady }) => {
+        // Only fire when we have a test code and the table has rows
+        if (!testCode || !tableReady) return;
+        // Final guard against duplicates
+        if (window._mlBannerShownFor.has(sessionKey) || window.mlNotificationChecked) return;
+        window._mlBannerShownFor.add(sessionKey);
+        window.mlNotificationChecked = true;
+        try {
+            if (typeof window.countEdgeCases === 'function') {
+                try { window.countEdgeCases(); } catch (e) {}
+            }
+            if (window.mlFeedbackInterface && typeof window.mlFeedbackInterface.checkForMLNotification === 'function') {
+                window.mlFeedbackInterface.checkForMLNotification().catch(() => {});
+            }
+        } catch (e) {
+            // no-op
+        }
+    });
 }
 
 // Generate CSV with Multi-Fluorophore Support
@@ -12766,17 +13019,26 @@ document.addEventListener('DOMContentLoaded', function() {
     const showSelectedBtn = document.getElementById('showSelectedBtn');
     if (showSelectedBtn) {
         showSelectedBtn.addEventListener('click', function() {
-            currentChartMode = 'selected';
-            updateChartDisplayMode();
-            updateActiveButton(this);
-            // Clear any filtered curve details when switching to selected mode
-            const wellSelector = document.getElementById('wellSelect');
-            if (wellSelector && wellSelector.value && wellSelector.value !== 'ALL_WELLS') {
-                showWellDetails(wellSelector.value);
+            // Prevent the state updater from auto-creating a chart while we switch to selected view
+            window.suppressAutoChartUpdate = true;
+            updateAppState({ currentChartMode: 'selected' });
+            if (window.selectedWellKeys && window.selectedWellKeys.length > 0) {
+                showSelectedCurves(window.selectedWellKeys);
+                updateActiveButton(this);
+            } else {
+                updateChartDisplayMode();
+                const wellSelector = document.getElementById('wellSelect');
+                if (wellSelector && wellSelector.value && wellSelector.value !== 'ALL_WELLS') {
+                    showWellDetails(wellSelector.value);
+                } else {
+                    const details = document.getElementById('curveDetails');
+                    if (details) details.innerHTML = '<p>Select a well to view curve details</p>';
+                }
             }
+            // Re-enable normal auto updates
+            window.suppressAutoChartUpdate = false;
         });
-        // Set as active by default
-        showSelectedBtn.classList.add('active');
+        // Don't force active by default; honor state mapping
     }
     
     // Show All Wells button
@@ -12784,9 +13046,12 @@ document.addEventListener('DOMContentLoaded', function() {
     if (showAllBtn) {
         showAllBtn.addEventListener('click', function() {
             // console.log('Show All Wells button clicked');
+            window.suppressAutoChartUpdate = true;
             updateAppState({ currentChartMode: 'all' });
             // Clear any filtered curve details when switching to all wells mode
             document.getElementById('curveDetails').innerHTML = '<p>Select a well to view individual curve details</p>';
+            try { updateChartDisplayMode(); } catch (e) {}
+            window.suppressAutoChartUpdate = false;
         });
     }
     
@@ -12795,7 +13060,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (showPosBtn) {
         showPosBtn.addEventListener('click', function() {
             // console.log('POS Results button clicked');
+            window.suppressAutoChartUpdate = true;
             updateAppState({ currentChartMode: 'pos' });
+            try { updateChartDisplayMode(); } catch (e) {}
+            window.suppressAutoChartUpdate = false;
         });
     }
     
@@ -12804,7 +13072,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (showNegBtn) {
         showNegBtn.addEventListener('click', function() {
             // console.log('NEG Results button clicked');
+            window.suppressAutoChartUpdate = true;
             updateAppState({ currentChartMode: 'neg' });
+            try { updateChartDisplayMode(); } catch (e) {}
+            window.suppressAutoChartUpdate = false;
         });
     }
     
@@ -12813,7 +13084,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (showRedoBtn) {
         showRedoBtn.addEventListener('click', function() {
             // console.log('REDO Results button clicked');
+            window.suppressAutoChartUpdate = true;
             updateAppState({ currentChartMode: 'redo' });
+            try { updateChartDisplayMode(); } catch (e) {}
+            window.suppressAutoChartUpdate = false;
         });
     }
     
@@ -12838,6 +13112,197 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
+// ==============================
+// Brush selection (Shift + Drag)
+// ==============================
+(function setupBrushSelection() {
+    const canvasEl = document.getElementById('amplificationChart');
+    const containerEl = canvasEl ? canvasEl.parentElement : null;
+    const overlay = document.getElementById('selectionOverlay');
+    if (!canvasEl || !overlay) return;
+
+    let isSelecting = false;
+    let startX = 0, startY = 0, currentX = 0, currentY = 0; // in canvas coordinates
+
+    function onMouseDown(e) {
+        if (!e.shiftKey || !window.amplificationChart) return;
+        const canvasRect = canvasEl.getBoundingClientRect();
+        const containerRect = containerEl.getBoundingClientRect();
+        isSelecting = true;
+        startX = e.clientX - canvasRect.left;
+        startY = e.clientY - canvasRect.top;
+        currentX = startX; currentY = startY;
+        const offsetX = canvasRect.left - containerRect.left;
+        const offsetY = canvasRect.top - containerRect.top;
+        overlay.style.left = (offsetX + startX) + 'px';
+        overlay.style.top = (offsetY + startY) + 'px';
+        overlay.style.width = '0px';
+        overlay.style.height = '0px';
+        overlay.style.display = 'block';
+        e.preventDefault();
+    }
+
+    function onMouseMove(e) {
+        if (!isSelecting) return;
+        const canvasRect = canvasEl.getBoundingClientRect();
+        const containerRect = containerEl.getBoundingClientRect();
+        const offsetX = canvasRect.left - containerRect.left;
+        const offsetY = canvasRect.top - containerRect.top;
+        currentX = Math.min(Math.max(e.clientX - canvasRect.left, 0), canvasRect.width);
+        currentY = Math.min(Math.max(e.clientY - canvasRect.top, 0), canvasRect.height);
+        const x = Math.min(startX, currentX);
+        const y = Math.min(startY, currentY);
+        const w = Math.abs(currentX - startX);
+        const h = Math.abs(currentY - startY);
+        overlay.style.left = (offsetX + x) + 'px';
+        overlay.style.top = (offsetY + y) + 'px';
+        overlay.style.width = w + 'px';
+        overlay.style.height = h + 'px';
+        e.preventDefault();
+    }
+
+    function onMouseUp(e) {
+        if (!isSelecting) return;
+        isSelecting = false;
+        overlay.style.display = 'none';
+        if (!window.amplificationChart || !currentAnalysisResults) return;
+
+        const chart = window.amplificationChart;
+        const chartArea = chart.chartArea;
+        const xScale = chart.scales.x;
+        const yScale = chart.scales.y;
+
+        // Convert selection (canvas coords) and clip to chart area (also in canvas coords)
+        const sx = Math.min(startX, currentX);
+        const sy = Math.min(startY, currentY);
+        const ex = Math.max(startX, currentX);
+        const ey = Math.max(startY, currentY);
+
+        const left = Math.max(sx, chartArea.left);
+        const right = Math.min(ex, chartArea.right);
+        const top = Math.max(sy, chartArea.top);
+        const bottom = Math.min(ey, chartArea.bottom);
+        if (right <= left || bottom <= top) return; // no selection in chart area
+
+        // Map to data values using pixel -> value
+        const xMin = xScale.getValueForPixel(left);
+        const xMax = xScale.getValueForPixel(right);
+        const yMaxVal = yScale.getValueForPixel(top);    // note: y is inverted in pixels
+        const yMinVal = yScale.getValueForPixel(bottom);
+
+        // Collect wells whose any point falls within selection
+        const selected = new Set();
+        const results = currentAnalysisResults.individual_results || {};
+        for (const [wellKey, wellData] of Object.entries(results)) {
+            try {
+                const cycles = typeof wellData.raw_cycles === 'string' ? JSON.parse(wellData.raw_cycles) : wellData.raw_cycles;
+                const rfu = typeof wellData.raw_rfu === 'string' ? JSON.parse(wellData.raw_rfu) : wellData.raw_rfu;
+                if (!cycles || !rfu) continue;
+                for (let i = 0; i < cycles.length; i++) {
+                    const x = cycles[i];
+                    const y = rfu[i];
+                    if (x >= xMin && x <= xMax && y >= yMinVal && y <= yMaxVal) {
+                        selected.add(wellKey);
+                        break;
+                    }
+                }
+            } catch {}
+        }
+
+        window.selectedWellKeys = Array.from(selected);
+        if (window.selectedWellKeys.length > 0) {
+            // Update details panel with selection list
+            updateSelectedDetailsList(window.selectedWellKeys);
+            // Switch to selected mode and display only selected wells
+            currentChartMode = 'selected';
+            showSelectedCurves(window.selectedWellKeys);
+            const showSelectedBtn = document.getElementById('showSelectedBtn');
+            if (showSelectedBtn) updateActiveButton(showSelectedBtn);
+        }
+    }
+
+    canvasEl.addEventListener('mousedown', onMouseDown, { passive: false });
+    window.addEventListener('mousemove', onMouseMove, { passive: false });
+    window.addEventListener('mouseup', onMouseUp, { passive: false });
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            window.selectedWellKeys = [];
+            const details = document.getElementById('curveDetails');
+            if (details) details.innerHTML = '<p>Select a well to view individual curve details</p>';
+            // No chart change on escape; user can click Show All to reset
+        }
+    });
+})();
+
+function updateSelectedDetailsList(wellKeys) {
+    const container = document.getElementById('curveDetails');
+    if (!container) return;
+    if (!currentAnalysisResults || !currentAnalysisResults.individual_results) {
+        container.innerHTML = '<p>No analysis results available</p>';
+        return;
+    }
+    // Build enriched list for selected wells
+    const items = [];
+    let fluor = null;
+    for (const k of wellKeys) {
+        const data = currentAnalysisResults.individual_results[k];
+        if (!data) continue;
+        const wellId = data.well_id || k.split('_')[0];
+        const sampleName = data.sample || data.sample_name || 'N/A';
+        const amplitude = Math.round(Number(data.amplitude || 0));
+        const f = data.fluorophore || 'Unknown';
+        fluor = fluor && fluor !== f ? 'All' : (fluor || f);
+        items.push({ wellId, sampleName, amplitude });
+    }
+    // Sort by well ID (A1..P1, A2..)
+    items.sort((a, b) => {
+        const am = a.wellId.match(/([A-Z]+)(\d+)/);
+        const bm = b.wellId.match(/([A-Z]+)(\d+)/);
+        if (am && bm) {
+            const lc = am[1].localeCompare(bm[1]);
+            if (lc !== 0) return lc;
+            return parseInt(am[2]) - parseInt(bm[2]);
+        }
+        return a.wellId.localeCompare(b.wellId);
+    });
+    const titleFluor = fluor || 'All';
+    const list = items.map(it => `<div class="sample-item"><span class="sample-well">${it.wellId}</span><span class="sample-name">${it.sampleName}</span><span class="sample-amplitude">${it.amplitude}</span></div>`).join('');
+    container.innerHTML = `
+        <div class="filtered-samples-section">
+            <h4>Selected Samples (${titleFluor})</h4>
+            <div class="filtered-samples-list">${list}</div>
+        </div>
+    `;
+}
+
+function showSelectedCurves(wellKeys) {
+    if (!currentAnalysisResults || !currentAnalysisResults.individual_results) return;
+    const ctx = document.getElementById('amplificationChart').getContext('2d');
+    safeDestroyChart();
+    const datasets = [];
+    for (const key of wellKeys) {
+        const wellData = currentAnalysisResults.individual_results[key];
+        if (!wellData) continue;
+        try {
+            const cycles = typeof wellData.raw_cycles === 'string' ? JSON.parse(wellData.raw_cycles) : wellData.raw_cycles;
+            const rfu = typeof wellData.raw_rfu === 'string' ? JSON.parse(wellData.raw_rfu) : wellData.raw_rfu;
+            if (!cycles || !rfu) continue;
+            const wellId = wellData.well_id || key.split('_')[0];
+            const fluorophore = wellData.fluorophore || 'Unknown';
+            const ds = createDatasetForWell(wellId, fluorophore, cycles, rfu, datasets.length, 'multi');
+            datasets.push(ds);
+        } catch {}
+    }
+    if (datasets.length === 0) return;
+    const chartConfig = createChartConfiguration('line', datasets, `Selected Curves (${datasets.length})`);
+    configureChartOptions(chartConfig, 'multi', datasets.length);
+    window.amplificationChart = new Chart(ctx, chartConfig);
+    setTimeout(() => {
+        if (window.updateAllChannelThresholds) window.updateAllChannelThresholds();
+        if (window.amplificationChart?.update) window.amplificationChart.update('none');
+    }, 100);
+}
+
 function updateActiveButton(activeBtn) {
     // Remove active class from all buttons
     const buttons = document.querySelectorAll('.view-controls .control-btn');
@@ -12849,7 +13314,11 @@ function updateActiveButton(activeBtn) {
 
 function updateChartDisplayMode() {
     // console.log('updateChartDisplayMode called with mode:', currentChartMode);
-    
+    // Guard against re-entrant updates during chart init/update
+    if (window.chartInitializing || window.chartUpdating) {
+        return;
+    }
+
     if (!currentAnalysisResults) {
         // console.error('No currentAnalysisResults in updateChartDisplayMode');
         return;
@@ -12870,7 +13339,10 @@ function updateChartDisplayMode() {
     
     switch (currentChartMode) {
         case 'selected':
-            if (selectedWell && selectedWell !== 'ALL_WELLS') {
+            if (window.selectedWellKeys && window.selectedWellKeys.length > 0) {
+                showSelectedCurves(window.selectedWellKeys);
+                updateSelectedDetailsList(window.selectedWellKeys);
+            } else if (selectedWell && selectedWell !== 'ALL_WELLS') {
                 // console.log('Calling showSelectedCurve for:', selectedWell);
                 showSelectedCurve(selectedWell);
             } else {
@@ -13232,43 +13704,60 @@ function showWellModal(wellKey) {
 function buildModalNavigationList() {
     modalNavigationList = [];
     
-    // CRITICAL FIX: Build navigation from ALL analysis results, not just visible table rows
-    // This prevents filters from breaking modal navigation after expert feedback
-    if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
-        console.log('🔄 Building modal navigation list from complete analysis results');
-        const allResults = window.currentAnalysisResults.individual_results;
-        const allWellKeys = Object.keys(allResults);
-        
-        console.log('� Total wells in analysis results:', allWellKeys.length);
-        
-        allWellKeys.forEach((wellKey, index) => {
-            const wellData = allResults[wellKey];
-            const sampleName = wellData.sample_name || wellData.sample || 'Unknown Sample';
-            
-            modalNavigationList.push({
-                wellKey: wellKey,
-                sampleName: sampleName
-            });
-            console.log(`📋 Added to navigation: ${wellKey} (${sampleName})`);
-        });
-    } else {
-        console.warn('⚠️ No analysis results available for building modal navigation, trying table rows...');
-        
-        // Fallback: Build from table rows if analysis results not available
-        const tableRows = document.querySelectorAll('#resultsTable tbody tr[data-well-key]');
-        console.log('📊 Fallback: Using table rows, found:', tableRows.length);
-        
+    // Primary: build navigation from the current table DOM order (matches user-visible sort/filter)
+    const tableRows = document.querySelectorAll('#resultsTableBody tr[data-well-key]');
+    if (tableRows && tableRows.length > 0) {
+        console.log('🔄 Building modal navigation list from current table order');
         tableRows.forEach((row) => {
             const wellKey = row.getAttribute('data-well-key');
+            // Prefer explicit sample-name cell if present
             const sampleCell = row.querySelector('.sample-name');
-            const sampleName = sampleCell ? sampleCell.textContent.trim() : 'Unknown Sample';
-            
-            modalNavigationList.push({
-                wellKey: wellKey,
-                sampleName: sampleName
-            });
-            console.log(`📋 Added to navigation from table: ${wellKey} (${sampleName})`);
+            const sampleName = sampleCell ? sampleCell.textContent.trim() : (function() {
+                // Fallback: look up from analysis results
+                try {
+                    const allResults = window.currentAnalysisResults?.individual_results || {};
+                    return (allResults[wellKey]?.sample_name || allResults[wellKey]?.sample || 'Unknown Sample');
+                } catch {
+                    return 'Unknown Sample';
+                }
+            })();
+            modalNavigationList.push({ wellKey, sampleName });
+            console.log(`📋 Added to navigation (table): ${wellKey} (${sampleName})`);
         });
+    } else if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+        // Fallback: use complete analysis results in plate order
+        console.log('📊 Table empty; building modal navigation from complete analysis results');
+        const allResults = window.currentAnalysisResults.individual_results;
+        const allWellKeys = Object.keys(allResults);
+
+        // Helper: natural plate order comparator (A1..A12, B1..)
+        const fluorOrder = ['FAM', 'HEX', 'Texas Red', 'Cy5'];
+        const wellKeyToParts = (key) => {
+            const [wellId, maybeFluor] = key.split('_');
+            const row = wellId ? wellId.match(/^[A-P]/i)?.[0]?.toUpperCase() || 'Z' : 'Z';
+            const col = wellId ? parseInt(wellId.replace(/^[A-P]/i, ''), 10) || 0 : 0;
+            const fluor = maybeFluor || (allResults[key]?.fluorophore || '');
+            const fluorIdx = fluorOrder.indexOf(fluor);
+            return { row, col, fluorIdx: fluorIdx === -1 ? Number.MAX_SAFE_INTEGER : fluorIdx };
+        };
+        const plateOrderCompare = (a, b) => {
+            const A = wellKeyToParts(a);
+            const B = wellKeyToParts(b);
+            if (A.row !== B.row) return A.row.localeCompare(B.row);
+            if (A.col !== B.col) return A.col - B.col;
+            return A.fluorIdx - B.fluorIdx;
+        };
+
+        allWellKeys.sort(plateOrderCompare);
+        console.log('📦 Total wells in analysis results:', allWellKeys.length);
+        allWellKeys.forEach((wellKey) => {
+            const wellData = allResults[wellKey] || {};
+            const sampleName = wellData.sample_name || wellData.sample || 'Unknown Sample';
+            modalNavigationList.push({ wellKey, sampleName });
+            console.log(`📋 Added to navigation (results): ${wellKey} (${sampleName})`);
+        });
+    } else {
+        console.warn('⚠️ No table rows or analysis results available for modal navigation');
     }
     
     console.log('✅ Modal navigation list built with', modalNavigationList.length, 'items');
@@ -13733,15 +14222,97 @@ function createModalChart(wellKey, wellData) {
     
     // Parse raw data
     let cycles, rfu;
+    const toArray = (val) => {
+        // Already an array
+        if (Array.isArray(val)) return val;
+
+        // Typed arrays or array-like with length
+        if (val && typeof val === 'object' && Number.isFinite(val.length) && val.length > 0) {
+            try { return Array.from(val); } catch { /* noop */ }
+        }
+
+        // If it's a JS object, convert values (preserving numeric key order when possible)
+        if (val && typeof val === 'object') {
+            try {
+                const keys = Object.keys(val);
+                // If keys look numeric, sort them numerically
+                const numeric = keys.every(k => /^\d+$/.test(k));
+                const orderedKeys = numeric ? keys.sort((a,b) => Number(a) - Number(b)) : keys;
+                const arr = orderedKeys.map(k => val[k]).map(Number).filter(n => Number.isFinite(n));
+                if (arr.length > 0) return arr;
+            } catch { /* noop */ }
+        }
+
+        // String input: try JSON first
+        if (typeof val === 'string') {
+            try {
+                const parsed = JSON.parse(val);
+                if (Array.isArray(parsed)) return parsed;
+                if (parsed && typeof parsed === 'object') {
+                    const keys = Object.keys(parsed);
+                    const numeric = keys.every(k => /^\d+$/.test(k));
+                    const orderedKeys = numeric ? keys.sort((a,b) => Number(a) - Number(b)) : keys;
+                    const arr = orderedKeys.map(k => parsed[k]).map(Number).filter(n => Number.isFinite(n));
+                    if (arr.length > 0) return arr;
+                }
+            } catch { /* fall through */ }
+
+            // Fallback: split on comma/semicolon/whitespace
+            const parts = val.split(/[;,\s]+/).map(x => x.trim()).filter(Boolean);
+            const nums = parts.map(Number).filter(n => Number.isFinite(n));
+            if (nums.length > 0) return nums;
+        }
+
+        return [];
+    };
     try {
-        cycles = typeof wellData.raw_cycles === 'string' ? 
-            JSON.parse(wellData.raw_cycles) : wellData.raw_cycles;
-        rfu = typeof wellData.raw_rfu === 'string' ? 
-            JSON.parse(wellData.raw_rfu) : wellData.raw_rfu;
+        cycles = toArray(wellData.raw_cycles);
+        rfu = toArray(wellData.raw_rfu);
+    // Fallback to cycles/rfu fields if raw_* are empty
+    if ((!cycles || cycles.length === 0) && (wellData.cycles !== undefined)) cycles = toArray(wellData.cycles);
+    if ((!rfu || rfu.length === 0) && (wellData.rfu !== undefined)) rfu = toArray(wellData.rfu);
+        // Fallback to raw_data [{x,y}] or [{cycle,rfu}]
+        if ((cycles.length === 0 || rfu.length === 0) && wellData.raw_data) {
+            try {
+                const rawData = typeof wellData.raw_data === 'string' ? JSON.parse(wellData.raw_data) : wellData.raw_data;
+                if (Array.isArray(rawData) && rawData.length > 0) {
+                    const xs = [];
+                    const ys = [];
+                    rawData.forEach(p => {
+                        if (p && typeof p === 'object') {
+                            const x = (p.x ?? p.cycle ?? p.Cycle ?? p[0]);
+                            const y = (p.y ?? p.rfu ?? p.RFU ?? p[1]);
+                            if (Number.isFinite(Number(x)) && Number.isFinite(Number(y))) {
+                                xs.push(Number(x));
+                                ys.push(Number(y));
+                            }
+                        }
+                    });
+                    if (xs.length > 0 && ys.length > 0) {
+                        cycles = xs;
+                        rfu = ys;
+                    }
+                }
+            } catch {}
+        }
     } catch (e) {
-        // console.error('Error parsing well data for modal:', e);
-        return;
+        cycles = [];
+        rfu = [];
     }
+
+    // If we have RFU but no cycles, synthesize cycles as 1..N
+    if ((cycles.length === 0 || cycles.length !== rfu.length) && rfu.length > 0) {
+        cycles = Array.from({ length: rfu.length }, (_, i) => i + 1);
+    }
+    // Ensure equal length by trimming to min length
+    if (cycles.length !== rfu.length) {
+        const m = Math.min(cycles.length, rfu.length);
+        cycles = cycles.slice(0, m);
+        rfu = rfu.slice(0, m);
+    }
+
+    // If still no data, render an empty chart with a friendly message area
+    const hasData = Array.isArray(cycles) && Array.isArray(rfu) && cycles.length > 0 && rfu.length > 0;
     
     // Parse fitted curve data if available
     let fitData = [];
@@ -13764,7 +14335,7 @@ function createModalChart(wellKey, wellData) {
     const wellId = wellData.well_id || wellKey.split('_')[0];
     const fluorophore = wellData.fluorophore || 'Unknown';
     
-    const datasets = [
+    const datasets = hasData ? [
         {
             label: `${wellId} (${fluorophore}) - Raw Data`,
             data: cycles.map((cycle, index) => ({
@@ -13779,9 +14350,9 @@ function createModalChart(wellKey, wellData) {
             showLine: false,
             pointStyle: 'circle'
         }
-    ];
+    ] : [];
     
-    if (fitData.length > 0) {
+    if (fitData.length > 0 && hasData) {
         datasets.push({
             label: `${wellId} (${fluorophore}) - Fitted Curve`,
             data: fitData,
@@ -13834,7 +14405,7 @@ function createModalChart(wellKey, wellData) {
                 //     font: { size: 16, weight: 'bold' }
                 // },
                 legend: {
-                    display: true,
+                    display: hasData,
                     position: 'top'
                 },
                 ...(annotation ? { annotation } : {})
@@ -13859,6 +14430,21 @@ function createModalChart(wellKey, wellData) {
             }
         }
     });
+
+    // Optional: When no data, overlay a simple message using Canvas API
+    if (!hasData) {
+        const chartArea = modalChart.chartArea;
+        const c = modalChart.ctx;
+        c.save();
+        c.fillStyle = '#7f8c8d';
+        c.font = '14px sans-serif';
+        const msg = 'No curve data available for this well';
+        const textWidth = c.measureText(msg).width;
+        const x = (chartArea.left + chartArea.right - textWidth) / 2;
+        const y = (chartArea.top + chartArea.bottom) / 2;
+        c.fillText(msg, x, y);
+        c.restore();
+    }
 }
 
 function populateModalDetails(wellKey, wellData) {
@@ -14416,8 +15002,27 @@ async function deleteSessionFromDB(sessionId, event) {
         console.log('🔍 Combined session detected for deletion:', sessionId);
         
         // Find the combined session in the history to get the real session IDs
-        const historyData = window.analysisHistory || [];
-        const combinedSession = historyData.find(session => session.id === sessionId);
+        // Prefer the grouped cache built by displayAnalysisHistory
+        const grouped = window.currentCombinedSessions || [];
+        let combinedSession = grouped.find(session => session.id === sessionId);
+        
+        // Fallback to legacy cache if not found
+        if (!combinedSession) {
+            const historyData = window.analysisHistory || [];
+            combinedSession = historyData.find(session => session.id === sessionId);
+        }
+        
+        // Final fallback: rebuild history-only view once to repopulate caches
+        if (!combinedSession && typeof loadAnalysisHistoryOnly === 'function') {
+            try {
+                console.log('♻️ Rebuilding history cache to resolve combined session');
+                await loadAnalysisHistoryOnly();
+                const rebuilt = (window.currentCombinedSessions || []).find(s => s.id === sessionId);
+                if (rebuilt) combinedSession = rebuilt;
+            } catch (e) {
+                console.warn('⚠️ Failed to rebuild history cache:', e);
+            }
+        }
         
         if (!combinedSession || !combinedSession.session_ids) {
             alert('❌ Could not find session IDs for combined session. Please try deleting individual sessions instead.');
@@ -14450,7 +15055,7 @@ async function deleteSessionFromDB(sessionId, event) {
             for (const realSessionId of realSessionIds) {
                 console.log(`🗑️ Deleting individual session ${realSessionId} from database...`);
                 
-                const response = await fetch(`/delete_session/${realSessionId}`, {
+                const response = await authenticatedFetch(`/delete_session/${realSessionId}`, {
                     method: 'DELETE'
                 });
                 
@@ -14491,7 +15096,7 @@ async function deleteSessionFromDB(sessionId, event) {
     // First check if this might be part of a multi-channel experiment
     try {
         console.log('🔍 Checking for multi-channel experiment before deletion...');
-        const checkResponse = await fetch('/api/sessions');
+        const checkResponse = await fetch('/sessions');
         if (checkResponse.ok) {
             const sessions = await checkResponse.json();
             
@@ -14583,7 +15188,11 @@ async function deleteSessionFromDB(sessionId, event) {
                 errorText = `HTTP ${response.status}: ${response.statusText}`;
             }
             console.error('❌ Database deletion failed:', errorText);
-            alert('❌ Failed to delete from database: ' + errorText);
+            if (response.status === 403) {
+                alert('⛔ This session is confirmed and protected. Only an admin can delete confirmed sessions from the database. Use the admin endpoint to remove confirmed records.');
+            } else {
+                alert('❌ Failed to delete from database: ' + errorText);
+            }
         }
     } catch (error) {
         console.error('❌ Error deleting from database:', error);
@@ -14593,6 +15202,24 @@ async function deleteSessionFromDB(sessionId, event) {
             deleteBtn.disabled = false;
             deleteBtn.textContent = 'Delete from DB';
         }
+    }
+}
+
+// --- UI-ONLY SOFT DELETE HELPERS ---
+function getHiddenSessionIds() {
+    try { return JSON.parse(localStorage.getItem('hiddenSessionIds_v1') || '[]'); } catch (e) { return []; }
+}
+
+function setHiddenSessionIds(ids) {
+    try { localStorage.setItem('hiddenSessionIds_v1', JSON.stringify(ids)); } catch (e) {}
+}
+
+function softHideSessionId(id) {
+    const ids = getHiddenSessionIds();
+    const idStr = String(id);
+    if (!ids.includes(idStr)) {
+        ids.push(idStr);
+        setHiddenSessionIds(ids);
     }
 }
 
@@ -14608,9 +15235,8 @@ async function deleteSessionGroup(sessionId, event) {
     
     // If not found in combined sessions, it might be an individual session ID (numeric)
     if (!session && !isNaN(sessionId)) {
-        // console.log('Processing as individual database session ID:', sessionId);
-        // Handle direct database session ID
-        if (!confirm('Are you sure you want to delete this analysis session?')) {
+        // Handle direct database session ID (UI-only removal)
+        if (!confirm('Remove this session from the history list? The data will remain in the database.')) {
             return;
         }
         
@@ -14618,32 +15244,12 @@ async function deleteSessionGroup(sessionId, event) {
         if (deleteBtn) deleteBtn.disabled = true;
         
         try {
-            // console.log('Making DELETE request to /sessions/' + sessionId);
-            const response = await fetch(`/sessions/${sessionId}`, {
-                method: 'DELETE'
-            });
-            
-            // console.log('Delete response status:', response.status);
-            
-            if (response.ok) {
-                const result = await response.json().catch(() => ({ message: 'Session deleted' }));
-                // console.log('Delete successful:', result);
-                alert('Session deleted successfully');
-                loadAnalysisHistory();
-            } else {
-                let errorText = '';
-                try {
-                    const errorData = await response.json();
-                    errorText = errorData.error || 'Unknown error';
-                } catch (e) {
-                    errorText = `HTTP ${response.status}: ${response.statusText}`;
-                }
-                // console.error('Delete failed:', errorText);
-                alert('Failed to delete session: ' + errorText);
-            }
+            // UI-only soft hide
+            softHideSessionId(sessionId);
+            alert('Removed from history. The session remains in the database.');
+            loadAnalysisHistoryOnly();
         } catch (error) {
-            // console.error('Error deleting session:', error);
-            alert('Failed to delete session: ' + error.message);
+            alert('Failed to update history: ' + error.message);
         } finally {
             if (deleteBtn) deleteBtn.disabled = false;
         }
@@ -14658,9 +15264,10 @@ async function deleteSessionGroup(sessionId, event) {
     
     let confirmMessage;
     if (session.is_combined) {
-        confirmMessage = `Are you sure you want to delete this multi-fluorophore analysis? This will delete ${session.session_ids.length} individual sessions.`;
+        confirmMessage = `Remove this multi-fluorophore analysis from the history list? (${session.session_ids.length} sessions)
+\nNote: This is a UI-only removal. Data remains in the database.`;
     } else {
-        confirmMessage = 'Are you sure you want to delete this analysis session?';
+        confirmMessage = 'Remove this analysis session from the history list? Data remains in the database.';
     }
     
     if (!confirm(confirmMessage)) {
@@ -14669,34 +15276,17 @@ async function deleteSessionGroup(sessionId, event) {
     
     try {
         if (session.is_combined) {
-            // Delete all individual sessions that make up the combined session
-            const deletePromises = session.session_ids.map(id => 
-                fetch(`/sessions/${id}`, { method: 'DELETE' })
-            );
-            
-            const responses = await Promise.all(deletePromises);
-            const allSuccessful = responses.every(response => response.ok);
-            
-            if (allSuccessful) {
-                loadAnalysisHistory();
-            } else {
-                alert('Some sessions could not be deleted. Please try again.');
-            }
+            // UI-only hide combined and its members for this view
+            softHideSessionId(session.id);
+            session.session_ids.forEach(id => softHideSessionId(id));
+            loadAnalysisHistoryOnly();
         } else {
-            // Delete single session
-            const response = await fetch(`/sessions/${sessionId}`, {
-                method: 'DELETE'
-            });
-            
-            if (response.ok) {
-                loadAnalysisHistory();
-            } else {
-                alert('Failed to delete session. Please try again.');
-            }
+            // UI-only hide single
+            softHideSessionId(sessionId);
+            loadAnalysisHistoryOnly();
         }
     } catch (error) {
-        // console.error('Error deleting session:', error);
-        alert('Failed to delete session. Please try again.');
+        alert('Failed to update history. Please try again.');
     }
 }
 
@@ -15157,8 +15747,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
             
-            // Reload the current session
-            window.location.reload();
+            // Reload the current session in-place (preserves fluorophore selection logic)
+            try {
+                await loadSessionDetails(window.currentSessionId);
+            } catch (e) {
+                console.error('Failed to reload session in-place:', e);
+                // Fallback to hard reload only if necessary
+                // window.location.reload();
+            }
         });
     }
 });

@@ -14,6 +14,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
 import joblib
 import os
+import logging
 
 class MLCurveClassifier:
     def __init__(self):
@@ -509,7 +510,8 @@ class MLCurveClassifier:
                 existing_metrics.get('midpoint', 0),
                 existing_metrics.get('baseline', 0),
                 existing_metrics.get('amplitude', 0),
-                cq_value=existing_metrics.get('cqj') or existing_metrics.get('cq_value')  # CRITICAL FIX: Pass CQJ value to classification
+                cq_value=existing_metrics.get('cqj') or existing_metrics.get('cq_value'),  # Prefer CQJ for rule-based
+                vendor_cq_value=existing_metrics.get('cq_value')  # Pass vendor Cq separately for REDO rule
             )
             
             print(f"🔍 ML Debug: Rule-based classification result: {result}")
@@ -1229,7 +1231,8 @@ class MLCurveClassifier:
             self.model_trained = True
             return True
         except FileNotFoundError:
-            print("No saved model found")
+            logger = logging.getLogger(__name__)
+            logger.info("No saved general ML model found (ml_curve_classifier.pkl)")
             return False
     
     def load_pathogen_models(self):
@@ -1238,10 +1241,12 @@ class MLCurveClassifier:
             pathogen_data = joblib.load('ml_pathogen_models.pkl')
             self.pathogen_models = pathogen_data['pathogen_models']
             self.pathogen_scalers = pathogen_data['pathogen_scalers']
-            print(f"Loaded {len(self.pathogen_models)} pathogen-specific models")
+            logger = logging.getLogger(__name__)
+            logger.info(f"Loaded {len(self.pathogen_models)} pathogen-specific models from ml_pathogen_models.pkl")
             return True
         except FileNotFoundError:
-            print("No saved pathogen models found")
+            logger = logging.getLogger(__name__)
+            logger.info("No saved pathogen models found (ml_pathogen_models.pkl)")
             return False
     
     def get_model_stats(self):
@@ -1354,8 +1359,8 @@ def extract_pathogen_from_well_data(well_data):
     # Priority 5: Extract from experiment pattern (fallback for single-channel experiments)
     test_code = None
     
-    # Check various fields that might contain the test code
-    for field in ['test_code', 'experiment_pattern', 'sample_name', 'extracted_test_code']:
+    # Check various fields that might contain the test code (REMOVED sample_name - contains sample IDs, not pathogen codes)
+    for field in ['test_code', 'experiment_pattern', 'extracted_test_code']:
         if field in well_data and well_data[field]:
             test_code = str(well_data[field]).strip()
             if test_code and test_code != '':

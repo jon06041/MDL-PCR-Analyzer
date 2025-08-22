@@ -6,7 +6,7 @@ Separate from main app.py to maintain clean architecture
 
 from flask import request, jsonify
 from models import db, AnalysisSession, WellResult
-from cqj_calcj_utils import calculate_cqj_calcj_for_well, calculate_cqj, calculate_calcj_with_controls
+from cqj_calcj_utils import calculate_cqj, calculate_calcj_with_controls
 import json
 import traceback
 
@@ -81,10 +81,10 @@ def create_threshold_routes(app):
             # Test with a sample threshold
             test_threshold = 1000.0
             
-            # Calculate CQJ directly
-            from cqj_calcj_utils import calculate_cqj, calculate_calcj
+            # Calculate CQJ directly (CalcJ requires controls, not available in single-well test)
+            from cqj_calcj_utils import calculate_cqj
             cqj_result = calculate_cqj(well_data, test_threshold)
-            calcj_result = calculate_calcj(well_data, test_threshold)
+            calcj_result = "N/A - requires control wells"
             
             return jsonify({
                 'success': True,

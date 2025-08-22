@@ -23,6 +23,11 @@ SNR_CUTOFFS = {
     'Negative': 1.0            # Below detection (reduced from 2.0)
 }
 
+from log_utils import get_logger
+
+logger = get_logger("curve_classification")
+
+
 def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, cq_value=None, **kwargs):
     """
     STRICT qPCR curve classification with clear positive/negative criteria.
@@ -93,6 +98,19 @@ def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, c
         except (ValueError, TypeError):
             pass  # Invalid CQJ, treat as no valid CQJ
     
+    # Vendor CQ (from CSV) — used for specific REDO rule only, to avoid CQJ conflicts
+    vendor_cq_value = kwargs.get('vendor_cq_value', None)
+    has_valid_vendor_cq = False
+    vendor_cq_float = None
+    if vendor_cq_value is not None and vendor_cq_value != 'N/A':
+        try:
+            vendor_cq_float = float(vendor_cq_value)
+            # Treat 6–45 as reasonable vendor Cq range
+            if 6.0 <= vendor_cq_float <= 45.0:
+                has_valid_vendor_cq = True
+        except (ValueError, TypeError):
+            pass
+
     # DETECT MACHINE ERRORS / ANOMALIES (true SUSPICIOUS cases)
     suspicious_patterns = []
     
@@ -131,6 +149,23 @@ def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, c
         # Note: SNR removed - causing incorrect classifications
     )
     
+    # EARLY REDO RULE — leverage vendor CQ only (avoid CQJ)
+    # If curve fit is low but a vendor CQ is present, recommend REDO instead of NEGATIVE.
+    # Place before confident_negative so it takes precedence when applicable.
+    if r2 < 0.75 and has_valid_vendor_cq:
+        logger.info(
+            f"Rule REDO satisfied | r2={r2:.4f} | vendor_cq={vendor_cq_float:.2f} | snr={snr} | amp={amplitude}"
+        )
+        return {
+            'classification': 'REDO',
+            'confidence': 0.80,
+            'edge_case': True,
+            'edge_case_reasons': ['low_r2_with_valid_vendor_cq'],
+            'ml_recommended': True,
+            'flag_for_review': True,
+            'reason': f"Low curve fit with vendor CQ present: R²={r2:.3f}, CQ={vendor_cq_float:.2f}"
+        }
+
     # STRICT CONFIDENT NEGATIVE CRITERIA (ANY one triggers negative)
     # Focus on curve quality and signal strength, not CQJ timing
     confident_negative = (

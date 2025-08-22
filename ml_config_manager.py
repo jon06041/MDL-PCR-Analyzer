@@ -433,6 +433,85 @@ class MLConfigManager:
             logger.error(f"❌ Failed to get audit log: {e}")
             return []
 
+    def backfill_audit_users_admin_or_system(self) -> dict:
+        """Backfill ml_config_audit_log.user_info so UI shows 'admin' or 'system'.
+        - If user_info JSON missing or empty -> set {'user_id': 'system'}
+        - If user_info has any non-empty identifier -> set user_id 'admin' and preserve original in 'original_user'
+        - Heuristic: if session_id/ip_address present (manually set later) treat as 'admin'; else 'system' when unknown.
+        Returns a summary dict with counts changed.
+        """
+        summary = {"updated": 0, "skipped": 0, "errors": 0}
+        try:
+            conn = self.get_db_connection()
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT id, user_info, session_id, ip_address FROM ml_config_audit_log ORDER BY id ASC")
+                    rows = cursor.fetchall() or []
+                    for row in rows:
+                        try:
+                            uid = None
+                            original = None
+                            ui_raw = row.get('user_info') if isinstance(row, dict) else row[1]
+                            if ui_raw:
+                                try:
+                                    ui = json.loads(ui_raw) if isinstance(ui_raw, str) else (ui_raw if isinstance(ui_raw, dict) else {})
+                                except Exception:
+                                    ui = {}
+                                # Derive existing identifier if present
+                                original = ui.get('user_id') or ui.get('username') or ui.get('display_name')
+                            # Heuristic based on presence of metadata
+                            has_session_meta = False
+                            try:
+                                has_session_meta = bool(row.get('session_id') or row.get('ip_address')) if isinstance(row, dict) else bool(row[2] or row[3])
+                            except Exception:
+                                has_session_meta = False
+
+                            if original:
+                                # Collapse all real users to 'admin'
+                                uid = 'admin'
+                            elif has_session_meta:
+                                uid = 'admin'
+                            else:
+                                uid = 'system'
+
+                            # Build new JSON preserving original when present
+                            new_info = {"user_id": uid}
+                            if original and original not in ('admin', 'system'):
+                                new_info['original_user'] = original
+
+                            # Only update when changed or when user_info is not normalized
+                            should_update = True
+                            if ui_raw:
+                                try:
+                                    if isinstance(ui_raw, str):
+                                        parsed = json.loads(ui_raw)
+                                    elif isinstance(ui_raw, dict):
+                                        parsed = ui_raw
+                                    else:
+                                        parsed = {}
+                                    if parsed.get('user_id') in ('admin', 'system') and (original is None or parsed.get('original_user')):
+                                        should_update = False
+                                except Exception:
+                                    should_update = True
+
+                            if should_update:
+                                cursor.execute(
+                                    "UPDATE ml_config_audit_log SET user_info = %s WHERE id = %s",
+                                    (json.dumps(new_info), row.get('id') if isinstance(row, dict) else row[0])
+                                )
+                                summary["updated"] += 1
+                            else:
+                                summary["skipped"] += 1
+                        except Exception:
+                            summary["errors"] += 1
+                    conn.commit()
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error(f"❌ Backfill audit users failed: {e}")
+            summary["errors"] += 1
+        return summary
+
 # For backward compatibility, create a global instance when imported
 ml_config_manager = None
 

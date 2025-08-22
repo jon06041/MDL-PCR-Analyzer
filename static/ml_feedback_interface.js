@@ -86,6 +86,19 @@ class MLFeedbackInterface {
                 pathogen_models: []
             });
         }
+
+        // Banner is managed centrally in main script (script.js) to avoid duplicates.
+        // If you need the ML interface to self-trigger banners, set window.enableMLBannerAutostart = true before init.
+        try {
+            if (window.enableMLBannerAutostart && window.currentAnalysisResults && window.currentAnalysisResults.individual_results && !window.mlNotificationChecked) {
+                setTimeout(() => {
+                    if (this.isInitialized && window.currentAnalysisResults && window.currentAnalysisResults.individual_results && !window.mlNotificationChecked) {
+                        window.mlNotificationChecked = true;
+                        this.checkForMLNotification().catch(() => {});
+                    }
+                }, 500);
+            }
+        } catch (e) { /* no-op */ }
     }
 
     async addMLSectionToModal() {
@@ -306,6 +319,7 @@ class MLFeedbackInterface {
                             <small>Expert review available after 50+ training samples</small>
                         </div>
                         <div class="progress-bar">
+            mlFeedbackBtn.disabled = false;
                             <div class="progress-fill" id="training-progress-fill"></div>
                         </div>
                     </div>
@@ -346,12 +360,33 @@ class MLFeedbackInterface {
 
     showMLSection() {
         console.log('ML Feedback Interface: Ensuring ML section is visible');
+        
+        // Ensure the parent ML feedback section is visible
         const mlSection = document.getElementById('ml-feedback-section');
         if (mlSection) {
+            // Force visibility with multiple methods
             mlSection.style.display = 'block';
-            //console.log('ML Feedback Interface: ML section made visible');
+            mlSection.style.visibility = 'visible';
+            mlSection.style.opacity = '1';
+            mlSection.removeAttribute('hidden');
+            
+            // Debug current styles
+            const computedStyle = window.getComputedStyle(mlSection);
+            console.log('🔍 ML Section Debug: Made ML feedback section visible');
+            console.log('🔍 ML Section Debug: Element display:', mlSection.style.display);
+            console.log('🔍 ML Section Debug: Computed display:', computedStyle.display);
+            console.log('🔍 ML Section Debug: Computed visibility:', computedStyle.visibility);
         } else {
-            //console.log('ML Feedback Interface: ML section not found');
+            console.warn('🔍 ML Section Debug: ML feedback section not found');
+        }
+        
+        // Ensure the ML section container is visible
+        const mlContainer = document.querySelector('.ml-feedback-container');
+        if (mlContainer) {
+            mlContainer.style.display = 'block';
+            mlContainer.style.visibility = 'visible';
+            mlContainer.style.opacity = '1';
+            console.log('🔍 ML Container Debug: Made ML container visible');
         }
         
         // Also show individual ML components when section becomes visible
@@ -368,6 +403,14 @@ class MLFeedbackInterface {
             mlAnalyzeBtn.textContent = '🔍 Analyze with ML';
             //console.log('ML Feedback Interface: ML analyze button made visible and enabled');
         }
+
+        // Also re-apply Analyze button disabled state if pathogen ML is off
+        setTimeout(async () => {
+            try {
+                // This reuses shouldHideMLFeedback to trigger internal ml-enabled probe and button state
+                await this.shouldHideMLFeedback();
+            } catch (e) { /* no-op */ }
+        }, 0);
     }
 
     hideMLSection() {
@@ -555,32 +598,42 @@ class MLFeedbackInterface {
         const feedbackBtn = document.getElementById('ml-feedback-btn');
         const feedbackForm = document.getElementById('ml-feedback-form');
         
-        if (predictionDisplay) predictionDisplay.style.display = 'none';
-        if (feedbackBtn) feedbackBtn.style.display = 'none';
+        // Default: show prediction area and feedback for rule-based context even before ML
+        if (predictionDisplay) predictionDisplay.style.display = 'block';
+        if (feedbackBtn) {
+            feedbackBtn.style.display = 'inline-block';
+            feedbackBtn.disabled = false;
+            feedbackBtn.style.opacity = '1';
+        }
         if (feedbackForm) feedbackForm.style.display = 'none';
+
+        // Respect training pause: if paused, hide the whole section; otherwise keep feedback visible
+        try {
+            let sessionId = window.currentSessionId || wellData.session_id;
+            if (sessionId) {
+                fetch(`/api/ml-training/check-pause/${encodeURIComponent(sessionId)}`)
+                    .then(r => r.ok ? r.json() : null)
+                    .then(data => {
+                        if (data && data.success === true && data.is_paused === true) {
+                            // Hide entire ML section when paused
+                            this.hideMLSection();
+                        } else {
+                            // Ensure section is shown when not paused
+                            this.showMLSection();
+                        }
+                    })
+                    .catch(() => {/* non-fatal */});
+            }
+        } catch (e) { /* no-op */ }
         
         // CRITICAL FIX: Reset all button states when switching wells
         this.resetButtonStates();
         
         // Reset any ongoing submission state
         this.submissionInProgress = false;
-        // Auto-analyze the curve if ML classification doesn't exist (only if ML is enabled)
-        if (!wellData.ml_classification) {
-            setTimeout(async () => {
-                // Check if ML feedback should be hidden before auto-analysis
-                const shouldHide = await this.shouldHideMLFeedback();
-                if (shouldHide) {
-                    console.log('ML Analysis: Skipping auto-analysis - ML feedback disabled');
-                    return;
-                }
-                
-                if (this.currentWellData && this.currentWellKey) {
-                    this.analyzeCurveWithML();
-                } else {
-                    console.warn('ML Analysis: Well data not ready for auto-analysis, skipping');
-                }
-            }, 300);
-        } else {
+        
+        // If an ML classification exists, display it
+        if (wellData.ml_classification) {
             // Only display existing classification if ML section is visible
             setTimeout(async () => {
                 const shouldHide = await this.shouldHideMLFeedback();
@@ -588,76 +641,130 @@ class MLFeedbackInterface {
                     this.displayExistingMLClassification(wellData.ml_classification);
                 }
             }, 100);
+        } else {
+            // No ML classification exists - show rule-based placeholder prediction and enable feedback
+            this.displayRuleBasedPrediction(wellData);
         }
         
         // Update visual curve analysis
         this.updateVisualCurveDisplay(wellData);
     }
 
+    /**
+     * Show a placeholder prediction based on rule-based classification so
+     * users can still provide feedback without running ML.
+     */
+    displayRuleBasedPrediction(wellData) {
+        try {
+            const predictionDisplay = document.getElementById('ml-prediction-display');
+            const classElement = document.getElementById('ml-prediction-class');
+            const confidenceElement = document.getElementById('ml-prediction-confidence');
+            const methodElement = document.getElementById('ml-prediction-method');
+            const pathogenElement = document.getElementById('detected-pathogen');
+            const pathogenContext = document.getElementById('pathogen-context');
+            const feedbackBtn = document.getElementById('ml-feedback-btn');
+
+            if (predictionDisplay) predictionDisplay.style.display = 'block';
+
+            const ruleClass = this.normalizeClassification(wellData.curve_classification || 'UNKNOWN');
+            if (classElement) {
+                classElement.textContent = ruleClass.replace('_', ' ');
+                classElement.className = `classification-badge ${this.getClassificationBadgeClass(ruleClass)}`;
+            }
+            if (confidenceElement) {
+                confidenceElement.textContent = '(Rule-Based)';
+            }
+            if (methodElement) {
+                methodElement.textContent = 'Rule-Based';
+            }
+
+            // Add pathogen context if available
+            try {
+                const ctx = this.extractChannelSpecificPathogen();
+                if (ctx && ctx.pathogen && pathogenElement && pathogenContext) {
+                    pathogenElement.textContent = ctx.pathogen;
+                    pathogenContext.style.display = 'block';
+                }
+            } catch (e) { /* no-op */ }
+
+            if (feedbackBtn) {
+                feedbackBtn.style.display = 'inline-block';
+                feedbackBtn.disabled = false;
+                feedbackBtn.style.opacity = '1';
+            }
+        } catch (e) {
+            console.warn('ML Feedback: Failed to display rule-based prediction placeholder', e);
+        }
+    }
+
     async shouldHideMLFeedback() {
         /**
-         * Determine if ML feedback should be hidden based on:
-         * Pathogen-specific ML enabled setting for current test
-         * Hide when ML is disabled for this specific pathogen/test
+         * Only hide the entire ML section when the test/session is paused.
+         * Do NOT hide the section when ML is disabled for the pathogen —
+         * instead, we’ll disable the Analyze button but keep feedback visible.
          */
         try {
-            // Get current pathogen information
-            const pathogenInfo = this.extractChannelSpecificPathogen();
-            if (!pathogenInfo.pathogen || pathogenInfo.pathogen === 'Unknown') {
-                console.log('ML Config Check: No pathogen detected, showing ML feedback');
-                return false; // Show ML feedback if we can't determine pathogen
+            // 1) Check if training is paused for this session
+            let sessionId = window.currentSessionId;
+            if (!sessionId && this.currentWellData && this.currentWellData.session_id) {
+                sessionId = this.currentWellData.session_id;
             }
-
-            // Get pathogen-specific ML configuration
-            const pathogenResponse = await fetch(`/api/ml-config/pathogen/${encodeURIComponent(pathogenInfo.pathogen)}`);
-            if (!pathogenResponse.ok) {
-                // During database connectivity issues, hide ML elements to prevent broken state
-                console.log('ML Config Check: Failed to get pathogen config (database connectivity issue), hiding ML feedback');
-                return true; // Hide ML feedback if we can't get pathogen config
-            }
-            const pathogenConfigResponse = await pathogenResponse.json();
-            
-            // Find config for current fluorophore or general config
-            let pathogenMLEnabled = true; // Default to enabled
-            if (pathogenConfigResponse.success && pathogenConfigResponse.configs?.length > 0) {
-                const configs = pathogenConfigResponse.configs;
-                
-                // Look for specific fluorophore config first
-                let config = configs.find(c => c.fluorophore === pathogenInfo.fluorophore);
-                // Fall back to general config (null fluorophore)
-                if (!config) {
-                    config = configs.find(c => !c.fluorophore);
-                }
-                
-                if (config) {
-                    pathogenMLEnabled = config.ml_enabled;
+            if (sessionId) {
+                try {
+                    const pauseResp = await fetch(`/api/ml-training/check-pause/${encodeURIComponent(sessionId)}`);
+                    if (pauseResp.ok) {
+                        const pauseData = await pauseResp.json();
+                        if (pauseData && pauseData.success === true && pauseData.is_paused === true) {
+                            console.log('ML Pause Check: Session is paused — hiding ML section');
+                            return true; // Hide UI when paused
+                        }
+                    }
+                } catch (e) {
+                    // Network/endpoint issues shouldn’t hide the section; proceed
+                    console.warn('ML Pause Check: Unable to verify pause status, proceeding to show UI');
                 }
             }
 
-            // Hide ML feedback when ML is disabled for this pathogen
-            const shouldHide = !pathogenMLEnabled;
+            // 2) Probe pathogen ML-enabled to control only the Analyze button state
+            try {
+                const pathogenInfo = this.extractChannelSpecificPathogen();
+                if (pathogenInfo && pathogenInfo.pathogen && pathogenInfo.pathogen !== 'Unknown') {
+                    const pathogenResponse = await fetch(`/api/ml-config/pathogen/${encodeURIComponent(pathogenInfo.pathogen)}`);
+                    if (pathogenResponse.ok) {
+                        const pathogenConfigResponse = await pathogenResponse.json();
+                        let pathogenMLEnabled = true; // default
+                        if (pathogenConfigResponse.success && Array.isArray(pathogenConfigResponse.configs)) {
+                            const configs = pathogenConfigResponse.configs;
+                            let config = configs.find(c => c.fluorophore === pathogenInfo.fluorophore) || configs.find(c => !c.fluorophore);
+                            if (config) pathogenMLEnabled = !!config.ml_enabled;
+                        }
+                        // Apply Analyze button state without hiding the section
+                        const analyzeBtn = document.getElementById('ml-analyze-btn');
+                        if (analyzeBtn) {
+                            if (!pathogenMLEnabled) {
+                                analyzeBtn.disabled = true;
+                                analyzeBtn.title = 'ML disabled for this pathogen — feedback still available';
+                                analyzeBtn.style.opacity = '0.5';
+                            } else {
+                                analyzeBtn.disabled = false;
+                                analyzeBtn.title = '';
+                                analyzeBtn.style.opacity = '1';
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                // Non-fatal; keep section visible and buttons in default state
+                console.warn('ML Config Check: Error while checking ml-enabled; leaving UI visible');
+            }
 
-            /*
-            console.log('ML Config Check:', {
-                pathogen: pathogenInfo.pathogen,
-                fluorophore: pathogenInfo.fluorophore,
-                pathogenMLEnabled,
-                shouldHide
-            });
-            */
-            
-            return shouldHide;
-            
+            // Default: do not hide the section
+            return false;
+
         } catch (error) {
-            console.error('ML Config Check: Error checking ML feedback visibility:', error);
-            
-            // During database connectivity issues, hide ML elements to prevent broken functionality
-            if (error.message && (error.message.includes('Failed to fetch') || error.message.includes('Network Error'))) {
-                console.log('ML Config Check: Database connectivity issue detected, hiding ML feedback');
-                return true; // Hide ML feedback during connectivity issues
-            }
-            
-            return false; // Show ML feedback for other types of errors
+            console.error('ML Config Check: Error deciding ML section visibility:', error);
+            // Don’t hide the UI on generic errors; keep it available for rule-based + feedback
+            return false;
         }
     }
 
@@ -924,6 +1031,30 @@ class MLFeedbackInterface {
         //console.log('🔄 ML Feedback: Reset all button states');
     }
 
+    // Normalize various classification value shapes to a readable string (avoid [object Object])
+    normalizeClassification(value) {
+        try {
+            if (value == null) return 'UNKNOWN';
+            // If it’s already a string
+            if (typeof value === 'string') return value;
+            // If backend sent an object with a classification field
+            if (typeof value === 'object') {
+                if (value.classification && typeof value.classification === 'string') {
+                    return value.classification;
+                }
+                // Common alternate keys
+                if (value.label && typeof value.label === 'string') return value.label;
+                if (value.result && typeof value.result === 'string') return value.result;
+                // As a last resort, stringify basic primitives safely
+                return JSON.stringify(value);
+            }
+            // Fallback to string conversion for numbers/booleans
+            return String(value);
+        } catch (e) {
+            return 'UNKNOWN';
+        }
+    }
+
     // Update the display with visual analysis
     updateVisualCurveDisplay(wellData) {
         //console.log('🔍 Visual Display Debug: Updating visual curve display for well with keys:', Object.keys(wellData || {}));
@@ -960,10 +1091,21 @@ class MLFeedbackInterface {
         // Show the visual analysis section
         const visualDisplay = document.getElementById('visual-curve-display');
         if (visualDisplay) {
+            // Force visibility with multiple methods
             visualDisplay.style.display = 'block';
+            visualDisplay.style.visibility = 'visible';
+            visualDisplay.style.opacity = '1';
+            visualDisplay.removeAttribute('hidden');
+            
+            // Debug current styles
+            const computedStyle = window.getComputedStyle(visualDisplay);
             console.log('🔍 Visual Display Debug: Made visual analysis section visible');
+            console.log('🔍 Visual Display Debug: Element display style:', visualDisplay.style.display);
+            console.log('🔍 Visual Display Debug: Computed display:', computedStyle.display);
+            console.log('🔍 Visual Display Debug: Computed visibility:', computedStyle.visibility);
+            console.log('🔍 Visual Display Debug: Element class:', visualDisplay.className);
         } else {
-            //console.warn('🔍 Visual Display Debug: Visual display element not found');
+            console.warn('🔍 Visual Display Debug: Visual display element not found');
         }
         
         // If we have basic metrics but no curve data, show what we can analyze
@@ -2073,21 +2215,29 @@ class MLFeedbackInterface {
             return;
         }
         
-        // Even if classification or confidence is missing, try to show what we have
-        if (!mlClassification.classification) {
-            console.warn('ML Feedback Interface: Missing classification field, using fallback');
-            mlClassification.classification = 'UNKNOWN';
+        // Normalize incoming data (string or object) to a unified structure
+        if (typeof mlClassification === 'string') {
+            mlClassification = { classification: mlClassification, method: 'Rule-Based', confidence: 1.0 };
         }
-        
-        if (mlClassification.confidence === undefined || mlClassification.confidence === null) {
-            console.warn('ML Feedback Interface: Missing confidence field, using fallback');
-            mlClassification.confidence = 0.0;
+
+        // Extract a safe, human-readable classification
+        const normalizedClass = this.normalizeClassification(
+            mlClassification.classification ?? mlClassification
+        ) || 'UNKNOWN';
+
+        // Ensure we have a numeric confidence
+        let normalizedConfidence = 0.0;
+        if (typeof mlClassification.confidence === 'number') {
+            normalizedConfidence = mlClassification.confidence;
+        } else if (typeof mlClassification.confidence === 'string') {
+            const parsed = parseFloat(mlClassification.confidence);
+            normalizedConfidence = isNaN(parsed) ? 0.0 : parsed;
         }
         
         console.log('🔄 DISPLAY-ML: Displaying ML classification:', {
-            classification: mlClassification.classification,
+            classification: normalizedClass,
             method: mlClassification.method,
-            confidence: mlClassification.confidence,
+            confidence: normalizedConfidence,
             isExpertFeedback: mlClassification.method === 'expert_feedback' || 
                              mlClassification.method === 'Expert Review' ||
                              mlClassification.expert_review_method === 'ml_feedback_interface'
@@ -2095,8 +2245,8 @@ class MLFeedbackInterface {
         
         // CRITICAL: Store the original ML prediction for comparison later
         if (this.currentWellData && !this.currentWellData.original_ml_prediction) {
-            this.currentWellData.original_ml_prediction = mlClassification.classification;
-            console.log('📊 Stored original ML prediction:', mlClassification.classification);
+            this.currentWellData.original_ml_prediction = normalizedClass;
+            console.log('📊 Stored original ML prediction:', normalizedClass);
         }
         
         const predictionDisplay = document.getElementById('ml-prediction-display');
@@ -2107,11 +2257,11 @@ class MLFeedbackInterface {
         const pathogenContext = document.getElementById('pathogen-context');
         const feedbackBtn = document.getElementById('ml-feedback-btn');
 
-        if (predictionDisplay && classElement && confidenceElement && methodElement) {
+    if (predictionDisplay && classElement && confidenceElement && methodElement) {
             predictionDisplay.style.display = 'block';
             
-            classElement.textContent = mlClassification.classification.replace('_', ' ');
-            classElement.className = `classification-badge ${this.getClassificationBadgeClass(mlClassification.classification)}`;
+            classElement.textContent = normalizedClass.replace('_', ' ');
+            classElement.className = `classification-badge ${this.getClassificationBadgeClass(normalizedClass)}`;
             
             // CRITICAL FIX: Handle expert feedback classifications differently
             // Check for both backend formats: 'expert_feedback' and 'Expert Review'
@@ -2121,7 +2271,7 @@ class MLFeedbackInterface {
                 confidenceElement.textContent = '(Expert Decision)';
                 methodElement.textContent = 'Expert Review';
             } else {
-                confidenceElement.textContent = `(${(mlClassification.confidence * 100).toFixed(1)}% confidence)`;
+                confidenceElement.textContent = `(${(normalizedConfidence * 100).toFixed(1)}% confidence)`;
                 methodElement.textContent = mlClassification.method || 'ML';
             }
             
@@ -2132,12 +2282,17 @@ class MLFeedbackInterface {
             
             if (feedbackBtn) {
                 feedbackBtn.style.display = 'inline-block';
+                feedbackBtn.style.opacity = '1';
             }
         }
     }
 
     async analyzeCurveWithML() {
-        console.log('ML Analysis: Starting analysis...');
+        console.log('ML Analysis: Starting manual individual analysis...');
+        
+        // CRITICAL FIX: Individual manual analysis should ALWAYS be allowed
+        // User has the right to request feedback regardless of batch skip state
+        console.log('🔓 Manual ML Analysis: Bypassing any previous skip choices - user manually requested analysis');
         
         const analyzeBtn = document.getElementById('ml-analyze-btn');
         let originalButtonState = null;
@@ -4702,17 +4857,18 @@ class MLFeedbackInterface {
                 
             console.log(`🧬 ML Notification: Current test code: ${currentTestCode} (from pattern: ${currentExperimentPattern})`);
             
-            // Check if ML is enabled for this pathogen before showing notification
+            // Check ML enabled status; if disabled, still show an informational banner so users know why it's missing
+            let mlEnabled = true;
             if (currentTestCode) {
                 console.log(`🔍 ML Notification: Checking ML enabled status for pathogen: "${currentTestCode}"`);
-                const mlEnabled = await this.checkMLEnabledForPathogen(currentTestCode);
+                mlEnabled = await this.checkMLEnabledForPathogen(currentTestCode);
                 if (!mlEnabled) {
-                    console.log(`🚫 ML Notification: ML disabled for pathogen ${currentTestCode}, not showing banner`);
-                    return false;
+                    console.log(`🚫 ML Notification: ML disabled for pathogen ${currentTestCode}, showing informational banner`);
+                } else {
+                    console.log(`✅ ML Notification: ML enabled for pathogen ${currentTestCode}, proceeding`);
                 }
-                console.log(`✅ ML Notification: ML enabled for pathogen ${currentTestCode}, showing notification banner`);
             } else {
-                console.log(`⚠️ ML Notification: No test code found, showing general ML notification`);
+                console.log(`⚠️ ML Notification: No test code found, will show general ML notification`);
             }
             
             const response = await fetch('/api/ml-stats');
@@ -4728,11 +4884,34 @@ class MLFeedbackInterface {
                         model.pathogen === currentTestCode
                     );
                     
+                    // PRIORITY: Always show a banner. If ML disabled for this pathogen, show an informational banner; else continue normal flow.
+                    if (!mlEnabled) {
+                        this.showMLAvailableNotification({
+                            type: 'new-pathogen',
+                            pathogen: currentTestCode || 'Unknown',
+                            samples: result.stats.training_samples || 0,
+                            onAccept: null,
+                            onDecline: () => this.handleMLNotificationDecline()
+                        });
+                        return true;
+                    }
                     if (pathogenModel && pathogenModel.training_samples >= 10) {
                         // Show pathogen-specific ML notification
                         this.showMLAvailableNotification({
                             type: 'pathogen-specific',
                             pathogen: pathogenModel.pathogen || pathogenModel.pathogen_code,
+                            samples: pathogenModel.training_samples,
+                            stats: result.stats,
+                            onAccept: () => this.handleMLNotificationAccept(),
+                            onDecline: () => this.handleMLNotificationDecline()
+                        });
+                        return true;
+                    } else if (pathogenModel && pathogenModel.training_samples < 10) {
+                        // Insufficient pathogen-specific training: prompt user to train
+                        console.log(`📚 ML Notification: Pathogen ${currentTestCode} has limited training data (${pathogenModel.training_samples}), showing training-needed banner`);
+                        this.showMLAvailableNotification({
+                            type: 'new-pathogen',
+                            pathogen: pathogenModel.pathogen || currentTestCode || 'Unknown',
                             samples: pathogenModel.training_samples,
                             stats: result.stats,
                             onAccept: () => this.handleMLNotificationAccept(),
@@ -4751,13 +4930,45 @@ class MLFeedbackInterface {
                         });
                         return true;
                     } else {
-                        console.log(`📊 ML Notification: Insufficient training data (${totalTrainingCount} total samples), not showing banner`);
-                        return false;
+                        // No specific model and low global training: still show a lightweight banner to guide training
+                        console.log(`📊 ML Notification: Low training data (${totalTrainingCount} total). Showing training-needed banner for ${currentTestCode || 'Unknown'}`);
+                        this.showMLAvailableNotification({
+                            type: 'new-pathogen',
+                            pathogen: currentTestCode || 'Unknown',
+                            samples: totalTrainingCount,
+                            stats: result.stats,
+                            onAccept: () => this.handleMLNotificationAccept(),
+                            onDecline: () => this.handleMLNotificationDecline()
+                        });
+                        return true;
                     }
+                }
+            } else {
+                // If stats endpoint fails but we have results, still show a lightweight banner
+                if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+                    this.showMLAvailableNotification({
+                        type: 'new-pathogen',
+                        pathogen: currentTestCode || 'Unknown',
+                        samples: 0,
+                        onAccept: null,
+                        onDecline: () => this.handleMLNotificationDecline()
+                    });
+                    return true;
                 }
             }
         } catch (error) {
             console.error('Failed to check for ML notification:', error);
+            // Fallback: show minimal banner if we have analysis results
+            if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+                this.showMLAvailableNotification({
+                    type: 'new-pathogen',
+                    pathogen: (typeof extractTestCode === 'function' && typeof getCurrentFullPattern === 'function') ? extractTestCode(getCurrentFullPattern()) || 'Unknown' : 'Unknown',
+                    samples: 0,
+                    onAccept: null,
+                    onDecline: () => this.handleMLNotificationDecline()
+                });
+                return true;
+            }
         }
         
         return false;
@@ -5018,9 +5229,12 @@ class MLFeedbackInterface {
                 }
                 // Fallback to direct data analysis
                 else if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
-                    uncertainCount = Object.values(window.currentAnalysisResults.individual_results).filter(result => 
-                        result.curve_classification && result.curve_classification.edge_case === true
-                    ).length;
+                    const resultsArray = Object.values(window.currentAnalysisResults.individual_results);
+                    if (window.isEdgeCaseClassification) {
+                        uncertainCount = resultsArray.filter(r => window.isEdgeCaseClassification(r)).length;
+                    } else {
+                        uncertainCount = resultsArray.filter(r => r.curve_classification && r.curve_classification.edge_case === true).length;
+                    }
                 }
                 // Final fallback to countEdgeCases if available
                 if (uncertainCount === 0 && window.countEdgeCases) {
@@ -5068,15 +5282,59 @@ class MLFeedbackInterface {
                 
             case 'new-pathogen':
                 notificationClass = 'ml-notification-info';
+                // Compute edge-case count for actionable guidance
+                let newPathogenUncertainCount = 0;
+                if (window.preMLEdgeCaseCount && window.preMLEdgeCaseCount > 0) {
+                    newPathogenUncertainCount = window.preMLEdgeCaseCount;
+                } else if (window.currentAnalysisResults && window.currentAnalysisResults.individual_results) {
+                    const resultsArray = Object.values(window.currentAnalysisResults.individual_results);
+                    if (window.isEdgeCaseClassification) {
+                        newPathogenUncertainCount = resultsArray.filter(r => window.isEdgeCaseClassification(r)).length;
+                    } else {
+                        newPathogenUncertainCount = resultsArray.filter(r => r.curve_classification && r.curve_classification.edge_case === true).length;
+                    }
+                }
+                if (newPathogenUncertainCount === 0 && window.countEdgeCases) {
+                    try { newPathogenUncertainCount = window.countEdgeCases(); } catch (e) {}
+                }
+                const newPathogenImprovement = newPathogenUncertainCount > 0 ? `
+                    <div class="ml-improvement-notification">
+                        <span class="improvement-info">💡 ${newPathogenUncertainCount} samples flagged as edge cases</span>
+                        <small style="display:block;margin-top:4px;">Analyze edge cases to assist training</small>
+                    </div>
+                ` : '';
+                // If stats include pathogen_models, try to find per-pathogen sample count for accurate messaging
+                let displaySamples = samples;
+                if (options.stats && options.stats.pathogen_models && pathogen) {
+                    const pm = options.stats.pathogen_models.find(m => m.pathogen === pathogen || m.pathogen_code === pathogen);
+                    if (pm && typeof pm.training_samples === 'number') {
+                        displaySamples = pm.training_samples;
+                    }
+                }
+                // Prevent odd displays like 21/20 by clamping to a minimum of 0 and showing max target separately
+                displaySamples = Math.max(0, displaySamples);
+                
+                // Choose copy based on training sufficiency
+                const hasMinTraining = displaySamples >= 20;
+                const trainingLine = hasMinTraining
+                    ? `📚 ML model trained for this pathogen (${displaySamples} samples)`
+                    : `📚 ML model needs training for this pathogen (${displaySamples}/20 samples)`;
+
                 notificationContent = `
                     <div class="ml-notification-content">
                         <div class="ml-notification-icon">🧬</div>
                         <div class="ml-notification-text">
                             <strong>New Pathogen Detected: ${pathogen}</strong><br>
-                            📚 ML model needs training for this pathogen (${samples}/20 total samples)<br>
+                            ${trainingLine}<br>
                             <small>💡 Use the ML feedback interface to classify curves and train the model</small>
+                            ${newPathogenImprovement}
                         </div>
                         <div class="ml-notification-actions">
+                            ${newPathogenUncertainCount > 0 ? `
+                                <button class="ml-notification-btn primary" onclick="this.parentElement.parentElement.parentElement.analyzeEdgeCases()">
+                                    Analyze Edge Cases (${newPathogenUncertainCount})
+                                </button>
+                            ` : ''}
                             <button class="ml-notification-btn secondary" onclick="this.parentElement.parentElement.parentElement.declineAction()">
                                 ✅ Got it
                             </button>
@@ -7213,6 +7471,147 @@ class MLFeedbackInterface {
         } catch (error) {
             console.error(`❌ TABLE-UPDATE: Error updating table display for ${wellKey}:`, error);
         }
+    }
+    
+    /**
+     * Handle ML notification acceptance - triggers ML analysis
+     */
+    handleMLNotificationAccept() {
+        console.log('🤖 ML-NOTIFICATION: User accepted ML analysis');
+        
+        // Hide the notification
+        const notification = document.getElementById('ml-available-notification');
+        if (notification) {
+            notification.remove();
+        }
+        
+        // Trigger ML analysis
+        const mlAnalyzeBtn = document.getElementById('ml-analyze-btn');
+        if (mlAnalyzeBtn && !mlAnalyzeBtn.disabled) {
+            mlAnalyzeBtn.click();
+        } else {
+            console.log('🔍 ML-NOTIFICATION: Falling back to direct ML analysis call');
+            this.analyzeWithML();
+        }
+    }
+    
+    /**
+     * Handle ML notification decline - hide notification and log decision
+     */
+    handleMLNotificationDecline() {
+        console.log('🚫 ML-NOTIFICATION: User declined ML analysis');
+        
+        // Hide the notification
+        const notification = document.getElementById('ml-available-notification');
+        if (notification) {
+            notification.remove();
+        }
+        
+        // Optionally store user preference to not show again for this session
+        sessionStorage.setItem('ml-notification-declined', 'true');
+    }
+
+    /**
+     * Handle batch analysis skip - mark as completed and show feedback interface
+     * This method provides the missing link between skip functionality and feedback UI
+     */
+    skipBatchAnalysis() {
+        console.log('🛑 ML-ANALYSIS: User skipped batch analysis - skipBatchAnalysis() called');
+        
+        // Use existing skip mechanism
+        window.mlAutoAnalysisUserChoice = 'skipped';
+        console.log('🏷️ ML-ANALYSIS: Set mlAutoAnalysisUserChoice to "skipped"');
+        
+        // Hide the notification/progress modal
+        const notification = document.getElementById('ml-available-notification');
+        if (notification) {
+            notification.remove();
+            console.log('🗑️ ML-ANALYSIS: Removed ml-available-notification');
+        } else {
+            console.log('⚠️ ML-ANALYSIS: ml-available-notification not found');
+        }
+        
+        // Hide any progress modals
+        const progressModal = document.querySelector('.ml-progress-modal');
+        if (progressModal) {
+            progressModal.remove();
+            console.log('🗑️ ML-ANALYSIS: Removed ml-progress-modal');
+        } else {
+            console.log('⚠️ ML-ANALYSIS: ml-progress-modal not found');
+        }
+        
+        // Show feedback interface - this is the missing piece that existing skip methods don't do
+        console.log('🎨 ML-ANALYSIS: About to call showMLFeedbackInterface()');
+        this.showMLFeedbackInterface();
+        
+        console.log('✅ ML-ANALYSIS: Skip completed, feedback interface shown');
+    }
+
+    /**
+     * Show ML feedback interface after analysis (or skip)
+     */
+    showMLFeedbackInterface() {
+        console.log('🎨 ML-FEEDBACK: Starting to show interface after skip');
+        
+        // Show the ML prediction display area
+        const mlPredictionDisplay = document.getElementById('ml-prediction-display');
+        if (mlPredictionDisplay) {
+            mlPredictionDisplay.style.display = 'block';
+            console.log('✅ ML-FEEDBACK: Showed ml-prediction-display');
+        } else {
+            console.error('❌ ML-FEEDBACK: Could not find ml-prediction-display element');
+        }
+
+        // Hide the analyze button
+        const mlAnalyzeBtn = document.getElementById('ml-analyze-btn');
+        if (mlAnalyzeBtn) {
+            mlAnalyzeBtn.style.display = 'none';
+            console.log('✅ ML-FEEDBACK: Hid ml-analyze-btn');
+        } else {
+            console.error('❌ ML-FEEDBACK: Could not find ml-analyze-btn element');
+        }
+
+        // Show the feedback button
+        const mlFeedbackBtn = document.getElementById('ml-feedback-btn');
+        if (mlFeedbackBtn) {
+            mlFeedbackBtn.style.display = 'inline-block';
+            mlFeedbackBtn.style.opacity = '1';
+            console.log('✅ ML-FEEDBACK: Showed ml-feedback-btn');
+        } else {
+            console.error('❌ ML-FEEDBACK: Could not find ml-feedback-btn element');
+        }
+
+        // Update prediction display with "skipped" status
+        const mlPredictionClass = document.getElementById('ml-prediction-class');
+        const mlPredictionConfidence = document.getElementById('ml-prediction-confidence');
+        const mlPredictionMethod = document.getElementById('ml-prediction-method');
+        
+        if (mlPredictionClass) {
+            mlPredictionClass.textContent = 'Analysis Skipped';
+            mlPredictionClass.className = 'classification-badge skipped';
+            // Add inline styles for skipped badge
+            mlPredictionClass.style.background = '#e0e0e0';
+            mlPredictionClass.style.color = '#666';
+            mlPredictionClass.style.padding = '4px 12px';
+            mlPredictionClass.style.borderRadius = '12px';
+            mlPredictionClass.style.fontSize = '0.85em';
+            mlPredictionClass.style.fontWeight = 'bold';
+            console.log('✅ ML-FEEDBACK: Updated ml-prediction-class to "Analysis Skipped"');
+        } else {
+            console.error('❌ ML-FEEDBACK: Could not find ml-prediction-class element');
+        }
+        
+        if (mlPredictionConfidence) {
+            mlPredictionConfidence.textContent = '';
+            console.log('✅ ML-FEEDBACK: Cleared ml-prediction-confidence');
+        }
+        
+        if (mlPredictionMethod) {
+            mlPredictionMethod.textContent = 'User Skipped Analysis';
+            console.log('✅ ML-FEEDBACK: Updated ml-prediction-method');
+        }
+
+        console.log('🎨 ML-FEEDBACK: Interface shown after skip - completed');
     }
 }
 

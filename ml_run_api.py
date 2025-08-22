@@ -5,6 +5,7 @@ Provides endpoints for the Log → Confirm → Record Accuracy workflow
 
 from flask import Blueprint, jsonify, request
 from ml_run_manager import MLRunManager
+from permission_decorators import production_admin_only
 
 ml_run_api = Blueprint('ml_run_api', __name__)
 run_manager = None  # Initialize lazily
@@ -162,5 +163,33 @@ def get_dashboard_data():
             'pending_runs': pending_runs,
             'recent_confirmed_runs': recent_confirmed
         })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@ml_run_api.route('/api/ml-runs/delete-pending', methods=['POST'])
+@production_admin_only
+def delete_pending_run():
+    """ADMIN: Delete a pending run (logs table only)"""
+    try:
+        data = request.get_json() or {}
+        run_id = data.get('run_id')
+        if not run_id:
+            return jsonify({'error': 'Missing run_id'}), 400
+        result = get_run_manager().delete_run(run_id, include_confirmed=False)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@ml_run_api.route('/api/ml-runs/delete-confirmed', methods=['POST'])
+@production_admin_only
+def delete_confirmed_run_admin():
+    """ADMIN: Delete a confirmed run explicitly"""
+    try:
+        data = request.get_json() or {}
+        run_id = data.get('run_id')
+        if not run_id:
+            return jsonify({'error': 'Missing run_id'}), 400
+        result = get_run_manager().delete_confirmed_run_admin(run_id)
+        return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
