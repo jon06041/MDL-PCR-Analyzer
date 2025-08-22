@@ -24,6 +24,32 @@ Dev tips:
 
 Next:
 - With the pre-check probe in place, re-run datasets to confirm cases with `r2 < 0.75` and valid vendor Cq flip to REDO prior to ML. Investigate wells that log probes but do not flip (likely missing vendor Cq or R² ≥ threshold at evaluation time).
+
+## Authentication: Open Test Mode and Local Admin (2025-08-22) ✅ ADDED
+
+Purpose: Unblock Railway testing and avoid login issues during demos. Adds an environment-gated bypass to require_auth and documents the local admin backdoor.
+
+What’s new
+- Open Test Mode (Railway/dev only)
+    - Enable with any of these env vars: `RAILWAY_OPEN_TEST_ALLOW_ALL=1` or `OPEN_TEST_ALLOW_ALL=1` (or `DEV_RELAXED_ADMIN_ACCESS=1`).
+    - Behavior: All routes decorated with `UnifiedAuthManager.require_auth(...)` bypass login and run as a synthetic admin session.
+    - Synthetic user context: `{ username: 'admin', role: 'administrator', roles: ['administrator'], auth_method: 'open_test' }` with union of all permissions.
+    - Intended only for testing; disable in production by unsetting the env flag.
+
+- Local Admin Backdoor (emergency access)
+    - Controlled by env: `ENABLE_BACKDOOR_AUTH=true` (default true), `BACKDOOR_USERNAME=admin`, `BACKDOOR_PASSWORD=qpcr_admin_2025`.
+    - On startup, `_ensure_backdoor_user()` auto-creates the admin user in MySQL table `local_users` when enabled.
+    - Login via the normal local login form with the backdoor credentials. If you see “Invalid username or password”, ensure backdoor is enabled and the `local_users` record exists.
+    - Password hashing: PBKDF2-HMAC-SHA256 with per-user salt. If you must rotate the password manually, update `salt` and `password_hash` for the `local_users` row accordingly.
+
+Fixes
+- Resolved login crash: fixed UnboundLocalError in `unified_auth_manager.authenticate_user` and hardened DB resource cleanup in auth methods.
+- Session payloads now include `roles: [role]` to support multi-role consumers while preserving legacy `role`.
+
+Usage notes (Railway)
+- For quick, no-login testing: set `RAILWAY_OPEN_TEST_ALLOW_ALL=1`, redeploy, and upload/analyze without signing in.
+- To use the backdoor admin: keep `ENABLE_BACKDOOR_AUTH=true` and use the configured username/password. The user is created automatically if missing.
+
 # MDL PCR Analyzer - AI Coding Agent Instructions
 
 ## 🚨 CRITICAL ALERT: NO SQLITE ALLOWED 🚨
