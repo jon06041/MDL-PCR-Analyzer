@@ -259,33 +259,40 @@ class UnifiedAuthManager:
     def authenticate_user(self, username: str, password: str, ip_address: str = None, 
                          user_agent: str = None) -> Optional[Dict]:
         """Authenticate user with local credentials (backdoor authentication)"""
+        connection = None
+        cursor = None
         try:
             if not self.backdoor_enabled:
                 logger.warning("Local authentication attempted but backdoor is disabled")
                 return None
-            
+
             connection = mysql.connector.connect(**self.mysql_config)
             cursor = connection.cursor(dictionary=True)
-            
+
             # Get user from local database
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT user_id, username, password_hash, salt, role, email, display_name, is_active
                 FROM local_users 
                 WHERE username = %s AND is_active = TRUE
-            """, (username,))
-            
+                """,
+                (username,),
+            )
+
             user = cursor.fetchone()
             if not user:
-                self._log_auth_event(username, 'local', 'login_failure', ip_address, user_agent,
-                                   {'reason': 'user_not_found'})
+                self._log_auth_event(
+                    username, 'local', 'login_failure', ip_address, user_agent, {'reason': 'user_not_found'}
+                )
                 return None
-            
+
             # Verify password
             if not self._verify_password(password, user['password_hash'], user['salt']):
-                self._log_auth_event(username, 'local', 'login_failure', ip_address, user_agent,
-                                   {'reason': 'invalid_password'})
+                self._log_auth_event(
+                    username, 'local', 'login_failure', ip_address, user_agent, {'reason': 'invalid_password'}
+                )
                 return None
-            
+
             # Create session
             session_data = self._create_user_session(
                 user_id=user['user_id'],
@@ -295,31 +302,42 @@ class UnifiedAuthManager:
                 ip_address=ip_address,
                 user_agent=user_agent,
                 display_name=user.get('display_name', user['username']),
-                email=user.get('email', '')
+                email=user.get('email', ''),
             )
-            
+
             # Update last login
-            cursor.execute("""
+            cursor.execute(
+                """
                 UPDATE local_users 
                 SET last_login = CURRENT_TIMESTAMP 
                 WHERE user_id = %s
-            """, (user['user_id'],))
-            
+                """,
+                (user['user_id'],),
+            )
+
             connection.commit()
-            
-            self._log_auth_event(username, 'local', 'login_success', ip_address, user_agent,
-                               {'role': user['role']})
-            
+
+            self._log_auth_event(
+                username, 'local', 'login_success', ip_address, user_agent, {'role': user['role']}
+            )
+
             logger.info(f"Local authentication successful for user: {username}")
             return session_data
-            
+
         except Error as e:
             logger.error(f"Database error during local authentication: {e}")
             return None
         finally:
-            if connection and connection.is_connected():
-                cursor.close()
-                connection.close()
+            try:
+                if cursor is not None:
+                    cursor.close()
+            except Exception:
+                pass
+            try:
+                if connection is not None and getattr(connection, 'is_connected', lambda: False)():
+                    connection.close()
+            except Exception:
+                pass
     
     def authenticate_with_entra(self, authorization_code: str, state: str, 
                                ip_address: str = None, user_agent: str = None) -> Optional[Dict]:
@@ -383,6 +401,8 @@ class UnifiedAuthManager:
                            display_name: str = None, email: str = None,
                            entra_oid: str = None, tenant_id: str = None) -> Dict:
         """Create a new user session in the database"""
+        connection = None
+        cursor = None
         try:
             session_id = secrets.token_urlsafe(64)
             expires_at = datetime.datetime.now() + datetime.timedelta(hours=self.session_timeout_hours)
@@ -411,6 +431,7 @@ class UnifiedAuthManager:
                 'user_id': user_id,
                 'username': username,
                 'role': role,
+                'roles': [role],
                 'permissions': self.PERMISSIONS.get(role, []),
                 'auth_method': auth_method,
                 'display_name': display_name or username,
@@ -422,12 +443,21 @@ class UnifiedAuthManager:
             logger.error(f"Error creating user session: {e}")
             return None
         finally:
-            if connection and connection.is_connected():
-                cursor.close()
-                connection.close()
+            try:
+                if cursor is not None:
+                    cursor.close()
+            except Exception:
+                pass
+            try:
+                if connection is not None and getattr(connection, 'is_connected', lambda: False)():
+                    connection.close()
+            except Exception:
+                pass
     
     def validate_session(self, session_id: str) -> Optional[Dict]:
         """Validate user session and return user data"""
+        connection = None
+        cursor = None
         try:
             connection = mysql.connector.connect(**self.mysql_config)
             cursor = connection.cursor(dictionary=True)
@@ -457,6 +487,7 @@ class UnifiedAuthManager:
                 'user_id': session['user_id'],
                 'username': session['username'],
                 'role': session['role'],
+                'roles': [session['role']],
                 'permissions': self.PERMISSIONS.get(session['role'], []),
                 'auth_method': session['auth_method'],
                 'expires_at': session['expires_at'].isoformat()
@@ -466,12 +497,21 @@ class UnifiedAuthManager:
             logger.error(f"Error validating session: {e}")
             return None
         finally:
-            if connection and connection.is_connected():
-                cursor.close()
-                connection.close()
+            try:
+                if cursor is not None:
+                    cursor.close()
+            except Exception:
+                pass
+            try:
+                if connection is not None and getattr(connection, 'is_connected', lambda: False)():
+                    connection.close()
+            except Exception:
+                pass
     
     def logout_user(self, session_id: str) -> bool:
         """Logout user and cleanup session"""
+        connection = None
+        cursor = None
         try:
             connection = mysql.connector.connect(**self.mysql_config)
             cursor = connection.cursor()
@@ -494,9 +534,16 @@ class UnifiedAuthManager:
             logger.error(f"Error during logout: {e}")
             return False
         finally:
-            if connection and connection.is_connected():
-                cursor.close()
-                connection.close()
+            try:
+                if cursor is not None:
+                    cursor.close()
+            except Exception:
+                pass
+            try:
+                if connection is not None and getattr(connection, 'is_connected', lambda: False)():
+                    connection.close()
+            except Exception:
+                pass
     
     def _hash_password(self, password: str, salt: str) -> str:
         """Hash password with salt using PBKDF2"""
@@ -510,6 +557,8 @@ class UnifiedAuthManager:
                        ip_address: str = None, user_agent: str = None, 
                        details: Dict = None):
         """Log authentication events for audit purposes"""
+        connection = None
+        cursor = None
         try:
             # Best-effort enrich details with request context (method/path)
             try:
@@ -537,15 +586,57 @@ class UnifiedAuthManager:
         except Error as e:
             logger.error(f"Error logging auth event: {e}")
         finally:
-            if connection and connection.is_connected():
-                cursor.close()
-                connection.close()
+            try:
+                if cursor is not None:
+                    cursor.close()
+            except Exception:
+                pass
+            try:
+                if connection is not None and getattr(connection, 'is_connected', lambda: False)():
+                    connection.close()
+            except Exception:
+                pass
+
+    def _is_open_test_mode(self) -> bool:
+        """Return True when open test mode is enabled (Railway/dev)."""
+        return (
+            os.getenv('RAILWAY_OPEN_TEST_ALLOW_ALL', '0') == '1'
+            or os.getenv('OPEN_TEST_ALLOW_ALL', '0') == '1'
+            or os.getenv('DEV_RELAXED_ADMIN_ACCESS', '0') == '1'
+        )
+
+    def _synthetic_admin_user(self) -> Dict:
+        """Build a synthetic admin user payload for open test mode."""
+        admin_perms = set()
+        for perms in self.PERMISSIONS.values():
+            admin_perms.update(perms)
+        return {
+            'session_id': 'open-test-mode',
+            'user_id': 'synthetic_admin',
+            'username': 'admin',
+            'role': 'administrator',
+            'roles': ['administrator'],
+            'permissions': sorted(admin_perms),
+            'auth_method': 'open_test',
+            'display_name': 'Open Test Admin',
+            'email': 'admin@localhost',
+            'expires_at': (datetime.datetime.now() + datetime.timedelta(hours=12)).isoformat(),
+        }
     
     def require_auth(self, required_permission: str = None):
         """Decorator to require authentication and optional permission"""
         def decorator(func):
             @wraps(func)
             def wrapper(*args, **kwargs):
+                # Open test mode: bypass auth and grant admin-like context
+                if self._is_open_test_mode():
+                    user_data = self._synthetic_admin_user()
+                    request.current_user = user_data
+                    try:
+                        session.setdefault('session_id', user_data['session_id'])
+                    except Exception:
+                        pass
+                    return func(*args, **kwargs)
                 session_id = session.get('session_id')
                 if not session_id:
                     if request.is_json:

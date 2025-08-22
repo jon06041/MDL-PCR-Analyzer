@@ -15,6 +15,44 @@ logger = logging.getLogger(__name__)
 # Initialize auth manager
 auth_manager = UnifiedAuthManager()
 
+# ---- Temporary, env-gated open test mode (for Railway testing) ----
+def _is_open_test_mode() -> bool:
+    """Returns True when Railway open test mode is enabled via env.
+
+    Opt-in only: set RAILWAY_OPEN_TEST_MODE=1 to allow limited, anonymous
+    access to specific endpoints needed for upload/analysis testing.
+    """
+    return os.getenv('RAILWAY_OPEN_TEST_MODE', '0').lower() in ('1', 'true', 'yes', 'on', 'y')
+
+def _is_open_test_allowed_path(path: str) -> bool:
+    """Allow only narrowly-scoped endpoints for open test mode."""
+    allowed_prefixes = (
+        '/analyze',                    # basic analysis upload endpoint
+        '/sessions/save-combined',     # save combined session after analysis
+        '/api/folder-queue',           # optional: folder queue dev helpers
+    )
+    return any(path.startswith(p) for p in allowed_prefixes)
+
+def _get_open_test_user():
+    """Synthetic user used in open test mode with minimal permissions."""
+    # Minimal set to enable uploads and viewing results
+    allowed = [
+        'upload_files',
+        'run_basic_analysis',
+        'view_analysis_results',
+    ]
+    # Allow override via env var (comma-separated)
+    override = os.getenv('OPEN_TEST_PERMISSIONS')
+    if override:
+        allowed = [p.strip() for p in override.split(',') if p.strip()]
+    return {
+        'username': 'open-test',
+        'display_name': 'Open Test User',
+        'role': 'qc_technician',  # non-admin role
+        'permissions': allowed,
+        'auth_method': 'open_test_mode',
+    }
+
 def is_development_mode():
     """Check if the application is running in development mode"""
     return os.environ.get('FLASK_ENV', 'development') == 'development'
@@ -49,6 +87,13 @@ def require_authentication(f):
     """Decorator to require valid authentication for any endpoint"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        # Open test mode: allow anonymous access for specific endpoints
+        if _is_open_test_mode() and _is_open_test_allowed_path(request.path):
+            from flask import g
+            g.current_user = _get_open_test_user()
+            logger.info(f"Open-test mode: granting anonymous access to {request.path}")
+            return f(*args, **kwargs)
+
         session_id = session.get('session_id')
         if not session_id:
             logger.warning(f"Unauthenticated access attempt to {request.endpoint} from {request.remote_addr}")
@@ -78,6 +123,13 @@ def require_permission(permission):
         @wraps(f)
         @require_authentication  # First ensure authentication
         def decorated_function(*args, **kwargs):
+            # If in open test mode and this endpoint is allowed, grant if permission matches synthetic user's perms
+            if _is_open_test_mode() and _is_open_test_allowed_path(request.path):
+                user_permissions = getattr(g, 'current_user', {}).get('permissions', [])
+                if permission in user_permissions:
+                    logger.info(f"Open-test mode: permitting {permission} on {request.path}")
+                    return f(*args, **kwargs)
+
             user_permissions = g.current_user.get('permissions', [])
             
             if permission not in user_permissions:
