@@ -138,6 +138,10 @@ function getAllowedEvidenceTypes(reqCode) {
         if (/VALIDATION|CFR[_\s-]*11[_\s-]*10[_\s-]*A|ISO[_\s-]*13485[_\s-]*4[_\s-]*1[_\s-]*6|ISO[_\s-]*14971[_\s-]*4[_\s-]*4/.test(code)) {
             return ['run_files', 'validation_tests'];
         }
+        // CFR 11.10(c): Record protection (documentation + some run evidence)
+        if (/CFR[_\s-]*11[_\s-]*10[_\s-]*C/.test(code) || /FDA[_\s-]*CFR[_\s-]*21[_\s-]*11[_\s-]*10[_\s-]*C/.test(code)) {
+            return ['documentation', 'run_files'];
+        }
         // Quality management
         if (/ISO[_\s-]*13485/.test(code)) {
             return ['run_files', 'documentation'];
