@@ -38,15 +38,20 @@ def get_encryption_handler():
     return encryption_handler
 
 def get_mysql_connection():
-    """Get MySQL connection with error handling"""
+    """Get MySQL connection with error handling (forces TCP, supports port)."""
     try:
+        host = os.environ.get('MYSQL_HOST', '127.0.0.1')
+        # Force TCP if 'localhost' is provided
+        if host == 'localhost':
+            host = '127.0.0.1'
+        port = int(os.environ.get('MYSQL_PORT', 3306))
         return mysql.connector.connect(
-            host=os.environ.get('MYSQL_HOST', 'localhost'),
+            host=host,
+            port=port,
             user=os.environ.get('MYSQL_USER', 'qpcr_user'), 
             password=os.environ.get('MYSQL_PASSWORD', 'qpcr_password'),
             database=os.environ.get('MYSQL_DATABASE', 'qpcr_analysis'),
-            charset='utf8mb4',
-            collation='utf8mb4_unicode_ci'
+            charset='utf8mb4'
         )
     except Exception as e:
         current_app.logger.error(f"MySQL connection failed: {e}")
