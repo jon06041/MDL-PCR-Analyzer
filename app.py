@@ -7061,23 +7061,29 @@ def get_encryption_evidence_for_requirement(requirement_code):
             # Normalize possible dash variant
             suffix = requirement_code.split('FDA-CFR-21-11-10-', 1)[1]
             candidates.append(f'FDA_CFR_21_11_10_{suffix}')
-        
+
         # Try exact matches first (any alias)
         placeholders = ','.join(['%s'] * len(candidates))
-     # Include tracking join only when table exists
-     has_tracking = _table_exists(cursor, 'compliance_requirements_tracking')
-     join_clause = 'LEFT JOIN compliance_requirements_tracking crt ON ce.requirement_id = crt.requirement_id' if has_tracking else ''
-     select_tracking = 'crt.compliance_status, crt.evidence_count' if has_tracking else 'NULL AS compliance_status, NULL AS evidence_count'
+        # Include tracking join only when table exists
+        has_tracking = _table_exists(cursor, 'compliance_requirements_tracking')
+        join_clause = (
+            'LEFT JOIN compliance_requirements_tracking crt ON ce.requirement_id = crt.requirement_id'
+            if has_tracking else ''
+        )
+        select_tracking = (
+            'crt.compliance_status, crt.evidence_count'
+            if has_tracking else 'NULL AS compliance_status, NULL AS evidence_count'
+        )
 
-     query_exact = f"""
-     SELECT ce.requirement_id, ce.evidence_type, ce.evidence_data, ce.created_at,
-         ce.validation_status, {select_tracking}
-     FROM compliance_evidence ce
-     {join_clause}
-     WHERE ce.requirement_id IN ({placeholders})
-     ORDER BY ce.created_at DESC
-     LIMIT 1
-     """
+        query_exact = f"""
+            SELECT ce.requirement_id, ce.evidence_type, ce.evidence_data, ce.created_at,
+                   ce.validation_status, {select_tracking}
+            FROM compliance_evidence ce
+            {join_clause}
+            WHERE ce.requirement_id IN ({placeholders})
+            ORDER BY ce.created_at DESC
+            LIMIT 1
+        """
         cursor.execute(query_exact, tuple(candidates))
         evidence_record = cursor.fetchone()
         
@@ -7090,11 +7096,11 @@ def get_encryption_evidence_for_requirement(requirement_code):
                 like_term = f"%11_10_{requirement_code.split('FDA_CFR_21_11_10_', 1)[1]}%"
             if like_term:
                 cursor.execute(
-                    """
-              SELECT ce.requirement_id, ce.evidence_type, ce.evidence_data, ce.created_at,
-                  ce.validation_status, {select_tracking}
-              FROM compliance_evidence ce
-              {join_clause}
+                    f"""
+                    SELECT ce.requirement_id, ce.evidence_type, ce.evidence_data, ce.created_at,
+                           ce.validation_status, {select_tracking}
+                    FROM compliance_evidence ce
+                    {join_clause}
                     WHERE ce.requirement_id LIKE %s
                     ORDER BY ce.created_at DESC
                     LIMIT 1
