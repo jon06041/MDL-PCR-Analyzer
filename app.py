@@ -6973,14 +6973,14 @@ def get_encryption_evidence_for_compliance():
         regulation = request.args.get('regulation', '').upper()
         requirement_code = request.args.get('requirement_code', '')
         
-    # MySQL connection
-    import mysql.connector
-    mysql_config = get_mysql_config()
-    conn = mysql.connector.connect(**mysql_config)
-    cursor = conn.cursor(dictionary=True)
+        # MySQL connection
+        import mysql.connector
+        mysql_config = get_mysql_config()
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
         
-    # Ensure base table exists; self-heal if missing
-    if not _table_exists(cursor, 'compliance_evidence'):
+        # Ensure base table exists; self-heal if missing
+        if not _table_exists(cursor, 'compliance_evidence'):
             _auto_fix_encryption_evidence()
         # Re-check after fix
         if not _table_exists(cursor, 'compliance_evidence'):
@@ -6990,8 +6990,8 @@ def get_encryption_evidence_for_compliance():
                 'regulation': regulation or 'ALL',
                 'requirements': [],
                 'total_evidence': 0,
-        'status': 'no_evidence',
-        'database_connected': True
+                'status': 'no_evidence',
+                'database_connected': True
             })
 
         # Decide whether to include tracking join
@@ -7068,11 +7068,11 @@ def get_encryption_evidence_for_compliance():
 def get_encryption_evidence_for_requirement(requirement_code):
     """Get specific encryption evidence for a compliance requirement"""
     try:
-    # MySQL connection
-    import mysql.connector
-    mysql_config = get_mysql_config()
-    conn = mysql.connector.connect(**mysql_config)
-    cursor = conn.cursor(dictionary=True)
+        # MySQL connection
+        import mysql.connector
+        mysql_config = get_mysql_config()
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
 
         # Ensure base table exists; self-heal if missing
         if not _table_exists(cursor, 'compliance_evidence'):
@@ -7149,7 +7149,7 @@ def get_encryption_evidence_for_requirement(requirement_code):
                 )
                 evidence_record = cursor.fetchone()
         
-    if not evidence_record:
+        if not evidence_record:
             # Graceful fallback: return a minimal structure rather than 404 to avoid noisy errors
             conn.close()
             return jsonify({
@@ -7162,8 +7162,8 @@ def get_encryption_evidence_for_requirement(requirement_code):
                 'created_at': None,
                 'validation_status': 'pending',
                 'implementation_status': 'in_progress',
-        'evidence_count': 0,
-        'database_connected': True
+                'evidence_count': 0,
+                'database_connected': True
             })
         
         # Format the response
