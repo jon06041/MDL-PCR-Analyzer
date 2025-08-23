@@ -2072,6 +2072,38 @@
                         `;
                     }
                     
+                    // Collect descriptive controls from multiple sources
+                    try {
+                        const controlSet = new Set();
+                        // Direct list on evidence
+                        if (Array.isArray(evidence.encryption_controls)) {
+                            evidence.encryption_controls.forEach(c => c && controlSet.add(String(c)));
+                        }
+                        // Compliance mapping style: object of org -> { encryption_controls: [...] }
+                        const cmap = evidence.compliance_mapping || {};
+                        if (cmap && typeof cmap === 'object') {
+                            Object.values(cmap).forEach(entry => {
+                                try {
+                                    if (entry && Array.isArray(entry.encryption_controls)) {
+                                        entry.encryption_controls.forEach(c => c && controlSet.add(String(c)));
+                                    }
+                                } catch {}
+                            });
+                        }
+                        // Flatten to array
+                        const controls = Array.from(controlSet);
+                        if (controls.length > 0) {
+                            encSection += `
+                                <div class="alert alert-secondary mt-3">
+                                    <strong>Encryption Controls Implemented:</strong>
+                                    <ul class="mb-0 mt-2">
+                                        ${controls.map(item => `<li>${item}</li>`).join('')}
+                                    </ul>
+                                </div>
+                            `;
+                        }
+                    } catch (e) { /* non-blocking */ }
+
                     encSection += `
                                         </tbody>
                                     </table>
