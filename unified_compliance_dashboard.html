@@ -1715,11 +1715,10 @@
                 }
             }
             
-            // Render Documentation upload/list UI when policy allows
+            // Render Documentation upload/list UI (always show to avoid gating surprises)
             try {
-                const allowDocs = (window.EvidenceFilter?.getAllowedEvidenceTypes?.(reqCode) || []).includes('documentation');
                 const container = document.getElementById('evidenceDetails');
-                if (allowDocs && container) {
+                if (container) {
                     const docSectionId = `docUpload_${reqCode}`;
                     if (!document.getElementById(docSectionId)) {
                         const block = document.createElement('div');
