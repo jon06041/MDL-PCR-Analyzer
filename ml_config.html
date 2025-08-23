@@ -25,6 +25,20 @@
         </header>
 
         <main>
+            <!-- Admin quick actions -->
+            <section class="admin-actions" style="margin-bottom:20px;">
+                <div class="card" style="padding:12px; border:1px solid #e9ecef; border-radius:6px;">
+                    <h3 style="margin:4px 0 12px 0;">Admin Quick Actions</h3>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                        <button id="enableAllBtn" class="btn btn-success">Enable ML for All Pathogens</button>
+                        <button id="disableAllBtn" class="btn btn-outline-danger">Disable ML for All Pathogens</button>
+                        <label style="margin-left:16px; display:flex; align-items:center; gap:6px;">
+                            <input type="checkbox" id="showLearningMessagesToggle" /> Show learning messages
+                        </label>
+                        <span id="adminActionStatus" style="font-size:12px; color:#6c757d;"></span>
+                    </div>
+                </div>
+            </section>
             <!-- Important Note Section -->
             <div class="important-note">
                 <h3>🤔 Should This Page Exist?</h3>
@@ -276,6 +290,60 @@
             
             // Refresh status overview every 30 seconds
             setInterval(loadMLStatusOverview, 30000);
+
+            // Wire admin quick actions
+            const enableAllBtn = document.getElementById('enableAllBtn');
+            const disableAllBtn = document.getElementById('disableAllBtn');
+            const showLearningToggle = document.getElementById('showLearningMessagesToggle');
+            const statusEl = document.getElementById('adminActionStatus');
+
+            async function bulkToggle(enabled) {
+                try {
+                    statusEl.textContent = enabled ? 'Enabling all…' : 'Disabling all…';
+                    const res = await fetch('/api/ml-config/pathogen/bulk-toggle', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ enabled })
+                    });
+                    const data = await res.json();
+                    if (!res.ok || data.success === false) throw new Error(data.error || `HTTP ${res.status}`);
+                    statusEl.textContent = `Updated ${data.affected || 0} configs`;
+                    loadMLStatusOverview();
+                } catch (e) {
+                    console.error('Bulk toggle failed', e);
+                    statusEl.textContent = `Error: ${e.message}`;
+                }
+            }
+
+            // Prefetch system config to set toggle initial state
+            (async () => {
+                try {
+                    const r = await fetch('/api/ml-config/system');
+                    const d = await r.json();
+                    if (d && d.config) {
+                        showLearningToggle.checked = !!d.config.show_learning_messages;
+                    }
+                } catch {}
+            })();
+
+            enableAllBtn.addEventListener('click', () => bulkToggle(true));
+            disableAllBtn.addEventListener('click', () => bulkToggle(false));
+            showLearningToggle.addEventListener('change', async (e) => {
+                try {
+                    statusEl.textContent = 'Updating setting…';
+                    const res = await fetch('/api/ml-config/system/show_learning_messages', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ value: e.target.checked })
+                    });
+                    const data = await res.json();
+                    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+                    statusEl.textContent = 'Setting updated';
+                } catch (err) {
+                    console.error('Update failed', err);
+                    statusEl.textContent = `Error: ${err.message}`;
+                }
+            });
         });
     </script>
 
@@ -410,6 +478,10 @@
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
+
+    .btn { padding:8px 12px; border-radius:4px; cursor:pointer; border:1px solid #dee2e6; background:#f8f9fa; }
+    .btn-success { background:#28a745; color:white; border-color:#28a745; }
+    .btn-outline-danger { background:white; color:#dc3545; border-color:#dc3545; }
 
         .status-grid {
             display: grid;

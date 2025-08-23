@@ -4278,21 +4278,47 @@ def update_system_ml_config(config_key):
         if ml_config_manager is None:
             return jsonify({'error': 'ML configuration manager not initialized'}), 503
         
-        data = request.get_json()
-        value = str(data.get('value', ''))
+        # Accept loose JSON and coerce
+        data = request.get_json(silent=True) or {}
+        raw_value = data.get('value')
+        notes = data.get('notes', '')
+        
+        # Normalize booleans and choose data_type
+        bool_keys = {
+            'ml_global_enabled', 'reset_protection_enabled', 'auto_training_enabled',
+            'show_learning_messages', 'disable_teaching', 'ml_default_enabled'
+        }
+        data_type = 'string'
+        value = raw_value
+        if config_key in bool_keys:
+            # Coerce to boolean then store as 'true'/'false'
+            sval = str(raw_value).strip().lower()
+            value = sval in ('true', '1', 'yes', 'on')
+            data_type = 'boolean'
+        elif isinstance(raw_value, bool):
+            value = bool(raw_value)
+            data_type = 'boolean'
+        elif isinstance(raw_value, int):
+            data_type = 'integer'
+        elif isinstance(raw_value, float):
+            data_type = 'float'
+        elif isinstance(raw_value, (dict, list)):
+            data_type = 'json'
         
         # Get user info for audit (session-based)
         user_info = {
             'user_id': get_current_user(),
             'ip': request.remote_addr,
-            'notes': data.get('notes', '')
+            'notes': notes
         }
         
-        # TODO: Add role-based access check here
-        # if not user_has_admin_role(user_info['user_id']):
-        #     return jsonify({'error': 'Admin access required'}), 403
-        
-        success = ml_config_manager.set_system_config(config_key, value, user_info)
+        # Persist with explicit data_type and description
+        success = ml_config_manager.set_system_config(
+            config_key,
+            value,
+            data_type=data_type,
+            description=f"Updated via API by {user_info.get('user_id')}"
+        )
         
         if success:
             return jsonify({
