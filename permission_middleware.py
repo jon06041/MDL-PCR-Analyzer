@@ -48,6 +48,9 @@ def _is_open_test_allowed_path(path: str) -> bool:
         '/api/folder-queue',
         # Compliance documentation evidence (upload/list/serve/delete)
         '/api/unified-compliance/evidence/documentation',
+    # Permission summary endpoints used by the dashboard
+    '/api/permissions/check',
+    '/api/permissions/validate',
         # Read-only compliance data used by dashboard
         '/api/unified-compliance/requirements',
         '/api/unified-compliance/recent-events',

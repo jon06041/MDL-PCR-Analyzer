@@ -782,7 +782,16 @@ from werkzeug.utils import secure_filename
 from flask import send_file
 
 # Base upload folder for compliance documents (created at runtime)
-BASE_UPLOAD_DIR = os.environ.get('COMPLIANCE_UPLOAD_DIR', os.path.join(os.getcwd(), 'uploads', 'compliance_docs'))
+# Priority: COMPLIANCE_UPLOAD_DIR env → Railway volume (/data) → ./uploads/compliance_docs
+_env_dir = os.environ.get('COMPLIANCE_UPLOAD_DIR')
+if _env_dir and _env_dir.strip():
+    BASE_UPLOAD_DIR = _env_dir.strip()
+else:
+    # Prefer Railway volume mount when present to survive redeploys
+    if os.path.isdir('/data') and os.access('/data', os.W_OK):
+        BASE_UPLOAD_DIR = os.path.join('/data', 'compliance_docs')
+    else:
+        BASE_UPLOAD_DIR = os.path.join(os.getcwd(), 'uploads', 'compliance_docs')
 os.makedirs(BASE_UPLOAD_DIR, exist_ok=True)
 
 # Limit upload size (20 MB by default)
