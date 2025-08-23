@@ -4089,7 +4089,8 @@ function handleFileUpload(file, type = 'amplification') {
     // Enhanced validation for file naming conventions
     if (type === 'amplification') {
         // Strict: must match "... - Quantification Amplification Results_<Channel>.csv"
-        const ampStrict = /\bQuantification\s+Amplification\s+Results_[A-Za-z0-9]+\.csv$/i.test(file.name);
+        // Allow multiple spaces after the dash and multi-word channels (e.g., "Texas Red")
+        const ampStrict = /-\s+Quantification\s+Amplification\s+Results_[A-Za-z0-9][A-Za-z0-9\s]*\.csv$/i.test(file.name);
         if (!ampStrict) {
             alert(`Invalid amplification file name. Expected "... - Quantification Amplification Results_<Channel>.csv".\nYour file: ${file.name}`);
             return;

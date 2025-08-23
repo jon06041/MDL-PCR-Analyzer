@@ -433,7 +433,8 @@ function getTestCompletionStatus(sessions) {
         if (!testCode || !PATHOGEN_LIBRARY[testCode]) return;
         
         // Extract base experiment pattern - handle both individual and multi-fluorophore sessions
-        let basePattern = experimentPattern.replace(/ -  Quantification Amplification Results_[A-Za-z0-9\s]+\.csv$/, '');
+    // Remove amplification suffix allowing one-or-more spaces and multi-word channels
+    let basePattern = experimentPattern.replace(/ -\s+Quantification\s+Amplification\s+Results_[A-Za-z0-9\s]+\.csv$/i, '');
         
         // Handle multi-fluorophore session format: "Multi-Fluorophore Analysis (HEX, FAM, Cy5) AcBVAB_2578826_CFX367394"
         if (basePattern.includes('Multi-Fluorophore Analysis')) {

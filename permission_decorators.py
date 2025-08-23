@@ -32,6 +32,15 @@ def require_permission(permission):
                 if request.is_json:
                     return jsonify({'error': 'Invalid session'}), 401
                 return redirect(url_for('auth.login'))
+
+            # Administrator override (multi-role aware)
+            roles = user_data.get('roles') or []
+            primary_role = user_data.get('role')
+            if primary_role:
+                roles = list(set(roles + [primary_role]))
+            if 'administrator' in roles:
+                request.current_user = user_data
+                return f(*args, **kwargs)
                 
             if permission not in user_data.get('permissions', []):
                 logger.warning(f"Permission denied: {user_data.get('username')} tried to access {request.endpoint} (requires {permission})")
@@ -89,15 +98,34 @@ def production_admin_only(f):
     """
     @wraps(f)
     def decorated_function(*args, **kwargs):
-                current_env = os.getenv('ENVIRONMENT', 'development').lower()
-                dev_relaxed = os.getenv('DEV_RELAXED_ADMIN_ACCESS', '0').lower() in ('1','true','yes','y','on')
+        current_env = os.getenv('ENVIRONMENT', 'development').lower()
+        dev_relaxed = os.getenv('DEV_RELAXED_ADMIN_ACCESS', '0').lower() in ('1','true','yes','y','on')
 
-                if current_env != 'production' and dev_relaxed:
-                        # Explicitly relaxed access for dev only
-                        logger.info(f"Development relaxed access: Allowing access to {request.endpoint}")
-                        return f(*args, **kwargs)
-                # Otherwise require admin permission in all environments
-                return require_permission('database_management')(f)(*args, **kwargs)
+        if current_env != 'production' and dev_relaxed:
+            # Explicitly relaxed access for dev only
+            logger.info(f"Development relaxed access: Allowing access to {request.endpoint}")
+            return f(*args, **kwargs)
+
+        # If the current user is an administrator, allow access without specific permission
+        try:
+            from unified_auth_manager import UnifiedAuthManager
+            auth_manager = UnifiedAuthManager()
+            session_id = session.get('session_id')
+            if session_id:
+                user_data = auth_manager.validate_session(session_id) or {}
+                roles = user_data.get('roles') or []
+                primary_role = user_data.get('role')
+                if primary_role:
+                    roles = list(set(roles + [primary_role]))
+                if 'administrator' in roles:
+                    logger.info(f"Admin override: {user_data.get('username')} accessing {request.endpoint}")
+                    return f(*args, **kwargs)
+        except Exception as _e:
+            # Fall through to permission-based check on any issue
+            pass
+
+        # Otherwise require explicit admin/database permission
+        return require_permission('database_management')(f)(*args, **kwargs)
             
     return decorated_function
 

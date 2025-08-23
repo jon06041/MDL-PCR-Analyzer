@@ -476,8 +476,8 @@ function normalizeBaseFilename(filename) {
                .replace(/-\s*_?Melt_Curve_Plate_View.*$/i, '')
                .replace(/-\s*_?Melt_Curve.*$/i, '')
                .replace(/-\s*_?End_Point.*$/i, '');
-    // Remove channelized export suffix like " - Quantification Amplification Results_FAM"
-    base = base.replace(/\s+-\s+Quantification\s+Amplification\s+Results_[A-Za-z0-9]+$/i, '');
+    // Remove channelized export suffix like " - Quantification Amplification Results_FAM" or multi-word channels
+    base = base.replace(/\s*-\s+Quantification\s+Amplification\s+Results_[A-Za-z0-9\s]+$/i, '');
     // Remove trailing channel fragments like " - FAM" or "_FAM"
     base = base.replace(/\s*-\s*(FAM|HEX|Cy5|Texas\s*Red)$/i, '')
                .replace(/_(FAM|HEX|Cy5|TexasRed)$/i, '');

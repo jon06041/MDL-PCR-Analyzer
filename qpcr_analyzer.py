@@ -705,9 +705,27 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
             try:
                 vendor_cq = data.get('cq_value') or analysis.get('cq_value')
                 r2_score_val = analysis.get('r2_score', 1.0)
+
+                # Compute a quick CQJ if a threshold is known so the REDO rule can consider CQJ presence
+                cqj_for_redo = None
+                threshold_for_redo = analysis.get('threshold_value')
+                if threshold_for_redo is not None:
+                    well_for_cqj_quick = {
+                        'raw_cycles': analysis.get('raw_cycles'),
+                        'raw_rfu': analysis.get('raw_rfu'),
+                        'cycles': cycles,
+                        'rfu': rfu
+                    }
+                    try:
+                        cqj_for_redo = py_cqj(well_for_cqj_quick, threshold_for_redo)
+                    except Exception:
+                        cqj_for_redo = None
+
                 # Persist a targeted debug entry for observability
-                logger.info(f"REDO pre-check probe | well={well_id} | R2={r2_score_val} | vendor_cq={vendor_cq}")
-                if vendor_cq is not None and r2_score_val < 0.75:
+                logger.info(f"REDO pre-check probe | well={well_id} | R2={r2_score_val} | vendor_cq={vendor_cq} | cqj={cqj_for_redo}")
+
+                # Apply REDO pre-check when R2 is low and either vendor Cq or CQJ is present
+                if r2_score_val < 0.75 and (vendor_cq is not None or cqj_for_redo is not None):
                     redo_probe = classify_curve(
                         r2_score_val,
                         analysis.get('steepness', 0),
@@ -715,7 +733,7 @@ def batch_analyze_wells(data_dict, **quality_filter_params):
                         analysis.get('midpoint', 50),
                         analysis.get('baseline', 100),
                         amplitude=analysis.get('amplitude', 0),
-                        cq_value=analysis.get('cqj') if analysis.get('cqj') else None,
+                        cq_value=cqj_for_redo,
                         vendor_cq_value=vendor_cq
                     )
                     if redo_probe and redo_probe.get('classification') == 'REDO':
