@@ -796,11 +796,16 @@
                     pending: (pendingData && (pendingData.pending_sessions || pendingData.sessions || [])) || []
                 };
 
-                // Preload encryption evidence presence for mapped requirements so counts match modal contents
+                // Preload encryption evidence presence for any requirement whose allowed types include encryption_evidence
                 window.encryptionPresenceByReq = {};
                 try {
-                    const mapping = window.EvidenceFilter?.REQUIREMENT_EVIDENCE_MAPPING || {};
-                    const encReqs = (window.requirementsData || []).filter(r => Array.isArray(mapping[r.id]) && mapping[r.id].includes('encryption_evidence'));
+                    const reqs = Array.isArray(window.requirementsData) ? window.requirementsData : [];
+                    const encReqs = reqs.filter(r => {
+                        try {
+                            const allowed = window.EvidenceFilter?.getAllowedEvidenceTypes?.(r.id) || [];
+                            return allowed.includes('encryption_evidence');
+                        } catch { return false; }
+                    });
                     if (encReqs.length > 0) {
                         await Promise.all(encReqs.map(async (r) => {
                             try {
@@ -1982,7 +1987,7 @@
 
                     // Wrap in a stable mount to avoid duplicates; replace if it exists
                     const mountId = `encryptionEvidence_${reqCode}`;
-                    const blockHtml = `
+                    let encryptionBlockHtml = `
                         <div id="${mountId}" class="card mb-3 border-primary">
                             <div class="card-header bg-primary text-white">
                                 <h6><i class="fas fa-shield-alt"></i> Encryption & Security Controls Evidence</h6>
@@ -2067,7 +2072,7 @@
                         `;
                     }
                     
-                    evidenceHTML += `
+                    encryptionBlockHtml += `
                                         </tbody>
                                     </table>
                                 </div>
@@ -2109,24 +2114,21 @@
                     `;
                     
                     // Insert or replace this encryption evidence block only (preserve other sections)
-                    if (!evidenceContainer) {
-                        // Nothing to mount into; safe guard
-                        evidenceHTML += blockHtml;
-                    } else {
+                    if (evidenceContainer) {
                         const existingBlock = document.getElementById(mountId);
                         if (existingBlock) {
-                            existingBlock.outerHTML = blockHtml;
+                            existingBlock.outerHTML = encryptionBlockHtml;
                         } else {
                             // If container was still showing spinner, clear it before first insert
                             if (evidenceContainer.innerHTML.trim().includes('Loading evidence')) {
                                 evidenceContainer.innerHTML = '';
                             }
-                            evidenceContainer.insertAdjacentHTML('beforeend', blockHtml);
+                            evidenceContainer.insertAdjacentHTML('beforeend', encryptionBlockHtml);
                         }
                     }
                 }
-                    // Also keep concatenated HTML for any later full replace logic
-                    evidenceHTML += blockHtml;
+                    // Note: Do not reference blockHtml outside the encryption block scope; it's block-scoped.
+                    // We already inserted/replaced the encryption section directly in the DOM above.
                 
                 // Add Validation Tests section when configured
                 if (needsValidationTests) {

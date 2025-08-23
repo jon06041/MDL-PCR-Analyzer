@@ -4448,6 +4448,50 @@ def get_ml_audit_log():
         app.logger.error(f"Failed to get audit log: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/ml-config/pathogen/bulk-toggle', methods=['POST'])
+@production_admin_only
+def bulk_toggle_ml_pathogens():
+    """Bulk enable/disable ML for pathogen configs. Admin-only."""
+    try:
+        global ml_config_manager
+        if ml_config_manager is None:
+            from ml_config_manager import MLConfigManager
+            ml_config_manager = MLConfigManager(use_mysql=True, mysql_config=mysql_config)
+
+        payload = request.get_json(force=True, silent=True) or {}
+        enabled = bool(payload.get('enabled', True))
+        pathogen_code = payload.get('pathogen_code')
+        fluorophore = payload.get('fluorophore')
+
+        affected = ml_config_manager.bulk_set_ml_enabled(enabled, pathogen_code, fluorophore)
+        return jsonify({'success': True, 'affected': affected})
+    except Exception as e:
+        app.logger.error(f"Bulk toggle failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/ml-config/system/ml_default_enabled', methods=['PUT'])
+@production_admin_only
+def set_ml_default_enabled():
+    """Set whether new pathogen entries default to enabled on sync."""
+    try:
+        global ml_config_manager
+        if ml_config_manager is None:
+            from ml_config_manager import MLConfigManager
+            ml_config_manager = MLConfigManager(use_mysql=True, mysql_config=mysql_config)
+
+        payload = request.get_json(force=True, silent=True) or {}
+        # Normalize boolean-like input
+        raw = str(payload.get('value', 'false')).strip().lower()
+        value = raw in ('true','1','yes','on')
+        ok = ml_config_manager.set_system_config(
+            'ml_default_enabled', str(value).lower(), data_type='boolean',
+            description='Default ML enabled for new pathogen entries'
+        )
+        return jsonify({'success': bool(ok), 'value': value})
+    except Exception as e:
+        app.logger.error(f"Set ml_default_enabled failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/auth/audit-log', methods=['GET'])
 def get_auth_audit_log():
     """Get authentication/access audit log entries from auth_audit_log (for Entra/access evidence)"""

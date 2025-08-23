@@ -543,9 +543,12 @@ function getGlobalEvidenceCount(requirements, cachedSessions, encryptionPresence
     // 3) Encryption evidence records
     let encCount = 0;
     try {
-        const mapping = window.EvidenceFilter?.REQUIREMENT_EVIDENCE_MAPPING || {};
         for (const r of reqs) {
-            const needsEnc = Array.isArray(mapping[r.id]) && mapping[r.id].includes('encryption_evidence');
+            let needsEnc = false;
+            try {
+                const allowed = window.EvidenceFilter?.getAllowedEvidenceTypes?.(r.id) || [];
+                needsEnc = allowed.includes('encryption_evidence');
+            } catch { needsEnc = false; }
             if (!needsEnc) continue;
             const encData = encryptionPresenceByReq ? encryptionPresenceByReq[r.id] : null;
             encCount += countEncryptionRecords(encData);

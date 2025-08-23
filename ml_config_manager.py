@@ -262,6 +262,11 @@ class MLConfigManager:
         - Idempotent: uses ON DUPLICATE KEY UPDATE to avoid duplicates; won't flip ml_enabled flags.
         """
         try:
+            # Determine default enabled behavior for new mappings from system config
+            try:
+                default_enabled = bool(self.get_system_config('ml_default_enabled', False))
+            except Exception:
+                default_enabled = False
             # Discover repository root and JS path (works in dev container and prod)
             repo_root = os.path.dirname(os.path.abspath(__file__))
             js_path = os.path.join(repo_root, 'static', 'pathogen_library.js')
@@ -296,7 +301,7 @@ class MLConfigManager:
                                         pathogen_code = VALUES(pathogen_code),
                                         fluorophore = VALUES(fluorophore)
                                     """,
-                                    (pathogen_code, fluorophore, False, 0.70, 50, 1000, True)
+                                    (pathogen_code, fluorophore, default_enabled, 0.70, 50, 1000, True)
                                 )
                                 inserted += cursor.rowcount
                             except Exception as ie:
@@ -309,6 +314,46 @@ class MLConfigManager:
         except Exception as e:
             logger.warning(f"⚠️ Auto-populate from pathogen library failed (non-critical): {e}")
             # Non-fatal; UI can still function with existing rows
+
+    def bulk_set_ml_enabled(self, enabled: bool, pathogen_code: str = None, fluorophore: str = None) -> int:
+        """Bulk enable/disable ML flags.
+        Returns number of rows affected.
+        """
+        try:
+            conn = self.get_db_connection()
+            try:
+                with conn.cursor() as cursor:
+                    params = []
+                    sql = "UPDATE ml_pathogen_config SET ml_enabled = %s, updated_at = CURRENT_TIMESTAMP"
+                    params.append(bool(enabled))
+                    conditions = []
+                    if pathogen_code:
+                        conditions.append("pathogen_code = %s")
+                        params.append(pathogen_code)
+                    if fluorophore:
+                        conditions.append("fluorophore = %s")
+                        params.append(fluorophore)
+                    if conditions:
+                        sql += " WHERE " + " AND ".join(conditions)
+                    cursor.execute(sql, params)
+                    affected = cursor.rowcount
+                    # Audit one summary entry
+                    self._log_audit_action(
+                        cursor,
+                        'bulk_toggle_ml',
+                        pathogen_code if pathogen_code else None,
+                        fluorophore if fluorophore else None,
+                        None,
+                        f"enabled={enabled}; affected={affected}",
+                        {"user_id": request.headers.get('X-User-ID') or 'admin'} if 'request' in globals() else None
+                    )
+                    conn.commit()
+                    return affected
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error(f"❌ Bulk toggle ML failed: {e}")
+            return 0
 
     def _load_pathogen_library(self, js_path: str):
         """Load PATHOGEN_LIBRARY object from a JS file by stripping comments and JSON-parsing."""
