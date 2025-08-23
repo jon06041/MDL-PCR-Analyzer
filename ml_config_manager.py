@@ -6,6 +6,7 @@ Uses MySQL exclusively - NO SQLITE
 
 import pymysql
 import json
+import re
 import os
 import shutil
 from datetime import datetime
@@ -256,31 +257,91 @@ class MLConfigManager:
             logger.error(f"Failed to log audit action: {e}")
     
     def populate_from_pathogen_library(self):
-        """Populate ML config from pathogen library - MySQL version
-        NOTE: Pathogen configs are now populated manually via populate_ml_config_simple.py
-        This method checks if configs exist and skips population if already present.
+        """Populate or upsert ML config rows from static/pathogen_library.js (MySQL only).
+        - Reads the canonical JS library, strips comments, parses object, and inserts missing (pathogen_code, fluorophore) pairs.
+        - Idempotent: uses ON DUPLICATE KEY UPDATE to avoid duplicates; won't flip ml_enabled flags.
         """
         try:
+            # Discover repository root and JS path (works in dev container and prod)
+            repo_root = os.path.dirname(os.path.abspath(__file__))
+            js_path = os.path.join(repo_root, 'static', 'pathogen_library.js')
+            if not os.path.exists(js_path):
+                # Fallback: try parent (when file layout differs)
+                alt = os.path.join(os.getcwd(), 'static', 'pathogen_library.js')
+                js_path = alt if os.path.exists(alt) else js_path
+
+            library = self._load_pathogen_library(js_path)
+            if not library:
+                logger.warning("⚠️ PATHOGEN_LIBRARY could not be loaded; skipping auto-population.")
+                return
+
+            # Upsert all entries
             conn = self.get_db_connection()
             try:
+                inserted = 0
                 with conn.cursor() as cursor:
-                    # Check if ml_pathogen_config table has data
-                    cursor.execute("SELECT COUNT(*) as count FROM ml_pathogen_config")
-                    result = cursor.fetchone()
-                    
-                    if result and result['count'] > 0:
-                        logger.info(f"✅ ML pathogen config already populated with {result['count']} configurations")
-                        return
-                    
-                    # If no configs exist, log a warning but don't fail
-                    logger.warning("⚠️ No ML pathogen configs found. Run populate_ml_config_simple.py to populate.")
-                    
+                    for pathogen_code, channels in library.items():
+                        if not isinstance(channels, dict):
+                            continue
+                        for fluorophore, target in channels.items():
+                            if not fluorophore or fluorophore == 'Unknown':
+                                continue
+                            try:
+                                cursor.execute(
+                                    """
+                                    INSERT INTO ml_pathogen_config
+                                        (pathogen_code, fluorophore, ml_enabled, confidence_threshold, min_training_samples, max_training_samples, auto_retrain)
+                                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                    ON DUPLICATE KEY UPDATE
+                                        pathogen_code = VALUES(pathogen_code),
+                                        fluorophore = VALUES(fluorophore)
+                                    """,
+                                    (pathogen_code, fluorophore, False, 0.70, 50, 1000, True)
+                                )
+                                inserted += cursor.rowcount
+                            except Exception as ie:
+                                # Continue on individual insert errors
+                                logger.debug(f"Skip/dup for {pathogen_code}/{fluorophore}: {ie}")
+                    conn.commit()
+                logger.info(f"✅ ML pathogen config synced from pathogen_library.js (upserts applied)")
             finally:
                 conn.close()
-                
         except Exception as e:
-            logger.warning(f"⚠️ Could not check pathogen library population (non-critical): {e}")
-            # Don't raise the error - this is not critical for ML config manager initialization
+            logger.warning(f"⚠️ Auto-populate from pathogen library failed (non-critical): {e}")
+            # Non-fatal; UI can still function with existing rows
+
+    def _load_pathogen_library(self, js_path: str):
+        """Load PATHOGEN_LIBRARY object from a JS file by stripping comments and JSON-parsing."""
+        try:
+            if not js_path or not os.path.exists(js_path):
+                return None
+            with open(js_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            # Remove /* ... */ block comments
+            content = re.sub(r"/\*.*?\*/", "", content, flags=re.DOTALL)
+            # Remove // line comments (not robust for // inside strings; acceptable for our file)
+            content = re.sub(r"(^|\s)//.*$", "", content, flags=re.MULTILINE)
+
+            # Extract the object literal assigned to PATHOGEN_LIBRARY
+            m = re.search(r"const\s+PATHOGEN_LIBRARY\s*=\s*({[\s\S]*?});", content)
+            if not m:
+                return None
+            obj_text = m.group(1)
+
+            # JSON parse (keys/values are already quoted in our JS)
+            data = json.loads(obj_text)
+            # Normalize keys (ensure strings)
+            norm = {}
+            for k, v in data.items():
+                try:
+                    norm[str(k)] = v
+                except Exception:
+                    norm[k] = v
+            return norm
+        except Exception as e:
+            logger.debug(f"PATHOGEN_LIBRARY parse error: {e}")
+            return None
     
     def get_system_config(self, config_key, default_value=None):
         """Get system-wide ML configuration"""
@@ -353,53 +414,72 @@ class MLConfigManager:
             logger.error(f"❌ Failed to set system config: {e}")
             return False
     
-    def reset_training_data(self, pathogen_code=None, user_info=None):
-        """Reset ML training data with proper backup"""
+    def reset_training_data(self, pathogen_code=None, fluorophore=None, user_info=None):
+        """Reset ML training flags (disable) for a pathogen (and optional fluorophore).
+        Returns (success: bool, backup_path: Optional[str]) to match app.py expectations.
+        """
         try:
             conn = self.get_db_connection()
             try:
                 with conn.cursor() as cursor:
                     # Create backup timestamp
                     backup_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    
+                    backup_path = None  # Reserved for future file-based training backups
+
                     if pathogen_code:
-                        # Reset specific pathogen
-                        cursor.execute("""
-                            UPDATE ml_pathogen_config 
-                            SET ml_enabled = FALSE, updated_at = CURRENT_TIMESTAMP
-                            WHERE pathogen_code = %s
-                        """, (pathogen_code,))
-                        
-                        self._log_audit_action(
-                            cursor, 'reset_training', pathogen_code, None,
-                            None, f'Reset at {backup_timestamp}', user_info
-                        )
-                        
-                        message = f"Training data reset for {pathogen_code}"
+                        if fluorophore:
+                            cursor.execute(
+                                """
+                                UPDATE ml_pathogen_config
+                                SET ml_enabled = FALSE, updated_at = CURRENT_TIMESTAMP
+                                WHERE pathogen_code = %s AND fluorophore = %s
+                                """,
+                                (pathogen_code, fluorophore)
+                            )
+                            self._log_audit_action(
+                                cursor, 'reset_training', pathogen_code, fluorophore,
+                                None, f'Reset at {backup_timestamp}', user_info
+                            )
+                            target = f"{pathogen_code}/{fluorophore}"
+                        else:
+                            cursor.execute(
+                                """
+                                UPDATE ml_pathogen_config
+                                SET ml_enabled = FALSE, updated_at = CURRENT_TIMESTAMP
+                                WHERE pathogen_code = %s
+                                """,
+                                (pathogen_code,)
+                            )
+                            self._log_audit_action(
+                                cursor, 'reset_training', pathogen_code, None,
+                                None, f'Reset at {backup_timestamp}', user_info
+                            )
+                            target = pathogen_code
+                        message = f"Training data reset for {target}"
                     else:
                         # Reset all pathogens
-                        cursor.execute("""
-                            UPDATE ml_pathogen_config 
+                        cursor.execute(
+                            """
+                            UPDATE ml_pathogen_config
                             SET ml_enabled = FALSE, updated_at = CURRENT_TIMESTAMP
-                        """)
-                        
+                            """
+                        )
                         self._log_audit_action(
                             cursor, 'reset_training', None, None,
                             None, f'Global reset at {backup_timestamp}', user_info
                         )
-                        
                         message = "All training data reset"
-                    
+
                     conn.commit()
                     logger.info(f"✅ {message}")
-                    return True
-                    
+                    return True, backup_path
+
             finally:
                 conn.close()
-                
+
         except Exception as e:
             logger.error(f"❌ Failed to reset training data: {e}")
-            return False
+            return False, None
     
     def get_audit_log(self, limit=100, pathogen_code=None, action=None):
         """Get configuration audit log"""
@@ -431,6 +511,26 @@ class MLConfigManager:
                 
         except Exception as e:
             logger.error(f"❌ Failed to get audit log: {e}")
+            return []
+
+    def get_enabled_pathogen_configs(self):
+        """Return all pathogen/fluorophore configs where ml_enabled is TRUE."""
+        try:
+            conn = self.get_db_connection()
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT * FROM ml_pathogen_config
+                        WHERE ml_enabled = TRUE
+                        ORDER BY pathogen_code, fluorophore
+                        """
+                    )
+                    return cursor.fetchall()
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error(f"❌ Failed to get enabled pathogen configs: {e}")
             return []
 
     def backfill_audit_users_admin_or_system(self) -> dict:

@@ -2413,26 +2413,20 @@
                     `;
                 }
                 
-                    // Show combined evidence or message if none
+                    // Show combined evidence or a clear message if none; always clear the loading spinner
                     if (!evidenceHTML) {
-                        // If the evidence container already has content (e.g., from evidence_sources),
-                        // do not append a misleading "No evidence" message.
-                        if (!(evidenceContainer && evidenceContainer.innerHTML.trim())) {
-                            evidenceHTML = `
-                                <div class="alert alert-warning">
-                                    <i class="fas fa-info-circle"></i>
-                                    No evidence found for this requirement.
-                                </div>
-                            `;
-                        } else {
-                            evidenceHTML = '';
-                        }
+                        evidenceHTML = `
+                            <div class="alert alert-warning">
+                                <i class="fas fa-info-circle"></i>
+                                No evidence found for this requirement.
+                            </div>
+                        `;
                     }
 
-                    // Append to any existing evidence (from evidence_sources)
-                    if (evidenceHTML && evidenceContainer.innerHTML.trim()) {
+                    // Replace spinner with content; if evidence_sources already populated above, append
+                    if (evidenceContainer && evidenceContainer.innerHTML.trim()) {
                         evidenceContainer.insertAdjacentHTML('beforeend', evidenceHTML);
-                    } else if (evidenceHTML) {
+                    } else {
                         evidenceContainer.innerHTML = evidenceHTML;
                     }
 
