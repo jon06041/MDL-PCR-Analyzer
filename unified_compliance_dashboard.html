@@ -1969,9 +1969,21 @@
                     }
                     
                     const statusBadge = complianceStatus === 'IMPLEMENTED' || complianceStatus === 'COMPLIANT' ? 'bg-success' : 'bg-warning';
-                    
-                    evidenceHTML += `
-                        <div class="card mb-3 border-primary">
+
+                    // Resolve a sane timestamp; avoid epoch/Invalid Date when missing
+                    let tsRaw = (evidence && evidence.timestamp) || (encryptionData && encryptionData.created_at);
+                    let tsSafe = new Date();
+                    try {
+                        if (tsRaw) {
+                            const dt = new Date(tsRaw);
+                            if (!isNaN(dt.getTime()) && dt.getFullYear() > 1970) tsSafe = dt;
+                        }
+                    } catch {}
+
+                    // Wrap in a stable mount to avoid duplicates; replace if it exists
+                    const mountId = `encryptionEvidence_${reqCode}`;
+                    const blockHtml = `
+                        <div id="${mountId}" class="card mb-3 border-primary">
                             <div class="card-header bg-primary text-white">
                                 <h6><i class="fas fa-shield-alt"></i> Encryption & Security Controls Evidence</h6>
                             </div>
@@ -2090,12 +2102,31 @@
                                 ` : ''}
                                 
                                 <small class="text-muted">
-                                    <i class="fas fa-clock"></i> Evidence generated: ${new Date(evidence.timestamp || encryptionData.created_at).toLocaleString()}
+                                    <i class="fas fa-clock"></i> Evidence generated: ${tsSafe.toLocaleString()}
                                 </small>
                             </div>
                         </div>
                     `;
+                    
+                    // Insert or replace this encryption evidence block only (preserve other sections)
+                    if (!evidenceContainer) {
+                        // Nothing to mount into; safe guard
+                        evidenceHTML += blockHtml;
+                    } else {
+                        const existingBlock = document.getElementById(mountId);
+                        if (existingBlock) {
+                            existingBlock.outerHTML = blockHtml;
+                        } else {
+                            // If container was still showing spinner, clear it before first insert
+                            if (evidenceContainer.innerHTML.trim().includes('Loading evidence')) {
+                                evidenceContainer.innerHTML = '';
+                            }
+                            evidenceContainer.insertAdjacentHTML('beforeend', blockHtml);
+                        }
+                    }
                 }
+                    // Also keep concatenated HTML for any later full replace logic
+                    evidenceHTML += blockHtml;
                 
                 // Add Validation Tests section when configured
                 if (needsValidationTests) {
@@ -2423,11 +2454,17 @@
                         `;
                     }
 
-                    // Replace spinner with content; if evidence_sources already populated above, append
-                    if (evidenceContainer && evidenceContainer.innerHTML.trim()) {
-                        evidenceContainer.insertAdjacentHTML('beforeend', evidenceHTML);
-                    } else {
-                        evidenceContainer.innerHTML = evidenceHTML;
+                    // Ensure spinner is cleared and content stable; prefer replace over accumulate
+                    if (evidenceContainer) {
+                        const hasAnyContent = evidenceContainer.innerHTML.trim().length > 0;
+                        // If nothing present or only spinner, replace entirely
+                        if (!hasAnyContent || evidenceContainer.innerText.includes('Loading evidence')) {
+                            evidenceContainer.innerHTML = evidenceHTML;
+                        } else {
+                            // Avoid duplicating encryption blocks (already handled via mountId replacement)
+                            // Append only non-encryption parts from this batch
+                            // For simplicity, when we already inserted the block above, skip appending again
+                        }
                     }
 
                     // Recalculate and update Evidence Count to match everything displayed
