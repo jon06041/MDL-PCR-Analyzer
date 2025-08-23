@@ -12,6 +12,13 @@
         <header>
             <h1>🤖 ML Configuration Management</h1>
             <p>Manage machine learning settings for pathogen-specific analysis</p>
+            <div id="authStatus" class="auth-status" style="margin-top:8px;">
+                <span class="user-pill">User: <span id="authUser">guest</span></span>
+                <span class="role-pill">Role: <span id="authRole">viewer</span></span>
+                <span class="admin-pill" id="adminBadge" style="display:none;">Admin</span>
+                <a id="signinLink" href="/login?return_to=/ml-config" class="signin-link" style="display:none;">Sign in</a>
+                <a id="logoutLink" href="/logout?return_to=/ml-config" class="logout-link" style="display:none;">Logout</a>
+            </div>
             <nav>
                 <a href="/" class="back-link">← Back to Main Analysis</a>
             </nav>
@@ -114,6 +121,32 @@
     <script src="/static/ml_config_manager.js"></script>
     
     <script>
+        // Show auth status similar to MySQL viewer
+        async function showAuthStatus() {
+            try {
+                const res = await fetch('/auth/api/current-user');
+                const data = res.ok ? await res.json() : {};
+                const user = data.user || data;
+                const username = user.username || 'guest';
+                const roles = user.roles || (user.role ? [user.role] : []);
+                const role = user.role || (roles[0] || 'viewer');
+                const isAdmin = role === 'administrator' || (roles || []).includes('administrator') || (user.permissions || []).includes('database_management');
+
+                document.getElementById('authUser').textContent = username;
+                document.getElementById('authRole').textContent = role;
+                document.getElementById('adminBadge').style.display = isAdmin ? 'inline-block' : 'none';
+
+                // Toggle sign-in/out links
+                const signedIn = !!username && username !== 'guest';
+                document.getElementById('signinLink').style.display = signedIn ? 'none' : 'inline-block';
+                document.getElementById('logoutLink').style.display = signedIn ? 'inline-block' : 'none';
+            } catch (e) {
+                // Leave defaults
+                console.warn('Auth status unavailable');
+                document.getElementById('signinLink').style.display = 'inline-block';
+            }
+        }
+
         // Initialize ML status overview
         async function loadMLStatusOverview() {
             try {
@@ -238,6 +271,7 @@
 
         // Load status overview when page loads
         document.addEventListener('DOMContentLoaded', function() {
+            showAuthStatus();
             loadMLStatusOverview();
             
             // Refresh status overview every 30 seconds
@@ -279,6 +313,21 @@
             background: #007bff;
             color: white;
         }
+
+        .auth-status { 
+            display:flex; 
+            gap:8px; 
+            justify-content:center; 
+            align-items:center; 
+            flex-wrap:wrap;
+        }
+        .auth-status .user-pill, .auth-status .role-pill {
+            background:#f1f3f5; border:1px solid #dee2e6; border-radius:999px; padding:4px 10px; font-size:12px;
+        }
+        .auth-status .admin-pill {
+            background:#d1e7dd; border:1px solid #badbcc; color:#0f5132; border-radius:999px; padding:4px 10px; font-size:12px; font-weight:600;
+        }
+        .auth-status .signin-link, .auth-status .logout-link { font-size:12px; }
 
         /* Important Note Section */
         .important-note {

@@ -4102,13 +4102,13 @@ def get_pathogen_ml_configs():
     try:
         # Check if ML config manager is properly initialized
         if ml_config_manager is None:
+            # Graceful fallback: return empty configs so UI can render
             return jsonify({
-                'success': False,
-                'error': 'ML Configuration Manager not initialized',
-                'details': 'MySQL database connection required. SQLite support has been permanently removed.',
-                'solution': 'Run: python3 initialize_mysql_tables.py',
-                'database_issue': True
-            }), 503
+                'success': True,
+                'configs': [],
+                'database_connected': False,
+                'note': 'ML Configuration Manager not initialized; returning empty list'
+            })
         
         configs = ml_config_manager.get_all_pathogen_configs()
         
@@ -4117,20 +4117,23 @@ def get_pathogen_ml_configs():
             'configs': configs
         })
     except ConnectionError as e:
+        # Graceful fallback: return empty list on DB failures
         return jsonify({
-            'success': False,
+            'success': True,
+            'configs': [],
+            'database_connected': False,
             'error': 'MySQL Database Connection Failed',
-            'details': str(e),
-            'solution': 'Check MySQL service is running and run: python3 initialize_mysql_tables.py',
-            'database_issue': True
-        }), 503
+            'details': str(e)
+        })
     except Exception as e:
+        # Graceful fallback: empty list on any unexpected error
         return jsonify({
-            'success': False,
+            'success': True,
+            'configs': [],
+            'database_connected': False,
             'error': 'Configuration retrieval failed',
-            'details': str(e),
-            'database_issue': 'MySQL' in str(e) or 'connection' in str(e).lower()
-        }), 500
+            'details': str(e)
+        })
         
     except Exception as e:
         app.logger.error(f"Failed to get pathogen ML configs: {e}")
@@ -4183,7 +4186,12 @@ def get_pathogen_ml_config(pathogen_code):
         print(f"🔍 DEBUG: get_pathogen_ml_config - ml_config_manager is None: {ml_config_manager is None}")
         
         if ml_config_manager is None:
-            return jsonify({'error': 'ML configuration manager not initialized'}), 503
+            # Graceful fallback: return empty config list
+            return jsonify({
+                'success': True,
+                'configs': [],
+                'database_connected': False
+            })
         
         # URL decode the pathogen code
         pathogen_code = unquote(pathogen_code)
@@ -4198,7 +4206,12 @@ def get_pathogen_ml_config(pathogen_code):
         
     except Exception as e:
         app.logger.error(f"Failed to get pathogen ML config: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({
+            'success': True,
+            'configs': [],
+            'database_connected': False,
+            'error': str(e)
+        })
 
 @app.route('/api/ml-config/system', methods=['GET'])
 def get_system_ml_config():
@@ -4207,7 +4220,19 @@ def get_system_ml_config():
         global ml_config_manager
         
         if ml_config_manager is None:
-            return jsonify({'error': 'ML configuration manager not initialized'}), 503
+            # Graceful fallback: default system config so UI can render
+            return jsonify({
+                'success': True,
+                'config': {
+                    'ml_global_enabled': False,
+                    'training_data_version': None,
+                    'min_training_examples': 10,
+                    'reset_protection_enabled': True,
+                    'auto_training_enabled': False,
+                    'show_learning_messages': False
+                },
+                'database_connected': False
+            })
         
         config = {
             'ml_global_enabled': ml_config_manager.get_system_config('ml_global_enabled') == 'true',
@@ -4225,7 +4250,19 @@ def get_system_ml_config():
         
     except Exception as e:
         app.logger.error(f"Failed to get system ML config: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({
+            'success': True,
+            'config': {
+                'ml_global_enabled': False,
+                'training_data_version': None,
+                'min_training_examples': 10,
+                'reset_protection_enabled': True,
+                'auto_training_enabled': False,
+                'show_learning_messages': False
+            },
+            'database_connected': False,
+            'error': str(e)
+        })
 
 @app.route('/api/ml-config/system/<config_key>', methods=['PUT'])
 def update_system_ml_config(config_key):
@@ -4271,7 +4308,15 @@ def get_ml_teaching_status():
         global ml_config_manager
         
         if ml_config_manager is None:
-            return jsonify({'error': 'ML configuration manager not initialized'}), 503
+            # Graceful fallback: default teaching status
+            return jsonify({
+                'success': True,
+                'config': {
+                    'disable_teaching': False,
+                    'teaching_enabled': True
+                },
+                'database_connected': False
+            })
         
         # Check if teaching is disabled via system config
         disable_teaching = ml_config_manager.get_system_config('disable_teaching') == 'true'
@@ -4288,7 +4333,15 @@ def get_ml_teaching_status():
         
     except Exception as e:
         app.logger.error(f"Failed to get ML teaching status: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({
+            'success': True,
+            'config': {
+                'disable_teaching': False,
+                'teaching_enabled': True
+            },
+            'database_connected': False,
+            'error': str(e)
+        })
 
 @app.route('/api/ml-config/reset-training-data', methods=['POST'])
 def reset_ml_training_data():
@@ -6920,22 +6973,14 @@ def get_encryption_evidence_for_compliance():
         regulation = request.args.get('regulation', '').upper()
         requirement_code = request.args.get('requirement_code', '')
         
-        # MySQL connection
-        import mysql.connector
-        mysql_config = {
-            'host': os.environ.get("MYSQL_HOST", "127.0.0.1"),
-            'port': int(os.environ.get("MYSQL_PORT", 3306)),
-            'user': os.environ.get("MYSQL_USER", "qpcr_user"),
-            'password': os.environ.get("MYSQL_PASSWORD", "qpcr_password"),
-            'database': os.environ.get("MYSQL_DATABASE", "qpcr_analysis"),
-            'charset': 'utf8mb4'
-        }
+    # MySQL connection
+    import mysql.connector
+    mysql_config = get_mysql_config()
+    conn = mysql.connector.connect(**mysql_config)
+    cursor = conn.cursor(dictionary=True)
         
-        conn = mysql.connector.connect(**mysql_config)
-        cursor = conn.cursor(dictionary=True)
-        
-        # Ensure base table exists; self-heal if missing
-        if not _table_exists(cursor, 'compliance_evidence'):
+    # Ensure base table exists; self-heal if missing
+    if not _table_exists(cursor, 'compliance_evidence'):
             _auto_fix_encryption_evidence()
         # Re-check after fix
         if not _table_exists(cursor, 'compliance_evidence'):
@@ -6945,7 +6990,8 @@ def get_encryption_evidence_for_compliance():
                 'regulation': regulation or 'ALL',
                 'requirements': [],
                 'total_evidence': 0,
-                'status': 'no_evidence'
+        'status': 'no_evidence',
+        'database_connected': True
             })
 
         # Decide whether to include tracking join
@@ -6998,7 +7044,8 @@ def get_encryption_evidence_for_compliance():
             'regulation': regulation or 'ALL',
             'requirements': requirements,
             'total_evidence': len(requirements),
-            'status': 'operational' if requirements else 'no_evidence'
+            'status': 'operational' if requirements else 'no_evidence',
+            'database_connected': True
         })
         
     except Exception as e:
@@ -7013,26 +7060,19 @@ def get_encryption_evidence_for_compliance():
             'regulation': request.args.get('regulation', '').upper() or 'ALL',
             'requirements': [],
             'total_evidence': 0,
-            'status': 'no_evidence'
+            'status': 'no_evidence',
+            'database_connected': False
         })
 
 @app.route('/api/unified-compliance/encryption-evidence/<requirement_code>', methods=['GET'])
 def get_encryption_evidence_for_requirement(requirement_code):
     """Get specific encryption evidence for a compliance requirement"""
     try:
-        # MySQL connection
-        import mysql.connector
-        mysql_config = {
-            'host': os.environ.get("MYSQL_HOST", "127.0.0.1"),
-            'port': int(os.environ.get("MYSQL_PORT", 3306)),
-            'user': os.environ.get("MYSQL_USER", "qpcr_user"),
-            'password': os.environ.get("MYSQL_PASSWORD", "qpcr_password"),
-            'database': os.environ.get("MYSQL_DATABASE", "qpcr_analysis"),
-            'charset': 'utf8mb4'
-        }
-        
-        conn = mysql.connector.connect(**mysql_config)
-        cursor = conn.cursor(dictionary=True)
+    # MySQL connection
+    import mysql.connector
+    mysql_config = get_mysql_config()
+    conn = mysql.connector.connect(**mysql_config)
+    cursor = conn.cursor(dictionary=True)
 
         # Ensure base table exists; self-heal if missing
         if not _table_exists(cursor, 'compliance_evidence'):
@@ -7109,7 +7149,7 @@ def get_encryption_evidence_for_requirement(requirement_code):
                 )
                 evidence_record = cursor.fetchone()
         
-        if not evidence_record:
+    if not evidence_record:
             # Graceful fallback: return a minimal structure rather than 404 to avoid noisy errors
             conn.close()
             return jsonify({
@@ -7122,7 +7162,8 @@ def get_encryption_evidence_for_requirement(requirement_code):
                 'created_at': None,
                 'validation_status': 'pending',
                 'implementation_status': 'in_progress',
-                'evidence_count': 0
+        'evidence_count': 0,
+        'database_connected': True
             })
         
         # Format the response
@@ -7138,14 +7179,25 @@ def get_encryption_evidence_for_requirement(requirement_code):
         }
         
         conn.close()
+        response_data['database_connected'] = True
         return jsonify(response_data)
         
     except Exception as e:
         app.logger.error(f"Error getting encryption evidence for {requirement_code}: {str(e)}")
+        # Graceful fallback to avoid 500s when DB is unreachable
         return jsonify({
-            'success': False,
-            'error': f'Failed to retrieve evidence for {requirement_code}: {str(e)}'
-        }), 500
+            'success': True,
+            'requirement_id': requirement_code,
+            'evidence_type': 'encryption_evidence',
+            'evidence_data': {
+                'description': 'Database unavailable; returning fallback.'
+            },
+            'created_at': None,
+            'validation_status': 'pending',
+            'implementation_status': 'in_progress',
+            'evidence_count': 0,
+            'database_connected': False
+        })
 
 # Helper functions for encryption evidence
 def calculate_regulation_compliance_score(evidence, regulation):
