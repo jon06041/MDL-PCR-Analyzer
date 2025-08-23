@@ -1989,8 +1989,9 @@
                     const mountId = `encryptionEvidence_${reqCode}`;
                     let encSection = `
                         <div id="${mountId}" class="card mb-3 border-primary">
-                            <div class="card-header bg-primary text-white">
-                                <h6><i class="fas fa-shield-alt"></i> Encryption & Security Controls Evidence</h6>
+                            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                                <h6 class="mb-0"><i class="fas fa-shield-alt"></i> Encryption & Security Controls Evidence</h6>
+                                ${(() => { try { const s = evidence?.regulatory_mapping?.evidence_strength; return s ? `<span class=\"badge bg-light text-dark\">Strength: ${s}</span>` : ''; } catch { return ''; } })()}
                             </div>
                             <div class="card-body">
                                 <div class="row mb-3">
@@ -2128,6 +2129,102 @@
                                         </ul>
                                     </div>
                                 ` : ''}
+
+                                ${(() => {
+                                    try {
+                                        const sys = evidence.system_verification || {};
+                                        const si = sys.system_info || {};
+                                        const rv = sys.runtime_verification || {};
+                                        const files = sys.implementation_files || {};
+                                        const cfg = sys.configuration_evidence || {};
+                                        const cfgEntries = Object.entries(cfg);
+                                        const cfgConfigured = cfgEntries.filter(([,v]) => v && v.configured).length;
+                                        const cfgTotal = cfgEntries.length;
+                                        const hasAny = (Object.keys(si).length + Object.keys(rv).length + Object.keys(files).length + cfgEntries.length) > 0;
+                                        if (!hasAny) return '';
+                                        const sysInfoHtml = Object.keys(si).length ? `
+                                            <div class=\"mb-3\">
+                                                <h6><i class=\"fas fa-microchip\"></i> System Info</h6>
+                                                <div class=\"table-responsive\">
+                                                    <table class=\"table table-sm\">
+                                                        <tbody>
+                                                            ${Object.entries(si).map(([k,v]) => `<tr><td style=\"width:220px\"><small><strong>${k.replace(/_/g,' ').toUpperCase()}</strong></small></td><td><small>${String(v)}</small></td></tr>`).join('')}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>` : '';
+                                        const filesHtml = Object.keys(files).length ? `
+                                            <div class=\"mb-3\">
+                                                <h6><i class=\"fas fa-file-code\"></i> Implementation Files</h6>
+                                                <div class=\"table-responsive\">
+                                                    <table class=\"table table-sm table-striped\">
+                                                        <thead><tr><th>File</th><th>Status</th><th>Size</th><th>Hash</th><th>Contains</th><th>Modified</th></tr></thead>
+                                                        <tbody>
+                                                            ${Object.entries(files).map(([name,meta]) => {
+                                                                const ok = meta && meta.exists;
+                                                                const size = (meta && meta.size_bytes!=null) ? `${meta.size_bytes} B` : '-';
+                                                                const hash = (meta && meta.hash_sha256) ? `${meta.hash_sha256.slice(0,12)}…` : '-';
+                                                                const contains = [];
+                                                                if (meta && meta.contains_fernet) contains.push('Fernet');
+                                                                if (meta && (meta.contains_aes || meta.contains_AES)) contains.push('AES');
+                                                                if (meta && meta.contains_encryption) contains.push('encrypt');
+                                                                const modified = (meta && meta.last_modified) ? new Date(meta.last_modified).toLocaleString() : '-';
+                                                                const badge = ok ? '<span class=\"badge bg-success\">Present</span>' : '<span class=\"badge bg-secondary\">Missing</span>';
+                                                                return `<tr>
+                                                                    <td><small>${name}</small></td>
+                                                                    <td>${badge}</td>
+                                                                    <td><small>${size}</small></td>
+                                                                    <td><small>${hash}</small></td>
+                                                                    <td><small>${contains.join(', ') || '-'}</small></td>
+                                                                    <td><small>${modified}</small></td>
+                                                                </tr>`;
+                                                            }).join('')}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>` : '';
+                                        const rvHtml = Object.keys(rv).length ? `
+                                            <div class=\"mb-3\">
+                                                <h6><i class=\"fas fa-vial\"></i> Runtime Verification</h6>
+                                                <div>
+                                                    <span class=\"badge ${rv.encryption_test_passed ? 'bg-success' : 'bg-danger'}\">${rv.encryption_test_passed ? 'ENCRYPTION TEST PASS' : 'ENCRYPTION TEST FAIL'}</span>
+                                                    <div class=\"mt-2\"><small>
+                                                        ${rv.algorithm_confirmed ? `<strong>Algorithm:</strong> ${rv.algorithm_confirmed} &nbsp; ` : ''}
+                                                        ${rv.key_length_bytes != null ? `<strong>Key Length:</strong> ${rv.key_length_bytes} B &nbsp; ` : ''}
+                                                        ${rv.encrypted_data_length_bytes != null ? `<strong>Ciphertext Length:</strong> ${rv.encrypted_data_length_bytes} B &nbsp; ` : ''}
+                                                        ${rv.test_timestamp ? `<strong>Tested:</strong> ${new Date(rv.test_timestamp).toLocaleString()}` : ''}
+                                                    </small></div>
+                                                </div>
+                                            </div>` : '';
+                                        const cfgHtml = cfgEntries.length ? `
+                                            <div class=\"mb-2\">
+                                                <h6><i class=\"fas fa-lock\"></i> Configuration Evidence <small class=\"text-muted\">(${cfgConfigured}/${cfgTotal} configured)</small></h6>
+                                                <div class=\"table-responsive\">
+                                                    <table class=\"table table-sm\">
+                                                        <thead><tr><th>Variable</th><th>Status</th><th>Length</th><th>Hash Preview</th></tr></thead>
+                                                        <tbody>
+                                                            ${cfgEntries.map(([k,v]) => {
+                                                                const ok = v && v.configured;
+                                                                const len = ok && v.length != null ? v.length : '-';
+                                                                const hp = ok && v.hash_preview ? v.hash_preview : '-';
+                                                                const badge = ok ? '<span class=\"badge bg-success\">Configured</span>' : '<span class=\"badge bg-secondary\">Missing</span>';
+                                                                return `<tr><td><small>${k}</small></td><td>${badge}</td><td><small>${len}</small></td><td><small>${hp}</small></td></tr>`;
+                                                            }).join('')}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>` : '';
+                                        return `
+                                            <div class=\"mt-3 p-3 border rounded\">
+                                                <div class=\"mb-2\"><strong><i class=\"fas fa-clipboard-check\"></i> Inspector-Level System Verification</strong></div>
+                                                ${sysInfoHtml}
+                                                ${filesHtml}
+                                                ${rvHtml}
+                                                ${cfgHtml}
+                                            </div>
+                                        `;
+                                    } catch { return ''; }
+                                })()}
                                 
                                 ${evidence.recommendations && evidence.recommendations.length > 0 ? `
                                     <div class="alert alert-info mt-3">
