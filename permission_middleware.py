@@ -60,7 +60,6 @@ def _get_open_test_user():
     If RAILWAY_OPEN_TEST_ALLOW_ALL/OPEN_TEST_ALLOW_ALL is set, grant union of all permissions
     to align with docs (synthetic admin context). Otherwise keep a minimal dev set.
     """
-    from .permission_middleware import Permissions as _Perms if False else None  # type hint guard
     grant_all = os.getenv('RAILWAY_OPEN_TEST_ALLOW_ALL', '0').lower() in ('1','true','yes','on','y') 
     grant_all = grant_all or os.getenv('OPEN_TEST_ALLOW_ALL', '0').lower() in ('1','true','yes','on','y')
 
