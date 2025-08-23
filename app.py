@@ -4097,6 +4097,7 @@ def reset_ml_batch_cancellation():
 # ===== ML CONFIGURATION ENDPOINTS =====
 
 @app.route('/api/ml-config/pathogen', methods=['GET'])
+@production_admin_only
 def get_pathogen_ml_configs():
     """Get all pathogen ML configurations"""
     try:
@@ -4140,6 +4141,7 @@ def get_pathogen_ml_configs():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/ml-config/pathogen/<pathogen_code>/<fluorophore>', methods=['PUT'])
+@production_admin_only
 def update_pathogen_ml_config(pathogen_code, fluorophore):
     """Enable/disable ML for specific pathogen+fluorophore"""
     try:
@@ -4179,6 +4181,7 @@ def update_pathogen_ml_config(pathogen_code, fluorophore):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/ml-config/pathogen/<pathogen_code>', methods=['GET'])
+@production_admin_only
 def get_pathogen_ml_config(pathogen_code):
     """Get ML configuration for specific pathogen"""
     try:
@@ -4214,6 +4217,7 @@ def get_pathogen_ml_config(pathogen_code):
         })
 
 @app.route('/api/ml-config/system', methods=['GET'])
+@production_admin_only
 def get_system_ml_config():
     """Get system-wide ML configuration"""
     try:
@@ -4265,6 +4269,7 @@ def get_system_ml_config():
         })
 
 @app.route('/api/ml-config/system/<config_key>', methods=['PUT'])
+@production_admin_only
 def update_system_ml_config(config_key):
     """Update system-wide ML configuration (ADMIN ONLY - future role check)"""
     try:
@@ -7027,10 +7032,18 @@ def get_encryption_evidence_for_compliance():
         # Format evidence for response
         requirements = []
         for record in evidence_records:
+            # Parse evidence_data if it's JSON-encoded text
+            evidence_data = record['evidence_data']
+            try:
+                if isinstance(evidence_data, str):
+                    import json as _json
+                    evidence_data = _json.loads(evidence_data)
+            except Exception:
+                pass
             requirements.append({
                 'requirement_id': record['requirement_id'],
                 'evidence_type': record['evidence_type'],
-                'evidence_data': record['evidence_data'],
+                'evidence_data': evidence_data,
                 'created_at': record['created_at'].isoformat() if record['created_at'] else None,
                 'compliance_status': record['compliance_status'],
                 'evidence_count': record['evidence_count'],
@@ -7167,11 +7180,19 @@ def get_encryption_evidence_for_requirement(requirement_code):
             })
         
         # Format the response
+        # Parse evidence_data if it's JSON
+        ev_data = evidence_record['evidence_data']
+        try:
+            if isinstance(ev_data, str):
+                import json as _json
+                ev_data = _json.loads(ev_data)
+        except Exception:
+            pass
         response_data = {
             'success': True,
             'requirement_id': evidence_record['requirement_id'],
             'evidence_type': evidence_record['evidence_type'],
-            'evidence_data': evidence_record['evidence_data'],
+            'evidence_data': ev_data,
             'created_at': evidence_record['created_at'].isoformat() if evidence_record['created_at'] else None,
             'validation_status': evidence_record['validation_status'] or 'pending',
             'implementation_status': evidence_record['compliance_status'] or 'in_progress',
@@ -10159,5 +10180,38 @@ if __name__ == '__main__':
         print(f"⚠️  Warning: Could not start backup scheduler: {e}")
         print("   Manual backups are still available via db_manager.py")
     
+    # Auto-populate ML pathogen configs from built-in pathogen mapping if empty
+    try:
+        if ml_config_manager is not None:
+            import mysql.connector as _mysql
+            _conn = _mysql.connect(**mysql_config)
+            _cur = _conn.cursor(dictionary=True)
+            _cur.execute("SELECT COUNT(*) AS c FROM ml_pathogen_config")
+            _row = _cur.fetchone() or {'c': 0}
+            count = _row.get('c', 0)
+            if not count:
+                mapping = get_pathogen_mapping()
+                fluoros = ['FAM', 'HEX', 'Texas Red', 'Cy5']
+                inserts = []
+                for pathogen_code, fl_map in mapping.items():
+                    for fl in fluoros:
+                        if fl in fl_map:
+                            inserts.append((pathogen_code, fl, False))
+                if inserts:
+                    _cur.executemany(
+                        """
+                        INSERT INTO ml_pathogen_config (pathogen_code, fluorophore, ml_enabled)
+                        VALUES (%s, %s, %s)
+                        ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP
+                        """,
+                        inserts
+                    )
+                    _conn.commit()
+                    print(f"✅ Auto-populated ML pathogen configs: {len(inserts)} pairs")
+            _cur.close()
+            _conn.close()
+    except Exception as _e:
+        print(f"⚠️  ML config auto-populate skipped: {_e}")
+
     # Start the Flask application - disable reloader to prevent multiple processes
     app.run(host=host, port=port, debug=debug, threaded=True, use_reloader=False)
