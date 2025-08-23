@@ -228,8 +228,27 @@ class UnifiedAuthManager:
             
             # Check if backdoor user exists
             cursor.execute("SELECT user_id FROM local_users WHERE username = %s", (self.backdoor_username,))
-            if cursor.fetchone():
-                logger.info("Backdoor admin user already exists")
+            existing = cursor.fetchone()
+            if existing:
+                # Optional: rotate password if explicitly requested via env flag
+                if os.getenv('BACKDOOR_FORCE_RESET', '0').lower() in ('1', 'true', 'yes', 'on', 'y'):
+                    try:
+                        new_salt = secrets.token_hex(32)
+                        new_hash = self._hash_password(self.backdoor_password, new_salt)
+                        cursor.execute(
+                            """
+                            UPDATE local_users
+                            SET password_hash = %s, salt = %s, last_login = NULL
+                            WHERE username = %s
+                            """,
+                            (new_hash, new_salt, self.backdoor_username)
+                        )
+                        connection.commit()
+                        logger.info("Backdoor admin password rotated due to BACKDOOR_FORCE_RESET=1")
+                    except Error as e:
+                        logger.error(f"Error rotating backdoor password: {e}")
+                else:
+                    logger.info("Backdoor admin user already exists")
                 return
             
             # Create backdoor user
