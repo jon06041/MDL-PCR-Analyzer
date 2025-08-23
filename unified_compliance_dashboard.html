@@ -1985,9 +1985,9 @@
                         }
                     } catch {}
 
-                    // Wrap in a stable mount to avoid duplicates; replace if it exists
+                    // Build encryption evidence section into a local buffer
                     const mountId = `encryptionEvidence_${reqCode}`;
-                    let encryptionBlockHtml = `
+                    let encSection = `
                         <div id="${mountId}" class="card mb-3 border-primary">
                             <div class="card-header bg-primary text-white">
                                 <h6><i class="fas fa-shield-alt"></i> Encryption & Security Controls Evidence</h6>
@@ -2017,7 +2017,7 @@
                     // Handle different evidence formats for test display
                     if (evidence.implementation_tests) {
                         // Old format with implementation_tests
-                        evidenceHTML += Object.entries(evidence.implementation_tests).map(([testName, testResult]) => {
+                        encSection += Object.entries(evidence.implementation_tests).map(([testName, testResult]) => {
                             const statusBadge = testResult.passed ? 'bg-success' : 'bg-danger';
                             const statusText = testResult.passed ? 'PASS' : 'FAIL';
                             return `
@@ -2035,7 +2035,7 @@
                         const statusText = analysisSuccess ? 'OPERATIONAL' : 'PENDING';
                         const successPercent = evidence.total_wells > 0 ? ((evidence.good_curves / evidence.total_wells) * 100).toFixed(1) : '0';
                         
-                        evidenceHTML += `
+                        encSection += `
                             <tr>
                                 <td><small>Analysis Execution</small></td>
                                 <td><span class="badge ${statusBadge}">${statusText}</span></td>
@@ -2054,7 +2054,7 @@
                         `;
                     } else if (evidence.compliance_evidence && Array.isArray(evidence.compliance_evidence)) {
                         // New enhanced format with compliance_evidence array
-                        evidenceHTML += evidence.compliance_evidence.map((item, index) => `
+                        encSection += evidence.compliance_evidence.map((item, index) => `
                             <tr>
                                 <td><small>Control ${index + 1}</small></td>
                                 <td><span class="badge bg-success">IMPLEMENTED</span></td>
@@ -2063,7 +2063,7 @@
                         `).join('');
                     } else {
                         // Fallback display
-                        evidenceHTML += `
+                        encSection += `
                             <tr>
                                 <td><small>Encryption Implementation</small></td>
                                 <td><span class="badge bg-success">OPERATIONAL</span></td>
@@ -2072,7 +2072,7 @@
                         `;
                     }
                     
-                    encryptionBlockHtml += `
+                    encSection += `
                                         </tbody>
                                     </table>
                                 </div>
@@ -2112,20 +2112,8 @@
                             </div>
                         </div>
                     `;
-                    
-                    // Insert or replace this encryption evidence block only (preserve other sections)
-                    if (evidenceContainer) {
-                        const existingBlock = document.getElementById(mountId);
-                        if (existingBlock) {
-                            existingBlock.outerHTML = encryptionBlockHtml;
-                        } else {
-                            // If container was still showing spinner, clear it before first insert
-                            if (evidenceContainer.innerHTML.trim().includes('Loading evidence')) {
-                                evidenceContainer.innerHTML = '';
-                            }
-                            evidenceContainer.insertAdjacentHTML('beforeend', encryptionBlockHtml);
-                        }
-                    }
+                    // Append the encryption section to the overall evidence buffer
+                    evidenceHTML += encSection;
                 }
                     // Note: Do not reference blockHtml outside the encryption block scope; it's block-scoped.
                     // We already inserted/replaced the encryption section directly in the DOM above.
@@ -2456,17 +2444,9 @@
                         `;
                     }
 
-                    // Ensure spinner is cleared and content stable; prefer replace over accumulate
+                    // Replace modal content with the full assembled buffer so multiple evidence types show together
                     if (evidenceContainer) {
-                        const hasAnyContent = evidenceContainer.innerHTML.trim().length > 0;
-                        // If nothing present or only spinner, replace entirely
-                        if (!hasAnyContent || evidenceContainer.innerText.includes('Loading evidence')) {
-                            evidenceContainer.innerHTML = evidenceHTML;
-                        } else {
-                            // Avoid duplicating encryption blocks (already handled via mountId replacement)
-                            // Append only non-encryption parts from this batch
-                            // For simplicity, when we already inserted the block above, skip appending again
-                        }
+                        evidenceContainer.innerHTML = evidenceHTML;
                     }
 
                     // Recalculate and update Evidence Count to match everything displayed
