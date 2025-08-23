@@ -300,10 +300,13 @@
             async function bulkToggle(enabled) {
                 try {
                     statusEl.textContent = enabled ? 'Enabling all…' : 'Disabling all…';
-                    const res = await fetch('/api/ml-config/pathogen/bulk-toggle', {
+                    // If enabling, call the one-click endpoint that syncs + enables
+                    const url = enabled ? '/api/ml-config/enable-all' : '/api/ml-config/pathogen/bulk-toggle';
+                    const body = enabled ? {} : { enabled };
+                    const res = await fetch(url, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ enabled })
+                        body: JSON.stringify(body)
                     });
                     const data = await res.json();
                     if (!res.ok || data.success === false) throw new Error(data.error || `HTTP ${res.status}`);

@@ -4495,6 +4495,44 @@ def bulk_toggle_ml_pathogens():
         app.logger.error(f"Bulk toggle failed: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/ml-config/pathogen/sync-from-library', methods=['POST'])
+@production_admin_only
+def sync_ml_pathogens_from_library():
+    """Ensure ml_pathogen_config table is populated from static/pathogen_library.js."""
+    try:
+        global ml_config_manager
+        if ml_config_manager is None:
+            from ml_config_manager import MLConfigManager
+            ml_config_manager = MLConfigManager(use_mysql=True, mysql_config=mysql_config)
+
+        # Populate is idempotent; returns None, but we can still report success
+        ml_config_manager.populate_from_pathogen_library()
+        # Return current counts for visibility
+        configs = ml_config_manager.get_all_pathogen_configs() or []
+        return jsonify({'success': True, 'count': len(configs)})
+    except Exception as e:
+        app.logger.error(f"Sync from library failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/ml-config/enable-all', methods=['POST'])
+@production_admin_only
+def enable_all_ml_configs():
+    """One-click: sync from library and enable ML for all pathogen/fluorophore configs."""
+    try:
+        global ml_config_manager
+        if ml_config_manager is None:
+            from ml_config_manager import MLConfigManager
+            ml_config_manager = MLConfigManager(use_mysql=True, mysql_config=mysql_config)
+
+        # Ensure rows exist
+        ml_config_manager.populate_from_pathogen_library()
+        # Enable all
+        affected = ml_config_manager.bulk_set_ml_enabled(True)
+        return jsonify({'success': True, 'affected': affected})
+    except Exception as e:
+        app.logger.error(f"Enable-all ML configs failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/ml-config/system/ml_default_enabled', methods=['PUT'])
 @production_admin_only
 def set_ml_default_enabled():
