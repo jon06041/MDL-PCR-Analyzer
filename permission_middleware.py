@@ -38,16 +38,51 @@ def _is_open_test_mode() -> bool:
     return False
 
 def _is_open_test_allowed_path(path: str) -> bool:
-    """Allow only narrowly-scoped endpoints for open test mode."""
+    """Allow endpoints for open test mode to unblock dev/testing flows.
+
+    Includes analysis, folder queue helpers, and compliance documentation APIs.
+    """
     allowed_prefixes = (
-        '/analyze',                    # basic analysis upload endpoint
-        '/sessions/save-combined',     # save combined session after analysis
-        '/api/folder-queue',           # optional: folder queue dev helpers
+        '/analyze',
+        '/sessions/save-combined',
+        '/api/folder-queue',
+        # Compliance documentation evidence (upload/list/serve/delete)
+        '/api/unified-compliance/evidence/documentation',
+        # Read-only compliance data used by dashboard
+        '/api/unified-compliance/requirements',
+        '/api/unified-compliance/recent-events',
     )
     return any(path.startswith(p) for p in allowed_prefixes)
 
 def _get_open_test_user():
-    """Synthetic user used in open test mode with minimal permissions."""
+    """Synthetic user used in open test mode.
+
+    If RAILWAY_OPEN_TEST_ALLOW_ALL/OPEN_TEST_ALLOW_ALL is set, grant union of all permissions
+    to align with docs (synthetic admin context). Otherwise keep a minimal dev set.
+    """
+    from .permission_middleware import Permissions as _Perms if False else None  # type hint guard
+    grant_all = os.getenv('RAILWAY_OPEN_TEST_ALLOW_ALL', '0').lower() in ('1','true','yes','on','y') 
+    grant_all = grant_all or os.getenv('OPEN_TEST_ALLOW_ALL', '0').lower() in ('1','true','yes','on','y')
+
+    if grant_all:
+        # Build union of all permissions defined in Permissions
+        try:
+            all_perms = [v for k, v in vars(Permissions).items() if isinstance(v, str)]
+        except Exception:
+            all_perms = [
+                'upload_files','run_basic_analysis','view_analysis_results','view_compliance_dashboard',
+                'run_ml_analysis','modify_thresholds','validate_results','provide_ml_feedback',
+                'manage_compliance_evidence','manage_compliance_requirements','audit_access','manage_users',
+                'system_administration','database_management'
+            ]
+        return {
+            'username': 'open-test-admin',
+            'display_name': 'Open Test Admin',
+            'role': 'administrator',
+            'permissions': sorted(set(all_perms)),
+            'auth_method': 'open_test_mode',
+        }
+
     # Minimal set to enable uploads and viewing results
     allowed = [
         'upload_files',
