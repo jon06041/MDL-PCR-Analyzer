@@ -179,10 +179,10 @@ def extract_test_code_from_filename(filename):
     if not filename:
         return None
         
-    # Remove CFX filename suffixes using regex to handle both single and double spaces
-    # Pattern matches: ' -  ' or ' - ' followed by 'Quantification Amplification Results_[FLUOROPHORE].csv'
+    # Remove CFX filename suffixes using regex to handle no/one/multiple spaces around dash
+    # Pattern matches: optional spaces, '-', one-or-more spaces, then 'Quantification Amplification Results_<FLUOROPHORE>.csv'
     import re
-    cfx_pattern = r' -\s+Quantification Amplification Results_(FAM|HEX|Texas Red|Cy5)\.csv$'
+    cfx_pattern = r'\s*-\s+Quantification\s+Amplification\s+Results_(FAM|HEX|Texas\s+Red|Cy5)\.csv$'
     base_pattern = re.sub(cfx_pattern, '', filename)
     
     # Extract test code (first part before underscore)
@@ -500,7 +500,13 @@ def save_individual_channel_session(filename, results, fluorophore, summary):
         pathogen_breakdown_display = None
         if fluorophore:
             # Extract test code from filename pattern (e.g., AcBVAB_2578825_CFX367393 -> BVAB)
-            base_pattern = filename.replace(' -  Quantification Amplification Results_' + fluorophore + '.csv', '')
+            # Allow optional spaces before dash, one-or-more after, and multi-word channels (e.g., "Texas Red")
+            import re as _re
+            try:
+                base_pattern = _re.sub(r"\s*-\s+Quantification\s+Amplification\s+Results_" + _re.escape(fluorophore) + r"\.csv$", '', filename)
+            except Exception:
+                # Fallback to simple replace if regex fails unexpectedly
+                base_pattern = filename.replace(f" -  Quantification Amplification Results_{fluorophore}.csv", '')
             test_code = base_pattern.split('_')[0]
             if test_code.startswith('Ac'):
                 test_code = test_code[2:]  # Remove "Ac" prefix

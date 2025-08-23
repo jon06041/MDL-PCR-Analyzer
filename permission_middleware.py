@@ -5,7 +5,8 @@ Enforces permissions on API endpoints and provides frontend permission checks
 """
 
 from functools import wraps
-from flask import session, request, jsonify, redirect, url_for, g
+from flask import session, request, jsonify, redirect, url_for
+import flask  # use flask.g explicitly to avoid any local shadowing issues
 from unified_auth_manager import UnifiedAuthManager
 import logging
 import os
@@ -17,12 +18,24 @@ auth_manager = UnifiedAuthManager()
 
 # ---- Temporary, env-gated open test mode (for Railway testing) ----
 def _is_open_test_mode() -> bool:
-    """Returns True when Railway open test mode is enabled via env.
+    """Returns True when open test/bypass mode is enabled via env.
 
-    Opt-in only: set RAILWAY_OPEN_TEST_MODE=1 to allow limited, anonymous
-    access to specific endpoints needed for upload/analysis testing.
+    Supported flags (any one):
+    - RAILWAY_OPEN_TEST_ALLOW_ALL
+    - OPEN_TEST_ALLOW_ALL
+    - DEV_RELAXED_ADMIN_ACCESS
+    - RAILWAY_OPEN_TEST_MODE (legacy)
     """
-    return os.getenv('RAILWAY_OPEN_TEST_MODE', '0').lower() in ('1', 'true', 'yes', 'on', 'y')
+    flags = (
+        'RAILWAY_OPEN_TEST_ALLOW_ALL',
+        'OPEN_TEST_ALLOW_ALL',
+        'DEV_RELAXED_ADMIN_ACCESS',
+        'RAILWAY_OPEN_TEST_MODE',  # legacy
+    )
+    for key in flags:
+        if os.getenv(key, '0').lower() in ('1', 'true', 'yes', 'on', 'y'):
+            return True
+    return False
 
 def _is_open_test_allowed_path(path: str) -> bool:
     """Allow only narrowly-scoped endpoints for open test mode."""
@@ -89,8 +102,7 @@ def require_authentication(f):
     def decorated_function(*args, **kwargs):
         # Open test mode: allow anonymous access for specific endpoints
         if _is_open_test_mode() and _is_open_test_allowed_path(request.path):
-            from flask import g
-            g.current_user = _get_open_test_user()
+            flask.g.current_user = _get_open_test_user()
             logger.info(f"Open-test mode: granting anonymous access to {request.path}")
             return f(*args, **kwargs)
 
@@ -101,7 +113,7 @@ def require_authentication(f):
                 return jsonify({'error': 'Authentication required', 'code': 'AUTH_REQUIRED'}), 401
             else:
                 return redirect(url_for('auth.login'))
-        
+
         user_data = auth_manager.validate_session(session_id)
         if not user_data:
             session.clear()
@@ -110,11 +122,11 @@ def require_authentication(f):
                 return jsonify({'error': 'Invalid session', 'code': 'INVALID_SESSION'}), 401
             else:
                 return redirect(url_for('auth.login'))
-        
+
         # Store user info in Flask g for use in the request
-        g.current_user = user_data
+        flask.g.current_user = user_data
         return f(*args, **kwargs)
-    
+
     return decorated_function
 
 def require_permission(permission):
@@ -125,20 +137,20 @@ def require_permission(permission):
         def decorated_function(*args, **kwargs):
             # If in open test mode and this endpoint is allowed, grant if permission matches synthetic user's perms
             if _is_open_test_mode() and _is_open_test_allowed_path(request.path):
-                user_permissions = getattr(g, 'current_user', {}).get('permissions', [])
+                user_permissions = getattr(flask.g, 'current_user', {}).get('permissions', [])
                 if permission in user_permissions:
                     logger.info(f"Open-test mode: permitting {permission} on {request.path}")
                     return f(*args, **kwargs)
 
-            user_permissions = g.current_user.get('permissions', [])
+            user_permissions = flask.g.current_user.get('permissions', [])
             
             if permission not in user_permissions:
-                logger.warning(f"Permission denied: {g.current_user['username']} attempted {permission} on {request.endpoint}")
+                logger.warning(f"Permission denied: {flask.g.current_user['username']} attempted {permission} on {request.endpoint}")
                 
                 # Log to audit trail
                 auth_manager._log_auth_event(
-                    g.current_user['username'], 
-                    g.current_user.get('auth_method', 'unknown'),
+                    flask.g.current_user['username'], 
+                    flask.g.current_user.get('auth_method', 'unknown'),
                     'permission_denied',
                     request.remote_addr,
                     request.headers.get('User-Agent'),
@@ -150,13 +162,13 @@ def require_permission(permission):
                         'error': 'Insufficient permissions', 
                         'code': 'PERMISSION_DENIED',
                         'required_permission': permission,
-                        'user_role': g.current_user['role']
+                        'user_role': flask.g.current_user['role']
                     }), 403
                 else:
                     return redirect(url_for('auth.login', error='insufficient_permissions'))
             
             # Log successful permission check
-            logger.info(f"Permission granted: {g.current_user['username']} used {permission} on {request.endpoint}")
+            logger.info(f"Permission granted: {flask.g.current_user['username']} used {permission} on {request.endpoint}")
             return f(*args, **kwargs)
         
         return decorated_function
@@ -168,17 +180,17 @@ def require_role(role):
         @wraps(f)
         @require_authentication
         def decorated_function(*args, **kwargs):
-            user_role = g.current_user['role']
+            user_role = flask.g.current_user['role']
             required_level = auth_manager.ROLES.get(role, 0)
             user_level = auth_manager.ROLES.get(user_role, 0)
             
             if user_level < required_level:
-                logger.warning(f"Role denied: {g.current_user['username']} ({user_role}) attempted {role} access on {request.endpoint}")
+                logger.warning(f"Role denied: {flask.g.current_user['username']} ({user_role}) attempted {role} access on {request.endpoint}")
                 
                 # Log to audit trail
                 auth_manager._log_auth_event(
-                    g.current_user['username'],
-                    g.current_user.get('auth_method', 'unknown'),
+                    flask.g.current_user['username'],
+                    flask.g.current_user.get('auth_method', 'unknown'),
                     'role_denied',
                     request.remote_addr,
                     request.headers.get('User-Agent'),
@@ -263,11 +275,12 @@ def register_permission_api(app):
     def api_validate_permission(permission):
         """API endpoint to validate specific permission"""
         has_permission = check_permission(permission)
+        current = getattr(flask.g, 'current_user', {}) or {}
         return jsonify({
             'permission': permission,
             'granted': has_permission,
-            'user_role': g.get('current_user', {}).get('role'),
-            'username': g.get('current_user', {}).get('username')
+            'user_role': current.get('role'),
+            'username': current.get('username')
         })
 
 # Permission constants for easy reference

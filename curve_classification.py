@@ -149,22 +149,39 @@ def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, c
         # Note: SNR removed - causing incorrect classifications
     )
     
-    # EARLY REDO RULE — leverage vendor CQ only (avoid CQJ)
-    # If curve fit is low but a vendor CQ is present, recommend REDO instead of NEGATIVE.
+    # EARLY REDO RULE — include either vendor CQ or CQJ presence
+    # If curve fit is low but a vendor CQ OR a valid CQJ is present, recommend REDO instead of NEGATIVE.
     # Place before confident_negative so it takes precedence when applicable.
-    if r2 < 0.75 and has_valid_vendor_cq:
-        logger.info(
-            f"Rule REDO satisfied | r2={r2:.4f} | vendor_cq={vendor_cq_float:.2f} | snr={snr} | amp={amplitude}"
-        )
-        return {
-            'classification': 'REDO',
-            'confidence': 0.80,
-            'edge_case': True,
-            'edge_case_reasons': ['low_r2_with_valid_vendor_cq'],
-            'ml_recommended': True,
-            'flag_for_review': True,
-            'reason': f"Low curve fit with vendor CQ present: R²={r2:.3f}, CQ={vendor_cq_float:.2f}"
-        }
+    logger.info(
+        f"REDO pre-check probe | r2={r2:.4f} | has_vendor_cq={has_valid_vendor_cq} | vendor_cq={vendor_cq_float if vendor_cq_float is not None else 'N/A'} | has_cqj={has_valid_cqj} | snr={snr} | amp={amplitude}"
+    )
+    if r2 < 0.75 and (has_valid_vendor_cq or has_valid_cqj):
+        if has_valid_vendor_cq:
+            logger.warning(
+                f"REDO pre-check applied | reason=low_r2_with_valid_vendor_cq | r2={r2:.4f} | vendor_cq={vendor_cq_float:.2f}"
+            )
+            return {
+                'classification': 'REDO',
+                'confidence': 0.80,
+                'edge_case': True,
+                'edge_case_reasons': ['low_r2_with_valid_vendor_cq'],
+                'ml_recommended': True,
+                'flag_for_review': True,
+                'reason': f"Low curve fit with vendor CQ present: R²={r2:.3f}, CQ={vendor_cq_float:.2f}"
+            }
+        else:
+            logger.warning(
+                f"REDO pre-check applied | reason=low_r2_with_valid_cqj | r2={r2:.4f} | cqj_present=True"
+            )
+            return {
+                'classification': 'REDO',
+                'confidence': 0.80,
+                'edge_case': True,
+                'edge_case_reasons': ['low_r2_with_valid_cqj'],
+                'ml_recommended': True,
+                'flag_for_review': True,
+                'reason': f"Low curve fit with CQJ present: R²={r2:.3f}"
+            }
 
     # STRICT CONFIDENT NEGATIVE CRITERIA (ANY one triggers negative)
     # Focus on curve quality and signal strength, not CQJ timing
@@ -287,3 +304,45 @@ def classify_curve(r2, steepness, snr, midpoint, baseline=100, amplitude=None, c
             'flag_for_review': False,
             'reason': f"Borderline case requiring ML review: {', '.join(edge_reasons)}"
         }
+
+
+# Centralized helpers used by edge-case ML batch analysis and UI
+def should_apply_ml_analysis(classification_result: dict) -> bool:
+    """
+    Decide if ML should be applied based on the rule-based classification result.
+    Criteria:
+    - Explicit edge_case flag, OR
+    - Low confidence (<= 0.60), OR
+    - INDETERMINATE classification
+    """
+    if not isinstance(classification_result, dict):
+        return False
+    edge_case = bool(classification_result.get('edge_case', False))
+    classification = str(classification_result.get('classification', '')).upper()
+    try:
+        confidence = float(classification_result.get('confidence', 0))
+    except (TypeError, ValueError):
+        confidence = 0.0
+    return edge_case or confidence <= 0.60 or classification == 'INDETERMINATE'
+
+
+def get_edge_case_summary(classification_result: dict) -> str:
+    """
+    Produce a compact, human-readable summary explaining why a sample is an edge case.
+    """
+    if not isinstance(classification_result, dict):
+        return ""
+    reasons = classification_result.get('edge_case_reasons') or []
+    if isinstance(reasons, list) and reasons:
+        return ", ".join(map(str, reasons))
+    # Fallback: derive from classification/confidence
+    cls = str(classification_result.get('classification', 'UNKNOWN')).upper()
+    conf = classification_result.get('confidence')
+    if cls == 'INDETERMINATE':
+        return 'indeterminate_require_review'
+    try:
+        if float(conf) <= 0.60:
+            return 'low_confidence_requires_ml'
+    except (TypeError, ValueError):
+        pass
+    return ''
