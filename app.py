@@ -6577,6 +6577,41 @@ def get_unified_compliance_requirements():
 
 # ===== Unified Compliance: Documentation Evidence (Upload/List/Serve) =====
 
+# Lightweight request probes for documentation evidence API to trace button clicks end-to-end
+from uuid import uuid4 as _uuid4
+from flask import g as _g
+
+@app.before_request
+def _doc_evidence_probe_in():
+    try:
+        if request.path.startswith('/api/unified-compliance/evidence/documentation'):
+            _g.__doc_probe_id = getattr(_g, '__doc_probe_id', None) or _uuid4().hex[:8]
+            # Avoid forcing full stream read; just log keys and metadata
+            try:
+                form_keys = list(request.form.keys()) if request.form else []
+            except Exception:
+                form_keys = []
+            try:
+                file_keys = list(request.files.keys()) if request.files else []
+            except Exception:
+                file_keys = []
+            app.logger.info(
+                f"[DOC-EVIDENCE][{_g.__doc_probe_id}] IN {request.method} {request.path} | ct={request.content_type} | len={request.content_length} | args={dict(request.args)} | form_keys={form_keys} | files={file_keys} | user={get_current_user()}"
+            )
+    except Exception:
+        pass
+
+@app.after_request
+def _doc_evidence_probe_out(resp):
+    try:
+        if request.path.startswith('/api/unified-compliance/evidence/documentation') and hasattr(_g, '__doc_probe_id'):
+            app.logger.info(
+                f"[DOC-EVIDENCE][{_g.__doc_probe_id}] OUT {resp.status_code} {request.path} | resp_ct={resp.content_type} | resp_len={getattr(resp, 'content_length', None)}"
+            )
+    except Exception:
+        pass
+    return resp
+
 @app.route('/api/unified-compliance/evidence/documentation/upload', methods=['POST'])
 @require_permission(Permissions.MANAGE_COMPLIANCE_EVIDENCE)
 def upload_compliance_documentation():
@@ -6584,21 +6619,27 @@ def upload_compliance_documentation():
     Form fields: file (multipart), requirement_id (str), description (optional)
     """
     try:
+        probe = getattr(_g, '__doc_probe_id', None) or _uuid4().hex[:8]
         if not unified_compliance_manager:
-            return jsonify({'error': 'Unified Compliance Manager not available'}), 503
+            app.logger.error(f"[DOC-EVIDENCE][{probe}] Upload aborted: UnifiedComplianceManager not available")
+            return jsonify({'error': 'Unified Compliance Manager not available', 'probe_id': probe}), 503
 
         # Validate multipart
         if 'file' not in request.files:
-            return jsonify({'error': 'No file provided'}), 400
+            app.logger.warning(f"[DOC-EVIDENCE][{probe}] No 'file' part in request.files | keys={list(request.files.keys())}")
+            return jsonify({'error': 'No file provided', 'probe_id': probe}), 400
         file = request.files['file']
         if not file or file.filename == '':
-            return jsonify({'error': 'Empty filename'}), 400
+            app.logger.warning(f"[DOC-EVIDENCE][{probe}] Empty filename or missing file stream")
+            return jsonify({'error': 'Empty filename', 'probe_id': probe}), 400
         if not _allowed_doc_file(file.filename):
-            return jsonify({'error': 'Unsupported file type'}), 400
+            app.logger.warning(f"[DOC-EVIDENCE][{probe}] Unsupported file type: {file.filename}")
+            return jsonify({'error': 'Unsupported file type', 'probe_id': probe}), 400
 
         requirement_id = request.form.get('requirement_id', '').strip() or request.args.get('requirement_id', '').strip()
         if not requirement_id:
-            return jsonify({'error': 'requirement_id is required'}), 400
+            app.logger.warning(f"[DOC-EVIDENCE][{probe}] Missing requirement_id in form/args")
+            return jsonify({'error': 'requirement_id is required', 'probe_id': probe}), 400
 
         # Save file to requirement-specific directory with randomized name
         original_name = secure_filename(file.filename)
@@ -6606,6 +6647,7 @@ def upload_compliance_documentation():
         stored_name = f"{uuid4().hex}.{ext}"
         req_dir = _ensure_req_dir(requirement_id)
         abs_path = os.path.join(req_dir, stored_name)
+        app.logger.info(f"[DOC-EVIDENCE][{probe}] Saving upload | requirement_id={requirement_id} | original={original_name} | stored={stored_name} -> {abs_path}")
         file.save(abs_path)
 
         # Gather metadata
@@ -6633,15 +6675,21 @@ def upload_compliance_documentation():
             user_id=user_id,
             session_id=request.headers.get('X-Session-Id')
         )
+        app.logger.info(f"[DOC-EVIDENCE][{probe}] Upload SUCCESS | event_id={event_id} | size={size_bytes} | mime={mime}")
 
         return jsonify({
             'success': True,
             'event_id': event_id,
-            'evidence': evidence_payload
+            'evidence': evidence_payload,
+            'probe_id': probe,
         })
     except Exception as e:
-        app.logger.error(f"Upload failed: {e}")
-        return jsonify({'error': str(e)}), 500
+        try:
+            probe = getattr(_g, '__doc_probe_id', None) or 'unknown'
+            app.logger.exception(f"[DOC-EVIDENCE][{probe}] Upload failed: {e}")
+        except Exception:
+            pass
+        return jsonify({'error': str(e), 'probe_id': probe}), 500
 
 
 @app.route('/api/unified-compliance/evidence/documentation/list', methods=['GET'])
