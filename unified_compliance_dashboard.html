@@ -1760,6 +1760,15 @@
                 // Prepend docs block to evidence buffer so it persists
                 evidenceHTML = docBlockHTML + (evidenceHTML || '');
 
+                // If the modal content was already injected earlier, ensure the Documentation
+                // block is also present in the live DOM by prepending it immediately.
+                try {
+                    const liveContainer = document.getElementById('evidenceDetails');
+                    if (liveContainer && !document.getElementById(`docUpload_${reqCode}`)) {
+                        liveContainer.innerHTML = `${docBlockHTML}${liveContainer.innerHTML}`;
+                    }
+                } catch (e) { /* no-op */ }
+
                 // Ensure list loader exists (idempotent define)
                 if (!window.loadDocumentationListFor) {
                     window.loadDocumentationListFor = async function(reqId){
@@ -1860,6 +1869,14 @@
                 };
                 // Expose for external calls if needed
                 window._wireDocUploadUI = wireDocUploadUI;
+
+                // If the live DOM has our block now, wire it and load its list immediately.
+                try {
+                    if (document.getElementById(`docUpload_${reqCode}`)) {
+                        if (window._wireDocUploadUI) window._wireDocUploadUI(reqCode);
+                        if (window.loadDocumentationListFor) window.loadDocumentationListFor(reqCode);
+                    }
+                } catch (e) { /* no-op */ }
             } catch {}
 
             // Fallback to the original method if no evidence_sources
