@@ -796,11 +796,16 @@
                     pending: (pendingData && (pendingData.pending_sessions || pendingData.sessions || [])) || []
                 };
 
-                // Preload encryption evidence presence for mapped requirements so counts match modal contents
+                // Preload encryption evidence presence for any requirement whose allowed types include encryption_evidence
                 window.encryptionPresenceByReq = {};
                 try {
-                    const mapping = window.EvidenceFilter?.REQUIREMENT_EVIDENCE_MAPPING || {};
-                    const encReqs = (window.requirementsData || []).filter(r => Array.isArray(mapping[r.id]) && mapping[r.id].includes('encryption_evidence'));
+                    const reqs = Array.isArray(window.requirementsData) ? window.requirementsData : [];
+                    const encReqs = reqs.filter(r => {
+                        try {
+                            const allowed = window.EvidenceFilter?.getAllowedEvidenceTypes?.(r.id) || [];
+                            return allowed.includes('encryption_evidence');
+                        } catch { return false; }
+                    });
                     if (encReqs.length > 0) {
                         await Promise.all(encReqs.map(async (r) => {
                             try {
@@ -1215,6 +1220,21 @@
             `;
         }
 
+        // Open evidence modal and jump to Documentation section
+        async function openDocumentation(reqCode, evidenceCount) {
+            try {
+                showSimpleEvidence(reqCode, typeof evidenceCount === 'number' ? evidenceCount : 0);
+                // Wait a tick for modal to render, then scroll to docs block
+                setTimeout(() => {
+                    const el = document.getElementById(`docUpload_${reqCode}`);
+                    if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        try { el.classList.add('border', 'border-3', 'border-info'); setTimeout(() => el.classList.remove('border-3'), 1500); } catch {}
+                    }
+                }, 250);
+            } catch (e) { console.warn('openDocumentation failed', e); }
+        }
+
         
 
         function showSimpleEvidence(reqCode, evidenceCount) {
@@ -1414,439 +1434,153 @@
             `;
         }
         
-        function loadEvidenceDetails(reqCode) {
-            // Get requirement data with evidence_sources from the stored data
-            const requirement = window.requirementsData?.find(req => req.id === reqCode);
-            const evidenceContainer = document.getElementById('evidenceDetails');
-            if (!evidenceContainer) return;
-            // Track session IDs represented in evidence_sources to avoid duplicate rendering later
-            let coveredSessionIds = new Set();
-            // Ensure we have a safe default for renderSources even when evidence_sources path is not taken
-            let renderSources = [];
-            // Simple, per-page-session cache for validation test results
-            try { window.__validationCache = window.__validationCache || null; } catch {}
-            
-            // If we have evidence_sources from the API, use those instead of the old method
-            if (requirement && requirement.evidence_sources && requirement.evidence_sources.length > 0) {
-                console.log('Using new evidence_sources for', reqCode, ':', requirement.evidence_sources.length, 'sources');
-
-                // Group repeated Data Integrity/File Validation entries by day to reduce noise
-                // Also filter to category-appropriate entries for this requirement
-                const allSources = Array.isArray(requirement.evidence_sources) ? requirement.evidence_sources.slice() : [];
-                const rawSources = allSources.filter(s => {
+        // Documentation upload/list: global handlers (defined once)
+        (function initDocumentationHandlersOnce(){
+            if (!window.loadDocumentationListFor) {
+                window.loadDocumentationListFor = async function(reqId){
                     try {
-                        return window.EvidenceFilter?.shouldIncludeSourceForRequirement?.(reqCode, s) ?? true;
-                    } catch { return true; }
-                });
-                renderSources = (() => {
-                    // Group by YYYY-MM-DD for integrity/validation types
-                    const groups = new Map();
-                    const others = [];
-                    let integrityRawCount = 0; // count raw integrity items before grouping
-                    for (const s of rawSources) {
-                        const et = (s.evidence_type || '').toLowerCase();
-                        const isIntegrity = et.includes('data integrity') || et.includes('file validation');
-                        if (!isIntegrity) { others.push(s); continue; }
-                        integrityRawCount++;
-                        let dateKey = 'unknown';
-                        try {
-                            const d = new Date(s.created_at || s.updated_at || Date.now());
-                            if (!isNaN(d.getTime())) dateKey = d.toISOString().slice(0,10);
-                        } catch {}
-                        const key = `${et}__${dateKey}`;
-                        if (!groups.has(key)) groups.set(key, []);
-                        groups.get(key).push(s);
-                    }
-                    // Expose duplicate summary for integrity items
-                    const grouped = [];
-                    const integrityGroupSummaries = [];
-                    for (const [key, list] of groups.entries()) {
-                        // Determine aggregate status and latest timestamp
-                        let status = 'pending';
-                        let ts = 0;
-                        for (const item of list) {
-                            const badgeStatus = (item.confirmation_status || item.validation_status || 'pending').toLowerCase();
-                            if (badgeStatus === 'validated' || badgeStatus === 'confirmed') status = 'validated';
-                            const t = new Date(item.created_at || item.updated_at || Date.now()).getTime();
-                            if (t > ts) ts = t;
-                        }
-                        const latest = new Date(ts || Date.now()).toISOString();
-                        const sample = list[0] || {};
-                        // Capture summary for duplicates listing UI
-                        try {
-                            const parts = (key || '').split('__');
-                            const dateOnly = parts.length > 1 ? parts[1] : 'unknown';
-                            integrityGroupSummaries.push({
-                                date: dateOnly,
-                                count: list.length,
-                                type: sample.evidence_type || 'Data integrity checks and file validation logs'
-                            });
-                        } catch {}
-                        grouped.push({
-                            evidence_type: sample.evidence_type || 'Data integrity checks and file validation logs',
-                            description: sample.description || 'N/A',
-                            validation_status: status,
-                            created_at: latest,
-                            __group_count: list.length
-                        });
-                    }
-                    // Attach deduplication meta on window for later rendering in this scope
-                    const uniqueIntegrityGroups = groups.size;
-                    const rawEvidenceSourcesCount = integrityRawCount + others.length;
-                    const uniqueEvidenceSourcesCount = grouped.length + others.length;
-                    // Stash on a local object we return alongside the list
-                    return Object.assign(
-                        [...grouped, ...others].sort((a,b) => new Date(b.created_at||0) - new Date(a.created_at||0)),
-                        {
-                            __dedup_meta: {
-                                integrityRawCount,
-                                uniqueIntegrityGroups,
-                                rawEvidenceSourcesCount,
-                                uniqueEvidenceSourcesCount,
-                                integrityGroupSummaries
-                            }
-                        }
-                    );
-                })();
-
-                // Populate coveredSessionIds from Analysis Session entries listed in evidence_sources
-                try {
-                    coveredSessionIds = new Set();
-                    const scanList = Array.from(renderSources);
-                    for (const item of scanList) {
-                        const et = (item.evidence_type || '').toLowerCase();
-                        if (et.includes('analysis session')) {
-                            // Prefer explicit session_id field if provided
-                            if (typeof item.session_id === 'number') {
-                                coveredSessionIds.add(item.session_id);
-                            } else {
-                                const hint = (item.description || item.filename || '');
-                                const m = /Session:\s*(\d+)/i.exec(hint);
-                                if (m) {
-                                    const sid = parseInt(m[1], 10);
-                                    if (!Number.isNaN(sid)) coveredSessionIds.add(sid);
-                                }
-                            }
-                        }
-                    }
-                } catch {}
-
-                let evidenceHTML = '';
-                if (renderSources.length > 0) {
-                    evidenceHTML += `
-                        <div class="card">
-                            <div class="card-header">
-                                <h6 class="mb-0"><i class="fas fa-database"></i> Evidence Records (${renderSources.length})</h6>
-                            </div>
-                            <div class="card-body">
-                                ${(() => {
-                                try {
-                                    const m = renderSources.__dedup_meta || {};
-                                    if (!m || typeof m.rawEvidenceSourcesCount !== 'number') return '';
-                                    const dup = Math.max(0, (m.integrityRawCount - m.uniqueIntegrityGroups));
-                                    const anyDup = dup > 0;
-                                    const listId = `dupList-${reqCode}`;
-                                    return `
-                                        <div class="mb-3">
-                                            <small class="text-muted">
-                                                Raw evidence sources: <strong>${m.rawEvidenceSourcesCount}</strong> • Unique after grouping: <strong>${m.uniqueEvidenceSourcesCount}</strong>
-                                                ${anyDup ? `
-                                                    <br>
-                                                    <span class="text-muted">${dup} duplicates from repeated Data Integrity/File Validation checks</span>
-                                                    &nbsp; <a href="#" onclick="(function(){ const el = document.getElementById('${listId}'); if (el) { el.style.display = (el.style.display==='none'?'block':'none'); } })(); return false;">${'Show details'}</a>
-                                                    <div id="${listId}" style="display: none;" class="mt-2">
-                                                        <ul class="mb-2">
-                                                            ${(m.integrityGroupSummaries || []).map(g => `
-                                                                <li><small>${g.type} — ${g.date}: <strong>${g.count}</strong> checks</small></li>
-                                                            `).join('')}
-                                                        </ul>
-                                                        <small class="text-muted">We group repeated integrity checks by day to avoid noisy duplicate counting. The table below shows grouped entries; click to expand for raw logs if needed.</small>
-                                                    </div>
-                                                ` : ''}
-                                            </small>
-                                        </div>
-                                    `;
-                                } catch { return ''; }
-                            })()}
-                                <div class="table-responsive">
-                                    <table class="table table-sm table-striped">
-                                        <thead>
-                                            <tr>
-                                                <th>Type</th>
-                                                <th>Description</th>
-                                                <th>Status</th>
-                                                <th>Date</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>`;
-                
-                renderSources.forEach((source, index) => {
-                    let statusBadge = source.confirmation_status === 'confirmed' ? 
-                        'bg-success' : source.validation_status === 'validated' ? 
-                        'bg-success' : 'bg-warning';
-                    let statusText = source.confirmation_status || source.validation_status || 'pending';
-                    
-                    // Heuristic: Data integrity/file validation logs are produced by completed checks.
-                    // If no explicit status is present, treat them as validated unless a failure is detected.
-                    try {
-                        const et = (source.evidence_type || '').toLowerCase();
-                        if ((et.includes('data integrity') || et.includes('file validation')) && (statusText === 'pending' || statusText === 'unknown')) {
-                            let evidence = null;
-                            if (typeof source.evidence_data === 'string') {
-                                try { evidence = JSON.parse(source.evidence_data); } catch {}
-                            } else if (typeof source.evidence_data === 'object') {
-                                evidence = source.evidence_data;
-                            }
-                            let hasFailure = false;
-                            let hasSuccess = false;
-                            if (evidence) {
-                                const vr = evidence.validation_results || evidence.results || {};
-                                const sv = evidence.system_verification || {};
-                                // Signals for failures/success
-                                if (typeof vr.errors === 'number' && vr.errors > 0) hasFailure = true;
-                                if (vr.failed || vr.status === 'FAIL') hasFailure = true;
-                                if (sv.overall_status === 'FAIL' || sv.pass === false) hasFailure = true;
-                                if (vr.success === true || vr.status === 'PASS') hasSuccess = true;
-                                if (sv.overall_status === 'PASS' || sv.pass === true) hasSuccess = true;
-                            }
-                            if (hasFailure) {
-                                statusBadge = 'bg-danger';
-                                statusText = 'failed';
-                            } else {
-                                statusBadge = 'bg-success';
-                                statusText = 'validated';
-                            }
-                        }
-                    } catch {}
-                    const dateStr = source.created_at ? new Date(source.created_at).toLocaleDateString() : 'N/A';
-                    
-                    // Parse evidence_data JSON to get enhanced descriptions
-                    let description = source.description || source.filename || 'N/A';
-                    try {
-                        if (source.evidence_data && typeof source.evidence_data === 'string') {
-                            const evidenceData = JSON.parse(source.evidence_data);
-                            // Try multiple fields for enhanced descriptions
-                            if (evidenceData.description && evidenceData.description !== 'N/A') {
-                                description = evidenceData.description;
-                            } else if (evidenceData.technical_specifications && evidenceData.technical_specifications.description) {
-                                description = evidenceData.technical_specifications.description;
-                            } else if (evidenceData.system_verification && evidenceData.system_verification.verification_summary) {
-                                description = evidenceData.system_verification.verification_summary;
-                            } else if (evidenceData.regulatory_mapping && evidenceData.regulatory_mapping.evidence_statement) {
-                                description = evidenceData.regulatory_mapping.evidence_statement;
-                            } else if (evidenceData.encryption_algorithm) {
-                                // Build description from encryption details
-                                const parts = [];
-                                if (evidenceData.encryption_algorithm) parts.push(`Algorithm: ${evidenceData.encryption_algorithm}`);
-                                if (evidenceData.key_derivation) parts.push(`Key Derivation: ${evidenceData.key_derivation}`);
-                                if (parts.length > 0) description = parts.join(', ');
-                            }
-                        } else if (source.evidence_data && typeof source.evidence_data === 'object') {
-                            const evidenceData = source.evidence_data;
-                            // Try multiple fields for enhanced descriptions
-                            if (evidenceData.description && evidenceData.description !== 'N/A') {
-                                description = evidenceData.description;
-                            } else if (evidenceData.technical_specifications && evidenceData.technical_specifications.description) {
-                                description = evidenceData.technical_specifications.description;
-                            } else if (evidenceData.system_verification && evidenceData.system_verification.verification_summary) {
-                                description = evidenceData.system_verification.verification_summary;
-                            } else if (evidenceData.regulatory_mapping && evidenceData.regulatory_mapping.evidence_statement) {
-                                description = evidenceData.regulatory_mapping.evidence_statement;
-                            } else if (evidenceData.encryption_algorithm) {
-                                // Build description from encryption details
-                                const parts = [];
-                                if (evidenceData.encryption_algorithm) parts.push(`Algorithm: ${evidenceData.encryption_algorithm}`);
-                                if (evidenceData.key_derivation) parts.push(`Key Derivation: ${evidenceData.key_derivation}`);
-                                if (parts.length > 0) description = parts.join(', ');
-                            }
-                        }
-                    } catch (e) {
-                        console.warn('Failed to parse evidence_data for enhanced description:', e);
-                        // Keep default description
-                    }
-                    
-                    // Improve placeholder descriptions
-                    if (!description || description === 'N/A' || description === 'NA') {
-                        const et = (source.evidence_type || '').toLowerCase();
-                        if (et.includes('audit')) {
-                            description = 'System access and activity logs (audit trail)';
-                        } else if (et.includes('encryption')) {
-                            description = 'Automated data integrity checks and encryption validation logs';
-                        } else if (et.includes('data integrity') || et.includes('file validation')) {
-                            description = 'Automated integrity pipeline including: SHA-256 checksum verification, CSV schema/format validation, well/channel consistency checks, pathogen threshold mapping enforcement, and audit trail entry creation.';
-                        } else {
-                            description = 'Automated data integrity checks and validation logs';
-                        }
-                    }
-
-                    // If this row is grouped, append count in description
-                    if (source.__group_count && source.__group_count > 1) {
-                        description += ` (${source.__group_count} checks)`;
-                    }
-
-                    evidenceHTML += `
-                        <tr>
-                            <td><span class="badge bg-primary">${source.evidence_type || 'Analysis Session'}</span></td>
-                            <td style="max-width: 500px; word-wrap: break-word; white-space: normal;">${description}</td>
-                            <td><span class="badge ${statusBadge}">${statusText}</span></td>
-                            <td>${dateStr}</td>
-                        </tr>`;
-                });
-                
-                evidenceHTML += `
-                                        </tbody>
-                                    </table>
-                                </div>
-                                <div class="alert alert-success mt-3">
-                                    <i class="fas fa-check-circle"></i>
-                                    <strong>Evidence Source:</strong> Direct API integration - real-time evidence tracking
-                                </div>
-                            </div>
-                        </div>`;
-                }
-                // Render sources card (if any) and continue to add logs/sessions so the count matches total shown
-                if (evidenceHTML) {
-                    evidenceContainer.innerHTML = evidenceHTML;
-                }
-            }
-            
-            // Render Documentation upload/list UI when policy allows
-            try {
-                const allowDocs = (window.EvidenceFilter?.getAllowedEvidenceTypes?.(reqCode) || []).includes('documentation');
-                const container = document.getElementById('evidenceDetails');
-                if (allowDocs && container) {
-                    const docSectionId = `docUpload_${reqCode}`;
-                    if (!document.getElementById(docSectionId)) {
-                        const block = document.createElement('div');
-                        block.id = docSectionId;
-                        block.className = 'card mb-3 border-info';
-                        block.innerHTML = `
-                            <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
-                                <h6 class="mb-0"><i class="fas fa-file-upload"></i> Documentation</h6>
-                                <small>Attach SOPs, policies, or supporting documents</small>
-                            </div>
-                            <div class="card-body">
-                                <form id="docForm_${reqCode}" class="row g-2 align-items-center" onsubmit="return false;">
-                                    <div class="col-md-5">
-                                        <input type="file" class="form-control form-control-sm" id="docFile_${reqCode}" accept=".pdf,.doc,.docx,.txt,.md,.rtf,.csv,.tsv,.xlsx,.xls,.png,.jpg,.jpeg">
-                                    </div>
-                                    <div class="col-md-5">
-                                        <input type="text" class="form-control form-control-sm" id="docDesc_${reqCode}" placeholder="Short description (optional)">
-                                    </div>
-                                    <div class="col-md-2 text-end">
-                                        <button class="btn btn-sm btn-primary" id="docBtn_${reqCode}">Upload</button>
-                                    </div>
-                                </form>
-                                <div id="docMsg_${reqCode}" class="mt-2"></div>
-                                <div class="mt-3">
-                                    <h6 class="mb-2"><i class="fas fa-folder-open"></i> Uploaded Documents</h6>
-                                    <div id="docList_${reqCode}"><small class="text-muted">None yet</small></div>
-                                </div>
+                        const listEl = document.getElementById(`docList_${reqId}`);
+                        if (!listEl) return;
+                        const r = await fetch(`/api/unified-compliance/evidence/documentation/list?requirement_id=${encodeURIComponent(reqId)}`, { credentials: 'same-origin' });
+                        const data = await r.json();
+                        if (!r.ok || data.success === false) throw new Error(data.error || 'Failed to load documents');
+                        const docs = Array.isArray(data.documents) ? data.documents : [];
+                        if (!docs.length) { listEl.innerHTML = '<small class="text-muted">None yet</small>'; return; }
+                        listEl.innerHTML = `
+                            <div class="table-responsive">
+                                <table class="table table-sm table-striped align-middle mb-0">
+                                    <thead><tr><th>Name</th><th>Type</th><th>Size</th><th>Uploaded</th><th></th></tr></thead>
+                                    <tbody>
+                                        ${docs.map(d => {
+                                            const size = (d.size_bytes && d.size_bytes > 0) ? (d.size_bytes >= 1024*1024 ? (d.size_bytes/1024/1024).toFixed(1)+' MB' : Math.ceil(d.size_bytes/1024)+' KB') : '-';
+                                            const when = d.created_at ? new Date(d.created_at).toLocaleString() : '-';
+                                            const desc = d.description ? `<div><small class=\"text-muted\">${d.description}</small></div>` : '';
+                                            return `
+                                                <tr>
+                                                    <td style=\"max-width:380px; word-break:break-word;\">
+                                                        <div><strong>${d.filename || 'document'}</strong></div>
+                                                        ${desc}
+                                                    </td>
+                                                    <td><small>${d.mime_type || '-'}</small></td>
+                                                    <td><small>${size}</small></td>
+                                                    <td><small>${when}</small></td>
+                                                    <td class=\"text-end\">
+                                                        <a class=\"btn btn-sm btn-outline-primary me-1\" href=\"/api/unified-compliance/evidence/documentation/serve/${d.evidence_id}\" target=\"_blank\">Open</a>
+                                                        <button class=\"btn btn-sm btn-outline-danger\" data-doc-delete=\"${d.evidence_id}\">Delete</button>
+                                                    </td>
+                                                </tr>`;
+                                        }).join('')}
+                                    </tbody>
+                                </table>
                             </div>`;
-                        // Prepend near top for visibility
-                        if (container.firstChild) container.insertBefore(block, container.firstChild);
-                        else container.appendChild(block);
 
-                        // Wire upload button
-                        const btn = block.querySelector(`#docBtn_${reqCode}`);
-                        btn?.addEventListener('click', async () => {
-                            const fileEl = block.querySelector(`#docFile_${reqCode}`);
-                            const descEl = block.querySelector(`#docDesc_${reqCode}`);
-                            const msg = block.querySelector(`#docMsg_${reqCode}`);
-                            if (!fileEl || !fileEl.files || !fileEl.files[0]) {
-                                msg.innerHTML = '<div class="alert alert-warning py-1 my-1">Choose a file to upload.</div>';
-                                return;
-                            }
-                            try {
-                                const fd = new FormData();
-                                fd.append('file', fileEl.files[0]);
-                                fd.append('requirement_id', reqCode);
-                                if (descEl && descEl.value) fd.append('description', descEl.value);
-                                const resp = await fetch('/api/unified-compliance/evidence/documentation/upload', { method: 'POST', body: fd });
-                                const data = await resp.json();
-                                if (!resp.ok || data.success === false) throw new Error(data.error || 'Upload failed');
-                                msg.innerHTML = '<div class="alert alert-success py-1 my-1">Uploaded.</div>';
-                                // Refresh list
-                                await window.loadDocumentationListFor(reqCode);
-                                // Bump evidence count subtly
-                                try { const el = document.getElementById('evidenceCountValue'); if (el) el.textContent = (parseInt(el.textContent||'0',10)+1); } catch {}
-                                // Clear form
-                                fileEl.value = '';
-                                if (descEl) descEl.value = '';
-                            } catch (e) {
-                                msg.innerHTML = `<div class="alert alert-danger py-1 my-1">${e.message}</div>`;
-                            }
+                        // Wire delete buttons
+                        listEl.querySelectorAll('button[data-doc-delete]')?.forEach(btn => {
+                            btn.addEventListener('click', async (ev) => {
+                                const id = ev.currentTarget.getAttribute('data-doc-delete');
+                                if (!id) return;
+                                if (!confirm('Delete this document from the server? This cannot be undone.')) return;
+                                try {
+                                    const r = await fetch(`/api/unified-compliance/evidence/documentation/delete/${id}`, { method: 'DELETE', credentials: 'same-origin' });
+                                    const data = await r.json();
+                                    if (!r.ok || data.success === false) {
+                                        const msg = data?.error || 'Delete failed';
+                                        alert(msg.includes('Insufficient') ? 'Not allowed: you need Compliance Officer, QC Technician, or Admin role.' : msg);
+                                        return;
+                                    }
+                                    await window.loadDocumentationListFor(reqId);
+                                } catch (e) {
+                                    alert(e.message || 'Delete failed');
+                                }
+                            });
                         });
-
-                        // Helper to load list
-                        window.loadDocumentationListFor = async function(reqId){
-                            try {
-                                const listEl = document.getElementById(`docList_${reqId}`);
-                                if (!listEl) return;
-                                const r = await fetch(`/api/unified-compliance/evidence/documentation/list?requirement_id=${encodeURIComponent(reqId)}`);
-                                const data = await r.json();
-                                if (!r.ok || data.success === false) throw new Error(data.error || 'Failed to load documents');
-                                const docs = Array.isArray(data.documents) ? data.documents : [];
-                                if (!docs.length) { listEl.innerHTML = '<small class="text-muted">None yet</small>'; return; }
-                                listEl.innerHTML = `
-                                    <div class="table-responsive">
-                                        <table class="table table-sm table-striped align-middle mb-0">
-                                            <thead><tr><th>Name</th><th>Type</th><th>Size</th><th>Uploaded</th><th></th></tr></thead>
-                                            <tbody>
-                                                ${docs.map(d => {
-                                                    const size = (d.size_bytes && d.size_bytes > 0) ? (d.size_bytes >= 1024*1024 ? (d.size_bytes/1024/1024).toFixed(1)+' MB' : Math.ceil(d.size_bytes/1024)+' KB') : '-';
-                                                    const when = d.created_at ? new Date(d.created_at).toLocaleString() : '-';
-                                                    const desc = d.description ? `<div><small class=\"text-muted\">${d.description}</small></div>` : '';
-                                                    return `
-                                                        <tr>
-                                                            <td style="max-width:380px; word-break:break-word;">
-                                                                <div><strong>${d.filename || 'document'}</strong></div>
-                                                                ${desc}
-                                                            </td>
-                                                            <td><small>${d.mime_type || '-'}</small></td>
-                                                            <td><small>${size}</small></td>
-                                                            <td><small>${when}</small></td>
-                                                            <td class="text-end">
-                                                                <a class="btn btn-sm btn-outline-primary me-1" href="/api/unified-compliance/evidence/documentation/serve/${d.evidence_id}" target="_blank">Open</a>
-                                                                <button class="btn btn-sm btn-outline-danger" data-doc-delete="${d.evidence_id}">Delete</button>
-                                                            </td>
-                                                        </tr>`;
-                                                }).join('')}
-                                            </tbody>
-                                        </table>
-                                    </div>`;
-
-                                // Wire delete buttons
-                                listEl.querySelectorAll('button[data-doc-delete]')?.forEach(btn => {
-                                    btn.addEventListener('click', async (ev) => {
-                                        const id = ev.currentTarget.getAttribute('data-doc-delete');
-                                        if (!id) return;
-                                        if (!confirm('Delete this document from the server? This cannot be undone.')) return;
-                                        try {
-                                            const r = await fetch(`/api/unified-compliance/evidence/documentation/delete/${id}`, { method: 'DELETE' });
-                                            const data = await r.json();
-                                            if (!r.ok || data.success === false) {
-                                                // Permission-aware messaging
-                                                const msg = data?.error || 'Delete failed';
-                                                alert(msg.includes('Insufficient') ? 'Not allowed: you need Compliance Officer, QC Technician, or Admin role.' : msg);
-                                                return;
-                                            }
-                                            await window.loadDocumentationListFor(reqId);
-                                        } catch (e) {
-                                            alert(e.message || 'Delete failed');
-                                        }
-                                    });
-                                });
-                            } catch (e) {
-                                const listEl = document.getElementById(`docList_${reqId}`);
-                                if (listEl) listEl.innerHTML = `<div class="alert alert-danger py-1 my-1">${e.message}</div>`;
-                            }
-                        };
-                        // Initial list
-                        window.loadDocumentationListFor(reqCode);
+                    } catch (e) {
+                        const listEl = document.getElementById(`docList_${reqId}`);
+                        if (listEl) listEl.innerHTML = `<div class="alert alert-danger py-1 my-1">${e.message}</div>`;
                     }
-                }
+                };
+            }
+
+            if (!window._wireDocUploadUI) {
+                window._wireDocUploadUI = function(reqId){
+                    const btn = document.getElementById(`docBtn_${reqId}`);
+                    const form = document.getElementById(`docForm_${reqId}`);
+                    const handler = async (ev) => {
+                        if (ev && ev.preventDefault) ev.preventDefault();
+                        const fileEl = document.getElementById(`docFile_${reqId}`);
+                        const descEl = document.getElementById(`docDesc_${reqId}`);
+                        const msg = document.getElementById(`docMsg_${reqId}`);
+                        const btnRef = document.getElementById(`docBtn_${reqId}`);
+                        if (!fileEl || !fileEl.files || !fileEl.files[0]) {
+                            if (msg) msg.innerHTML = '<div class="alert alert-warning py-1 my-1">Choose a file to upload.</div>';
+                            return false;
+                        }
+                        try {
+                            if (btnRef) { btnRef.disabled = true; btnRef.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Uploading…'; }
+                            const fd = new FormData();
+                            fd.append('file', fileEl.files[0]);
+                            fd.append('requirement_id', reqId);
+                            if (descEl && descEl.value) fd.append('description', descEl.value);
+                            const resp = await fetch('/api/unified-compliance/evidence/documentation/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
+                            const data = await resp.json();
+                            if (!resp.ok || data.success === false) throw new Error(data.error || 'Upload failed');
+                            if (msg) msg.innerHTML = '<div class="alert alert-success py-1 my-1">Uploaded.</div>';
+                            await window.loadDocumentationListFor(reqId);
+                            try { const el = document.getElementById('evidenceCountValue'); if (el) el.textContent = (parseInt(el.textContent||'0',10)+1); } catch {}
+                            if (fileEl) fileEl.value = '';
+                            if (descEl) descEl.value = '';
+                        } catch (e) {
+                            if (msg) msg.innerHTML = `<div class="alert alert-danger py-1 my-1">${e.message}</div>`;
+                            try { console.error('Doc upload failed', e); } catch {}
+                        } finally {
+                            if (btnRef) { btnRef.disabled = false; btnRef.textContent = 'Upload'; }
+                        }
+                        return false;
+                    };
+                    if (btn && !btn.__wired) { btn.addEventListener('click', handler); btn.__wired = true; }
+                    if (form && !form.__wired) { form.addEventListener('submit', handler); form.__wired = true; }
+                };
+            }
+
+            // Delegated fallback: installed on demand after modal insert
+            if (!window.ensureDocDelegation) {
+                window.ensureDocDelegation = function(){
+                    const container = document.getElementById('evidenceDetails');
+                    if (!container || container.__docDelegated) return;
+                    container.addEventListener('click', (e) => {
+                        const btn = e.target && e.target.closest && e.target.closest('button[id^="docBtn_"]');
+                        if (!btn) return;
+                        const reqId = btn.id.replace('docBtn_', '');
+                        if (window._wireDocUploadUI) window._wireDocUploadUI(reqId);
+                    });
+                    container.addEventListener('submit', (e) => {
+                        const form = e.target && e.target.closest && e.target.closest('form[id^="docForm_"]');
+                        if (!form) return;
+                        e.preventDefault();
+                        const reqId = form.id.replace('docForm_', '');
+                        if (window._wireDocUploadUI) window._wireDocUploadUI(reqId);
+                    }, true);
+                    container.__docDelegated = true;
+                };
+            }
+        })();
+        
+        function loadEvidenceDetails(reqCode) {
+            // Initialize requirement context and a set of already covered session IDs to avoid duplicates later
+            const req = (window.requirementsData || []).find(r => r.id === reqCode) || {};
+            const coveredSessionIds = new Set();
+            try {
+                const sources = Array.isArray(req.evidence_sources) ? req.evidence_sources : [];
+                sources.forEach(src => {
+                    try {
+                        const sid = (src && (src.session_id ?? src.analysis_session_id))
+                            ?? (src && src.evidence_data && (src.evidence_data.session_id || src.evidence_data.analysis_session_id));
+                        if (sid != null && !isNaN(Number(sid))) coveredSessionIds.add(Number(sid));
+                    } catch {}
+                });
             } catch {}
+
+            // Documentation upload/list block is injected once at final render (see later section); global handlers are already initialized.
 
             // Fallback to the original method if no evidence_sources
             console.log('Using fallback evidence method for', reqCode);
@@ -1969,11 +1703,24 @@
                     }
                     
                     const statusBadge = complianceStatus === 'IMPLEMENTED' || complianceStatus === 'COMPLIANT' ? 'bg-success' : 'bg-warning';
-                    
-                    evidenceHTML += `
-                        <div class="card mb-3 border-primary">
-                            <div class="card-header bg-primary text-white">
-                                <h6><i class="fas fa-shield-alt"></i> Encryption & Security Controls Evidence</h6>
+
+                    // Resolve a sane timestamp; avoid epoch/Invalid Date when missing
+                    let tsRaw = (evidence && evidence.timestamp) || (encryptionData && encryptionData.created_at);
+                    let tsSafe = new Date();
+                    try {
+                        if (tsRaw) {
+                            const dt = new Date(tsRaw);
+                            if (!isNaN(dt.getTime()) && dt.getFullYear() > 1970) tsSafe = dt;
+                        }
+                    } catch {}
+
+                    // Build encryption evidence section into a local buffer
+                    const mountId = `encryptionEvidence_${reqCode}`;
+                    let encSection = `
+                        <div id="${mountId}" class="card mb-3 border-primary">
+                            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                                <h6 class="mb-0"><i class="fas fa-shield-alt"></i> Encryption & Security Controls Evidence</h6>
+                                ${(() => { try { const s = evidence?.regulatory_mapping?.evidence_strength; return s ? `<span class=\"badge bg-light text-dark\">Strength: ${s}</span>` : ''; } catch { return ''; } })()}
                             </div>
                             <div class="card-body">
                                 <div class="row mb-3">
@@ -2000,7 +1747,7 @@
                     // Handle different evidence formats for test display
                     if (evidence.implementation_tests) {
                         // Old format with implementation_tests
-                        evidenceHTML += Object.entries(evidence.implementation_tests).map(([testName, testResult]) => {
+                        encSection += Object.entries(evidence.implementation_tests).map(([testName, testResult]) => {
                             const statusBadge = testResult.passed ? 'bg-success' : 'bg-danger';
                             const statusText = testResult.passed ? 'PASS' : 'FAIL';
                             return `
@@ -2018,7 +1765,7 @@
                         const statusText = analysisSuccess ? 'OPERATIONAL' : 'PENDING';
                         const successPercent = evidence.total_wells > 0 ? ((evidence.good_curves / evidence.total_wells) * 100).toFixed(1) : '0';
                         
-                        evidenceHTML += `
+                        encSection += `
                             <tr>
                                 <td><small>Analysis Execution</small></td>
                                 <td><span class="badge ${statusBadge}">${statusText}</span></td>
@@ -2037,7 +1784,7 @@
                         `;
                     } else if (evidence.compliance_evidence && Array.isArray(evidence.compliance_evidence)) {
                         // New enhanced format with compliance_evidence array
-                        evidenceHTML += evidence.compliance_evidence.map((item, index) => `
+                        encSection += evidence.compliance_evidence.map((item, index) => `
                             <tr>
                                 <td><small>Control ${index + 1}</small></td>
                                 <td><span class="badge bg-success">IMPLEMENTED</span></td>
@@ -2046,7 +1793,7 @@
                         `).join('');
                     } else {
                         // Fallback display
-                        evidenceHTML += `
+                        encSection += `
                             <tr>
                                 <td><small>Encryption Implementation</small></td>
                                 <td><span class="badge bg-success">OPERATIONAL</span></td>
@@ -2055,7 +1802,39 @@
                         `;
                     }
                     
-                    evidenceHTML += `
+                    // Collect descriptive controls from multiple sources
+                    try {
+                        const controlSet = new Set();
+                        // Direct list on evidence
+                        if (Array.isArray(evidence.encryption_controls)) {
+                            evidence.encryption_controls.forEach(c => c && controlSet.add(String(c)));
+                        }
+                        // Compliance mapping style: object of org -> { encryption_controls: [...] }
+                        const cmap = evidence.compliance_mapping || {};
+                        if (cmap && typeof cmap === 'object') {
+                            Object.values(cmap).forEach(entry => {
+                                try {
+                                    if (entry && Array.isArray(entry.encryption_controls)) {
+                                        entry.encryption_controls.forEach(c => c && controlSet.add(String(c)));
+                                    }
+                                } catch {}
+                            });
+                        }
+                        // Flatten to array
+                        const controls = Array.from(controlSet);
+                        if (controls.length > 0) {
+                            encSection += `
+                                <div class="alert alert-secondary mt-3">
+                                    <strong>Encryption Controls Implemented:</strong>
+                                    <ul class="mb-0 mt-2">
+                                        ${controls.map(item => `<li>${item}</li>`).join('')}
+                                    </ul>
+                                </div>
+                            `;
+                        }
+                    } catch (e) { /* non-blocking */ }
+
+                    encSection += `
                                         </tbody>
                                     </table>
                                 </div>
@@ -2079,6 +1858,105 @@
                                         </ul>
                                     </div>
                                 ` : ''}
+
+                                ${(() => {
+                                    try {
+                                        const sys = evidence.system_verification || {};
+                                        const si = sys.system_info || {};
+                                        const rv = sys.runtime_verification || {};
+                                        const files = sys.implementation_files || {};
+                                        const cfg = sys.configuration_evidence || {};
+                                        const cfgEntries = Object.entries(cfg);
+                                        const cfgConfigured = cfgEntries.filter(([,v]) => v && v.configured).length;
+                                        const cfgTotal = cfgEntries.length;
+                                        const hasAny = (Object.keys(si).length + Object.keys(rv).length + Object.keys(files).length + cfgEntries.length) > 0;
+                                        if (!hasAny) return '';
+                                        const sysInfoHtml = Object.keys(si).length ? `
+                                            <div class=\"mb-3\">
+                                                <h6><i class=\"fas fa-microchip\"></i> System Info</h6>
+                                                <div class=\"table-responsive\">
+                                                    <table class=\"table table-sm\">
+                                                        <tbody>
+                                                            ${Object.entries(si).map(([k,v]) => `<tr><td style=\"width:220px\"><small><strong>${k.replace(/_/g,' ').toUpperCase()}</strong></small></td><td><small>${String(v)}</small></td></tr>`).join('')}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>` : '';
+                                        const filesHtml = Object.keys(files).length ? `
+                                            <div class=\"mb-3\">
+                                                <h6><i class=\"fas fa-file-code\"></i> Implementation Files</h6>
+                                                <div class=\"table-responsive\">
+                                                    <table class=\"table table-sm table-striped\">
+                                                        <thead><tr><th>File</th><th>Status</th><th>Size</th><th>Hash</th><th>Contains</th><th>Modified</th></tr></thead>
+                                                        <tbody>
+                                                            ${Object.entries(files).map(([name,meta]) => {
+                                                                const ok = meta && meta.exists;
+                                                                const size = (meta && meta.size_bytes!=null) ? `${meta.size_bytes} B` : '-';
+                                                                const hash = (meta && meta.hash_sha256) ? `${meta.hash_sha256.slice(0,12)}…` : '-';
+                                                                const contains = [];
+                                                                if (meta && meta.contains_fernet) contains.push('Fernet');
+                                                                if (meta && (meta.contains_aes || meta.contains_AES)) contains.push('AES');
+                                                                if (meta && meta.contains_encryption) contains.push('encrypt');
+                                                                const modified = (meta && meta.last_modified) ? new Date(meta.last_modified).toLocaleString() : '-';
+                                                                const badge = ok ? '<span class=\"badge bg-success\">Present</span>' : '<span class=\"badge bg-secondary\">Missing</span>';
+                                                                return `<tr>
+                                                                    <td><small>${name}</small></td>
+                                                                    <td>${badge}</td>
+                                                                    <td><small>${size}</small></td>
+                                                                    <td><small>${hash}</small></td>
+                                                                    <td><small>${contains.join(', ') || '-'}</small></td>
+                                                                    <td><small>${modified}</small></td>
+                                                                </tr>`;
+                                                            }).join('')}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>` : '';
+                                        const rvHtml = Object.keys(rv).length ? `
+                                            <div class=\"mb-3\">
+                                                <h6><i class=\"fas fa-vial\"></i> Runtime Verification</h6>
+                                                <div>
+                                                    <span class=\"badge ${rv.encryption_test_passed ? 'bg-success' : 'bg-danger'}\">${rv.encryption_test_passed ? 'ENCRYPTION TEST PASS' : 'ENCRYPTION TEST FAIL'}</span>
+                                                    <div class=\"mt-2\"><small>
+                                                        ${rv.algorithm_confirmed ? `<strong>Algorithm:</strong> ${rv.algorithm_confirmed} &nbsp; ` : ''}
+                                                        ${rv.key_length_bytes != null ? `<strong>Key Length:</strong> ${rv.key_length_bytes} B &nbsp; ` : ''}
+                                                        ${rv.encrypted_data_length_bytes != null ? `<strong>Ciphertext Length:</strong> ${rv.encrypted_data_length_bytes} B &nbsp; ` : ''}
+                                                        ${rv.test_timestamp ? `<strong>Tested:</strong> ${new Date(rv.test_timestamp).toLocaleString()}` : ''}
+                                                    </small></div>
+                                                </div>
+                                            </div>` : '';
+                                        const cfgHtml = cfgEntries.length ? `
+                                            <div class=\"mb-2\">
+                                                <div class=\"d-flex justify-content-between align-items-center\">
+                                                    <h6 class=\"mb-0\"><i class=\"fas fa-lock\"></i> Configuration Evidence <small class=\"text-muted\">(${cfgConfigured}/${cfgTotal} configured)</small></h6>
+                                                    <button class=\"btn btn-sm btn-outline-secondary\" type=\"button\" onclick=\"(function(){ const el=document.getElementById('policyConfigurator'); if(el){ el.style.display='block'; try{ el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(_){} } })()\">Configure</button>
+                                                </div>
+                                                <div class=\"table-responsive\">
+                                                    <table class=\"table table-sm\">
+                                                        <thead><tr><th>Variable</th><th>Status</th><th>Length</th><th>Hash Preview</th></tr></thead>
+                                                        <tbody>
+                                                            ${cfgEntries.map(([k,v]) => {
+                                                                const ok = v && v.configured;
+                                                                const len = ok && v.length != null ? v.length : '-';
+                                                                const hp = ok && v.hash_preview ? v.hash_preview : '-';
+                                                                const badge = ok ? '<span class=\"badge bg-success\">Configured</span>' : '<span class=\"badge bg-secondary\">Missing</span>';
+                                                                return `<tr><td><small>${k}</small></td><td>${badge}</td><td><small>${len}</small></td><td><small>${hp}</small></td></tr>`;
+                                                            }).join('')}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>` : '';
+                                        return `
+                                            <div class=\"mt-3 p-3 border rounded\">
+                                                <div class=\"mb-2\"><strong><i class=\"fas fa-clipboard-check\"></i> Inspector-Level System Verification</strong></div>
+                                                ${sysInfoHtml}
+                                                ${filesHtml}
+                                                ${rvHtml}
+                                                ${cfgHtml}
+                                            </div>
+                                        `;
+                                    } catch { return ''; }
+                                })()}
                                 
                                 ${evidence.recommendations && evidence.recommendations.length > 0 ? `
                                     <div class="alert alert-info mt-3">
@@ -2090,12 +1968,16 @@
                                 ` : ''}
                                 
                                 <small class="text-muted">
-                                    <i class="fas fa-clock"></i> Evidence generated: ${new Date(evidence.timestamp || encryptionData.created_at).toLocaleString()}
+                                    <i class="fas fa-clock"></i> Evidence generated: ${tsSafe.toLocaleString()}
                                 </small>
                             </div>
                         </div>
                     `;
+                    // Append the encryption section to the overall evidence buffer
+                    evidenceHTML += encSection;
                 }
+                    // Note: Do not reference blockHtml outside the encryption block scope; it's block-scoped.
+                    // We already inserted/replaced the encryption section directly in the DOM above.
                 
                 // Add Validation Tests section when configured
                 if (needsValidationTests) {
@@ -2413,27 +2295,63 @@
                     `;
                 }
                 
-                    // Show combined evidence or message if none
+                    // Show combined evidence or a clear message if none; always clear the loading spinner
                     if (!evidenceHTML) {
-                        // If the evidence container already has content (e.g., from evidence_sources),
-                        // do not append a misleading "No evidence" message.
-                        if (!(evidenceContainer && evidenceContainer.innerHTML.trim())) {
-                            evidenceHTML = `
-                                <div class="alert alert-warning">
-                                    <i class="fas fa-info-circle"></i>
-                                    No evidence found for this requirement.
-                                </div>
-                            `;
-                        } else {
-                            evidenceHTML = '';
-                        }
+                        evidenceHTML = `
+                            <div class="alert alert-warning">
+                                <i class="fas fa-info-circle"></i>
+                                No evidence found for this requirement.
+                            </div>
+                        `;
                     }
 
-                    // Append to any existing evidence (from evidence_sources)
-                    if (evidenceHTML && evidenceContainer.innerHTML.trim()) {
-                        evidenceContainer.insertAdjacentHTML('beforeend', evidenceHTML);
-                    } else if (evidenceHTML) {
+            // Always prepend the Documentation upload/list block at final render ONLY if enabled (avoid duplicates)
+                    try {
+                        let __docsEnabledFinal = false;
+                        try { __docsEnabledFinal = (window.EvidenceFilter?.getAllowedEvidenceTypes?.(reqCode) || []).includes('documentation'); } catch { __docsEnabledFinal = false; }
+                        if (__docsEnabledFinal) {
+                const docBlockHTML_final = `
+                                <div id="docUpload_${reqCode}" class="card mb-3 border-info">
+                                    <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                                        <h6 class="mb-0"><i class="fas fa-file-upload"></i> Documentation</h6>
+                                        <small>Attach SOPs, policies, or supporting documents</small>
+                                    </div>
+                                    <div class="card-body">
+                                        <form id="docForm_${reqCode}" class="row g-2 align-items-center" onsubmit="return false;">
+                                            <div class="col-md-5">
+                                                <input type="file" class="form-control form-control-sm" id="docFile_${reqCode}" accept=".pdf,.doc,.docx,.txt,.md,.rtf,.csv,.tsv,.xlsx,.xls,.png,.jpg,.jpeg">
+                                            </div>
+                                            <div class="col-md-5">
+                                                <input type="text" class="form-control form-control-sm" id="docDesc_${reqCode}" placeholder="Short description (optional)">
+                                            </div>
+                                            <div class="col-md-2 text-end">
+                                                <button class="btn btn-sm btn-primary" id="docBtn_${reqCode}">Upload</button>
+                                            </div>
+                                        </form>
+                                        <div id="docMsg_${reqCode}" class="mt-2"></div>
+                                        <div class="mt-3">
+                                            <h6 class="mb-2"><i class="fas fa-folder-open"></i> Uploaded Documents</h6>
+                                            <div id="docList_${reqCode}"><small class="text-muted">None yet</small></div>
+                                        </div>
+                                    </div>
+                                </div>`;
+                            if (!String(evidenceHTML || '').includes(`id=\"docUpload_${reqCode}\"`)) {
+                                evidenceHTML = docBlockHTML_final + (evidenceHTML || '');
+                            }
+                        }
+                    } catch (e) { /* non-blocking */ }
+
+                    // Replace modal content with the full assembled buffer so multiple evidence types show together
+                    if (evidenceContainer) {
                         evidenceContainer.innerHTML = evidenceHTML;
+                        // Wire documentation upload UI and load list now that DOM is ready (only if block exists)
+                        try {
+                            if (document.getElementById(`docUpload_${reqCode}`)) {
+                                if (window._wireDocUploadUI) window._wireDocUploadUI(reqCode);
+                                if (window.loadDocumentationListFor) window.loadDocumentationListFor(reqCode);
+                                if (window.ensureDocDelegation) window.ensureDocDelegation();
+                            }
+                        } catch {}
                     }
 
                     // Recalculate and update Evidence Count to match everything displayed

@@ -12,12 +12,33 @@
         <header>
             <h1>🤖 ML Configuration Management</h1>
             <p>Manage machine learning settings for pathogen-specific analysis</p>
+            <div id="authStatus" class="auth-status" style="margin-top:8px;">
+                <span class="user-pill">User: <span id="authUser">guest</span></span>
+                <span class="role-pill">Role: <span id="authRole">viewer</span></span>
+                <span class="admin-pill" id="adminBadge" style="display:none;">Admin</span>
+                <a id="signinLink" href="/login?return_to=/ml-config" class="signin-link" style="display:none;">Sign in</a>
+                <a id="logoutLink" href="/logout?return_to=/ml-config" class="logout-link" style="display:none;">Logout</a>
+            </div>
             <nav>
                 <a href="/" class="back-link">← Back to Main Analysis</a>
             </nav>
         </header>
 
         <main>
+            <!-- Admin quick actions -->
+            <section class="admin-actions" style="margin-bottom:20px;">
+                <div class="card" style="padding:12px; border:1px solid #e9ecef; border-radius:6px;">
+                    <h3 style="margin:4px 0 12px 0;">Admin Quick Actions</h3>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                        <button id="enableAllBtn" class="btn btn-success">Enable ML for All Pathogens</button>
+                        <button id="disableAllBtn" class="btn btn-outline-danger">Disable ML for All Pathogens</button>
+                        <label style="margin-left:16px; display:flex; align-items:center; gap:6px;">
+                            <input type="checkbox" id="showLearningMessagesToggle" /> Show learning messages
+                        </label>
+                        <span id="adminActionStatus" style="font-size:12px; color:#6c757d;"></span>
+                    </div>
+                </div>
+            </section>
             <!-- Important Note Section -->
             <div class="important-note">
                 <h3>🤔 Should This Page Exist?</h3>
@@ -114,6 +135,32 @@
     <script src="/static/ml_config_manager.js"></script>
     
     <script>
+        // Show auth status similar to MySQL viewer
+        async function showAuthStatus() {
+            try {
+                const res = await fetch('/auth/api/current-user');
+                const data = res.ok ? await res.json() : {};
+                const user = data.user || data;
+                const username = user.username || 'guest';
+                const roles = user.roles || (user.role ? [user.role] : []);
+                const role = user.role || (roles[0] || 'viewer');
+                const isAdmin = role === 'administrator' || (roles || []).includes('administrator') || (user.permissions || []).includes('database_management');
+
+                document.getElementById('authUser').textContent = username;
+                document.getElementById('authRole').textContent = role;
+                document.getElementById('adminBadge').style.display = isAdmin ? 'inline-block' : 'none';
+
+                // Toggle sign-in/out links
+                const signedIn = !!username && username !== 'guest';
+                document.getElementById('signinLink').style.display = signedIn ? 'none' : 'inline-block';
+                document.getElementById('logoutLink').style.display = signedIn ? 'inline-block' : 'none';
+            } catch (e) {
+                // Leave defaults
+                console.warn('Auth status unavailable');
+                document.getElementById('signinLink').style.display = 'inline-block';
+            }
+        }
+
         // Initialize ML status overview
         async function loadMLStatusOverview() {
             try {
@@ -238,10 +285,68 @@
 
         // Load status overview when page loads
         document.addEventListener('DOMContentLoaded', function() {
+            showAuthStatus();
             loadMLStatusOverview();
             
             // Refresh status overview every 30 seconds
             setInterval(loadMLStatusOverview, 30000);
+
+            // Wire admin quick actions
+            const enableAllBtn = document.getElementById('enableAllBtn');
+            const disableAllBtn = document.getElementById('disableAllBtn');
+            const showLearningToggle = document.getElementById('showLearningMessagesToggle');
+            const statusEl = document.getElementById('adminActionStatus');
+
+            async function bulkToggle(enabled) {
+                try {
+                    statusEl.textContent = enabled ? 'Enabling all…' : 'Disabling all…';
+                    // If enabling, call the one-click endpoint that syncs + enables
+                    const url = enabled ? '/api/ml-config/enable-all' : '/api/ml-config/pathogen/bulk-toggle';
+                    const body = enabled ? {} : { enabled };
+                    const res = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body)
+                    });
+                    const data = await res.json();
+                    if (!res.ok || data.success === false) throw new Error(data.error || `HTTP ${res.status}`);
+                    statusEl.textContent = `Updated ${data.affected || 0} configs`;
+                    loadMLStatusOverview();
+                } catch (e) {
+                    console.error('Bulk toggle failed', e);
+                    statusEl.textContent = `Error: ${e.message}`;
+                }
+            }
+
+            // Prefetch system config to set toggle initial state
+            (async () => {
+                try {
+                    const r = await fetch('/api/ml-config/system');
+                    const d = await r.json();
+                    if (d && d.config) {
+                        showLearningToggle.checked = !!d.config.show_learning_messages;
+                    }
+                } catch {}
+            })();
+
+            enableAllBtn.addEventListener('click', () => bulkToggle(true));
+            disableAllBtn.addEventListener('click', () => bulkToggle(false));
+            showLearningToggle.addEventListener('change', async (e) => {
+                try {
+                    statusEl.textContent = 'Updating setting…';
+                    const res = await fetch('/api/ml-config/system/show_learning_messages', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ value: e.target.checked })
+                    });
+                    const data = await res.json();
+                    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+                    statusEl.textContent = 'Setting updated';
+                } catch (err) {
+                    console.error('Update failed', err);
+                    statusEl.textContent = `Error: ${err.message}`;
+                }
+            });
         });
     </script>
 
@@ -279,6 +384,21 @@
             background: #007bff;
             color: white;
         }
+
+        .auth-status { 
+            display:flex; 
+            gap:8px; 
+            justify-content:center; 
+            align-items:center; 
+            flex-wrap:wrap;
+        }
+        .auth-status .user-pill, .auth-status .role-pill {
+            background:#f1f3f5; border:1px solid #dee2e6; border-radius:999px; padding:4px 10px; font-size:12px;
+        }
+        .auth-status .admin-pill {
+            background:#d1e7dd; border:1px solid #badbcc; color:#0f5132; border-radius:999px; padding:4px 10px; font-size:12px; font-weight:600;
+        }
+        .auth-status .signin-link, .auth-status .logout-link { font-size:12px; }
 
         /* Important Note Section */
         .important-note {
@@ -361,6 +481,10 @@
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
+
+    .btn { padding:8px 12px; border-radius:4px; cursor:pointer; border:1px solid #dee2e6; background:#f8f9fa; }
+    .btn-success { background:#28a745; color:white; border-color:#28a745; }
+    .btn-outline-danger { background:white; color:#dc3545; border-color:#dc3545; }
 
         .status-grid {
             display: grid;

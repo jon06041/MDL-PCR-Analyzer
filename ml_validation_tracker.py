@@ -218,6 +218,18 @@ class MLValidationTracker:
         """Calculate version number based on accuracy improvements"""
         with self.engine.connect() as conn:
             try:
+                # Ensure the versions table exists before querying
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS ml_model_versions (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        pathogen_code VARCHAR(255) UNIQUE,
+                        version_number VARCHAR(50),
+                        model_metrics TEXT,
+                        creation_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_pathogen (pathogen_code)
+                    )
+                """))
+
                 # Get previous version and accuracy for this pathogen
                 result = conn.execute(text("""
                     SELECT version_number, model_metrics 

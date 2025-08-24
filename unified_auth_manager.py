@@ -124,13 +124,8 @@ class UnifiedAuthManager:
     
     def __init__(self):
         self.entra_auth = EntraAuthManager()
-        self.mysql_config = {
-            'host': os.environ.get('MYSQL_HOST', 'localhost'),
-            'user': os.environ.get('MYSQL_USER', 'qpcr_user'),
-            'password': os.environ.get('MYSQL_PASSWORD', 'qpcr_password'),
-            'database': os.environ.get('MYSQL_DATABASE', 'qpcr_analysis'),
-            'autocommit': True
-        }
+        # Resolve MySQL configuration from environment (supports Railway)
+        self.mysql_config = self._resolve_mysql_config()
         
         # Local admin backdoor credentials (for emergency access)
         self.backdoor_enabled = os.getenv('ENABLE_BACKDOOR_AUTH', 'true').lower() == 'true'
@@ -142,6 +137,92 @@ class UnifiedAuthManager:
         
         # Initialize database tables
         self._initialize_auth_tables()
+
+    def _resolve_mysql_config(self) -> Dict:
+        """Build mysql.connector config supporting MYSQL_URL/DATABASE_URL and Railway vars.
+        Priority: MYSQL_URL > DATABASE_URL (mysql*) > explicit vars (including Railway MYSQLHOST).
+        """
+        import urllib.parse as _urlparse
+
+        # Helper to mask
+        def _mask(s: str) -> str:
+            if not s:
+                return s
+            return '***' if len(s) <= 4 else s[:2] + '***' + s[-2:]
+
+        # Try MYSQL_URL (Railway)
+        mysql_url = os.getenv('MYSQL_URL')
+        if mysql_url:
+            try:
+                parsed = _urlparse.urlparse(mysql_url)
+                db = parsed.path.lstrip('/') or os.getenv('MYSQL_DATABASE', 'qpcr_analysis')
+                host = parsed.hostname or os.getenv('MYSQL_HOST', 'localhost')
+                port = parsed.port or int(os.getenv('MYSQL_PORT', '3306'))
+                user = parsed.username or os.getenv('MYSQL_USER', 'qpcr_user')
+                pwd = parsed.password or os.getenv('MYSQL_PASSWORD', 'qpcr_password')
+                cfg = {
+                    'host': host,
+                    'user': user,
+                    'password': pwd,
+                    'database': db,
+                    'port': port,
+                    'autocommit': True,
+                }
+                logger.info(
+                    "UnifiedAuthManager MySQL config via MYSQL_URL host=%s port=%s db=%s user=%s",
+                    host, port, db, _mask(user),
+                )
+                return cfg
+            except Exception as _e:
+                logger.warning("Failed to parse MYSQL_URL; falling back to other env vars: %s", _e)
+
+        # Try DATABASE_URL if it is mysql or mysql+pymysql
+        db_url = os.getenv('DATABASE_URL')
+        if db_url and db_url.startswith('mysql'):
+            try:
+                # Normalize scheme: mysql+pymysql://user:pass@host:port/db
+                # For mysql://... just parse normally
+                parsed = _urlparse.urlparse(db_url.replace('mysql+pymysql://', 'mysql://', 1))
+                db = parsed.path.lstrip('/') or os.getenv('MYSQL_DATABASE', 'qpcr_analysis')
+                host = parsed.hostname or os.getenv('MYSQL_HOST', 'localhost')
+                port = parsed.port or int(os.getenv('MYSQL_PORT', '3306'))
+                user = parsed.username or os.getenv('MYSQL_USER', 'qpcr_user')
+                pwd = parsed.password or os.getenv('MYSQL_PASSWORD', 'qpcr_password')
+                cfg = {
+                    'host': host,
+                    'user': user,
+                    'password': pwd,
+                    'database': db,
+                    'port': port,
+                    'autocommit': True,
+                }
+                logger.info(
+                    "UnifiedAuthManager MySQL config via DATABASE_URL host=%s port=%s db=%s user=%s",
+                    host, port, db, _mask(user),
+                )
+                return cfg
+            except Exception as _e:
+                logger.warning("Failed to parse DATABASE_URL; falling back to explicit vars: %s", _e)
+
+        # Explicit env vars; support Railway variants without underscores
+        host = os.getenv('MYSQL_HOST') or os.getenv('MYSQLHOST', 'localhost')
+        port = int(os.getenv('MYSQL_PORT') or os.getenv('MYSQLPORT') or '3306')
+        user = os.getenv('MYSQL_USER') or os.getenv('MYSQLUSER', 'qpcr_user')
+        pwd = os.getenv('MYSQL_PASSWORD') or os.getenv('MYSQLPASSWORD', 'qpcr_password')
+        db = os.getenv('MYSQL_DATABASE') or os.getenv('MYSQLDATABASE', 'qpcr_analysis')
+        cfg = {
+            'host': host,
+            'user': user,
+            'password': pwd,
+            'database': db,
+            'port': port,
+            'autocommit': True,
+        }
+        logger.info(
+            "UnifiedAuthManager MySQL config via explicit vars host=%s port=%s db=%s user=%s",
+            host, port, db, _mask(user),
+        )
+        return cfg
     
     def _initialize_auth_tables(self):
         """Initialize authentication-related database tables"""
@@ -228,8 +309,27 @@ class UnifiedAuthManager:
             
             # Check if backdoor user exists
             cursor.execute("SELECT user_id FROM local_users WHERE username = %s", (self.backdoor_username,))
-            if cursor.fetchone():
-                logger.info("Backdoor admin user already exists")
+            existing = cursor.fetchone()
+            if existing:
+                # Optional: rotate password if explicitly requested via env flag
+                if os.getenv('BACKDOOR_FORCE_RESET', '0').lower() in ('1', 'true', 'yes', 'on', 'y'):
+                    try:
+                        new_salt = secrets.token_hex(32)
+                        new_hash = self._hash_password(self.backdoor_password, new_salt)
+                        cursor.execute(
+                            """
+                            UPDATE local_users
+                            SET password_hash = %s, salt = %s, last_login = NULL
+                            WHERE username = %s
+                            """,
+                            (new_hash, new_salt, self.backdoor_username)
+                        )
+                        connection.commit()
+                        logger.info("Backdoor admin password rotated due to BACKDOOR_FORCE_RESET=1")
+                    except Error as e:
+                        logger.error(f"Error rotating backdoor password: {e}")
+                else:
+                    logger.info("Backdoor admin user already exists")
                 return
             
             # Create backdoor user
