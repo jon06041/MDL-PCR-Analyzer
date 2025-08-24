@@ -1220,6 +1220,21 @@
             `;
         }
 
+        // Open evidence modal and jump to Documentation section
+        async function openDocumentation(reqCode, evidenceCount) {
+            try {
+                showSimpleEvidence(reqCode, typeof evidenceCount === 'number' ? evidenceCount : 0);
+                // Wait a tick for modal to render, then scroll to docs block
+                setTimeout(() => {
+                    const el = document.getElementById(`docUpload_${reqCode}`);
+                    if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        try { el.classList.add('border', 'border-3', 'border-info'); setTimeout(() => el.classList.remove('border-3'), 1500); } catch {}
+                    }
+                }, 250);
+            } catch (e) { console.warn('openDocumentation failed', e); }
+        }
+
         
 
         function showSimpleEvidence(reqCode, evidenceCount) {
@@ -2197,7 +2212,10 @@
                                             </div>` : '';
                                         const cfgHtml = cfgEntries.length ? `
                                             <div class=\"mb-2\">
-                                                <h6><i class=\"fas fa-lock\"></i> Configuration Evidence <small class=\"text-muted\">(${cfgConfigured}/${cfgTotal} configured)</small></h6>
+                                                <div class=\"d-flex justify-content-between align-items-center\">
+                                                    <h6 class=\"mb-0\"><i class=\"fas fa-lock\"></i> Configuration Evidence <small class=\"text-muted\">(${cfgConfigured}/${cfgTotal} configured)</small></h6>
+                                                    <button class=\"btn btn-sm btn-outline-secondary\" type=\"button\" onclick=\"(function(){ const el=document.getElementById('policyConfigurator'); if(el){ el.style.display='block'; try{ el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(_){} } })()\">Configure</button>
+                                                </div>
                                                 <div class=\"table-responsive\">
                                                     <table class=\"table table-sm\">
                                                         <thead><tr><th>Variable</th><th>Status</th><th>Length</th><th>Hash Preview</th></tr></thead>
