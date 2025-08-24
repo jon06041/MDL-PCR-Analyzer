@@ -1730,141 +1730,136 @@
                 }
             }
             
-            // Render Documentation upload/list UI (always show to avoid gating surprises)
+            // Render Documentation upload/list UI as part of the modal content (do not inject before render)
             try {
-                const container = document.getElementById('evidenceDetails');
-                if (container) {
-                    const docSectionId = `docUpload_${reqCode}`;
-                    if (!document.getElementById(docSectionId)) {
-                        const block = document.createElement('div');
-                        block.id = docSectionId;
-                        block.className = 'card mb-3 border-info';
-                        block.innerHTML = `
-                            <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
-                                <h6 class="mb-0"><i class="fas fa-file-upload"></i> Documentation</h6>
-                                <small>Attach SOPs, policies, or supporting documents</small>
-                            </div>
-                            <div class="card-body">
-                                <form id="docForm_${reqCode}" class="row g-2 align-items-center" onsubmit="return false;">
-                                    <div class="col-md-5">
-                                        <input type="file" class="form-control form-control-sm" id="docFile_${reqCode}" accept=".pdf,.doc,.docx,.txt,.md,.rtf,.csv,.tsv,.xlsx,.xls,.png,.jpg,.jpeg">
-                                    </div>
-                                    <div class="col-md-5">
-                                        <input type="text" class="form-control form-control-sm" id="docDesc_${reqCode}" placeholder="Short description (optional)">
-                                    </div>
-                                    <div class="col-md-2 text-end">
-                                        <button class="btn btn-sm btn-primary" id="docBtn_${reqCode}">Upload</button>
-                                    </div>
-                                </form>
-                                <div id="docMsg_${reqCode}" class="mt-2"></div>
-                                <div class="mt-3">
-                                    <h6 class="mb-2"><i class="fas fa-folder-open"></i> Uploaded Documents</h6>
-                                    <div id="docList_${reqCode}"><small class="text-muted">None yet</small></div>
+                const docBlockHTML = `
+                    <div id="docUpload_${reqCode}" class="card mb-3 border-info">
+                        <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                            <h6 class="mb-0"><i class="fas fa-file-upload"></i> Documentation</h6>
+                            <small>Attach SOPs, policies, or supporting documents</small>
+                        </div>
+                        <div class="card-body">
+                            <form id="docForm_${reqCode}" class="row g-2 align-items-center" onsubmit="return false;">
+                                <div class="col-md-5">
+                                    <input type="file" class="form-control form-control-sm" id="docFile_${reqCode}" accept=".pdf,.doc,.docx,.txt,.md,.rtf,.csv,.tsv,.xlsx,.xls,.png,.jpg,.jpeg">
                                 </div>
-                            </div>`;
-                        // Prepend near top for visibility
-                        if (container.firstChild) container.insertBefore(block, container.firstChild);
-                        else container.appendChild(block);
+                                <div class="col-md-5">
+                                    <input type="text" class="form-control form-control-sm" id="docDesc_${reqCode}" placeholder="Short description (optional)">
+                                </div>
+                                <div class="col-md-2 text-end">
+                                    <button class="btn btn-sm btn-primary" id="docBtn_${reqCode}">Upload</button>
+                                </div>
+                            </form>
+                            <div id="docMsg_${reqCode}" class="mt-2"></div>
+                            <div class="mt-3">
+                                <h6 class="mb-2"><i class="fas fa-folder-open"></i> Uploaded Documents</h6>
+                                <div id="docList_${reqCode}"><small class="text-muted">None yet</small></div>
+                            </div>
+                        </div>
+                    </div>`;
+                // Prepend docs block to evidence buffer so it persists
+                evidenceHTML = docBlockHTML + (evidenceHTML || '');
 
-                        // Wire upload button
-                        const btn = block.querySelector(`#docBtn_${reqCode}`);
-                        btn?.addEventListener('click', async () => {
-                            const fileEl = block.querySelector(`#docFile_${reqCode}`);
-                            const descEl = block.querySelector(`#docDesc_${reqCode}`);
-                            const msg = block.querySelector(`#docMsg_${reqCode}`);
+                // Ensure list loader exists (idempotent define)
+                if (!window.loadDocumentationListFor) {
+                    window.loadDocumentationListFor = async function(reqId){
+                        try {
+                            const listEl = document.getElementById(`docList_${reqId}`);
+                            if (!listEl) return;
+                            const r = await fetch(`/api/unified-compliance/evidence/documentation/list?requirement_id=${encodeURIComponent(reqId)}`);
+                            const data = await r.json();
+                            if (!r.ok || data.success === false) throw new Error(data.error || 'Failed to load documents');
+                            const docs = Array.isArray(data.documents) ? data.documents : [];
+                            if (!docs.length) { listEl.innerHTML = '<small class="text-muted">None yet</small>'; return; }
+                            listEl.innerHTML = `
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-striped align-middle mb-0">
+                                        <thead><tr><th>Name</th><th>Type</th><th>Size</th><th>Uploaded</th><th></th></tr></thead>
+                                        <tbody>
+                                            ${docs.map(d => {
+                                                const size = (d.size_bytes && d.size_bytes > 0) ? (d.size_bytes >= 1024*1024 ? (d.size_bytes/1024/1024).toFixed(1)+' MB' : Math.ceil(d.size_bytes/1024)+' KB') : '-';
+                                                const when = d.created_at ? new Date(d.created_at).toLocaleString() : '-';
+                                                const desc = d.description ? `<div><small class=\"text-muted\">${d.description}</small></div>` : '';
+                                                return `
+                                                    <tr>
+                                                        <td style=\"max-width:380px; word-break:break-word;\">
+                                                            <div><strong>${d.filename || 'document'}</strong></div>
+                                                            ${desc}
+                                                        </td>
+                                                        <td><small>${d.mime_type || '-'}</small></td>
+                                                        <td><small>${size}</small></td>
+                                                        <td><small>${when}</small></td>
+                                                        <td class=\"text-end\">
+                                                            <a class=\"btn btn-sm btn-outline-primary me-1\" href=\"/api/unified-compliance/evidence/documentation/serve/${d.evidence_id}\" target=\"_blank\">Open</a>
+                                                            <button class=\"btn btn-sm btn-outline-danger\" data-doc-delete=\"${d.evidence_id}\">Delete</button>
+                                                        </td>
+                                                    </tr>`;
+                                            }).join('')}
+                                        </tbody>
+                                    </table>
+                                </div>`;
+
+                            // Wire delete buttons
+                            listEl.querySelectorAll('button[data-doc-delete]')?.forEach(btn => {
+                                btn.addEventListener('click', async (ev) => {
+                                    const id = ev.currentTarget.getAttribute('data-doc-delete');
+                                    if (!id) return;
+                                    if (!confirm('Delete this document from the server? This cannot be undone.')) return;
+                                    try {
+                                        const r = await fetch(`/api/unified-compliance/evidence/documentation/delete/${id}`, { method: 'DELETE' });
+                                        const data = await r.json();
+                                        if (!r.ok || data.success === false) {
+                                            const msg = data?.error || 'Delete failed';
+                                            alert(msg.includes('Insufficient') ? 'Not allowed: you need Compliance Officer, QC Technician, or Admin role.' : msg);
+                                            return;
+                                        }
+                                        await window.loadDocumentationListFor(reqId);
+                                    } catch (e) {
+                                        alert(e.message || 'Delete failed');
+                                    }
+                                });
+                            });
+                        } catch (e) {
+                            const listEl = document.getElementById(`docList_${reqId}`);
+                            if (listEl) listEl.innerHTML = `<div class="alert alert-danger py-1 my-1">${e.message}</div>`;
+                        }
+                    };
+                }
+
+                // Wire upload handler after render
+                const wireDocUploadUI = (reqId) => {
+                    const btn = document.getElementById(`docBtn_${reqId}`);
+                    if (btn) {
+                        btn.onclick = async () => {
+                            const fileEl = document.getElementById(`docFile_${reqId}`);
+                            const descEl = document.getElementById(`docDesc_${reqId}`);
+                            const msg = document.getElementById(`docMsg_${reqId}`);
                             if (!fileEl || !fileEl.files || !fileEl.files[0]) {
-                                msg.innerHTML = '<div class="alert alert-warning py-1 my-1">Choose a file to upload.</div>';
-                                return;
+                                if (msg) msg.innerHTML = '<div class="alert alert-warning py-1 my-1">Choose a file to upload.</div>';
+                                return false;
                             }
                             try {
                                 const fd = new FormData();
                                 fd.append('file', fileEl.files[0]);
-                                fd.append('requirement_id', reqCode);
+                                fd.append('requirement_id', reqId);
                                 if (descEl && descEl.value) fd.append('description', descEl.value);
                                 const resp = await fetch('/api/unified-compliance/evidence/documentation/upload', { method: 'POST', body: fd });
                                 const data = await resp.json();
                                 if (!resp.ok || data.success === false) throw new Error(data.error || 'Upload failed');
-                                msg.innerHTML = '<div class="alert alert-success py-1 my-1">Uploaded.</div>';
-                                // Refresh list
-                                await window.loadDocumentationListFor(reqCode);
-                                // Bump evidence count subtly
+                                if (msg) msg.innerHTML = '<div class="alert alert-success py-1 my-1">Uploaded.</div>';
+                                await window.loadDocumentationListFor(reqId);
                                 try { const el = document.getElementById('evidenceCountValue'); if (el) el.textContent = (parseInt(el.textContent||'0',10)+1); } catch {}
-                                // Clear form
-                                fileEl.value = '';
+                                if (fileEl) fileEl.value = '';
                                 if (descEl) descEl.value = '';
                             } catch (e) {
-                                msg.innerHTML = `<div class="alert alert-danger py-1 my-1">${e.message}</div>`;
+                                if (msg) msg.innerHTML = `<div class="alert alert-danger py-1 my-1">${e.message}</div>`;
                             }
-                        });
-
-                        // Helper to load list
-                        window.loadDocumentationListFor = async function(reqId){
-                            try {
-                                const listEl = document.getElementById(`docList_${reqId}`);
-                                if (!listEl) return;
-                                const r = await fetch(`/api/unified-compliance/evidence/documentation/list?requirement_id=${encodeURIComponent(reqId)}`);
-                                const data = await r.json();
-                                if (!r.ok || data.success === false) throw new Error(data.error || 'Failed to load documents');
-                                const docs = Array.isArray(data.documents) ? data.documents : [];
-                                if (!docs.length) { listEl.innerHTML = '<small class="text-muted">None yet</small>'; return; }
-                                listEl.innerHTML = `
-                                    <div class="table-responsive">
-                                        <table class="table table-sm table-striped align-middle mb-0">
-                                            <thead><tr><th>Name</th><th>Type</th><th>Size</th><th>Uploaded</th><th></th></tr></thead>
-                                            <tbody>
-                                                ${docs.map(d => {
-                                                    const size = (d.size_bytes && d.size_bytes > 0) ? (d.size_bytes >= 1024*1024 ? (d.size_bytes/1024/1024).toFixed(1)+' MB' : Math.ceil(d.size_bytes/1024)+' KB') : '-';
-                                                    const when = d.created_at ? new Date(d.created_at).toLocaleString() : '-';
-                                                    const desc = d.description ? `<div><small class=\"text-muted\">${d.description}</small></div>` : '';
-                                                    return `
-                                                        <tr>
-                                                            <td style="max-width:380px; word-break:break-word;">
-                                                                <div><strong>${d.filename || 'document'}</strong></div>
-                                                                ${desc}
-                                                            </td>
-                                                            <td><small>${d.mime_type || '-'}</small></td>
-                                                            <td><small>${size}</small></td>
-                                                            <td><small>${when}</small></td>
-                                                            <td class="text-end">
-                                                                <a class="btn btn-sm btn-outline-primary me-1" href="/api/unified-compliance/evidence/documentation/serve/${d.evidence_id}" target="_blank">Open</a>
-                                                                <button class="btn btn-sm btn-outline-danger" data-doc-delete="${d.evidence_id}">Delete</button>
-                                                            </td>
-                                                        </tr>`;
-                                                }).join('')}
-                                            </tbody>
-                                        </table>
-                                    </div>`;
-
-                                // Wire delete buttons
-                                listEl.querySelectorAll('button[data-doc-delete]')?.forEach(btn => {
-                                    btn.addEventListener('click', async (ev) => {
-                                        const id = ev.currentTarget.getAttribute('data-doc-delete');
-                                        if (!id) return;
-                                        if (!confirm('Delete this document from the server? This cannot be undone.')) return;
-                                        try {
-                                            const r = await fetch(`/api/unified-compliance/evidence/documentation/delete/${id}`, { method: 'DELETE' });
-                                            const data = await r.json();
-                                            if (!r.ok || data.success === false) {
-                                                // Permission-aware messaging
-                                                const msg = data?.error || 'Delete failed';
-                                                alert(msg.includes('Insufficient') ? 'Not allowed: you need Compliance Officer, QC Technician, or Admin role.' : msg);
-                                                return;
-                                            }
-                                            await window.loadDocumentationListFor(reqId);
-                                        } catch (e) {
-                                            alert(e.message || 'Delete failed');
-                                        }
-                                    });
-                                });
-                            } catch (e) {
-                                const listEl = document.getElementById(`docList_${reqId}`);
-                                if (listEl) listEl.innerHTML = `<div class="alert alert-danger py-1 my-1">${e.message}</div>`;
-                            }
+                            return false;
                         };
-                        // Initial list
-                        window.loadDocumentationListFor(reqCode);
                     }
-                }
+                };
+                // Expose for external calls if needed
+                window._wireDocUploadUI = wireDocUploadUI;
             } catch {}
 
             // Fallback to the original method if no evidence_sources
@@ -2593,6 +2588,11 @@
                     // Replace modal content with the full assembled buffer so multiple evidence types show together
                     if (evidenceContainer) {
                         evidenceContainer.innerHTML = evidenceHTML;
+                        // Wire documentation upload UI and load list now that DOM is ready
+                        try {
+                            if (window._wireDocUploadUI) window._wireDocUploadUI(reqCode);
+                            if (window.loadDocumentationListFor) window.loadDocumentationListFor(reqCode);
+                        } catch {}
                     }
 
                     // Recalculate and update Evidence Count to match everything displayed
