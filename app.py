@@ -3890,26 +3890,18 @@ def update_well_classification():
                         conn = mysql.connector.connect(**mysql_config)
                         cursor = conn.cursor(dictionary=True)
 
-                        # Deduplicate recent identical decisions for the same well/pair
-                        dedup_sql = (
+                        # Upsert policy: one expert decision row per (session_id, well_id). Update if exists, else insert.
+                        select_sql = (
                             "SELECT id FROM ml_expert_decisions "
-                            "WHERE well_id = %s "
-                            "AND ( (original_prediction = %s AND expert_correction = %s) "
-                            "   OR (ml_prediction = %s AND expert_decision = %s) ) "
-                            "AND COALESCE(feedback_timestamp, `timestamp`) > (NOW() - INTERVAL 10 MINUTE) "
+                            "WHERE session_id = %s AND well_id = %s "
                             "ORDER BY id DESC LIMIT 1"
                         )
-                        dedup_params = (
-                            well_id,
-                            original_cls_val, new_classification,
-                            original_cls_val, new_classification
-                        )
                         try:
-                            cursor.execute(dedup_sql, dedup_params)
+                            cursor.execute(select_sql, (session_id, well_id))
                             existing_row = cursor.fetchone()
                         except Exception as qerr:
                             existing_row = None
-                            print(f"[EXPERT FEEDBACK] Dedup query warning (continuing): {qerr}")
+                            print(f"[EXPERT FEEDBACK] Select existing row warning (continuing): {qerr}")
 
                         if not existing_row:
                             # Prepare optional context fields if present on the ORM object
@@ -3947,7 +3939,30 @@ def update_well_classification():
                                 1 if is_corr else 0
                             ))
                             conn.commit()
-                            print(f"[EXPERT FEEDBACK] 📘 Logged expert decision row for {well_id}: {original_cls_val} -> {new_classification} (is_correction={is_corr})")
+                            print(f"[EXPERT FEEDBACK] 📘 Inserted expert decision for {well_id}: {original_cls_val} -> {new_classification} (is_correction={is_corr})")
+                        else:
+                            row_id = existing_row.get('id') if isinstance(existing_row, dict) else existing_row[0]
+                            update_sql = (
+                                "UPDATE ml_expert_decisions SET "
+                                "pathogen=%s, fluorophore=%s, sample_name=%s, "
+                                "original_prediction=%s, expert_correction=%s, expert_decision=%s, "
+                                "confidence=%s, feedback_context=%s, is_correction=%s, feedback_timestamp=NOW() "
+                                "WHERE id=%s"
+                            )
+                            cursor.execute(update_sql, (
+                                pathogen_val,
+                                fluorophore_val,
+                                sample_name_val,
+                                original_cls_val,
+                                new_classification,
+                                new_classification,
+                                1.0,
+                                f"classification_only:{reason}",
+                                1 if is_corr else 0,
+                                row_id
+                            ))
+                            conn.commit()
+                            print(f"[EXPERT FEEDBACK] ♻️ Updated expert decision for {well_id} (row {row_id}): {original_cls_val} -> {new_classification} (is_correction={is_corr})")
 
                         try:
                             cursor.close(); conn.close()
