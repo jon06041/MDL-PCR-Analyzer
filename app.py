@@ -3871,6 +3871,90 @@ def update_well_classification():
                 
                 print(f"[EXPERT FEEDBACK] Updated well {well_id} classification: {current_classification.get('original_classification', 'Unknown')} -> {new_classification}")
                 app.logger.info(f"[EXPERT FEEDBACK] Updated well {well_id} classification in database")
+
+                # Also persist an expert decision record for analytics/training dashboards
+                try:
+                    # Only log when it is an actual change
+                    original_cls_val = current_classification.get('original_classification') or 'Unknown'
+                    if original_cls_val and str(original_cls_val).upper() != str(new_classification).upper():
+                        import mysql.connector
+                        mysql_config = {
+                            'host': os.environ.get("MYSQL_HOST", "127.0.0.1"),
+                            'port': int(os.environ.get("MYSQL_PORT", 3306)),
+                            'user': os.environ.get("MYSQL_USER", "qpcr_user"),
+                            'password': os.environ.get("MYSQL_PASSWORD", "qpcr_password"),
+                            'database': os.environ.get("MYSQL_DATABASE", "qpcr_analysis"),
+                            'charset': 'utf8mb4'
+                        }
+
+                        conn = mysql.connector.connect(**mysql_config)
+                        cursor = conn.cursor(dictionary=True)
+
+                        # Deduplicate recent identical decisions for the same well/pair
+                        dedup_sql = (
+                            "SELECT id FROM ml_expert_decisions "
+                            "WHERE well_id = %s "
+                            "AND ( (original_prediction = %s AND expert_correction = %s) "
+                            "   OR (ml_prediction = %s AND expert_decision = %s) ) "
+                            "AND COALESCE(feedback_timestamp, `timestamp`) > (NOW() - INTERVAL 10 MINUTE) "
+                            "ORDER BY id DESC LIMIT 1"
+                        )
+                        dedup_params = (
+                            well_id,
+                            original_cls_val, new_classification,
+                            original_cls_val, new_classification
+                        )
+                        try:
+                            cursor.execute(dedup_sql, dedup_params)
+                            existing_row = cursor.fetchone()
+                        except Exception as qerr:
+                            existing_row = None
+                            print(f"[EXPERT FEEDBACK] Dedup query warning (continuing): {qerr}")
+
+                        if not existing_row:
+                            # Prepare optional context fields if present on the ORM object
+                            try:
+                                sample_name_val = well_result.sample_name if hasattr(well_result, 'sample_name') else None
+                            except Exception:
+                                sample_name_val = None
+                            try:
+                                fluorophore_val = well_result.fluorophore if hasattr(well_result, 'fluorophore') else None
+                            except Exception:
+                                fluorophore_val = None
+                            try:
+                                pathogen_val = getattr(well_result, 'test_code', None)
+                            except Exception:
+                                pathogen_val = None
+
+                            is_corr = is_expert_correction(original_cls_val, new_classification)
+
+                            insert_sql = (
+                                "INSERT INTO ml_expert_decisions "
+                                "(session_id, well_id, pathogen, fluorophore, sample_name, original_prediction, expert_correction, expert_decision, confidence, feedback_context, is_correction, feedback_timestamp) "
+                                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())"
+                            )
+                            cursor.execute(insert_sql, (
+                                session_id,
+                                well_id,
+                                pathogen_val,
+                                fluorophore_val,
+                                sample_name_val,
+                                original_cls_val,
+                                new_classification,
+                                new_classification,  # expert_decision mirrors correction for this path
+                                1.0,
+                                f"classification_only:{reason}",
+                                1 if is_corr else 0
+                            ))
+                            conn.commit()
+                            print(f"[EXPERT FEEDBACK] 📘 Logged expert decision row for {well_id}: {original_cls_val} -> {new_classification} (is_correction={is_corr})")
+
+                        try:
+                            cursor.close(); conn.close()
+                        except Exception:
+                            pass
+                except Exception as log_err:
+                    print(f"[EXPERT FEEDBACK] ⚠️ Could not persist expert decision to MySQL (non-fatal): {log_err}")
             else:
                 print(f"[EXPERT FEEDBACK] Warning: Could not find WellResult for well_id={well_id}, session_id={session_id}")
                 app.logger.warning(f"Could not find WellResult for well_id={well_id}, session_id={session_id}")
