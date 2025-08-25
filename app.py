@@ -36,6 +36,13 @@ from encryption_api import encryption_bp
 # Load environment variables immediately at startup
 load_dotenv()
 
+# Best-effort: ensure critical MySQL schema exists on startup (non-fatal if it fails)
+try:
+    from mysql_schema_ensure import ensure_mysql_schema
+    ensure_mysql_schema(verbose=True)
+except Exception as _schema_err:
+    print(f"[SCHEMA] Skipping ensure (non-fatal): {_schema_err}")
+
 def is_control_sample(sample_name):
     """
     Dynamically detect control samples based on naming patterns.

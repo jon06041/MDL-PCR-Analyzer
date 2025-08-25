@@ -782,11 +782,8 @@ class MLFeedbackInterface {
                     return data.config.disable_teaching === true;
                 }
             }
-            
-            // For now, you can manually enable this by uncommenting the line below
-            return true; // Uncomment to disable ML teaching while keeping predictions
-            
-            return false; // Teaching enabled by default
+            // Default: teaching enabled when server doesn’t specify
+            return false;
         } catch (error) {
             console.error('ML Teaching Check: Error checking teaching status:', error);
             return false; // Default to allowing teaching
